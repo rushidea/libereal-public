@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=1920, height=1080">
+  <title>科研生活 Hero</title>
+  <script src="https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"></script>
+  <style>
+    * { box-sizing: border-box; }
+    html, body { width: 1920px; height: 1080px; margin: 0; overflow: hidden; background: #f5f5f7; }
+    @font-face { font-family: "Hero CJK"; src: local("PingFang SC"); }
+    body { font-family: "Hero CJK", Inter, Arial, sans-serif; }
+    #research-life-desktop { position: relative; width: 1920px; height: 1080px; overflow: hidden; color: #17221e; }
+    .canvas { position: absolute; inset: 0; background: #f5f5f7; }
+    .photo { position: absolute; overflow: hidden; border: 10px solid rgba(255,255,255,.96); border-radius: 34px; background: #e7ece9; box-shadow: 0 28px 72px rgba(34,55,47,.13), 0 4px 16px rgba(34,55,47,.07); transform-origin: 50% 50%; will-change: transform, opacity; }
+    .photo img { width: 100%; height: 100%; display: block; object-fit: cover; }
+    #desktop-photo-pipetting { left: 74px; top: 118px; width: 500px; height: 318px; transform: rotate(-2.4deg); }
+    #desktop-photo-microscope { left: 547px; top: 68px; width: 826px; height: 530px; z-index: 4; }
+    #desktop-photo-freezer { left: 1345px; top: 116px; width: 500px; height: 318px; transform: rotate(2.2deg); }
+    #desktop-photo-centrifuge { left: 118px; top: 444px; width: 560px; height: 334px; transform: rotate(1.5deg); }
+    #desktop-photo-result { left: 1242px; top: 438px; width: 560px; height: 340px; transform: rotate(-1.7deg); }
+    .headline { position: absolute; left: 0; right: 0; top: 824px; text-align: center; font-size: 76px; font-weight: 700; line-height: 1.08; letter-spacing: 0; color: #17221e; will-change: transform, opacity; }
+    .headline strong { color: #08785d; font-weight: 700; }
+    .accent-line { position: absolute; left: 50%; top: 930px; width: 72px; height: 5px; border-radius: 99px; background: #0a8a69; transform-origin: 50% 50%; will-change: transform, opacity; }
+  </style>
+</head>
+<body>
+  <div data-hf-id="hf-i7ym" id="research-life-desktop" data-composition-id="research-life-desktop" data-start="0" data-duration="10" data-width="1920" data-height="1080">
+    <div data-hf-id="hf-nq1o" class="canvas"></div>
+    <div data-hf-id="hf-jbky" id="desktop-photo-pipetting" class="photo clip" data-start="0" data-duration="10" data-track-index="1">
+      <img data-hf-id="hf-s1qk" src="assets/research-v2/pipetting-count.webp" alt="两位青年科研人员配合完成连续移液">
+    </div>
+    <div data-hf-id="hf-bgyq" id="desktop-photo-freezer" class="photo clip" data-start="0" data-duration="10" data-track-index="2">
+      <img data-hf-id="hf-5ns7" src="assets/research-v2/freezer-samples.webp" alt="两位青年科研人员查找低温样本">
+    </div>
+    <div data-hf-id="hf-ac82" id="desktop-photo-centrifuge" class="photo clip" data-start="0" data-duration="10" data-track-index="3">
+      <img data-hf-id="hf-3gzv" src="assets/research-v2/centrifuge-wait.webp" alt="两位青年科研人员等待离心结束">
+    </div>
+    <div data-hf-id="hf-6brs" id="desktop-photo-result" class="photo clip" data-start="0" data-duration="10" data-track-index="4">
+      <img data-hf-id="hf-4368" src="assets/research-v2/gel-result.webp" alt="青年科研人员共同确认实验结果">
+    </div>
+    <div data-hf-id="hf-ycna" id="desktop-photo-microscope" class="photo clip" data-start="0" data-duration="10" data-track-index="5">
+      <img data-hf-id="hf-8yzo" src="assets/research-v2/microscope-discovery.webp" alt="两位青年科研人员观察显微图像">
+    </div>
+    <div data-hf-id="hf-p0w5" id="desktop-headline" class="headline clip" data-start="0" data-duration="10" data-track-index="6">科研生活，<strong data-hf-id="hf-uzwc">全搞定。</strong></div>
+    <div data-hf-id="hf-ro8y" id="desktop-accent" class="accent-line clip" data-start="0" data-duration="10" data-track-index="7"></div>
+  </div>
+  <script>
+    window.__timelines = window.__timelines || {};
+    const tl = gsap.timeline({ paused: true });
+    tl.fromTo("#desktop-photo-microscope", { y: 74, scale: .9, opacity: 0 }, { y: 0, scale: 1, opacity: 1, duration: 1.05, ease: "power3.out" }, 0.1);
+    tl.fromTo("#desktop-photo-pipetting", { x: 90, y: 40, scale: .92, opacity: 0 }, { x: 0, y: 0, scale: 1, opacity: 1, duration: .9, ease: "power3.out" }, .34);
+    tl.fromTo("#desktop-photo-freezer", { x: -90, y: 40, scale: .92, opacity: 0 }, { x: 0, y: 0, scale: 1, opacity: 1, duration: .9, ease: "power3.out" }, .48);
+    tl.fromTo("#desktop-photo-centrifuge", { x: 78, y: -40, scale: .94, opacity: 0 }, { x: 0, y: 0, scale: 1, opacity: 1, duration: .85, ease: "power3.out" }, .62);
+    tl.fromTo("#desktop-photo-result", { x: -78, y: -40, scale: .94, opacity: 0 }, { x: 0, y: 0, scale: 1, opacity: 1, duration: .85, ease: "power3.out" }, .76);
+    tl.fromTo("#desktop-headline", { y: 28, opacity: 0 }, { y: 0, opacity: 1, duration: .72, ease: "power2.out" }, 1.02);
+    tl.fromTo("#desktop-accent", { xPercent: -50, scaleX: 0, opacity: 0 }, { xPercent: -50, scaleX: 1, opacity: 1, duration: .58, ease: "power3.out" }, 1.3);
+    tl.to("#desktop-photo-microscope", { scale: 1.018, duration: 5.9, ease: "sine.inOut" }, 1.25);
+    tl.to("#desktop-photo-pipetting", { x: -9, y: -5, duration: 5.7, ease: "sine.inOut" }, 1.35);
+    tl.to("#desktop-photo-freezer", { x: 10, y: -5, duration: 5.6, ease: "sine.inOut" }, 1.42);
+    tl.to("#desktop-photo-centrifuge", { x: -7, y: 7, duration: 5.5, ease: "sine.inOut" }, 1.5);
+    tl.to("#desktop-photo-result", { x: 8, y: 6, duration: 5.4, ease: "sine.inOut" }, 1.7);
+    tl.to([".photo", "#desktop-headline", "#desktop-accent"], { opacity: 0, duration: .7, ease: "power2.in" }, 9.08);
+    window.__timelines["research-life-desktop"] = tl;
+  </script>
+</body>
+</html>

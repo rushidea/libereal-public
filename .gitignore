@@ -1,0 +1,126 @@
+# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
+
+# dependencies
+/node_modules
+/.tmp-ci-home/
+/.tmp-ci-cache/
+/.pnp
+.pnp.*
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/versions
+
+# testing
+/coverage
+
+# next.js
+/.next/
+/out/
+
+# production
+/build
+
+# misc
+.DS_Store
+# Private keys and local secret bundles
+*.pem
+*.key
+*.p12
+*.pfx
+/secrets/
+**/secrets/
+
+# debug
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# env files (can opt-in for committing if needed)
+.env*
+!.env.example
+
+# IndexNow key is generated per environment and served from public/
+/public/indexnow-key.txt
+/public/[a-fA-F0-9]*.txt
+
+# vercel
+.vercel
+
+# typescript
+*.tsbuildinfo
+next-env.d.ts
+
+/src/generated/prisma
+
+# runtime caches (RSS 轮询自动更新，每次 diff 都是噪音)
+/src/data/news-cache.json
+/src/data/*-cache.json
+
+# playwright test artifacts
+/test-results/
+/playwright-report/
+/blob-report/
+/playwright/.cache/
+
+# optimized news hero thumbnails (warmed on deploy / cache refresh)
+/.cache/news-images/
+
+# local sqlite at project root (use prisma/dev.db only)
+/dev.db
+/prisma.dev.db
+
+# large one-off import/scrape archives (see backups/data-import/README.md)
+/backups/data-import/
+
+# deploy targets (host/path only; use SSH keys — no passwords)
+/scripts/deploy.env
+/scripts/deploy.staging.env
+/deploy.env
+
+# old agent session logs (may contain dev credentials in transcripts)
+/backups/
+
+# generated design previews and local agent state
+/generated-images/
+/.worktrees/
+/.sisyphus/
+/.opencode/node_modules/
+/cookies.txt
+/libereal-wechat-miniprogram.zip
+
+# Cursor IDE local settings (plugins, personal prefs — commit .cursor/rules only if team agrees)
+/.cursor/
+
+# internal admin templates (cost/min-price columns; never served from public/)
+/content/admin/
+
+# local prisma sqlite (never commit — use migrations + DATABASE_PATH in prod)
+/prisma/dev.db
+/prisma/dev.db-journal
+/prisma/dev.db-shm
+/prisma/dev.db-wal
+/prisma/dev.db.backup*
+/prisma/ci.db*
+/prisma/backups/
+/prisma/dev.db.bak-*
+/prisma/dev.db.corrupted
+/prisma/dev.db.small-backup-*
+/prisma/dev_backup_*
+
+
+# Public/private repository boundary
+# Commercial source files and operational material belong in the private companion repo.
+*.xlsx
+*.xls
+/private-assets/
+/private-data/
+/commercial-data/
+/supplier-data/
+/vendor-data/
+/pricing-private/
+/docs/private/
+/scripts/private/
+/.local-commercial/

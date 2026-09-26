@@ -1,0 +1,1681 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+model User {
+  id            String    @id @default(cuid())
+  name          String?
+  email         String    @unique
+  password      String?
+  role          String    @default("customer")  // customer | admin
+  phone         String?
+  phoneVerifiedAt DateTime?
+  phoneLastChangedAt DateTime?
+  institution   String?   // 兼容旧资料的完整机构文本
+  department    String?   // 通用部门、学系或科室
+  institutionType     String? // 机构类型，可为高校、医院、科研院所或其他自定义类型
+  institutionName     String? // 学校、医院、科研院所或其他机构名称
+  institutionUnit     String? // 学院、院区、研究所、中心等组织单元
+  institutionFacility String? // 楼号、病区、研究中心、课题组等具体单元
+  identity      String?
+  advisorName   String?
+  advisorPhone  String?
+
+  // === 注册资料结构化字段 (锁定) ===
+  school        String?  // 学校
+  college       String?  // 学院
+  major         String?  // 学系
+  building      String?  // 楼号
+  piLab         String?  // PI 实验室（导师的实验室，锁定）
+  affiliatedLab String?  // 依托实验室（注册人实际所在实验室，选填）
+  points        Int       @default(0)   // 累计积分
+  discountRate  Float?    // 个人统一折扣率 (0-1, null = 走等级/品牌)
+  brandDiscounts String?  // 个人品牌差异化折扣 JSON: {"Abcam": 0.7, "Fisher": 0.8}
+  sourceTemplateId String? // 套用的折扣模板 id（admin 手动改折扣会清空此字段）
+  avatar        String?   // 用户头像（Google/Alipay等通用）
+  googleEmail   String?   // 绑定的Google账号邮箱
+  alipayId      String?   // 支付宝用户唯一标识
+  alipayAvatar  String?   // 支付宝头像
+  alipayNickname String?  // 支付宝昵称
+  alipayGender  String?   // 支付宝性别：m/f/null
+  alipayCity    String?   // 支付宝城市
+  alipayProvince String? // 支付宝省份
+  isNewUser    Boolean  @default(true)  // 首单需人工审核
+  approvalStatus String  @default("approved")  // approved | rejected (新字段; 旧 user 通过 default 兼容)
+  resetToken       String?  // 密码重置 token
+  resetTokenExpiry DateTime? // 密码重置过期时间 (新字段; 旧 user 通过 default 兼容)
+  isBlacklisted Boolean @default(false) // 黑名单用户
+  isFrozen     Boolean @default(false) // 冻结后可登录，但看不到折扣价且不可下单/询价
+  tier         String    @default("璞玉")
+  wechatNickname String?  // 微信昵称（用户贡献时显示用）
+  sex            Int?     // 微信 OAuth 性别：0=未知, 1=男, 2=女
+  displayAvatarUrl String? // 用户上传的展示头像（社区贡献时显示）
+  emailVerified  DateTime?
+  legalAcceptedAt  DateTime?
+  legalAcceptedIds String?   // JSON: string[] document ids accepted at registration
+  legalAcceptedSnapshot String? // JSON: accepted document ids, versions, and acceptance time
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  accounts      Account[]
+  sessions      Session[]
+  securitySessions UserSession[]
+  devices       UserDevice[]
+  inquiries     Inquiry[]
+  cart          Cart?
+  addresses     Address[]
+  wishlist      Wishlist[]
+  pointsLogs    PointsLog[]
+  redemptions   PointsRedemption[]
+  userCreatedRecipes UserCreatedRecipe[]
+  savedBuffers         UserSavedBuffer[]
+  orders               Order[]
+  creditAccount        CreditAccount?
+  creditTransactions   CreditTransaction[]
+  receivables          AccountReceivable[]
+  tierHistory          UserTierHistory[]
+  adminRoleAssignments AdminUserRole[] @relation("AdminRoleUser")
+  grantedAdminRoles    AdminUserRole[] @relation("AdminRoleAssigner")
+  researchGroupMembership ResearchGroupMember?
+  pointsTopups         PointsTopup[]
+  groupPointsLogs      GroupPointsLog[] @relation("GroupPointsActor")
+  notificationReceipts NotificationReceipt[]
+  authenticators      UserAuthenticator[]
+  recoveryCodes       RecoveryCode[]
+  mfaSetting           MfaSetting?
+  mfaRecoveryCodes     MfaRecoveryCode[]
+  mfaChallenges        MfaChallenge[]
+  securityEvents       SecurityEvent[]
+  ownedOrganizations   Organization[] @relation("OrganizationOwner")
+  organizationMemberships OrganizationMember[]
+  grantedOrganizationRoles OrganizationRoleAssignment[] @relation("OrganizationRoleAssigner")
+  grantedOrganizationPermissions OrganizationMemberPermission[] @relation("OrganizationPermissionAssigner")
+  organizationApprovalRequests OrganizationApprovalRequest[] @relation("OrganizationApprovalRequester")
+  reviewedOrganizationApprovals OrganizationApprovalRequest[] @relation("OrganizationApprovalReviewer")
+  organizationCreationGrant OrganizationCreationGrant? @relation("OrganizationCreationUser")
+  grantedOrganizationCreationAccess OrganizationCreationGrant[] @relation("OrganizationCreationGrantor")
+}
+
+model Organization {
+  id          String   @id @default(cuid())
+  name        String
+  pendingName String?  @map("pending_name")
+  status      String   @default("pending") // pending | active | pending_reapproval | rejected | suspended | archived
+  ownerUserId String   @map("owner_user_id")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+  owner       User     @relation("OrganizationOwner", fields: [ownerUserId], references: [id], onDelete: Restrict)
+  members     OrganizationMember[]
+  roles       OrganizationRole[]
+  approvals   OrganizationApprovalRequest[]
+  inquiries   Inquiry[]
+  orders      Order[]
+
+  @@index([ownerUserId])
+  @@index([status, updatedAt])
+  @@map("organizations")
+}
+
+model OrganizationMember {
+  id             String   @id @default(cuid())
+  organizationId String   @map("organization_id")
+  userId         String   @map("user_id")
+  status         String   @default("pending") // pending | active | suspended | removed
+  pendingRoleKey String?  @map("pending_role_key")
+  joinedAt       DateTime? @map("joined_at")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  roleAssignments OrganizationRoleAssignment[]
+  permissionOverrides OrganizationMemberPermission[]
+  approvals      OrganizationApprovalRequest[]
+
+  @@unique([organizationId, userId])
+  @@index([userId, status])
+  @@index([organizationId, status])
+  @@map("organization_members")
+}
+
+model OrganizationRole {
+  id             String   @id @default(cuid())
+  organizationId String   @map("organization_id")
+  key            String
+  name           String
+  permissions    String   @default("[]")
+  isSystem       Boolean  @default(true) @map("is_system")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  assignments    OrganizationRoleAssignment[]
+
+  @@unique([organizationId, key])
+  @@index([organizationId, isSystem])
+  @@map("organization_roles")
+}
+
+model OrganizationRoleAssignment {
+  memberId       String   @map("member_id")
+  roleId         String   @map("role_id")
+  assignedBy     String?  @map("assigned_by")
+  assignedAt     DateTime @default(now()) @map("assigned_at")
+  member         OrganizationMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  role           OrganizationRole @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  assigner       User?    @relation("OrganizationRoleAssigner", fields: [assignedBy], references: [id], onDelete: SetNull)
+
+  @@id([memberId, roleId])
+  @@index([roleId])
+  @@index([assignedBy])
+  @@map("organization_role_assignments")
+}
+
+model OrganizationMemberPermission {
+  id         String   @id @default(cuid())
+  memberId   String   @map("member_id")
+  permission String
+  granted    Boolean  @default(true)
+  assignedBy String?  @map("assigned_by")
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+  member     OrganizationMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  assigner   User?    @relation("OrganizationPermissionAssigner", fields: [assignedBy], references: [id], onDelete: SetNull)
+
+  @@unique([memberId, permission])
+  @@index([permission])
+  @@index([assignedBy])
+  @@map("organization_member_permissions")
+}
+
+model OrganizationApprovalRequest {
+  id             String   @id @default(cuid())
+  organizationId String   @map("organization_id")
+  memberId       String?  @map("member_id")
+  requesterUserId String  @map("requester_user_id")
+  kind           String   // member_invite | role_change | member_exit
+  status         String   @default("pending") // pending | approved | rejected | cancelled
+  payload        String   @default("{}")
+  reviewedByUserId String? @map("reviewed_by_user_id")
+  reviewedAt     DateTime? @map("reviewed_at")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  member         OrganizationMember? @relation(fields: [memberId], references: [id], onDelete: SetNull)
+  requester      User     @relation("OrganizationApprovalRequester", fields: [requesterUserId], references: [id], onDelete: Cascade)
+  reviewer       User?    @relation("OrganizationApprovalReviewer", fields: [reviewedByUserId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId, status, createdAt])
+  @@index([memberId, status])
+  @@index([requesterUserId, createdAt])
+  @@unique([organizationId, memberId, kind, status])
+  @@map("organization_approval_requests")
+}
+
+model UserAuthenticator {
+  id              String   @id @default(cuid())
+  userId          String   @map("user_id")
+  type            String
+  name            String?
+  legacySourceId  String?  @unique @map("legacy_source_id")
+  credentialData  String?  @map("credential_data")
+  credentialId    String?  @unique @map("credential_id")
+  encryptedSecret String?  @map("encrypted_secret")
+  secretIv        String?  @map("secret_iv")
+  secretAuthTag   String?  @map("secret_auth_tag")
+  keyVersion      Int?     @map("key_version")
+  lastUsedStep    Int?     @map("last_used_step")
+  confirmedAt     DateTime? @map("confirmed_at")
+  required        Boolean  @default(false)
+  enabled         Boolean  @default(true)
+  lastUsedAt      DateTime? @map("last_used_at")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  recoveryCodes   RecoveryCode[]
+
+  @@index([userId, type, enabled])
+  @@map("user_authenticators")
+}
+
+model RecoveryCode {
+  id              String             @id @default(cuid())
+  userId          String             @map("user_id")
+  authenticatorId String?            @map("authenticator_id")
+  codeHash        String             @map("code_hash")
+  pepperVersion   Int                @default(1) @map("pepper_version")
+  usedAt          DateTime?          @map("used_at")
+  createdAt       DateTime           @default(now()) @map("created_at")
+  user            User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  authenticator   UserAuthenticator? @relation(fields: [authenticatorId], references: [id], onDelete: SetNull)
+
+  @@unique([userId, codeHash])
+  @@index([userId, usedAt])
+  @@map("recovery_codes")
+}
+
+model MfaSetting {
+  id              String   @id @default(cuid())
+  userId          String   @unique
+  enabled         Boolean  @default(false)
+  required        Boolean  @default(false)
+  method          String   @default("totp")
+  encryptedSecret String
+  secretVersion   Int      @default(1)
+  lastUsedStep    Int?
+  confirmedAt     DateTime?
+  lastVerifiedAt  DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model MfaRecoveryCode {
+  id        String    @id @default(cuid())
+  userId    String
+  codeHash  String
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, codeHash])
+  @@index([userId, usedAt])
+}
+
+model MfaChallenge {
+  id            String    @id
+  userId        String
+  challengeHash String    @unique
+  purpose       String
+  provider      String
+  expiresAt     DateTime
+  attemptCount  Int       @default(0)
+  consumedAt    DateTime?
+  createdAt     DateTime  @default(now())
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, purpose, provider])
+  @@index([expiresAt])
+  @@index([consumedAt])
+}
+
+model SecurityEvent {
+  id        String    @id @default(cuid())
+  userId    String?
+  eventType String
+  ip        String?
+  userAgent String?
+  metadata  String?
+  createdAt DateTime  @default(now())
+  user      User?     @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([userId, createdAt])
+  @@index([eventType, createdAt])
+}
+
+model AdminRole {
+  id          String   @id
+  key         String   @unique
+  name        String
+  description String?
+  isSystem    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  permissions AdminRolePermission[]
+  users       AdminUserRole[]
+}
+
+model AdminMfaSetting {
+  id             String   @id
+  scenarios      String
+  updatedByEmail String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+}
+
+model AdminPermission {
+  id          String   @id
+  key         String   @unique
+  resource    String
+  action      String
+  name        String
+  description String?
+  roles       AdminRolePermission[]
+
+  @@index([resource, action])
+}
+
+model AdminRolePermission {
+  roleId       String
+  permissionId String
+  role          AdminRole       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission    AdminPermission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, permissionId])
+  @@index([permissionId])
+}
+
+model AdminUserRole {
+  userId     String
+  roleId     String
+  assignedBy String?
+  assignedAt DateTime  @default(now())
+  user       User      @relation("AdminRoleUser", fields: [userId], references: [id], onDelete: Cascade)
+  role       AdminRole @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  assigner   User?     @relation("AdminRoleAssigner", fields: [assignedBy], references: [id], onDelete: SetNull)
+
+  @@id([userId, roleId])
+  @@index([roleId])
+  @@index([assignedBy])
+}
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  actorId    String?
+  actorEmail String?
+  action     String
+  resource   String
+  targetType String
+  targetId   String?
+  beforeData String?
+  afterData  String?
+  reason     String?
+  metadata   String?
+  createdAt  DateTime @default(now())
+
+  @@index([actorId, createdAt])
+  @@index([resource, createdAt])
+  @@index([targetType, targetId])
+  @@index([action, createdAt])
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+  user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model UserDevice {
+  id            String         @id @default(cuid())
+  userId        String         @map("user_id")
+  fingerprint   String
+  name          String?
+  browser       String?
+  operatingSystem String?      @map("operating_system")
+  ip            String?
+  lastSeenAt    DateTime       @map("last_seen_at")
+  createdAt     DateTime       @default(now()) @map("created_at")
+  revokedAt     DateTime?      @map("revoked_at")
+  user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sessions      UserSession[]
+
+  @@index([userId, fingerprint])
+  @@index([userId, revokedAt])
+  @@map("user_devices")
+}
+
+model UserSession {
+  id            String       @id @default(cuid())
+  userId        String       @map("user_id")
+  sessionId     String       @unique @map("session_id")
+  deviceId      String?      @map("device_id")
+  ip            String?
+  userAgent     String?      @map("user_agent")
+  createdAt     DateTime     @default(now()) @map("created_at")
+  lastSeenAt    DateTime     @map("last_seen_at")
+  lastMfaAt     DateTime?    @map("last_mfa_at")
+  expiresAt     DateTime?    @map("expires_at")
+  revokedAt     DateTime?    @map("revoked_at")
+  user          User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  device        UserDevice?  @relation(fields: [deviceId], references: [id], onDelete: SetNull)
+
+  @@index([userId, revokedAt, lastSeenAt])
+  @@index([deviceId])
+  @@map("user_sessions")
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+model WechatMiniLoginChallenge {
+  id                String    @id
+  status            String    @default("pending")
+  providerAccountId String?
+  userId            String?
+  loginToken        String?   @unique
+  oauthName         String?
+  oauthImage        String?
+  oauthSex          Int?
+  expiresAt         DateTime
+  completedAt       DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  @@index([status])
+  @@index([expiresAt])
+  @@index([providerAccountId])
+  @@index([userId])
+}
+
+model Inquiry {
+  id           String   @id @default(cuid())
+  userId       String?
+  organizationId String? @map("organization_id")
+  ownerScope   String   @default("personal") @map("owner_scope") // personal | organization
+  name         String
+  email        String
+  phone        String
+  institution  String
+  department   String?
+  address      String?
+  notes        String?
+  subtotal     Float    @default(0)
+  paymentMethod String?
+  leadTime     String?
+  identity     String?
+  advisorName  String?
+  advisorPhone String?
+  status       String   @default("pending_quote")  // pending_quote | quote_sent | closed
+  operationLogs String  @default("[]")  // JSON: [{adminId, adminEmail, time, items: [{name, price, quantity, leadTime}]}]
+  ip           String?
+  userAgent    String?
+  createdAt    DateTime @default(now())
+  archivedAt   DateTime? // 归档时间，非null表示已归档
+  user         User?    @relation(fields: [userId], references: [id])
+  organization Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
+  orders       Order[]  // 该询价单关联的所有订单
+  inquiryItems InquiryItem[]
+  quotes       Quote[]
+
+  @@index([email])
+  @@index([createdAt])
+  @@index([status])
+  @@index([archivedAt])
+  @@index([organizationId, ownerScope, createdAt])
+}
+
+model Order {
+  id              String   @id @default(cuid())
+  inquiryId       String?  // 外键 → Inquiry.id (可选，用于直接购买)
+  inquiry         Inquiry? @relation(fields: [inquiryId], references: [id])
+  organizationId   String?  @map("organization_id")
+  ownerScope       String   @default("personal") @map("owner_scope") // personal | organization
+  email           String
+  customerId      String?
+  subtotal        Float    // 商品小计
+  adjustmentTotal Float    @default(0)
+  total           Float    @default(0)
+  status          String   @default("pending")  // unpaid | pending | confirmed | partially_shipped | shipped | completed | cancelled | closed
+  paymentMethod   String?
+  legalAcceptedIds String?  // JSON: string[] consent document ids at order placement
+  legalAcceptedSnapshot String? // JSON: accepted document ids, versions, and acceptance time
+
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  archivedAt      DateTime? // 归档时间，非null表示已归档
+  paidAt          DateTime?
+  // 自动关闭时刻：unpaid/pending 超时后应被系统自动关闭的时间点（= createdAt + AUTO_CLOSE_HOURS）。
+  // 订单离开 unpaid/pending（付款进入待确认、确认、取消、关闭、归档）时置 null。定时任务按 autoCloseAt < now 查询处理。
+  autoCloseAt     DateTime? @map("auto_close_at")
+  quoteSent       Boolean  @default(false) // 报价已发送
+  quoteSentAt     DateTime? // 报价发送时间
+  addressSnapshot OrderAddressSnapshot?
+  orderItems      OrderItem[]
+  statusHistory   OrderStatusHistory[]
+  adjustments     OrderAdjustment[]
+  shipments       Shipment[]
+  events          OrderEvent[]
+  customer        User? @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  organization    Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
+  receivable      AccountReceivable?
+  creditTransactions CreditTransaction[]
+  inventoryReservations InventoryReservation[]
+  inventoryTransactions InventoryTransaction[]
+  paymentAttempts PaymentAttempt[]
+  // 结账积分抵扣（1 分 = 1 元）；下单时扣减并占用，取消时按退款规则退回
+  pointsPersonal      Int      @default(0)
+  pointsGroup         Int      @default(0)
+  pointsGroupId       String?
+  pointsDiscount      Float    @default(0)
+  pointsApplied       Boolean  @default(false)
+  pointsAppliedAt     DateTime?
+  pointsRefundedPersonal Int   @default(0)
+  pointsRefundedGroup Int      @default(0)
+  researchGroup       ResearchGroup? @relation(fields: [pointsGroupId], references: [id], onDelete: SetNull)
+
+  @@index([email])
+  @@index([inquiryId])
+  @@index([createdAt])
+  @@index([status])
+  @@index([archivedAt])
+  @@index([customerId])
+  @@index([paidAt])
+  @@index([status, autoCloseAt])
+  @@index([pointsGroupId])
+  @@index([organizationId, ownerScope, createdAt])
+}
+
+model PaymentAttempt {
+  id          String   @id @default(cuid())
+  orderId     String
+  provider    String
+  outTradeNo  String   @unique
+  amount      Float
+  status      String   @default("created")
+  tradeNo     String?
+  notifiedAt  DateTime?
+  paidAt      DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  order       Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([orderId, createdAt])
+  @@index([provider, status])
+}
+
+model AlipayMessageReceipt {
+  id          String   @id @default(cuid())
+  notifyId    String   @unique
+  msgMethod   String
+  notifyType  String?
+  appId       String
+  payload     String
+  status      String   @default("received")
+  receivedAt  DateTime @default(now())
+  processedAt DateTime?
+  lastError   String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([msgMethod, status])
+  @@index([receivedAt])
+}
+
+model OrderAddressSnapshot {
+  id              String   @id @default(cuid())
+  orderId         String   @unique
+  sourceAddressId String?
+  name            String
+  phone           String
+  address         String
+  institution     String?
+  createdAt       DateTime @default(now())
+  order           Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([sourceAddressId])
+}
+
+model OrderAdjustment {
+  id          String   @id @default(cuid())
+  orderId     String
+  type        String
+  label       String
+  amount      Float
+  reason      String?
+  createdBy   String?
+  createdAt   DateTime @default(now())
+  order       Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([orderId, createdAt])
+  @@index([type])
+}
+
+model Shipment {
+  id             String   @id @default(cuid())
+  orderId        String
+  method         String   @default("logistics")
+  status         String   @default("pending")
+  carrier        String?
+  trackingNumber String?
+  pickupPoint    String?
+  contactName    String?
+  contactPhone   String?
+  note           String?
+  shippedAt      DateTime?
+  deliveredAt    DateTime?
+  createdBy      String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  order          Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  items          ShipmentItem[]
+
+  @@index([orderId, createdAt])
+  @@index([trackingNumber])
+  @@index([status])
+}
+
+model ShipmentItem {
+  id          String    @id @default(cuid())
+  shipmentId  String
+  orderItemId String
+  quantity    Int
+  createdAt   DateTime  @default(now())
+  shipment    Shipment  @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
+  orderItem   OrderItem @relation(fields: [orderItemId], references: [id], onDelete: Cascade)
+
+  @@unique([shipmentId, orderItemId])
+  @@index([orderItemId])
+}
+
+model OrderEvent {
+  id         String   @id @default(cuid())
+  orderId    String
+  type       String
+  actorId    String?
+  actorEmail String?
+  message    String?
+  metadata   String?
+  createdAt  DateTime @default(now())
+  order      Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([orderId, createdAt])
+  @@index([type])
+}
+
+model CreditAccount {
+  id               String   @id @default(cuid())
+  userId           String   @unique
+  baseLimit        Float
+  overrideLimit    Float?
+  temporaryLimit   Float    @default(0)
+  temporaryUntil   DateTime?
+  usedAmount       Float    @default(0)
+  status           String   @default("active")
+  paymentTermDays  Int      @default(30)
+  manuallyUnlockedAt DateTime?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([status])
+  @@index([temporaryUntil])
+}
+
+model CreditTransaction {
+  id           String   @id @default(cuid())
+  userId       String
+  orderId      String?
+  type         String
+  amount       Float
+  balanceAfter Float
+  reason       String?
+  actorId      String?
+  createdAt    DateTime @default(now())
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  order        Order?   @relation(fields: [orderId], references: [id], onDelete: SetNull)
+
+  @@index([userId, createdAt])
+  @@index([orderId])
+  @@index([type])
+}
+
+model AccountReceivable {
+  id             String   @id @default(cuid())
+  orderId        String   @unique
+  userId         String
+  amount         Float
+  status         String   @default("open")
+  confirmedAt    DateTime
+  termStartedAt  DateTime?
+  dueAt          DateTime?
+  paymentTermDaysSnapshot Int @default(30)
+  paidAt         DateTime?
+  lastReminderAt DateTime?
+  reminderCount  Int      @default(0)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  order          Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, status])
+  @@index([status, dueAt])
+}
+
+model UserTierHistory {
+  id                String   @id @default(cuid())
+  userId            String
+  fromTier          String?
+  toTier            String
+  rollingSpend      Float
+  calculationFrom   DateTime
+  calculationTo     DateTime
+  reason            String
+  createdAt         DateTime @default(now())
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([toTier])
+}
+
+// 询价商品关系表。Inquiry.items 暂时保留为兼容快照。
+model InquiryItem {
+  id            String   @id @default(cuid())
+  inquiryId     String
+  position      Int
+  productId     String?
+  catalogNumber String?
+  name          String
+  unitPrice     Float?
+  clientPrice   Float?
+  quantity      Int      @default(1)
+  lineTotal     Float?
+  leadTime      String?
+  available     Boolean?
+  ordered       Boolean  @default(false)
+  pricingSource String?
+  metadata      String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  inquiry       Inquiry  @relation(fields: [inquiryId], references: [id], onDelete: Cascade)
+  quoteItems    QuoteItem[]
+
+  @@unique([inquiryId, position])
+  @@index([inquiryId])
+  @@index([catalogNumber])
+  @@index([productId])
+}
+
+model Quote {
+  id            String    @id @default(cuid())
+  inquiryId     String
+  version       Int
+  status        String    @default("draft")
+  subtotal      Float
+  currency      String    @default("CNY")
+  validUntil    DateTime?
+  sentAt        DateTime?
+  acceptedAt    DateTime?
+  createdBy     String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  inquiry       Inquiry   @relation(fields: [inquiryId], references: [id], onDelete: Cascade)
+  items         QuoteItem[]
+  confirmations QuoteConfirmation[]
+
+  @@unique([inquiryId, version])
+  @@index([inquiryId, status, version])
+  @@index([validUntil])
+}
+
+model QuoteItem {
+  id            String   @id @default(cuid())
+  quoteId       String
+  inquiryItemId String?
+  position      Int
+  productId     String?
+  catalogNumber String?
+  name          String
+  unitPrice     Float
+  quantity      Int      @default(1)
+  orderedQty    Int      @default(0)
+  lineTotal     Float
+  leadTime      String?
+  available     Boolean  @default(true)
+  notes         String?
+  pricingSnapshot String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  quote         Quote    @relation(fields: [quoteId], references: [id], onDelete: Cascade)
+  inquiryItem   InquiryItem? @relation(fields: [inquiryItemId], references: [id], onDelete: SetNull)
+
+  @@unique([quoteId, position])
+  @@index([quoteId])
+  @@index([inquiryItemId])
+  @@index([catalogNumber])
+}
+
+model QuoteConfirmation {
+  id          String   @id @default(cuid())
+  quoteId     String
+  userId      String?
+  email       String
+  action      String
+  details     String?
+  ip          String?
+  userAgent   String?
+  createdAt   DateTime @default(now())
+  quote       Quote    @relation(fields: [quoteId], references: [id], onDelete: Cascade)
+
+  @@index([quoteId, createdAt])
+  @@index([email])
+}
+
+// 订单商品关系表。Order.items 暂时保留为成交快照。
+model OrderItem {
+  id            String   @id @default(cuid())
+  orderId       String
+  position      Int
+  productId     String?
+  catalogNumber String?
+  name          String
+  brand         String?
+  unitPrice     Float
+  clientPrice   Float?
+  quantity      Int      @default(1)
+  shippedQty    Int      @default(0)
+  leadTime      String?
+  status        String   @default("pending")
+  metadata      String?
+  pricingSnapshot String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  order         Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  shipmentItems ShipmentItem[]
+  inventoryReservation InventoryReservation?
+
+  @@unique([orderId, position])
+  @@index([orderId])
+  @@index([catalogNumber])
+  @@index([productId])
+}
+
+model OrderStatusHistory {
+  id         String   @id @default(cuid())
+  orderId    String
+  fromStatus String?
+  toStatus   String
+  actorId    String?
+  actorEmail String?
+  reason     String?
+  metadata   String?
+  createdAt  DateTime @default(now())
+  order      Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([orderId, createdAt])
+  @@index([toStatus])
+}
+
+model Notification {
+  id              String    @id @default(cuid())
+  userId          String?   // null for admin notifications (all admins see them)
+  email           String    // customer's email for routing, or 'admin' / 'broadcast'
+  role            String    // 'customer' | 'admin'
+  type            String    // notification type
+  title           String
+  content         String
+  isRead          Boolean   @default(false)
+  linkUrl         String?
+  metadata        String?   // JSON: extra data like inquiryId, orderId
+  scope           String    @default("personal") // personal | broadcast
+  requiresAck     Boolean   @default(false) // broadcast-only forced acknowledgment
+  createdByUserId String?
+  deletedAt       DateTime?
+  createdAt       DateTime  @default(now())
+  receipts        NotificationReceipt[]
+
+  @@index([email])
+  @@index([role])
+  @@index([isRead])
+  @@index([createdAt])
+  @@index([scope, deletedAt])
+  @@index([requiresAck, deletedAt])
+}
+
+model NotificationReceipt {
+  id              String    @id @default(cuid())
+  notificationId  String
+  userId          String
+  isRead          Boolean   @default(false)
+  acknowledgedAt  DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  notification    Notification @relation(fields: [notificationId], references: [id], onDelete: Cascade)
+  user            User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([notificationId, userId])
+  @@index([userId])
+  @@index([acknowledgedAt])
+}
+
+model Cart {
+  id        String   @id @default(cuid())
+  userId    String   @unique
+  items     String   // JSON: CartItem[]
+  updatedAt DateTime @updatedAt
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Address {
+  id          String   @id @default(cuid())
+  userId      String
+  name        String   // 收货人姓名
+  phone       String   // 手机号
+  address     String   // 收货地址（地址栏1，必填）
+  institution String?  // 单位/实验室（地址栏2，选填）
+  label       String?  // 标签（如"家"/"公司"）
+  isDefault   Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model Product {
+  id              String   @id @default(cuid())
+  catalogNumber   String
+  name            String
+  brand           String
+  price           Float    // 市场价（成交价/卖价，前台大字展示）
+  pricingMode     String   @default("fixed") // fixed | inquiry
+  originalPrice   Float?   // 目录价（基准价/划线原价，前台划线展示；通常高于 price）
+  category        String?
+  subcategory     String?
+  type            String?
+  spec            String?
+  salesUnit       String?  // 当前 price 对应的销售单位，例如瓶、盒、箱
+  target          String?
+  host            String?
+  applications    String   @default("[]") // JSON array
+  reactivity      String   @default("[]") // JSON array
+  description     String?
+  specificity     String?
+  productUsage    String?
+  speciesReactivity String?
+  speciesPredicted  String?
+  inStock         Boolean  @default(true)
+  promotionalPrice Float?
+  promotion       Boolean  @default(false)
+  costPrice       Float?   // 进货价 (内部/经销商价). 仅 admin 可见, 永不在前端展示
+  minimumSalePrice Float?  // 最低成交价，仅服务端价格服务和授权管理接口读取
+  subBrand        String?
+  imageUrl        String?
+  casNumber       String?
+  hazardous       Boolean  @default(false)  // 危险化学品标记
+
+  // === P2-1: 生物医药专业字段 ===
+  leadTime        String?  // 货期/交货时间（如 "1-2 周" / "现货"）
+  storageTemp     String?  // 储存温度（如 "-20°C" / "4°C" / "室温"）
+  storageBuffer   String?  // 储存缓冲液/条件
+  expiryDate      String?  // 有效期/保质期
+  lotNumber       String?  // 批号
+  cloneNumber     String?  // 克隆号（抗体）/ 目录株号
+  purity          String?  // 纯度（如 ">95%" / "HPLC"）
+  molecularWeight Float?   // 分子量 (kDa)
+  isoelectricPoint Float?  // 等电点 (pI)
+  concentration   String?  // 浓度
+  cofaUrl         String?  // CoA 证书 PDF 下载链接
+  sdsUrl          String?  // SDS 安全表下载链接
+  pmids           String   @default("[]")  // JSON 引用文献 PMID 列表
+  stockQuantity   Int      @default(-1)  // 库存数量，-1 = 无限
+  brandRecordId   String?
+  categoryRecordId String?
+  subcategoryRecordId String?
+
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  variants        ProductVariant[]
+  wishlistItems   Wishlist[]
+  brandRecord     Brand?   @relation(fields: [brandRecordId], references: [id], onDelete: SetNull)
+  categoryRecord  ProductCategory? @relation("ProductPrimaryCategory", fields: [categoryRecordId], references: [id], onDelete: SetNull)
+  subcategoryRecord ProductCategory? @relation("ProductSecondaryCategory", fields: [subcategoryRecordId], references: [id], onDelete: SetNull)
+  attributes      ProductAttribute[]
+  prices          ProductPrice[]
+  priceBreaks     ProductPriceBreak[]
+  documents       ProductDocument[]
+  promotionLinks  PromotionProduct[]
+  inventoryAccounts InventoryAccount[]
+
+  @@index([brand])
+  @@index([category])
+  @@index([target])
+  @@index([brand, category])
+  @@index([category, subcategory])
+  @@index([promotion, hazardous])
+  @@index([catalogNumber])
+  @@index([casNumber])
+  @@index([stockQuantity])
+  @@index([pricingMode])
+  @@index([brandRecordId])
+  @@index([categoryRecordId])
+  @@index([subcategoryRecordId])
+  @@unique([brand, catalogNumber])
+}
+
+model TransientEntry {
+  key       String   @id
+  value     String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([expiresAt])
+}
+
+model BackgroundTask {
+  id           String    @id @default(cuid())
+  type         String
+  status       String    @default("pending")
+  payload      String
+  result       String?
+  priority     Int       @default(0)
+  attempts     Int       @default(0)
+  maxAttempts  Int       @default(3)
+  lastError    String?
+  runAt        DateTime  @default(now())
+  lockedAt     DateTime?
+  lockedBy     String?
+  completedAt  DateTime?
+  dedupeKey    String?   @unique
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@index([status, runAt, priority])
+  @@index([type, status])
+  @@index([lockedAt])
+  @@index([createdAt])
+}
+
+model ProductVariant {
+  id              String   @id @default(cuid())
+  productId       String
+  catalogNumber   String
+  spec            String
+  price           Float    // 市场价（成交价/卖价）
+  originalPrice   Float?   // 目录价（基准价/划线原价）
+  promotionalPrice Float?  // 该包装促销价，优先于 price 用于成交
+  costPrice       Float?   // 该包装进货价，仅 admin 可见，永不在前端展示
+  minimumSalePrice Float?  // 该包装最低成交价，仅服务端价格服务读取
+  packageType     String?  // box | case | tier；普通规格为空
+  salesUnit       String?
+  baseQuantity    Int      @default(1)
+  source          String?
+  product         Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  prices          ProductPrice[]
+  priceBreaks     ProductPriceBreak[]
+  promotionLinks  PromotionProduct[]
+  inventoryAccounts InventoryAccount[]
+
+  @@index([catalogNumber])
+  @@index([productId])
+  @@index([productId, packageType, baseQuantity])
+  @@index([source])
+}
+
+model Brand {
+  id          String    @id @default(cuid())
+  name        String    @unique
+  slug        String?   @unique
+  description String?
+  websiteUrl  String?
+  logoUrl     String?
+  isActive    Boolean   @default(true)
+  sortOrder   Int       @default(0)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  products    Product[]
+
+  @@index([isActive, sortOrder])
+}
+
+model ProductCategory {
+  id                String    @id @default(cuid())
+  name              String
+  slug              String?
+  parentId          String?
+  description       String?
+  isActive          Boolean   @default(true)
+  sortOrder         Int       @default(0)
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  parent            ProductCategory? @relation("CategoryTree", fields: [parentId], references: [id], onDelete: Cascade)
+  children          ProductCategory[] @relation("CategoryTree")
+  primaryProducts   Product[] @relation("ProductPrimaryCategory")
+  secondaryProducts Product[] @relation("ProductSecondaryCategory")
+
+  @@unique([parentId, name])
+  @@index([parentId, sortOrder])
+  @@index([isActive])
+}
+
+model ProductAttribute {
+  id              String   @id @default(cuid())
+  productId       String
+  key             String
+  label           String
+  value           String
+  normalizedValue String?
+  unit            String?
+  source          String?
+  sortOrder       Int      @default(0)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  product         Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@unique([productId, key, value])
+  @@index([productId, sortOrder])
+  @@index([key, normalizedValue])
+}
+
+model ProductPrice {
+  id          String    @id @default(cuid())
+  productId   String
+  variantId   String?
+  kind        String
+  amount      Float
+  currency    String    @default("CNY")
+  startsAt    DateTime?
+  endsAt      DateTime?
+  isActive    Boolean   @default(true)
+  source      String?
+  createdBy   String?
+  createdAt   DateTime  @default(now())
+  product     Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
+  variant     ProductVariant? @relation(fields: [variantId], references: [id], onDelete: Cascade)
+
+  @@index([productId, kind, createdAt])
+  @@index([variantId])
+  @@index([isActive, startsAt, endsAt])
+}
+
+model ProductPriceBreak {
+  id              String   @id @default(cuid())
+  productId       String
+  variantId       String?
+  kind            String   // unit | box | case | tier
+  label           String
+  salesUnit       String?
+  baseQuantity    Int      @default(1)
+  listAmount      Float?
+  publicAmount    Float?
+  costAmount      Float?
+  currency        String   @default("CNY")
+  source          String?
+  sourceSheet     String?
+  sortOrder       Int      @default(0)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  product         Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  variant         ProductVariant? @relation(fields: [variantId], references: [id], onDelete: Cascade)
+
+  @@index([productId, kind, baseQuantity])
+  @@index([variantId])
+  @@index([source])
+}
+
+model Promotion {
+  id          String   @id @default(cuid())
+  name        String
+  type        String   // fixed_price | discount_rate | amount_off
+  value       Float
+  ruleDefinition String? // 带 schemaVersion 的规则参数；空值保留旧计价方式
+  ruleVersion Int      @default(1)
+  status      String   @default("draft") // draft | active | paused | ended
+  startsAt    DateTime
+  endsAt      DateTime
+  priority    Int      @default(0)
+  exclusive   Boolean  @default(true)
+  createdBy   String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  products    PromotionProduct[]
+
+  @@index([status, startsAt, endsAt])
+  @@index([priority])
+}
+
+model PromotionProduct {
+  id          String   @id @default(cuid())
+  promotionId String
+  productId   String
+  variantId   String?
+  groupKey    String   @default("main")
+  promotion   Promotion      @relation(fields: [promotionId], references: [id], onDelete: Cascade)
+  product     Product        @relation(fields: [productId], references: [id], onDelete: Cascade)
+  variant     ProductVariant? @relation(fields: [variantId], references: [id], onDelete: Cascade)
+
+  @@unique([promotionId, productId, variantId])
+  @@index([productId, variantId])
+}
+
+model InventoryAccount {
+  id               String   @id @default(cuid())
+  productId        String
+  variantId        String?
+  actualQuantity   Int      @default(-1)
+  availableQuantity Int     @default(-1)
+  reservedQuantity Int      @default(0)
+  shippedQuantity  Int      @default(0)
+  inboundQuantity  Int      @default(0)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  product          Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  variant          ProductVariant? @relation(fields: [variantId], references: [id], onDelete: Cascade)
+  batches          InventoryBatch[]
+  reservations     InventoryReservation[]
+  transactions     InventoryTransaction[]
+
+  @@unique([productId, variantId])
+  @@index([variantId])
+  @@index([availableQuantity])
+}
+
+model InventoryBatch {
+  id               String   @id @default(cuid())
+  inventoryAccountId String
+  batchNumber      String
+  quantity         Int
+  reservedQuantity Int      @default(0)
+  expiryDate       DateTime?
+  receivedAt       DateTime @default(now())
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  account          InventoryAccount @relation(fields: [inventoryAccountId], references: [id], onDelete: Cascade)
+  transactions     InventoryTransaction[]
+  batchAllocations InventoryReservationBatch[]
+
+  @@unique([inventoryAccountId, batchNumber])
+  @@index([expiryDate])
+}
+
+model InventoryReservationBatch {
+  id            String   @id @default(cuid())
+  reservationId String
+  batchId       String
+  quantity      Int
+  fulfilledQuantity Int @default(0)
+  reservation   InventoryReservation @relation(fields: [reservationId], references: [id], onDelete: Cascade)
+  batch         InventoryBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+
+  @@unique([reservationId, batchId])
+  @@index([batchId])
+}
+
+model InventoryReservation {
+  id               String   @id @default(cuid())
+  inventoryAccountId String
+  orderId          String
+  orderItemId      String   @unique
+  quantity         Int
+  fulfilledQuantity Int     @default(0)
+  status           String   @default("active")
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  account          InventoryAccount @relation(fields: [inventoryAccountId], references: [id], onDelete: Cascade)
+  order            Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  orderItem        OrderItem @relation(fields: [orderItemId], references: [id], onDelete: Cascade)
+  transactions     InventoryTransaction[]
+  batchAllocations InventoryReservationBatch[]
+
+  @@index([orderId, status])
+  @@index([inventoryAccountId, status])
+}
+
+model InventoryTransaction {
+  id               String   @id @default(cuid())
+  inventoryAccountId String
+  batchId          String?
+  reservationId    String?
+  orderId          String?
+  type             String
+  quantity         Int
+  reason           String
+  actorId          String?
+  actualBefore     Int
+  actualAfter      Int
+  availableBefore  Int
+  availableAfter   Int
+  reservedBefore   Int
+  reservedAfter    Int
+  inboundBefore    Int
+  inboundAfter     Int
+  shippedBefore    Int
+  shippedAfter     Int
+  createdAt        DateTime @default(now())
+  account          InventoryAccount @relation(fields: [inventoryAccountId], references: [id], onDelete: Cascade)
+  batch            InventoryBatch? @relation(fields: [batchId], references: [id], onDelete: SetNull)
+  reservation      InventoryReservation? @relation(fields: [reservationId], references: [id], onDelete: SetNull)
+  order            Order? @relation(fields: [orderId], references: [id], onDelete: SetNull)
+
+  @@index([inventoryAccountId, createdAt])
+  @@index([orderId])
+  @@index([batchId])
+  @@index([type])
+}
+
+model ProductDocument {
+  id          String   @id @default(cuid())
+  productId   String
+  type        String
+  title       String
+  url         String
+  version     String?
+  language    String?  @default("zh-CN")
+  source      String?
+  sortOrder   Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  product     Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@unique([productId, type, url])
+  @@index([productId, sortOrder])
+  @@index([type])
+}
+
+model Wishlist {
+  id        String   @id @default(cuid())
+  userId    String
+  productId String
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, productId])
+  @@index([userId])
+  @@index([productId])
+}
+
+// ============ 积分系统 ============
+
+// 课题组（一人仅可加入一个课题组；成员自动共享课题组积分）
+// status: pending 待审核 | active 已通过 | archived 已归档
+// 用户创建为 pending；管理员审核通过后 locked=true；不通过则删除记录
+model ResearchGroup {
+  id               String   @id @default(cuid())
+  name             String
+  points           Int      @default(0)
+  status           String   @default("pending")
+  locked           Boolean  @default(false)
+  lockedAt         DateTime?
+  reviewedAt       DateTime?
+  reviewedByEmail  String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  members          ResearchGroupMember[]
+  pointsLogs       GroupPointsLog[]
+  orders           Order[]
+  topups           PointsTopup[]
+
+  @@index([status])
+  @@index([name])
+}
+
+model ResearchGroupMember {
+  id        String   @id @default(cuid())
+  groupId   String
+  userId    String   @unique
+  role      String   @default("member") // owner | member
+  createdAt DateTime @default(now())
+  group     ResearchGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([groupId])
+}
+
+model GroupPointsLog {
+  id          String   @id @default(cuid())
+  groupId     String
+  delta       Int
+  type        String   // admin_inject | topup_alipay | order_redeem | order_redeem_refund
+  reason      String?
+  relatedId   String?
+  actorUserId String?
+  adminEmail  String?
+  createdAt   DateTime @default(now())
+  group       ResearchGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  actor       User?    @relation("GroupPointsActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@index([groupId, createdAt])
+  @@index([type])
+  @@index([relatedId])
+}
+
+// 支付宝扫码充值（个人或课题组，1 元 = 1 分）
+model PointsTopup {
+  id         String   @id @default(cuid())
+  userId     String
+  targetType String   // personal | group
+  groupId    String?
+  points     Int
+  amount     Float
+  status     String   @default("pending") // pending | paid | failed | cancelled
+  outTradeNo String?  @unique
+  tradeNo    String?
+  paidAt     DateTime?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  group      ResearchGroup? @relation(fields: [groupId], references: [id], onDelete: SetNull)
+
+  @@index([userId, createdAt])
+  @@index([groupId])
+  @@index([status])
+}
+
+// 积分变动流水（审计所有积分变化）
+model PointsLog {
+  id         String   @id @default(cuid())
+  userId     String
+  delta      Int      // 正数=收入，负数=支出
+  type       String   // admin_adjust | order_credit | redemption | admin_undo | order_redeem | order_redeem_refund | topup_alipay | admin_inject
+  reason     String?  // 管理员备注
+  relatedId  String?  // 关联订单/兑换 ID
+  undoOfId   String?  @unique // admin_undo 唯一对应的原始管理员调整记录
+  adminEmail String?  // 操作管理员
+  createdAt  DateTime @default(now())
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([createdAt])
+  @@index([type])
+  @@index([relatedId])
+  @@index([undoOfId])
+}
+
+// 积分商城商品
+model PointsProduct {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  category    String   // tool | digital | physical
+  imageUrl    String?
+  pointsCost  Int
+  stock       Int      @default(-1)  // -1 = 无限
+  isActive    Boolean  @default(true)
+  metadata    String?  // JSON: {digitalCode?, requiresShipping?}
+  createdAt   DateTime @default(now())
+  redemptions PointsRedemption[]
+
+  @@index([isActive])
+  @@index([category])
+}
+
+// 兑换记录
+model PointsRedemption {
+  id             String   @id @default(cuid())
+  userId         String
+  productId      String
+  productName    String   // 冗余存储（商品可能被下架）
+  pointsCost     Int
+  status         String   @default("pending")  // pending | shipped | completed | cancelled
+  shippingInfo   String?  // JSON 收货地址（实物）
+  trackingNumber String?
+  adminNote      String?
+  variantName    String?  // 礼遇规格（如"标准/100T"）
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  product        PointsProduct @relation(fields: [productId], references: [id])
+
+  @@index([userId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+// 系统配置（单行表）
+model SystemSettings {
+  id                  Int      @id @default(1)
+  pointsPerYuan       Float    @default(1.0)    // 1 元 = N 积分
+  pointsPerYuanActive Boolean  @default(true)   // 是否启用订单自动积分
+  organizationCreationEnabled Boolean @default(false) // 是否开放用户创建组织
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+}
+
+model OrganizationCreationGrant {
+  id             String   @id @default(cuid())
+  userId         String   @unique @map("user_id")
+  grantedByUserId String?  @map("granted_by_user_id")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+  user           User     @relation("OrganizationCreationUser", fields: [userId], references: [id], onDelete: Cascade)
+  grantedBy      User?    @relation("OrganizationCreationGrantor", fields: [grantedByUserId], references: [id], onDelete: SetNull)
+
+  @@index([grantedByUserId])
+  @@map("organization_creation_grants")
+}
+
+// Note: DiscountTemplate and _rate_limits are managed outside Prisma
+// (raw SQL). Run scripts/init-extra-tables.sql after schema changes.
+
+model DiscountTemplate {
+  id              String   @id @default(cuid())
+  name            String
+  discountRate    Float    // 通用折扣率，如 0.85 = 85折
+  brandDiscounts  String   @default("[]") // JSON: { [brand: string]: rate }
+  description     String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+// 优惠券模板（落地 5）：定义券规则，发放后生成 CouponInstance
+model Coupon {
+  id          String   @id @default(cuid())
+  name        String   // 券名，如「满 1000 减 100」「无门槛 50 元券」
+  type        String   // threshold（满减券：满 X 减 Y）| unrestricted（无门槛券：可叠加折上折再减）
+  threshold   Float    @default(0) // 满减门槛金额（type=threshold 时有效；unrestricted 为 0）
+  discount    Float    // 优惠金额（减 Y 元）
+  stackable   Boolean  @default(false) // true=可与其他优惠叠加（无门槛券）；false=互斥取最低（满减券）
+  // 二次授权（无门槛券生成/发放必须）
+  requiresApproval Boolean @default(false) // 无门槛券=true：模板生成后需管理员二次授权
+  approvalStatus   String @default("auto") // auto（满减券直接生效）| pending | approved | rejected
+  approvedBy       String?
+  approvedAt       DateTime?
+  // 有效期与总量
+  validFrom   DateTime @default(now())
+  validUntil  DateTime?
+  maxUses     Int      @default(0) // 0=不限；>0=模板累计发放上限
+  usedCount   Int      @default(0)
+  description String?
+  createdBy   String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  instances   CouponInstance[]
+
+  @@index([type, approvalStatus])
+  @@index([validUntil])
+}
+
+// 优惠券实例（发放给用户的券码）
+model CouponInstance {
+  id          String   @id @default(cuid())
+  couponId    String
+  coupon      Coupon   @relation(fields: [couponId], references: [id], onDelete: Cascade)
+  userId      String?  // 空 = 通用券码（可被任意用户兑换）；非空 = 定向发放
+  code        String   @unique // 券码（用户下单时提交）
+  status      String   @default("active") // active | used | expired | revoked
+  // 发放二次授权（无门槛券定向发放时：管理员创建实例→待授权→授权后 active）
+  issueApprovalStatus String @default("auto") // auto（满减券）| pending | approved | rejected
+  issuedBy     String?
+  approvedBy   String?
+  approvedAt   DateTime?
+  redeemedOrderId String?
+  redeemedAt   DateTime?
+  expiresAt    DateTime?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([userId, status])
+  @@index([code])
+  @@index([couponId])
+  @@index([redeemedOrderId])
+}
+
+// 社区贡献的食谱/方案（用户提交）
+model UserCreatedRecipe {
+  id              String   @id @default(cuid())
+  userId          String
+  ownerScope      String   @default("personal") @map("owner_scope") // personal
+  type            String   // 'protocol' | 'buffer'
+  name            String
+  description     String?
+  content         String   // JSON
+  status          String   @default("draft")  // draft | pending | approved | rejected
+  rejectionReason String?
+  submittedAt     DateTime?
+  reviewedAt      DateTime?
+  reviewerId      String?
+  createdAt       DateTime @default(now())
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  updatedAt       DateTime @updatedAt
+
+  @@index([userId])
+  @@index([status])
+  @@index([type])
+}
+
+// 用户保存的计算器配方（缓冲液等）
+model UserSavedBuffer {
+  id             String   @id @default(cuid())
+  userId         String
+  ownerScope     String   @default("personal") @map("owner_scope") // personal
+  name           String
+  calculatorType String
+  parameters     String   // JSON
+  result         String   // JSON
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+// 律师审定商事文书（元数据；PDF 源文件在 docs/legal/）
+model LegalDocument {
+  id               String   @id
+  version          String   @default("1.0")
+  title            String
+  category         String   // contract | attachment | sop | index | site
+  kind             String   @default("pdf") // pdf | site
+  fileName         String?  // PDF 基础名（不含扩展名）
+  sitePath         String?  // 站内页面路径，kind=site 时使用
+  description      String?
+  published        Boolean  @default(true)
+  requireRegister  Boolean  @default(false)
+  requireCheckout  Boolean  @default(false)
+  showOnLegalPage  Boolean  @default(true)
+  showOnOpenPlatform Boolean @default(false)
+  sortOrder        Int      @default(0)
+  updatedAt        DateTime @updatedAt
+
+  @@index([published])
+  @@index([sortOrder])
+}

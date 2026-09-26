@@ -1,0 +1,3891 @@
+{
+  "schema_version": "research-deep-dive-public-v0.1",
+  "batch_id": "B07",
+  "title": "计算与组学测量",
+  "publication_status": "snapshot_ready",
+  "frontend_status": "snapshot_ready",
+  "snapshot_date": "2026-08-30",
+  "source_record_count": 156,
+  "unique_publication_count": 148,
+  "topics": [
+    {
+      "topic_id": "H003",
+      "title": "人工智能表型分析与实验决策支持",
+      "topic_role": "research_deep_dive",
+      "overview": "人工智能辅助的表型分析把显微图像转成可比较的细胞状态。细胞绘图和高内涵成像同时记录细胞核、细胞器和形态变化，可以比较化合物、遗传扰动或疾病相关状态；深度表征还能从大规模扰动中提出值得复测的候选，但图像相似不能直接说明靶点、作用机制或人体效应。\n\n本方向从 Cell Painting、高内涵成像、单细胞图像特征、深度表征、活性预测和细胞健康预测出发，集中处理三类问题：哪些图像特征能够稳定区分细胞状态；模型能否在不同批次、实验室和扰动条件下保持可比；预测候选如何通过独立成像、分子或功能实验验证。图像特征、模型预测和实际表型是需要分开报告的证据层级。\n\n比较公开研究时，需要同时交代细胞和处理条件、染色与成像参数、板式设计、批次校正、特征提取、训练和测试划分、对照及独立复验。模型在一个细胞系或图像库上的性能不能直接代表疾病组织或临床效应。表型筛选专题处理候选和靶点验证，单细胞扰动专题处理遗传扰动读出；本页聚焦 AI 图像表征与预测的适用范围。",
+      "sections": [
+        {
+          "section_id": "H003-SEC-01",
+          "title": "概述",
+          "body": "人工智能（AI）辅助的表型分析把显微图像转成可比较的细胞状态。细胞绘图（Cell Painting）和高内涵成像会同时记录细胞核、细胞器和形态变化；同一批图像因此可以用来比较化合物、遗传扰动或疾病相关细胞状态。近年的工作把深度表征加入这条流程，模型可以帮助研究者从大规模扰动中排出更值得复测的候选。结论仍要回到独立实验：图像相似只能提出线索，不能直接说明靶点、作用机制或人体效应。",
+          "source_ids": [
+            "H003S001",
+            "H003S002",
+            "H003S003",
+            "H003S006",
+            "H003S009"
+          ]
+        },
+        {
+          "section_id": "H003-SEC-02",
+          "title": "研究进展",
+          "body": "这一方向的起点，是把固定的染色、成像和板内对照做成可重复的细胞读出。细胞绘图（Cell Painting）与高内涵成像由此可以比较化学扰动和遗传扰动，而不再只依赖单一终点。2024 年的前瞻性筛选把图像和单浓度活性读出用于 140 个实验：模型优选的化合物在后续复测中有更高的活性命中比例，并保留了较多结构不同的候选。随后，大规模遗传扰动图谱把形态变化用于寻找基因功能和变异优先级线索，但图谱中的相近表型仍需要独立实验确认。2026 年的 JUMP-MOA 参考板比较进一步显示，多个预训练表征在活性和扰动区分上都能通过基础检查，对作用机制检索的表现却不相同。图像表征不能只看一个通用分数，必须按实际研究任务复测。同年的病毒感染筛选和时间分辨成像把这条路线延伸到感染相关形态、表皮生长因子受体（EGFR）与肝细胞生长因子受体（c-Met）转运等读出。图像可以提出可复测的候选和状态变化，但不能直接说明靶点、作用机制或人体疗效。",
+          "source_ids": [
+            "H003S001",
+            "H003S002",
+            "H003S003",
+            "H003S004",
+            "H003S005",
+            "H003S006",
+            "H003S007",
+            "H003S009",
+            "H003S010",
+            "H003S014",
+            "H003S017",
+            "H003S018",
+            "H003S021",
+            "H003S022",
+            "H003S023"
+          ]
+        },
+        {
+          "section_id": "H003-SEC-03",
+          "title": "研究工具和方法",
+          "body": "一个可复核的 AI 表型实验通常从稳定的细胞模型和扰动设计开始。随后进行 Cell Painting 或高内涵成像，检查染色、焦平面、细胞密度和板位效应，再完成单细胞分割和特征提取。模型训练应按实验批次设置留出集，避免把同一批次的相似图像同时放入训练和测试。模型给出的候选需要用重复成像、生化或遗传读出、独立细胞批次和必要的功能实验逐步确认。方法卡会分别说明高内涵成像、图像分割、深度表征、候选优选和正交验证。",
+          "source_ids": [
+            "H003S002",
+            "H003S006",
+            "H003S008",
+            "H003S009",
+            "H003S015"
+          ]
+        },
+        {
+          "section_id": "H003-SEC-04",
+          "title": "应用与疾病关联",
+          "body": "化合物筛选是目前最直接的应用场景：在特定细胞体系中，图像表征可以把复测优先级放在更可能有活性的候选上，也能保留一部分结构差异较大的分子。疾病相关研究则把这套读出放到患者来源的心脏成纤维细胞和病毒感染细胞中，观察预先定义的状态是否出现可区分的形态特征，并据此安排后续实验。遗传扰动和肺癌相关变异研究提供的是另一类线索：细胞形态可提示哪些变异或基因扰动值得继续做蛋白、遗传或功能验证。时间分辨高内涵成像还在 A549 细胞中比较了 EGFR 与 c-Met 转运受阻后的不同表型。上述结果分别来自体外筛选、患者来源细胞、感染模型或细胞系；它们能帮助设计复测，不能代替变异致病性判断、疾病诊断或治疗选择。",
+          "source_ids": [
+            "H003S004",
+            "H003S005",
+            "H003S006",
+            "H003S010",
+            "H003S018",
+            "H003S019",
+            "H003S021",
+            "H003S022"
+          ]
+        },
+        {
+          "section_id": "H003-SEC-05",
+          "title": "参考文献",
+          "body": "本专题收录 23 条已核对来源。方法与流程依据包括图像表型综述和 Cell Painting 协议；算法与基准依据包括深度表征、活性预测、细胞健康预测和任务相关表征比较；应用部分覆盖遗传扰动、药物筛选、感染模型和疾病来源细胞。正文中的判断可分别回溯至 H003-A01 至 H003-A04 的论证链，以及 H003S001 至 H003S023 的完整题录。",
+          "source_ids": [
+            "H003S001",
+            "H003S002",
+            "H003S003",
+            "H003S004",
+            "H003S005",
+            "H003S006",
+            "H003S007",
+            "H003S008",
+            "H003S009",
+            "H003S010",
+            "H003S011",
+            "H003S012",
+            "H003S013",
+            "H003S014",
+            "H003S015",
+            "H003S016",
+            "H003S017",
+            "H003S018",
+            "H003S019",
+            "H003S020",
+            "H003S021",
+            "H003S022",
+            "H003S023"
+          ]
+        }
+      ],
+      "methods": [
+        {
+          "method_id": "H003-M01",
+          "display_order": 1,
+          "category": "细胞表型测量",
+          "title": "Cell Painting 与高内涵成像",
+          "principle": "Cell Painting 用多种荧光染料同时标记细胞核、线粒体、内质网、肌动蛋白和其他细胞结构。显微镜在每个孔采集多个视野，软件再把细胞的形状、纹理、荧光强度和细胞器分布转成数值特征。研究者比较的不是一张代表性图片，而是同一处理条件下大量单细胞组成的形态谱。",
+          "answers": "适合比较药物、基因扰动或疾病相关细胞在整体形态上是否形成可重复的差异，并据此寻找相似处理、异常细胞状态或值得复测的候选。",
+          "sample_design": "先根据研究问题确定细胞模型、扰动方式和主要比较组，再统一细胞密度、培养时间、处理剂量、染色批次和成像参数。每块板都要放入阴性对照和能够产生已知表型的阳性对照；生物学重复应分布在不同板或不同实验批次，而不是只增加同一孔的拍摄视野。剂量或时间可能改变表型时，应在设计阶段设置梯度，不能等看到结果后再补选条件。",
+          "workflow": "完成成像后，先检查失焦、照明不均、边缘孔效应、细胞数量和染色强度，再进行光照校正、细胞分割和特征提取。随后在板内对照的基础上归一化特征，并把同一处理的单细胞信息汇总为可比较的表型谱。需要使用机器学习时，这些表型谱再进入相似性检索、分类或候选排序模型。",
+          "quality_control": "用阴性对照判断批次背景，用阳性对照确认实验能否识别预期变化；随机抽查原始图像、分割轮廓和异常孔，避免把失焦、过密或染色失败误当成生物学差异。重要候选至少应在独立批次重新处理和成像。",
+          "result_interpretation": "两个处理的表型谱接近，说明它们在当前细胞、剂量和时间条件下引起了相似的形态变化。它可以支持候选排序或提出作用机制假设，但还不能说明二者具有相同靶点，也不能证明这种变化在其他细胞或人体中存在。",
+          "limitations": "细胞密度、培养状态、板位和成像条件都可能改变形态谱。即使技术重复稳定，形态相似仍然缺少靶点特异性；结果必须与生化、遗传或功能读出结合。",
+          "source_ids": [
+            "H003S001",
+            "H003S002",
+            "H003S003",
+            "H003S016"
+          ]
+        },
+        {
+          "method_id": "H003-M02",
+          "display_order": 2,
+          "category": "图像处理",
+          "title": "单细胞分割与特征提取",
+          "principle": "图像分析先识别细胞核，再依据膜、细胞质染色或邻近关系确定每个细胞的范围。每个细胞随后得到一组形状、纹理、强度和细胞器分布特征。传统流程使用可追溯的图像处理规则，深度学习流程则从人工标注或预训练数据中学习细胞边界和图像表征。",
+          "answers": "适合判断处理后是否只影响部分细胞、细胞群内部是否出现不同状态，以及哪些图像特征构成了孔位层级的总体差异。",
+          "sample_design": "原始图像、分割掩膜和特征表应一并保存。建立分析流程时，要从不同板位、细胞密度、处理组和异常图像中抽取代表性视野进行人工核对；如果细胞形态差异很大，应分别调校参数或使用能够覆盖这些形态的训练集。",
+          "workflow": "可用 CellProfiler 建立可复用的照明校正、分割和特征提取流程，也可用 SPACe 处理单细胞 Cell Painting 数据。工具输出后，先比较细胞数、分割面积和异常值分布，再做板内归一化和批次校正。需要深度表征时，应保留原始图像与细胞坐标，便于把模型结果追溯到具体细胞。",
+          "quality_control": "在空白背景、正常密度、过密区域、细胞碎片和强表型处理组中分别检查分割。不能只查看整体分割准确率；对研究结论贡献最大的异常群体也要人工复核。若更换显微镜、物镜或细胞模型，应重新确认参数。",
+          "result_interpretation": "单细胞特征可以显示群体平均值掩盖的亚群，但亚群比例也会受到分割失败和细胞丢失影响。任何与疾病状态或药物反应相关的亚群，都应回看原始图像，并用独立标志物或功能检测确认。",
+          "limitations": "分割误差会传递到后续特征和模型。贴壁形态、细胞重叠、弱染色或处理造成的细胞破碎，都会使一套固定参数失效。",
+          "source_ids": [
+            "H003S008",
+            "H003S011",
+            "H003S016"
+          ]
+        },
+        {
+          "method_id": "H003-M03",
+          "display_order": 3,
+          "category": "模型分析",
+          "title": "形态特征与深度表征",
+          "principle": "模型可以使用人工提取的形态特征，也可以直接从图像学习表征。前者便于追查哪些纹理或细胞器变化影响结果；后者能从大规模图像中学习更复杂的组合特征。两种路线最终都把细胞或处理条件表示为数值向量，用于相似性检索、分类或活性预测。",
+          "answers": "适合比较不同扰动的表型距离，预测某个处理是否属于已定义状态，或从大规模实验中筛出更值得复测的候选。模型性能必须围绕实际任务评价，不能用一个通用表征分数代替。",
+          "sample_design": "训练集、验证集和测试集应按实验板、批次或扰动实体划分，不能把同一批次中的相似单细胞随机分到两侧。条件允许时，保留独立实验批次、细胞系或实验室数据作为外部测试；类别不平衡、重复化合物和近似结构也要在划分前处理。",
+          "workflow": "先完成图像质控、特征归一化和批次检查，再训练分类、回归或检索模型。训练阶段只用训练集选择特征和参数，验证集用于调参，最终性能在未参与开发的测试集上报告。用于机制检索时，还要单独测试已知同机制扰动能否相互找回，不能只报告总体分类准确率。",
+          "quality_control": "除平均性能外，应检查不同实验板、处理强度和细胞状态下的结果是否一致，并与简单基线模型比较。对高置信度预测回看原始图像，确认模型没有利用细胞数量、边缘孔或批次标签等捷径。",
+          "result_interpretation": "较高的预测概率或较近的表型距离表示模型在训练任务中发现了相似模式。它首先是复测优先级，不是机制结论。只有当预测在独立批次复现，并与遗传、生化或功能证据一致时，才适合继续讨论具体生物学解释。",
+          "limitations": "模型输出受训练数据范围和批次结构限制。留出集分数高，并不证明模型学到了可解释机制；跨细胞、跨平台或跨实验室使用前仍需重新验证。",
+          "source_ids": [
+            "H003S006",
+            "H003S007",
+            "H003S012",
+            "H003S013",
+            "H003S014"
+          ]
+        },
+        {
+          "method_id": "H003-M04",
+          "display_order": 4,
+          "category": "筛选决策",
+          "title": "候选优选与复测设计",
+          "principle": "候选优选把图像表型、已有活性读出和化学结构信息放在同一决策流程中。模型负责估计哪些候选更可能出现目标表型，研究者再结合结构多样性、可获得性和后续实验容量决定复测顺序。",
+          "answers": "适合在复测资源有限时缩小候选范围，并比较模型优选后是否提高确认命中率、是否保留了结构不同的候选。",
+          "sample_design": "训练数据与待筛化合物应使用相近的细胞模型、剂量和处理时间。预先确定复测容量和入选规则，并保留一组未参与训练和阈值选择的化合物做盲法验证。若目标是发现新化学骨架，结构多样性应在排序规则中明确体现。",
+          "workflow": "先用图像模型为全部候选计算活性概率或与目标表型的距离，再与初筛读出、化学结构聚类和实验可行性合并。选出的候选进入独立配液、重复成像和剂量反应实验；只有复测结果稳定后，才进入靶点或作用机制研究。",
+          "quality_control": "比较随机选择、传统单一读出和模型优选三种策略的确认命中率，避免只报告入选候选中的阳性结果。复测应使用新的实验批次，并记录未复现候选，以判断模型在哪些化学类别或表型范围内失效。",
+          "result_interpretation": "命中率提高说明模型改善了当前筛选体系中的资源分配；结构多样性增加说明它没有只找回与已知活性物相近的分子。这两项结果仍不能回答候选是否具有选择性、明确靶点或体内活性。",
+          "limitations": "候选排序依赖初始训练集和实验体系。模型可能偏向强表型、细胞毒性或已被充分采样的化学类别；优先级不能作为活性、选择性或作用机制的最终证据。",
+          "source_ids": [
+            "H003S006",
+            "H003S017",
+            "H003S018",
+            "H003S020"
+          ]
+        },
+        {
+          "method_id": "H003-M05",
+          "display_order": 5,
+          "category": "验证",
+          "title": "正交读出与独立模型复核",
+          "principle": "正交验证改用与图像模型不同的测量原理，检查候选是否真的影响预期过程。例如用靶点结合或酶活实验检验直接作用，用基因编辑或敲低检验遗传关系，用细胞死亡、DNA 损伤、转运或疾病相关功能读出检验生物学效应。",
+          "answers": "适合判断图像中的候选表型能否复现、是否具有剂量或时间依赖性，以及它与预设靶点、通路或细胞功能是否一致。",
+          "sample_design": "先根据候选产生的原因选择验证层级：表型相似只需先确认表型，机制假设则必须增加直接的生化或遗传读出。复测使用独立配液和独立细胞批次，设置阴性对照、已知阳性对照和剂量或时间梯度；涉及疾病时，再考虑疾病相关细胞或患者来源样本。",
+          "workflow": "从重复成像开始，确认候选表型不是板位或批次造成；随后选择最接近假设的直接读出。若直接读出支持假设，再在独立模型中检查功能结果。图像、直接读出和功能实验应分别保留原始数据，最后按预先设定的判定标准汇总，而不是只挑选一致结果。",
+          "quality_control": "验证实验应包含未入选候选或阴性候选，便于估计优选流程的假阳性。重复实验要报告效应量和变异，未复现结果也应保留。若验证方法与原始图像共享相同染色或相同算法，它不能算完全独立的证据。",
+          "result_interpretation": "重复成像确认的是表型稳定性，生化或遗传实验支持的是更具体的机制关系，疾病相关模型中的功能读出才进一步说明该关系在特定疾病语境中是否存在。不同层级不能相互替代。",
+          "limitations": "验证成功只支持所测细胞、剂量、时间和读出。体外细胞结果仍不能直接外推到其他疾病、患者样本或人体疗效。",
+          "source_ids": [
+            "H003S009",
+            "H003S010",
+            "H003S015",
+            "H003S019"
+          ]
+        }
+      ],
+      "timeline": [
+        {
+          "display_order": 1,
+          "year": 2021,
+          "discovery": "图像表型开始被用于从多通道细胞形态中推断可复测的细胞健康状态；同一批图像不再只服务于单一终点。",
+          "application": "可作为药物或遗传扰动实验的后续读出和复测优先级线索；图像相似本身不能确认靶点、机制或人体效应。",
+          "source_ids": [
+            "H003S001",
+            "H003S009"
+          ]
+        },
+        {
+          "display_order": 2,
+          "year": 2022,
+          "discovery": "Cell Painting 被用于比较肺癌相关变异引起的细胞形态差异，将图像读出拓展到变异功能线索。",
+          "application": "可帮助筛出值得进入蛋白、遗传或功能实验的肺癌变异候选；不能替代变异致病性判断。",
+          "source_ids": [
+            "H003S010"
+          ]
+        },
+        {
+          "display_order": 3,
+          "year": 2024,
+          "discovery": "前瞻性筛选显示，基于 Cell Painting 的生物活性预测可把复测资源优先投向更可能命中的化合物，并保留部分结构差异较大的候选。",
+          "application": "适用于特定细胞体系中的体外高通量筛选和候选排序；命中后仍需独立复测与作用机制验证。",
+          "source_ids": [
+            "H003S006"
+          ]
+        },
+        {
+          "display_order": 4,
+          "year": 2026,
+          "discovery": "参考板比较显示，不同预训练表征对活性与扰动区分可表现相近，但对作用机制检索并不等价；感染筛选和时间分辨成像进一步把图像读出延伸到感染状态及 EGFR、c-Met 转运。",
+          "application": "可用于感染模型或细胞系中提出后续复测问题，并比较动态表型；不能据此直接作出治疗选择或人体疗效判断。",
+          "source_ids": [
+            "H003S021",
+            "H003S022",
+            "H003S023"
+          ]
+        }
+      ],
+      "shared_findings": [
+        {
+          "finding_id": "H003-C01",
+          "display_order": 1,
+          "title": "形态谱更适合描述细胞状态，不适合单独指定作用机制",
+          "shared_result": "Cell Painting、高内涵成像和细胞健康预测研究都表明，多通道图像可以同时记录多个细胞结构的变化，并把处理后的细胞状态转成可比较的表型谱。不同药物或遗传扰动可能产生相近的形态结果，因此这种读出擅长发现状态相似性，却没有天然的靶点特异性。",
+          "research_use": "把图像表型放在研究流程的前段，用于发现异常状态、比较处理组和缩小候选范围。若研究问题涉及具体靶点或通路，应在方案中预先安排直接的生化、遗传或功能检测。",
+          "boundary": "共同认识主要来自体外细胞成像和扰动研究。表型谱在不同细胞类型、剂量、时间和成像平台之间不一定可直接比较。",
+          "source_ids": [
+            "H003S001",
+            "H003S003",
+            "H003S009",
+            "H003S016"
+          ]
+        },
+        {
+          "finding_id": "H003-C02",
+          "display_order": 2,
+          "title": "模型是否有用，取决于它能否完成当前任务",
+          "shared_result": "深度表征、活性预测和参考板比较得到的共同结果是：同一种图像表征可能在扰动区分上表现良好，却不一定适合作用机制检索；在一个数据集上取得较高分数，也不能保证换到另一种细胞或实验批次仍然有效。",
+          "research_use": "先写清楚模型承担的是相似性检索、活性预测还是候选排序，再按该任务设置留出集和评价指标。不要因为某个预训练模型总体分数较高，就跳过本实验中的基准比较。",
+          "boundary": "这些比较评价的是已定义任务中的模型表现，不等于证明模型学到了可解释的生物学机制。",
+          "source_ids": [
+            "H003S006",
+            "H003S007",
+            "H003S014",
+            "H003S023"
+          ]
+        },
+        {
+          "finding_id": "H003-C03",
+          "display_order": 3,
+          "title": "样本和批次安排决定了模型能否真正外推",
+          "shared_result": "方法优化、单细胞分析和高通量成像研究反复遇到同一问题：细胞密度、板位、染色、分割和实验批次都能形成稳定的图像差异。若训练集和测试集共享这些差异，模型可能看似准确，实际识别的是实验来源。",
+          "research_use": "把生物学重复分布到不同板和批次，训练与测试按批次或扰动实体分开；保留原始图像和分割结果，检查模型高分样本是否集中在特定板位、细胞数量或成像条件。",
+          "boundary": "批次校正只能减少已识别的技术差异，不能保证不同实验室、显微镜或细胞模型之间自动可比。",
+          "source_ids": [
+            "H003S002",
+            "H003S008",
+            "H003S016"
+          ]
+        },
+        {
+          "finding_id": "H003-C04",
+          "display_order": 4,
+          "title": "AI 最可靠的作用是安排复测顺序",
+          "shared_result": "化合物筛选、遗传变异、感染模型和疾病来源细胞研究虽然对象不同，却采用了相近的证据路线：先从图像中找出可区分的状态或候选，再用独立批次、直接读出或功能实验确认。图像模型由此改善的是实验资源分配，而不是替代后续实验。",
+          "research_use": "在方案中把模型输出定义为候选名单，并提前写明复测容量、入选规则和确认实验。记录未复现候选，才能判断模型在哪些表型或样本条件下失效。",
+          "boundary": "候选在体外细胞中复现，只支持该实验条件下的表型或功能关系；不能直接转化为疾病诊断、治疗选择或人体疗效判断。",
+          "source_ids": [
+            "H003S006",
+            "H003S010",
+            "H003S018",
+            "H003S019",
+            "H003S021",
+            "H003S022"
+          ]
+        }
+      ],
+      "references": [
+        {
+          "source_id": "H003S001",
+          "title": "Image-based profiling for drug discovery: due for a machine-learning upgrade?",
+          "journal": "Nature Reviews Drug Discovery",
+          "published_date": "2021-02",
+          "doi": "10.1038/s41573-020-00117-w",
+          "pmid": "33353986",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/33353986/",
+          "source_type": "review",
+          "evidence_role": "scope-and-limitations"
+        },
+        {
+          "source_id": "H003S002",
+          "title": "Optimizing the Cell Painting assay for image-based profiling.",
+          "journal": "Nature Protocols",
+          "published_date": "2023-07",
+          "doi": "10.1038/s41596-023-00840-9",
+          "pmid": "37344608",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/37344608/",
+          "source_type": "protocol",
+          "evidence_role": "assay-design"
+        },
+        {
+          "source_id": "H003S003",
+          "title": "Cell Painting: a decade of discovery and innovation in cellular imaging.",
+          "journal": "Nature Methods",
+          "published_date": "2025-02",
+          "doi": "10.1038/s41592-024-02528-8",
+          "pmid": "39639168",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/39639168/",
+          "source_type": "review",
+          "evidence_role": "field-synthesis"
+        },
+        {
+          "source_id": "H003S004",
+          "title": "A genome-wide atlas of human cell morphology.",
+          "journal": "Nature Methods",
+          "published_date": "2025-03",
+          "doi": "10.1038/s41592-024-02537-7",
+          "pmid": "39870862",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/39870862/",
+          "source_type": "original-research",
+          "evidence_role": "genetic-perturbation-atlas"
+        },
+        {
+          "source_id": "H003S005",
+          "title": "Morphological map of under- and overexpression of genes in human cells.",
+          "journal": "Nature Methods",
+          "published_date": "2025-08",
+          "doi": "10.1038/s41592-025-02753-9",
+          "pmid": "40775081",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/40775081/",
+          "source_type": "original-research",
+          "evidence_role": "gene-function-inference"
+        },
+        {
+          "source_id": "H003S006",
+          "title": "Cell Painting-based bioactivity prediction boosts high-throughput screening hit-rates and compound diversity.",
+          "journal": "Nature Communications",
+          "published_date": "2024-04-24",
+          "doi": "10.1038/s41467-024-47171-1",
+          "pmid": "38658534",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/38658534/",
+          "source_type": "original-research",
+          "evidence_role": "prospective-hit-prioritization"
+        },
+        {
+          "source_id": "H003S007",
+          "title": "Learning representations for image-based profiling of perturbations.",
+          "journal": "Nature Communications",
+          "published_date": "2024-02-21",
+          "doi": "10.1038/s41467-024-45999-1",
+          "pmid": "38383513",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/38383513/",
+          "source_type": "original-research",
+          "evidence_role": "self-supervised-representation"
+        },
+        {
+          "source_id": "H003S008",
+          "title": "SPACe: an open-source, single-cell analysis of Cell Painting data.",
+          "journal": "Nature Communications",
+          "published_date": "2024-11-23",
+          "doi": "10.1038/s41467-024-54264-4",
+          "pmid": "39580445",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/39580445/",
+          "source_type": "software-method",
+          "evidence_role": "single-cell-analysis"
+        },
+        {
+          "source_id": "H003S009",
+          "title": "Predicting cell health phenotypes using image-based morphology profiling.",
+          "journal": "Molecular Biology of the Cell",
+          "published_date": "2021-04-19",
+          "doi": "10.1091/mbc.E20-12-0784",
+          "pmid": "33534641",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/33534641/",
+          "source_type": "original-research",
+          "evidence_role": "orthogonal-readout-prediction"
+        },
+        {
+          "source_id": "H003S010",
+          "title": "Cell Painting predicts impact of lung cancer variants.",
+          "journal": "Molecular Biology of the Cell",
+          "published_date": "2022-05-15",
+          "doi": "10.1091/mbc.E21-11-0538",
+          "pmid": "35353015",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/35353015/",
+          "source_type": "original-research",
+          "evidence_role": "variant-phenotyping"
+        },
+        {
+          "source_id": "H003S011",
+          "title": "Label-free prediction of cell painting from brightfield images.",
+          "journal": "Scientific Reports",
+          "published_date": "2022-06-15",
+          "doi": "10.1038/s41598-022-12914-x",
+          "pmid": "35705591",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/35705591/",
+          "source_type": "original-research",
+          "evidence_role": "label-free-profiling"
+        },
+        {
+          "source_id": "H003S012",
+          "title": "CellDeathPred: a deep learning framework for ferroptosis and apoptosis prediction based on cell painting.",
+          "journal": "Cell Death Discovery",
+          "published_date": "2023-07-31",
+          "doi": "10.1038/s41420-023-01559-y",
+          "pmid": "37524741",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/37524741/",
+          "source_type": "original-research",
+          "evidence_role": "phenotype-classification"
+        },
+        {
+          "source_id": "H003S013",
+          "title": "Evaluating the utility of brightfield image data for mechanism of action prediction.",
+          "journal": "PLoS Computational Biology",
+          "published_date": "2023-07",
+          "doi": "10.1371/journal.pcbi.1011323",
+          "pmid": "37490493",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/37490493/",
+          "source_type": "original-research",
+          "evidence_role": "mechanism-hypothesis-generation"
+        },
+        {
+          "source_id": "H003S014",
+          "title": "Leveraging Cell Painting Images to Expand the Applicability Domain and Actively Improve Deep Learning Quantitative Structure-Activity Relationship Models.",
+          "journal": "Chemical Research in Toxicology",
+          "published_date": "2023-07-17",
+          "doi": "10.1021/acs.chemrestox.2c00404",
+          "pmid": "37327474",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/37327474/",
+          "source_type": "original-research",
+          "evidence_role": "model-applicability"
+        },
+        {
+          "source_id": "H003S015",
+          "title": "Using chemical and biological data to predict drug toxicity.",
+          "journal": "SLAS Discovery",
+          "published_date": "2023-04",
+          "doi": "10.1016/j.slasd.2022.12.003",
+          "pmid": "36639032",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/36639032/",
+          "source_type": "review",
+          "evidence_role": "toxicity-prediction"
+        },
+        {
+          "source_id": "H003S016",
+          "title": "High throughput microscopy and single cell phenotypic image-based analysis in toxicology and drug discovery.",
+          "journal": "Biochemical Pharmacology",
+          "published_date": "2023-10",
+          "doi": "10.1016/j.bcp.2023.115770",
+          "pmid": "37660829",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/37660829/",
+          "source_type": "review",
+          "evidence_role": "single-cell-imaging"
+        },
+        {
+          "source_id": "H003S017",
+          "title": "Morphological subprofile analysis for bioactivity annotation of small molecules.",
+          "journal": "Cell Chemical Biology",
+          "published_date": "2023-07-20",
+          "doi": "10.1016/j.chembiol.2023.06.003",
+          "pmid": "37385259",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/37385259/",
+          "source_type": "original-research",
+          "evidence_role": "bioactivity-annotation"
+        },
+        {
+          "source_id": "H003S018",
+          "title": "A phenomics approach for antiviral drug discovery.",
+          "journal": "BMC Biology",
+          "published_date": "2021-08-02",
+          "doi": "10.1186/s12915-021-01086-1",
+          "pmid": "34334126",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/34334126/",
+          "source_type": "original-research",
+          "evidence_role": "phenotypic-screening"
+        },
+        {
+          "source_id": "H003S019",
+          "title": "Cell Painting and Machine Learning Distinguish Fibroblasts From Nonfailing and Failing Human Hearts.",
+          "journal": "Circulation",
+          "published_date": "2025-04-22",
+          "doi": "10.1161/CIRCULATIONAHA.124.071956",
+          "pmid": "40258050",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/40258050/",
+          "source_type": "original-research",
+          "evidence_role": "disease-phenotype-classification"
+        },
+        {
+          "source_id": "H003S020",
+          "title": "Unleashing the potential of cell painting assays for compound activities and hazards prediction.",
+          "journal": "Frontiers in Toxicology",
+          "published_date": "2024",
+          "doi": "10.3389/ftox.2024.1401036",
+          "pmid": "39086553",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/39086553/",
+          "source_type": "review",
+          "evidence_role": "compound-activity-and-hazard"
+        },
+        {
+          "source_id": "H003S021",
+          "title": "A host-centric morphological profiling approach to identify repurposed antiviral drugs",
+          "journal": "iScience",
+          "published_date": "2026-07-10",
+          "doi": "10.1016/j.isci.2026.116673",
+          "pmid": "42472122",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/42472122/",
+          "source_type": "original-research",
+          "evidence_role": "host-directed-phenotypic-screen"
+        },
+        {
+          "source_id": "H003S022",
+          "title": "Time-resolved phenotypic profiling maps EGFR and c-Met trafficking signatures",
+          "journal": "Scientific Reports",
+          "published_date": "2026-07-19",
+          "doi": "10.1038/s41598-026-61308-w",
+          "pmid": "42471366",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/42471366/",
+          "source_type": "original-research",
+          "evidence_role": "time-resolved-high-content-imaging"
+        },
+        {
+          "source_id": "H003S023",
+          "title": "Retrieval-Based Evaluation of Cell Painting Feature Spaces Reveals Differences in the Preservation of Biologically Meaningful Phenotypic Similarity",
+          "journal": "International Journal of Molecular Sciences",
+          "published_date": "2026-06-25",
+          "doi": "10.3390/ijms27135727",
+          "pmid": "42450000",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/42450000/",
+          "source_type": "original-research",
+          "evidence_role": "feature-space-qualification"
+        }
+      ]
+    },
+    {
+      "topic_id": "H004",
+      "title": "长读长、人类泛基因组与复杂变异",
+      "topic_role": "research_deep_dive",
+      "overview": "长读长测序和人类泛基因组改变了复杂变异的观察方式。短读长和单一线性参考在着丝粒、节段重复、假基因和大型重排附近容易出现比对歧义；连续读段、端粒到端粒参考和多祖源单倍型改善了变异表示、断点解析和相位信息，但确认结构并不等于完成致病性或功能判断。\n\n本方向从高分子 DNA、端粒到端粒参考、泛基因组图结构、群体长读长目录、结构变异调用、单倍型分相和串联重复分型出发，集中处理三类问题：过去难以表示的序列和变异如何进入共同坐标；复杂结构和重复扩增如何在个体与群体尺度被检测；候选变异如何通过家系、功能、甲基化或正交测量得到分层验证。参考、测序、计算调用和功能证据承担不同作用。\n\n比较公开研究时，需要同时交代 DNA 完整性、读长、覆盖度、测序平台、参考版本、比对或组装流程、分相方法、结构变异定义和验证方式。跨人群目录改善的是表示和频率参照，不能直接判断某一患者的风险；肿瘤样本中的复杂重排也需要克隆、功能和临床证据。多组学专题处理跨分子层整合，本页聚焦复杂基因组结构的测量与验证。",
+      "sections": [
+        {
+          "section_id": "H004-SEC-01",
+          "title": "概述",
+          "body": "长读长测序和人类泛基因组改变了复杂变异的观察方式。短读长和单一线性参考在着丝粒、节段重复、假基因和大型重排附近常出现比对歧义；连续读段、端粒到端粒参考和多祖源单倍型为这些区域提供了更多可用坐标。它们改善的是变异的表示、断点解析和相位信息。一个候选结构即使被测序确认，是否致病、是否与肿瘤演化有关，仍需要家系、功能和临床证据。",
+          "source_ids": [
+            "H004S001",
+            "H004S002",
+            "H004S003",
+            "H004S013",
+            "H004S014"
+          ]
+        },
+        {
+          "section_id": "H004-SEC-02",
+          "title": "研究进展",
+          "body": "首先需要解决的问题，是如何表示参考基因组中缺失的序列。端粒到端粒参考补齐了过去难以连续组装的区域；人类泛基因组再用多个单倍型和图结构表示不同祖源的序列差异。在泛基因组草图所用的数据和流程中，小变异检出错误率降低 34%，每个单倍型检出的结构变异数量增加 104%，但这些数字只说明该参考和分析流程下的比较结果。高覆盖长读长与个体化参考的比较随后显示，部分复杂区域的比对、结构变异表示和相位信息可以得到改善，改善幅度取决于脱氧核糖核酸（DNA）完整性、覆盖度、平台和参考版本。接着，1,019 名、26 个人群的长读长队列把复杂变异带到群体尺度，提供超过 10 万个具有序列解析的双等位结构变异和 30 万个多等位可变数目串联重复的资料。2026 年的图参考研究把变异定义为参考树和非参考边之间可计算的差异，给出约 2,960 万个变异目录；它解决的是图中的表示和比较，不是功能分级。同期的 TandemTwister 在三联体、不同长读长平台和小型疾病队列中测试串联重复分型、孟德尔一致性和人工复核。研究已经从补全参考、建立群体目录推进到用统一规则记录和复核候选变异，致病性判断仍要另行结合家系、表型与正交检测。",
+          "source_ids": [
+            "H004S002",
+            "H004S003",
+            "H004S004",
+            "H004S005",
+            "H004S008",
+            "H004S015",
+            "H004S017",
+            "H004S018",
+            "H004S021",
+            "H004S022"
+          ]
+        },
+        {
+          "section_id": "H004-SEC-03",
+          "title": "研究工具和方法",
+          "body": "可信的复杂变异研究从高分子 DNA 开始。读长、覆盖度和 DNA 完整性决定能否跨越断点和重复区。分析阶段通常并行使用比对式与组装式证据，再结合线性或图参考、结构变异调用、单倍型分相及必要的甲基化读出。重要候选不应只看一个软件的结果，还要查看支持读段、断点周围的重复序列、家系关系和聚合酶链式反应（PCR）或其他正交确认。方法卡分别覆盖样本与建库、泛基因组参考、结构变异调用、跨层读出和临床研究验证。",
+          "source_ids": [
+            "H004S001",
+            "H004S007",
+            "H004S012",
+            "H004S015",
+            "H004S016",
+            "H004S018"
+          ]
+        },
+        {
+          "section_id": "H004-SEC-04",
+          "title": "应用与疾病关联",
+          "body": "在未解罕见病研究中，长读长最常补充的是短读长难以处理的断点、相位和重复扩增。早发帕金森病家系的 PRKN 研究先发现一条等位基因的外显子缺失，再用长读长识别另一条等位基因上跨越 700 万碱基的倒位，才得到该家系的复合杂合解释。肿瘤研究关注另一类问题：长读长可把复杂重排、单倍型与甲基化背景一起观察，为驱动事件、克隆结构或耐药机制提出候选解释。神经发育和神经退行性疾病的小型队列则用 TandemTwister 比较不同平台的重复分型、可视化和健康与致病拷贝数范围。多祖源泛基因组和群体队列提供变异频率与表示的参照，但不能判断某一患者的风险。无论研究对象是家系、疾病队列还是肿瘤样本，发现结构变异不等于完成致病性或药物靶点评估；仍需要共分离、正交检测、功能和临床表型证据。",
+          "source_ids": [
+            "H004S002",
+            "H004S005",
+            "H004S006",
+            "H004S008",
+            "H004S009",
+            "H004S010",
+            "H004S011",
+            "H004S017",
+            "H004S018",
+            "H004S019",
+            "H004S020",
+            "H004S021",
+            "H004S022"
+          ]
+        },
+        {
+          "section_id": "H004-SEC-05",
+          "title": "参考文献",
+          "body": "本专题收录 22 条已核对来源。参考与群体资源包括端粒到端粒参考、泛基因组和群体长读长目录；方法部分包括比对、结构变异调用、图参考和串联重复分型；应用部分包括遗传病家系、罕见病和肿瘤复杂重排研究。正文可回溯至 H004-A01 至 H004-A04 的论证链，以及 H004S001 至 H004S022 的完整题录。",
+          "source_ids": [
+            "H004S001",
+            "H004S002",
+            "H004S003",
+            "H004S004",
+            "H004S005",
+            "H004S006",
+            "H004S007",
+            "H004S008",
+            "H004S009",
+            "H004S010",
+            "H004S011",
+            "H004S012",
+            "H004S013",
+            "H004S014",
+            "H004S015",
+            "H004S016",
+            "H004S017",
+            "H004S018",
+            "H004S019",
+            "H004S020",
+            "H004S021",
+            "H004S022"
+          ]
+        }
+      ],
+      "methods": [
+        {
+          "method_id": "H004-M01",
+          "display_order": 1,
+          "category": "样本与建库",
+          "title": "高分子 DNA 提取和长读长建库",
+          "principle": "保留足够长的 DNA 分子，供单分子测序读取复杂重复区域和较长的结构变异。",
+          "answers": "读长分布、覆盖度、碱基质量和样本级测序指标。",
+          "sample_design": "记录样本来源、保存方式、DNA 完整性、片段长度、文库类型和目标覆盖度；家系研究尽量同时纳入父母样本。",
+          "limitations": "长读长不能弥补低质量 DNA 或不足覆盖；读长和错误模式随平台及文库变化。",
+          "source_ids": [
+            "H004S001",
+            "H004S014",
+            "H004S017"
+          ],
+          "workflow": "设计阶段先确定：记录样本来源、保存方式、DNA 完整性、片段长度、文库类型和目标覆盖度；家系研究尽量同时纳入父母样本。 从高分子 DNA 质量和覆盖度评估开始，选择并记录线性、端粒到端粒或图参考；比对、组装和结构变异调用并行进行，重要断点回看支持读段并使用家系或正交检测确认。 这项方法的直接测量或计算依据是：保留足够长的 DNA 分子，供单分子测序读取复杂重复区域和较长的结构变异。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：长读长不能弥补低质量 DNA 或不足覆盖；读长和错误模式随平台及文库变化。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "主要结果包括：读长分布、覆盖度、碱基质量和样本级测序指标。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        },
+        {
+          "method_id": "H004-M02",
+          "display_order": 2,
+          "category": "参考构建",
+          "title": "端粒到端粒参考与泛基因组",
+          "principle": "以完整或多祖源单倍型参考表示线性参考难以覆盖的序列和结构。",
+          "answers": "更完整的比对位置、候选结构变异和单倍型表示。",
+          "sample_design": "明确采用线性参考、T2T 参考还是图参考；记录样本祖源、参考版本、图构建版本和坐标转换规则。",
+          "limitations": "参考改进的是表示和检出，不会自动决定变异的功能或临床意义。",
+          "source_ids": [
+            "H004S002",
+            "H004S003",
+            "H004S004",
+            "H004S005",
+            "H004S008"
+          ],
+          "workflow": "设计阶段先确定：明确采用线性参考、T2T 参考还是图参考；记录样本祖源、参考版本、图构建版本和坐标转换规则。 从高分子 DNA 质量和覆盖度评估开始，选择并记录线性、端粒到端粒或图参考；比对、组装和结构变异调用并行进行，重要断点回看支持读段并使用家系或正交检测确认。 这项方法的直接测量或计算依据是：以完整或多祖源单倍型参考表示线性参考难以覆盖的序列和结构。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：参考改进的是表示和检出，不会自动决定变异的功能或临床意义。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "主要结果包括：更完整的比对位置、候选结构变异和单倍型表示。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        },
+        {
+          "method_id": "H004-M03",
+          "display_order": 3,
+          "category": "变异解析",
+          "title": "比对、组装与结构变异调用",
+          "principle": "从长读段中重建断点、插入、缺失、倒位和复杂重排，并尽可能与单倍型关联。",
+          "answers": "结构变异候选、断点区间、支持读段、单倍型和可视化结果。",
+          "sample_design": "同时保留比对式和组装式证据；使用互补调用策略，记录版本、阈值和过滤规则。",
+          "limitations": "不同调用器对不同变异类别敏感度不同；单一算法通常不足以确认复杂重排。",
+          "source_ids": [
+            "H004S012",
+            "H004S015",
+            "H004S016",
+            "H004S018",
+            "H004S020"
+          ],
+          "workflow": "设计阶段先确定：同时保留比对式和组装式证据；使用互补调用策略，记录版本、阈值和过滤规则。 从高分子 DNA 质量和覆盖度评估开始，选择并记录线性、端粒到端粒或图参考；比对、组装和结构变异调用并行进行，重要断点回看支持读段并使用家系或正交检测确认。 这项方法的直接测量或计算依据是：从长读段中重建断点、插入、缺失、倒位和复杂重排，并尽可能与单倍型关联。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：不同调用器对不同变异类别敏感度不同；单一算法通常不足以确认复杂重排。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "主要结果包括：结构变异候选、断点区间、支持读段、单倍型和可视化结果。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        },
+        {
+          "method_id": "H004-M04",
+          "display_order": 4,
+          "category": "多层读出",
+          "title": "相位、甲基化与转录证据",
+          "principle": "在同一长读段或同一样本中连接变异、相位、甲基化及必要时转录或表观组信息。",
+          "answers": "相位结构、甲基化模式、等位特异读出和跨层候选解释。",
+          "sample_design": "明确哪些数据来自同一分子、同一样本还是不同实验；按样本和等位基因保留关联关系。",
+          "limitations": "共现或同相位不等于致病机制；多层数据仍可能来自相关而非因果关系。",
+          "source_ids": [
+            "H004S006",
+            "H004S007",
+            "H004S011",
+            "H004S019"
+          ],
+          "workflow": "设计阶段先确定：明确哪些数据来自同一分子、同一样本还是不同实验；按样本和等位基因保留关联关系。 从高分子 DNA 质量和覆盖度评估开始，选择并记录线性、端粒到端粒或图参考；比对、组装和结构变异调用并行进行，重要断点回看支持读段并使用家系或正交检测确认。 这项方法的直接测量或计算依据是：在同一长读段或同一样本中连接变异、相位、甲基化及必要时转录或表观组信息。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：共现或同相位不等于致病机制；多层数据仍可能来自相关而非因果关系。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "主要结果包括：相位结构、甲基化模式、等位特异读出和跨层候选解释。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        },
+        {
+          "method_id": "H004-M05",
+          "display_order": 5,
+          "category": "临床研究验证",
+          "title": "家系共分离与正交确认",
+          "principle": "用家系、PCR、其他测序、功能研究和临床表型评估候选变异的可信度与意义。",
+          "answers": "经确认的变异结构、共分离证据、临床相关性和功能线索。",
+          "sample_design": "预先区分检出、确认、分类和功能解释；记录先证者入组条件、既往检测、家系材料和随访信息。",
+          "limitations": "即使结构被确认，致病性仍可能不明确；研究页不提供个体化诊断或遗传咨询。",
+          "source_ids": [
+            "H004S010",
+            "H004S011",
+            "H004S013",
+            "H004S014",
+            "H004S017"
+          ],
+          "workflow": "设计阶段先确定：预先区分检出、确认、分类和功能解释；记录先证者入组条件、既往检测、家系材料和随访信息。 从高分子 DNA 质量和覆盖度评估开始，选择并记录线性、端粒到端粒或图参考；比对、组装和结构变异调用并行进行，重要断点回看支持读段并使用家系或正交检测确认。 这项方法的直接测量或计算依据是：用家系、PCR、其他测序、功能研究和临床表型评估候选变异的可信度与意义。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：即使结构被确认，致病性仍可能不明确；研究页不提供个体化诊断或遗传咨询。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "主要结果包括：经确认的变异结构、共分离证据、临床相关性和功能线索。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        }
+      ],
+      "timeline": [
+        {
+          "display_order": 1,
+          "year": 2020,
+          "discovery": "基于长读长的结构变异检测工具开始把复杂断点和较大变异纳入常规分析流程。",
+          "application": "为后续罕见病和群体研究提供候选结构变异；检出结果仍需结合覆盖度、比对质量和正交检测。",
+          "source_ids": [
+            "H004S016"
+          ]
+        },
+        {
+          "display_order": 2,
+          "year": 2022,
+          "discovery": "端粒到端粒参考补齐了此前难以连续组装的区域，改变了复杂区域的参考基础。",
+          "application": "为重复序列和结构变异的再分析提供更完整坐标；并不直接给出个体疾病解释。",
+          "source_ids": [
+            "H004S003"
+          ]
+        },
+        {
+          "display_order": 3,
+          "year": 2023,
+          "discovery": "人类泛基因组草图以多个单倍型和图结构表示序列差异，并在其比较流程中改善了部分小变异与结构变异检出。",
+          "application": "可减少单一线性参考带来的表示偏差；具体增益受参考版本、祖源和分析流程影响。",
+          "source_ids": [
+            "H004S002"
+          ]
+        },
+        {
+          "display_order": 4,
+          "year": 2024,
+          "discovery": "个体化泛基因组、高覆盖人群长读长和靶向解析把相位、复杂重排与单碱基分辨率带入同一分析框架。",
+          "application": "可用于未解遗传病、肿瘤复杂重排和特定基因组疾病的候选解析；仍需家系、功能与临床表型证据。",
+          "source_ids": [
+            "H004S004",
+            "H004S006",
+            "H004S008",
+            "H004S018"
+          ]
+        },
+        {
+          "display_order": 5,
+          "year": 2025,
+          "discovery": "1,019 名多祖源个体的长读长资料扩展了已解析结构变异和串联重复的群体目录。",
+          "application": "为个体候选变异提供频率与表示参照；群体目录不能单独判断患者风险。",
+          "source_ids": [
+            "H004S005"
+          ]
+        },
+        {
+          "display_order": 6,
+          "year": 2026,
+          "discovery": "图参考研究提出可计算的泛基因组变异目录；串联重复工具同时在三联体、多个平台和小型疾病队列中检验分型与一致性。",
+          "application": "有助于统一记录和复核复杂候选变异；致病性仍需共分离、正交检测和表型关联。",
+          "source_ids": [
+            "H004S021",
+            "H004S022"
+          ]
+        }
+      ],
+      "shared_findings": [
+        {
+          "finding_id": "H004-C01",
+          "display_order": 1,
+          "title": "参考基因组会影响哪些变异能够被看见和怎样被记录",
+          "shared_result": "端粒到端粒参考、人类泛基因组和个体化参考得到的共同结果是：补入缺失序列或增加多祖源单倍型后，一部分原本难以比对、容易被压缩表示的复杂区域可以得到更完整的坐标和变异描述。改变参考后出现的新增候选，首先说明表示方式发生了变化。",
+          "research_use": "在方案中预先写明使用线性参考、端粒到端粒参考还是图参考，并保存参考版本和坐标转换规则。比较不同流程时，应使用同一批样本重新分析，避免把参考差异误写成群体或疾病差异。",
+          "boundary": "参考改进可以减少部分表示偏差，但不能自动覆盖所有祖源，也不能直接判断新增变异的功能或致病性。",
+          "source_ids": [
+            "H004S002",
+            "H004S003",
+            "H004S004",
+            "H004S008",
+            "H004S021"
+          ]
+        },
+        {
+          "finding_id": "H004-C02",
+          "display_order": 2,
+          "title": "长读长的主要增益来自跨越断点、重复区和单倍型",
+          "shared_result": "群体队列、遗传病家系和肿瘤研究虽然研究对象不同，却都利用连续长读段连接结构变异断点、邻近序列和单倍型背景。部分研究还能在同一批数据中读取甲基化信息。能否得到这些增益，取决于 DNA 完整性、有效读长、覆盖度和平台误差。",
+          "research_use": "样本采集阶段就要围绕高分子 DNA 设计保存和提取流程，并根据目标变异大小确定覆盖度。家系研究尽量同时纳入父母样本；肿瘤研究还要记录纯度和匹配对照。",
+          "boundary": "长读长不能补救降解严重或覆盖不足的样本。跨平台、跨建库流程得到的检出率和相位完整度不能直接横向比较。",
+          "source_ids": [
+            "H004S001",
+            "H004S005",
+            "H004S006",
+            "H004S007",
+            "H004S011",
+            "H004S017"
+          ]
+        },
+        {
+          "finding_id": "H004-C03",
+          "display_order": 3,
+          "title": "复杂变异需要多种计算证据和原始读段复核",
+          "shared_result": "不同比对器、组装流程和结构变异调用器对插入、缺失、倒位、串联重复和肿瘤复杂重排的敏感度并不相同。多项方法研究因此采用互补调用、断点可视化、家系一致性或跨平台比较，而不是把单一软件输出当作最终结构。",
+          "research_use": "保留比对式和组装式证据，记录软件版本、过滤阈值和支持读段。优先候选应查看断点附近的重复序列，并用 PCR、另一种测序方法、三联体一致性或人工复核确认。",
+          "boundary": "多个调用器给出相近结果可以提高结构可信度，但共享同一比对错误时仍可能同时出错；计算一致不能替代正交确认。",
+          "source_ids": [
+            "H004S012",
+            "H004S015",
+            "H004S016",
+            "H004S018",
+            "H004S020",
+            "H004S022"
+          ]
+        },
+        {
+          "finding_id": "H004-C04",
+          "display_order": 4,
+          "title": "检出并确认结构变异之后，疾病解释才刚开始",
+          "shared_result": "未解遗传病、PRKN 家系和肿瘤研究都显示，长读长可以补出此前遗漏的复杂结构或相位关系；群体目录则提供频率和变异范围参照。这些证据解决的是候选是否存在、结构怎样组成和在人群中是否常见，不能单独完成致病性或肿瘤驱动判断。",
+          "research_use": "把流程明确分成检出、结构确认、家系共分离、功能解释和临床关联。只有结构被确认后，再根据研究问题补充表型、转录、蛋白或功能实验。",
+          "boundary": "群体频率低、与疾病样本共现或位于已知基因附近，都不足以单独证明致病性、预后价值或治疗相关性。",
+          "source_ids": [
+            "H004S005",
+            "H004S010",
+            "H004S011",
+            "H004S013",
+            "H004S014",
+            "H004S019"
+          ]
+        }
+      ],
+      "references": [
+        {
+          "source_id": "H004S001",
+          "title": "Long-Read DNA Sequencing: Recent Advances and Remaining Challenges.",
+          "journal": "Annual Review of Genomics and Human Genetics",
+          "published_date": "2023-08-25",
+          "doi": "10.1146/annurev-genom-101722-103045",
+          "pmid": "37075062",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/37075062/",
+          "source_type": "review",
+          "evidence_role": "technology-and-limitations"
+        },
+        {
+          "source_id": "H004S002",
+          "title": "A draft human pangenome reference.",
+          "journal": "Nature",
+          "published_date": "2023-05",
+          "doi": "10.1038/s41586-023-05896-x",
+          "pmid": "37165242",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/37165242/",
+          "source_type": "original-research",
+          "evidence_role": "pangenome-reference"
+        },
+        {
+          "source_id": "H004S003",
+          "title": "The complete sequence of a human genome.",
+          "journal": "Science",
+          "published_date": "2022-04-01",
+          "doi": "10.1126/science.abj6987",
+          "pmid": "35357919",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/35357919/",
+          "source_type": "original-research",
+          "evidence_role": "telomere-to-telomere-reference"
+        },
+        {
+          "source_id": "H004S004",
+          "title": "Personalized pangenome references.",
+          "journal": "Nature Methods",
+          "published_date": "2024-11",
+          "doi": "10.1038/s41592-024-02407-2",
+          "pmid": "39261641",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/39261641/",
+          "source_type": "original-research",
+          "evidence_role": "personalized-reference"
+        },
+        {
+          "source_id": "H004S005",
+          "title": "Structural variation in 1,019 diverse humans based on long-read sequencing.",
+          "journal": "Nature",
+          "published_date": "2025-08",
+          "doi": "10.1038/s41586-025-09290-7",
+          "pmid": "40702182",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/40702182/",
+          "source_type": "original-research",
+          "evidence_role": "population-structural-variation"
+        },
+        {
+          "source_id": "H004S006",
+          "title": "Long-read sequencing of an advanced cancer cohort resolves rearrangements, unravels haplotypes, and reveals methylation landscapes.",
+          "journal": "Cell Genomics",
+          "published_date": "2024-11-13",
+          "doi": "10.1016/j.xgen.2024.100674",
+          "pmid": "39406235",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/39406235/",
+          "source_type": "original-research",
+          "evidence_role": "cancer-rearrangement-and-methylation"
+        },
+        {
+          "source_id": "H004S007",
+          "title": "Synchronized long-read genome, methylome, epigenome and transcriptome profiling resolve a Mendelian condition.",
+          "journal": "Nature Genetics",
+          "published_date": "2025-02",
+          "doi": "10.1038/s41588-024-02067-0",
+          "pmid": "39880924",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/39880924/",
+          "source_type": "original-research",
+          "evidence_role": "multilayer-variant-interpretation"
+        },
+        {
+          "source_id": "H004S008",
+          "title": "High-coverage nanopore sequencing of samples from the 1000 Genomes Project to build a comprehensive catalog of human genetic variation.",
+          "journal": "Genome Research",
+          "published_date": "2024-11-20",
+          "doi": "10.1101/gr.279273.124",
+          "pmid": "39358015",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/39358015/",
+          "source_type": "original-research",
+          "evidence_role": "population-long-read-resource"
+        },
+        {
+          "source_id": "H004S009",
+          "title": "Long read sequencing identifies complex structural variant landscape and recurrent TERT rearrangements in mucoepidermoid carcinoma.",
+          "journal": "Oral Oncology",
+          "published_date": "2024-12",
+          "doi": "10.1016/j.oraloncology.2024.107108",
+          "pmid": "39549430",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/39549430/",
+          "source_type": "original-research",
+          "evidence_role": "tumor-complex-rearrangements"
+        },
+        {
+          "source_id": "H004S010",
+          "title": "Long-read sequencing improves diagnostic rate in neuromuscular disorders.",
+          "journal": "Acta Myologica",
+          "published_date": "2023",
+          "doi": "10.36185/2532-1900-394",
+          "pmid": "38406378",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/38406378/",
+          "source_type": "original-research",
+          "evidence_role": "rare-disease-diagnosis"
+        },
+        {
+          "source_id": "H004S011",
+          "title": "Long-Read Sequencing Resolves a Complex Structural Variant in PRKN Parkinson's Disease.",
+          "journal": "Movement Disorders",
+          "published_date": "2023-12",
+          "doi": "10.1002/mds.29610",
+          "pmid": "37926948",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/37926948/",
+          "source_type": "original-research",
+          "evidence_role": "complex-variant-resolution"
+        },
+        {
+          "source_id": "H004S012",
+          "title": "Vulcan: Improved long-read mapping and structural variant calling via dual-mode alignment.",
+          "journal": "GigaScience",
+          "published_date": "2021-09-24",
+          "doi": "10.1093/gigascience/giab063",
+          "pmid": "34561697",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/34561697/",
+          "source_type": "software-method",
+          "evidence_role": "alignment-and-calling"
+        },
+        {
+          "source_id": "H004S013",
+          "title": "Applications of long-read sequencing to Mendelian genetics.",
+          "journal": "Genome Medicine",
+          "published_date": "2023-06-14",
+          "doi": "10.1186/s13073-023-01194-3",
+          "pmid": "37316925",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/37316925/",
+          "source_type": "review",
+          "evidence_role": "mendelian-application-boundaries"
+        },
+        {
+          "source_id": "H004S014",
+          "title": "Long-read sequencing for molecular diagnostics in constitutional genetic disorders.",
+          "journal": "Human Mutation",
+          "published_date": "2022-11",
+          "doi": "10.1002/humu.24465",
+          "pmid": "36086952",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/36086952/",
+          "source_type": "review",
+          "evidence_role": "clinical-implementation-boundaries"
+        },
+        {
+          "source_id": "H004S015",
+          "title": "VolcanoSV enables accurate and robust structural variant calling in diploid genomes from single-molecule long read sequencing.",
+          "journal": "Nature Communications",
+          "published_date": "2024-08-13",
+          "doi": "10.1038/s41467-024-51282-0",
+          "pmid": "39138168",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/39138168/",
+          "source_type": "software-method",
+          "evidence_role": "structural-variant-calling"
+        },
+        {
+          "source_id": "H004S016",
+          "title": "Long-read-based human genomic structural variation detection with cuteSV.",
+          "journal": "Genome Biology",
+          "published_date": "2020-08-03",
+          "doi": "10.1186/s13059-020-02107-y",
+          "pmid": "32746918",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/32746918/",
+          "source_type": "software-method",
+          "evidence_role": "structural-variant-calling"
+        },
+        {
+          "source_id": "H004S017",
+          "title": "Long-read trio sequencing of individuals with unsolved intellectual disability.",
+          "journal": "European Journal of Human Genetics",
+          "published_date": "2021-04",
+          "doi": "10.1038/s41431-020-00770-0",
+          "pmid": "33257779",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/33257779/",
+          "source_type": "original-research",
+          "evidence_role": "trio-based-diagnosis"
+        },
+        {
+          "source_id": "H004S018",
+          "title": "NanoRanger enables rapid single-base-pair resolution of genomic disorders.",
+          "journal": "Med",
+          "published_date": "2024-10-11",
+          "doi": "10.1016/j.medj.2024.07.003",
+          "pmid": "39047733",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/39047733/",
+          "source_type": "software-method",
+          "evidence_role": "targeted-resolution"
+        },
+        {
+          "source_id": "H004S019",
+          "title": "The Utility of Long-Read Sequencing in Diagnosing Early Onset Parkinson's Disease.",
+          "journal": "Annals of Neurology",
+          "published_date": "2025-04",
+          "doi": "10.1002/ana.27155",
+          "pmid": "39699073",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/39699073/",
+          "source_type": "original-research",
+          "evidence_role": "disease-specific-diagnosis"
+        },
+        {
+          "source_id": "H004S020",
+          "title": "Severus detects somatic structural variation and complex rearrangements in cancer genomes using long-read sequencing.",
+          "journal": "Nature Biotechnology",
+          "published_date": "2026-02",
+          "doi": "10.1038/s41587-025-02618-8",
+          "pmid": "40185952",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/40185952/",
+          "source_type": "software-method",
+          "evidence_role": "somatic-structural-variation"
+        },
+        {
+          "source_id": "H004S021",
+          "title": "Defining and cataloging variants in pangenome graphs",
+          "journal": "Cell Genomics",
+          "published_date": "2026-08-17",
+          "doi": "10.1016/j.xgen.2026.101327",
+          "pmid": "42607688",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/42607688/",
+          "source_type": "original-research",
+          "evidence_role": "pangenome-variant-definition"
+        },
+        {
+          "source_id": "H004S022",
+          "title": "TandemTwister: scalable genotyping and advanced visualization of tandem repeats",
+          "journal": "NAR Genomics and Bioinformatics",
+          "published_date": "2026-08-17",
+          "doi": "10.1093/nargab/lqag096",
+          "pmid": "42609617",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/42609617/",
+          "source_type": "original-research",
+          "evidence_role": "tandem-repeat-genotyping-benchmark"
+        }
+      ]
+    },
+    {
+      "topic_id": "H008",
+      "title": "空间转录组与空间多组学",
+      "topic_role": "research_deep_dive",
+      "overview": "空间转录组与空间多组学在测量 RNA、蛋白或其他分子的同时保留组织位置，补回了解离测序丢失的结构信息。测序型方法、成像型方法和区域选择型方法在覆盖度、分辨率和面板范围上各有取舍，实际可解释的空间分辨率还受到组织质量、分子扩散、细胞分割和图像配准影响。\n\n本方向从测序型空间转录组、成像型原位检测、空间蛋白与染色质读出、同切片或相邻切片整合以及空间域和邻域分析出发，集中处理三类问题：全组织、细胞边界和细胞内分子位置分别需要什么技术；空间模式能否在不同组织、平台和样本中复现；直接空间测量与计算预测如何共同支持疾病或组织机制假设。分子测量、位置关系、算法整合和功能验证需要分层呈现。\n\n比较公开研究时，需要同时交代组织格式、标称与实测分辨率、捕获或成像面板、细胞分割、配准、去卷积、批次、参考数据和独立验证。空间共定位不能单独证明细胞互作，计算预测也不能冒充直接分子测量。肿瘤空间免疫专题聚焦免疫组织位置，多组学网络专题聚焦跨层关联；本页聚焦空间分子测量和整合方法的证据边界。",
+      "sections": [
+        {
+          "section_id": "H008-SEC-01",
+          "title": "概述",
+          "body": "空间转录组与空间多组学在测量 RNA、蛋白或其他分子的同时，保留它们在组织中的位置。它们补回了解离测序丢失的组织结构，但不同平台各有取舍：测序型方法通常覆盖更多转录本，成像型方法通常定位更细，区域选择型方法则依赖研究者预先选定区域。用于解释结果的实际空间分辨率还受组织质量、分子扩散、细胞分割和图像配准影响。选择技术前，先明确要观察全组织、细胞类型边界，还是细胞内的分子位置。",
+          "source_ids": [
+            "H008S001",
+            "H008S002",
+            "H008S004",
+            "H008S007",
+            "H008S008",
+            "H008S009"
+          ]
+        },
+        {
+          "section_id": "H008-SEC-02",
+          "title": "研究进展",
+          "body": "空间转录组的早期进展，是把 RNA 读数放回组织坐标；随后的重点转为在不同组织样本中检验平台能保留多少空间信息。一项人体肿瘤组织基准研究在结肠腺癌、肝细胞癌和卵巢癌的连续切片上比较 Stereo-seq、Visium HD、CosMx 和 Xenium，并用相邻切片的多重蛋白成像和同一样本的单细胞 RNA 测序作参照。研究不只比较标称分辨率，还检查捕获灵敏度、分子扩散、细胞分割、细胞注释和空间聚类。髓母细胞瘤冷冻切片的独立比较也显示，实验后再次成像可改善细胞分割，但结果仍取决于具体组织与工作流。2025 年的高通量亚细胞和福尔马林固定石蜡包埋（FFPE）样本比较进一步把组织处理和图像分析列为平台评价的一部分。2026 年的 Spatial Hi-C-RNA 则在同一切片上联测染色质接触和 RNA：它在小鼠脑、胚胎和人黑色素瘤中观察到区域相关模式，并发现部分肿瘤亚区仅靠 RNA 不易识别。与此不同，CarHE 从常规苏木精—伊红（H&E）染色图像推断空间转录特征，属于计算预测；它与直接空间测量不能混写。",
+          "source_ids": [
+            "H008S001",
+            "H008S002",
+            "H008S004",
+            "H008S007",
+            "H008S008",
+            "H008S009",
+            "H008S017",
+            "H008S019",
+            "H008S020",
+            "H008S021",
+            "H008S022"
+          ]
+        },
+        {
+          "section_id": "H008-SEC-03",
+          "title": "研究工具和方法",
+          "body": "空间实验从取样和病理评估开始。测序型空间转录组适合较广的 RNA 覆盖和发现性问题；成像型方法适合目标基因面板、细胞级定位和与病理图像对照。空间多组学要写清 RNA、蛋白、表观组和形态信息来自同一切片、相邻切片还是计算映射。计算阶段常会进行细胞去卷积、空间域识别、邻域分析和跨模态整合。每一步都要保留组织图像、区域标注、质量控制和参考数据来源。若要把某项空间模式列为主要结论，还应使用原位杂交、免疫染色、病理审阅或功能实验复核。",
+          "source_ids": [
+            "H008S001",
+            "H008S002",
+            "H008S005",
+            "H008S006",
+            "H008S010",
+            "H008S013",
+            "H008S015",
+            "H008S020"
+          ]
+        },
+        {
+          "section_id": "H008-SEC-04",
+          "title": "应用与疾病关联",
+          "body": "肿瘤研究经常使用空间测量，因为同一病灶内的病理区域、细胞邻域和分子状态并不一致。患者肿瘤组织切片和黑色素瘤研究已经把 RNA、蛋白或染色质模式定位到具体区域；Spatial Hi-C-RNA 的结果还提示，有些肿瘤亚区仅看 RNA 不容易区分。固定石蜡包埋组织和回顾性病理样本扩大了可用材料范围，但不同病理流程、面板和组织质量会改变细胞分割与分子检出，跨平台结果不能直接互换。在小鼠脑和胚胎中，同切片空间多组学可比较区域相关的染色质构象与转录变化，仍不能据此证明构象改变驱动基因表达。数字病理是另一条延伸路线：CarHE 在乳腺癌、肺癌、黑色素瘤和肾透明细胞癌图像队列中预测部分空间转录特征与三级淋巴结构（TLS）相关区域，并报告肺癌队列的生存关联。模型输出不是直接分子测量，也不构成临床检测、分层或治疗建议。",
+          "source_ids": [
+            "H008S008",
+            "H008S009",
+            "H008S019",
+            "H008S021",
+            "H008S022"
+          ]
+        },
+        {
+          "section_id": "H008-SEC-05",
+          "title": "参考文献",
+          "body": "本专题收录 22 条已核对来源。技术综述与协议用于解释平台和样本设计；多平台基准研究用于说明分辨率、细胞分割和组织格式的实际影响；同切片空间多组学、计算方法和应用研究用于区分直接测量、整合与空间预测。正文可回溯至 H008-A01 至 H008-A04 的论证链，以及 H008S001 至 H008S022 的完整题录。",
+          "source_ids": [
+            "H008S001",
+            "H008S002",
+            "H008S003",
+            "H008S004",
+            "H008S005",
+            "H008S006",
+            "H008S007",
+            "H008S008",
+            "H008S009",
+            "H008S010",
+            "H008S011",
+            "H008S012",
+            "H008S013",
+            "H008S014",
+            "H008S015",
+            "H008S016",
+            "H008S017",
+            "H008S018",
+            "H008S019",
+            "H008S020",
+            "H008S021",
+            "H008S022"
+          ]
+        }
+      ],
+      "methods": [
+        {
+          "method_id": "H008-M01",
+          "display_order": 1,
+          "category": "样本准备",
+          "title": "组织保存、切片与病理评估",
+          "principle": "在空间测量前保留组织结构、RNA 质量和病理信息。",
+          "answers": "组织图像、区域标注、RNA 或样本质量记录及切片配准信息。",
+          "sample_design": "预先规定取样部位、冷缺血时间、保存方式、切片厚度、染色和相邻切片策略；病理人员参与区域定义。",
+          "limitations": "一张切片不能代表整个病灶；相邻切片的细胞并非同一细胞。",
+          "source_ids": [
+            "H008S002",
+            "H008S005",
+            "H008S007",
+            "H008S008",
+            "H008S019"
+          ],
+          "workflow": "设计阶段先确定：预先规定取样部位、冷缺血时间、保存方式、切片厚度、染色和相邻切片策略；病理人员参与区域定义。 将取样部位、病理区域、保存方式、切片顺序和组织图像作为原始数据的一部分；分子测量后完成图像配准、细胞分割、区域识别和必要的单细胞参考整合，关键空间模式再用原位方法复核。 这项方法的直接测量或计算依据是：在空间测量前保留组织结构、RNA 质量和病理信息。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：一张切片不能代表整个病灶；相邻切片的细胞并非同一细胞。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "主要结果包括：组织图像、区域标注、RNA 或样本质量记录及切片配准信息。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        },
+        {
+          "method_id": "H008-M02",
+          "display_order": 2,
+          "category": "空间 RNA 测量",
+          "title": "测序型空间转录组",
+          "principle": "在带空间条形码的区域捕获 RNA，再以测序读出转录本和坐标。",
+          "answers": "点位或像素层级的表达矩阵、空间坐标和组织图像。",
+          "sample_design": "根据预期细胞大小、组织结构和预算选择点位或高密度捕获；设计生物学重复和必要的单细胞参考。",
+          "limitations": "一个点位可能含多个细胞；标称像素大小不等于实际的细胞级解析度。",
+          "source_ids": [
+            "H008S001",
+            "H008S002",
+            "H008S004",
+            "H008S009",
+            "H008S017"
+          ],
+          "workflow": "设计阶段先确定：根据预期细胞大小、组织结构和预算选择点位或高密度捕获；设计生物学重复和必要的单细胞参考。 将取样部位、病理区域、保存方式、切片顺序和组织图像作为原始数据的一部分；分子测量后完成图像配准、细胞分割、区域识别和必要的单细胞参考整合，关键空间模式再用原位方法复核。 这项方法的直接测量或计算依据是：在带空间条形码的区域捕获 RNA，再以测序读出转录本和坐标。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：一个点位可能含多个细胞；标称像素大小不等于实际的细胞级解析度。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "主要结果包括：点位或像素层级的表达矩阵、空间坐标和组织图像。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        },
+        {
+          "method_id": "H008-M03",
+          "display_order": 3,
+          "category": "空间 RNA 测量",
+          "title": "成像型空间转录组",
+          "principle": "以原位杂交、条形码解码或原位测序在组织中定位预设 RNA 面板。",
+          "answers": "分子坐标、细胞归属、目标基因面板和组织图像。",
+          "sample_design": "根据样本类型和问题设计探针面板；将细胞分割、核染色、组织边界和阴性探针纳入实验计划。",
+          "limitations": "面板外基因不可见；细胞分割错误和探针设计会改变细胞类型与空间邻域结果。",
+          "source_ids": [
+            "H008S005",
+            "H008S007",
+            "H008S008",
+            "H008S019"
+          ],
+          "workflow": "设计阶段先确定：根据样本类型和问题设计探针面板；将细胞分割、核染色、组织边界和阴性探针纳入实验计划。 将取样部位、病理区域、保存方式、切片顺序和组织图像作为原始数据的一部分；分子测量后完成图像配准、细胞分割、区域识别和必要的单细胞参考整合，关键空间模式再用原位方法复核。 这项方法的直接测量或计算依据是：以原位杂交、条形码解码或原位测序在组织中定位预设 RNA 面板。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：面板外基因不可见；细胞分割错误和探针设计会改变细胞类型与空间邻域结果。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "主要结果包括：分子坐标、细胞归属、目标基因面板和组织图像。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        },
+        {
+          "method_id": "H008-M04",
+          "display_order": 4,
+          "category": "空间多组学",
+          "title": "同切片共测、相邻切片配准与三维重建",
+          "principle": "把空间 RNA 与蛋白、表观组或形态联系起来，并区分直接共测和计算配准。",
+          "answers": "多模态空间图、配准质量、共同或可比较的区域。",
+          "sample_design": "在设计时标注每个模态来自同切片、相邻切片还是参考映射；三维研究需预先设置切片间配准和误差评估。",
+          "limitations": "跨切片重叠不等于同一细胞共测；三维重建受缺失切片与配准误差影响。",
+          "source_ids": [
+            "H008S001",
+            "H008S003",
+            "H008S012",
+            "H008S013",
+            "H008S018"
+          ],
+          "workflow": "设计阶段先确定：在设计时标注每个模态来自同切片、相邻切片还是参考映射；三维研究需预先设置切片间配准和误差评估。 将取样部位、病理区域、保存方式、切片顺序和组织图像作为原始数据的一部分；分子测量后完成图像配准、细胞分割、区域识别和必要的单细胞参考整合，关键空间模式再用原位方法复核。 这项方法的直接测量或计算依据是：把空间 RNA 与蛋白、表观组或形态联系起来，并区分直接共测和计算配准。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：跨切片重叠不等于同一细胞共测；三维重建受缺失切片与配准误差影响。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "主要结果包括：多模态空间图、配准质量、共同或可比较的区域。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        },
+        {
+          "method_id": "H008-M05",
+          "display_order": 5,
+          "category": "计算与验证",
+          "title": "细胞去卷积、空间域和原位复核",
+          "principle": "估计混合点位的细胞组成、识别空间域和邻域，并用独立实验检查关键发现。",
+          "answers": "细胞组成估计、空间域、候选邻域和待验证的区域。",
+          "sample_design": "明确单细胞参考的来源与匹配程度；在模型运行前预设感兴趣区域和质量控制规则。",
+          "limitations": "去卷积和通讯评分是推断；不能单独证明直接细胞接触或因果关系。",
+          "source_ids": [
+            "H008S006",
+            "H008S010",
+            "H008S015",
+            "H008S020"
+          ],
+          "workflow": "设计阶段先确定：明确单细胞参考的来源与匹配程度；在模型运行前预设感兴趣区域和质量控制规则。 将取样部位、病理区域、保存方式、切片顺序和组织图像作为原始数据的一部分；分子测量后完成图像配准、细胞分割、区域识别和必要的单细胞参考整合，关键空间模式再用原位方法复核。 这项方法的直接测量或计算依据是：估计混合点位的细胞组成、识别空间域和邻域，并用独立实验检查关键发现。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：去卷积和通讯评分是推断；不能单独证明直接细胞接触或因果关系。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "主要结果包括：细胞组成估计、空间域、候选邻域和待验证的区域。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        }
+      ],
+      "timeline": [
+        {
+          "display_order": 1,
+          "year": 2021,
+          "discovery": "空间转录组分析开始系统处理组织坐标、细胞类型和多组学整合之间的关系。",
+          "application": "为组织中的细胞邻域和区域差异提供分析框架；整合结果依赖原始测量质量与模型假设。",
+          "source_ids": [
+            "H008S010"
+          ]
+        },
+        {
+          "display_order": 2,
+          "year": 2023,
+          "discovery": "技术综述和实验设计框架明确了空间测量需要在分辨率、覆盖范围、组织处理与研究问题之间取舍。",
+          "application": "可用于实验前选择平台和样本流程；不同平台的读出不能直接互换。",
+          "source_ids": [
+            "H008S001",
+            "H008S002",
+            "H008S004"
+          ]
+        },
+        {
+          "display_order": 3,
+          "year": 2024,
+          "discovery": "跨平台比较把捕获灵敏度、扩散、细胞分割和空间聚类纳入评价，并把组织质量和图像分析列为解释条件。",
+          "application": "适用于肿瘤和其它组织样本的平台选择；观察到的区域差异应在相邻切片或独立读出中核对。",
+          "source_ids": [
+            "H008S009",
+            "H008S017",
+            "H008S020"
+          ]
+        },
+        {
+          "display_order": 4,
+          "year": 2025,
+          "discovery": "人体肿瘤冷冻切片、FFPE 材料与高通量亚细胞平台的基准研究，将组织处理和细胞分割纳入实际性能评估。",
+          "application": "扩大了回顾性病理样本的可用性；病理流程、面板与组织质量会改变跨平台可比性。",
+          "source_ids": [
+            "H008S007",
+            "H008S008",
+            "H008S019"
+          ]
+        },
+        {
+          "display_order": 5,
+          "year": 2026,
+          "discovery": "Spatial Hi-C-RNA 在同一切片联测染色质接触与 RNA；CarHE 则从常规 H&E 图像预测部分空间转录特征。",
+          "application": "前者可用于脑、胚胎和肿瘤区域的联合观察，后者可提出数字病理线索；预测结果不等同于直接分子测量或临床检测。",
+          "source_ids": [
+            "H008S021",
+            "H008S022"
+          ]
+        }
+      ],
+      "shared_findings": [
+        {
+          "finding_id": "H008-C01",
+          "display_order": 1,
+          "title": "实际空间分辨率由整套实验流程共同决定",
+          "shared_result": "多平台基准研究反复表明，标称点位或像素大小不能单独代表最终可解释的空间尺度。RNA 捕获、分子扩散、组织形态、核染色和细胞分割都会改变分子能否被分到正确细胞，以及空间域是否稳定。",
+          "research_use": "选择平台时先确定要回答的是组织区域、细胞邻域还是细胞内定位问题，再同时评估捕获灵敏度和分割质量。实验报告应保留原始组织图像、分割轮廓和区域标注，不能只展示处理后的空间图。",
+          "boundary": "不同组织、保存方式和分析流程会改变实际分辨率；一个平台在某类肿瘤切片中的表现不能直接外推到所有组织。",
+          "source_ids": [
+            "H008S007",
+            "H008S008",
+            "H008S009",
+            "H008S017",
+            "H008S019"
+          ]
+        },
+        {
+          "finding_id": "H008-C02",
+          "display_order": 2,
+          "title": "同切片共测、跨切片配准和图像预测是三种不同证据",
+          "shared_result": "空间多组学可以在同一切片直接读取多个模态，也可以把相邻切片或独立实验进行计算配准。近期研究还从常规病理图像预测空间转录特征。三条路线都能形成联合空间图，但分子之间的对应关系强度不同。",
+          "research_use": "在设计和结果中明确每个模态来自同一分子、同一细胞、同一切片、相邻切片还是参考映射。若使用预测模型，应把预测结果标为候选区域，并用直接空间测量或独立样本复核。",
+          "boundary": "配准重叠不能写成同一细胞共测，病理图像预测也不能当作直接分子检测。",
+          "source_ids": [
+            "H008S003",
+            "H008S013",
+            "H008S018",
+            "H008S021",
+            "H008S022"
+          ]
+        },
+        {
+          "finding_id": "H008-C03",
+          "display_order": 3,
+          "title": "空间结论先受取样位置和病理边界约束",
+          "shared_result": "冷冻组织、福尔马林固定石蜡包埋组织和肿瘤连续切片的比较都显示，组织保存、切片位置和病理区域会改变可检出的细胞与分子。空间技术保留了切片内的位置，但一张切片仍只是整个病灶或器官的一部分。",
+          "research_use": "取样前定义病灶部位、中心与边缘、正常对照和切片方向，由病理人员确认区域。需要跨模态比较时，预留相邻切片并记录切片顺序；广义结论应有多个病灶或多个患者样本支持。",
+          "boundary": "相邻切片并不包含完全相同的细胞。单个切面观察到的邻域和分子状态不能代表整个病灶。",
+          "source_ids": [
+            "H008S002",
+            "H008S005",
+            "H008S007",
+            "H008S008",
+            "H008S019"
+          ]
+        },
+        {
+          "finding_id": "H008-C04",
+          "display_order": 4,
+          "title": "空间邻近和多模态相关用于提出机制问题，不能替代机制实验",
+          "shared_result": "去卷积、空间域识别、邻域分析和同切片多组学都能指出哪些细胞或分子状态在组织中共同出现。它们支持的是位置关联和候选关系；即使两个模态在同一区域变化，也不能仅凭空间共现判断细胞直接接触或调控因果。",
+          "research_use": "把空间分析用于确定需要复核的区域、细胞组合和分子候选，再用原位杂交、免疫染色、病理复核或功能扰动检验。涉及跨模态关系时，应优先验证方向明确、能够被独立测量的候选。",
+          "boundary": "模型推断的细胞比例、通讯评分和空间相关性受参考数据与参数影响，不构成细胞互作或疾病机制的直接证据。",
+          "source_ids": [
+            "H008S006",
+            "H008S010",
+            "H008S015",
+            "H008S020",
+            "H008S021"
+          ]
+        }
+      ],
+      "references": [
+        {
+          "source_id": "H008S001",
+          "title": "Methods and applications for single-cell and spatial multi-omics.",
+          "journal": "Nature Reviews Genetics",
+          "published_date": "2023-08",
+          "doi": "10.1038/s41576-023-00580-2",
+          "pmid": "36864178",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/36864178/",
+          "source_type": "review",
+          "evidence_role": "technology-framework"
+        },
+        {
+          "source_id": "H008S002",
+          "title": "Spatial transcriptomics: Technologies, applications and experimental considerations.",
+          "journal": "Genomics",
+          "published_date": "2023-09",
+          "doi": "10.1016/j.ygeno.2023.110671",
+          "pmid": "37353093",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/37353093/",
+          "source_type": "review",
+          "evidence_role": "experimental-design"
+        },
+        {
+          "source_id": "H008S003",
+          "title": "Spatial multi-omics: deciphering technological landscape of integration of multi-omics and its applications.",
+          "journal": "Journal of Hematology & Oncology",
+          "published_date": "2024-08-24",
+          "doi": "10.1186/s13045-024-01596-9",
+          "pmid": "39182134",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/39182134/",
+          "source_type": "review",
+          "evidence_role": "multiomic-integration"
+        },
+        {
+          "source_id": "H008S004",
+          "title": "Spatial Transcriptomics: Emerging Technologies in Tissue Gene Expression Profiling.",
+          "journal": "Analytical Chemistry",
+          "published_date": "2023-10-24",
+          "doi": "10.1021/acs.analchem.3c02029",
+          "pmid": "37814884",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/37814884/",
+          "source_type": "review",
+          "evidence_role": "technology-comparison"
+        },
+        {
+          "source_id": "H008S005",
+          "title": "Protocol for Xenium spatial transcriptomics studies using fixed frozen mouse brain sections.",
+          "journal": "STAR Protocols",
+          "published_date": "2024-12-20",
+          "doi": "10.1016/j.xpro.2024.103420",
+          "pmid": "39535916",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/39535916/",
+          "source_type": "protocol",
+          "evidence_role": "imaging-platform-workflow"
+        },
+        {
+          "source_id": "H008S006",
+          "title": "Cell-type deconvolution methods for spatial transcriptomics.",
+          "journal": "Nature Reviews Genetics",
+          "published_date": "2025-12",
+          "doi": "10.1038/s41576-025-00845-y",
+          "pmid": "40369312",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/40369312/",
+          "source_type": "review",
+          "evidence_role": "deconvolution-boundaries"
+        },
+        {
+          "source_id": "H008S007",
+          "title": "Systematic benchmarking of high-throughput subcellular spatial transcriptomics platforms across human tumors.",
+          "journal": "Nature Communications",
+          "published_date": "2025-10-17",
+          "doi": "10.1038/s41467-025-64292-3",
+          "pmid": "41107232",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/41107232/",
+          "source_type": "comparative-study",
+          "evidence_role": "platform-benchmark"
+        },
+        {
+          "source_id": "H008S008",
+          "title": "Systematic benchmarking of imaging spatial transcriptomics platforms in FFPE tissues.",
+          "journal": "Nature Communications",
+          "published_date": "2025-11-20",
+          "doi": "10.1038/s41467-025-64990-y",
+          "pmid": "41266321",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/41266321/",
+          "source_type": "comparative-study",
+          "evidence_role": "ffpe-platform-benchmark"
+        },
+        {
+          "source_id": "H008S009",
+          "title": "Advancing sequencing-based spatial transcriptomics with a comprehensive benchmarking study.",
+          "journal": "Nature Methods",
+          "published_date": "2024-09",
+          "doi": "10.1038/s41592-024-02326-2",
+          "pmid": "38977827",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/38977827/",
+          "source_type": "comparative-study",
+          "evidence_role": "sequencing-platform-benchmark"
+        },
+        {
+          "source_id": "H008S010",
+          "title": "Integrative analysis methods for spatial transcriptomics.",
+          "journal": "Nature Methods",
+          "published_date": "2021-11",
+          "doi": "10.1038/s41592-021-01272-7",
+          "pmid": "34711969",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/34711969/",
+          "source_type": "review",
+          "evidence_role": "computational-integration"
+        },
+        {
+          "source_id": "H008S011",
+          "title": "Spatial transcriptomics technology in cancer research.",
+          "journal": "Frontiers in Oncology",
+          "published_date": "2022",
+          "doi": "10.3389/fonc.2022.1019111",
+          "pmid": "36313703",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/36313703/",
+          "source_type": "review",
+          "evidence_role": "cancer-application"
+        },
+        {
+          "source_id": "H008S012",
+          "title": "Single-cell and spatial transcriptomics: Bridging current technologies with long-read sequencing.",
+          "journal": "Molecular Aspects of Medicine",
+          "published_date": "2024-04",
+          "doi": "10.1016/j.mam.2024.101255",
+          "pmid": "38368637",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/38368637/",
+          "source_type": "review",
+          "evidence_role": "long-read-and-spatial"
+        },
+        {
+          "source_id": "H008S013",
+          "title": "Protocol for high-resolution 3D spatial transcriptomics using Open-ST.",
+          "journal": "STAR Protocols",
+          "published_date": "2025-03-21",
+          "doi": "10.1016/j.xpro.2024.103521",
+          "pmid": "39708325",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/39708325/",
+          "source_type": "protocol",
+          "evidence_role": "three-dimensional-workflow"
+        },
+        {
+          "source_id": "H008S014",
+          "title": "Encoding Method of Single-cell Spatial Transcriptomics Sequencing.",
+          "journal": "International Journal of Biological Sciences",
+          "published_date": "2020",
+          "doi": "10.7150/ijbs.43887",
+          "pmid": "32792863",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/32792863/",
+          "source_type": "review",
+          "evidence_role": "encoding-principles"
+        },
+        {
+          "source_id": "H008S015",
+          "title": "NLSDeconv: an efficient cell-type deconvolution method for spatial transcriptomics data.",
+          "journal": "Bioinformatics",
+          "published_date": "2024-12-26",
+          "doi": "10.1093/bioinformatics/btae747",
+          "pmid": "39705170",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/39705170/",
+          "source_type": "software-method",
+          "evidence_role": "deconvolution-method"
+        },
+        {
+          "source_id": "H008S016",
+          "title": "Re-exploring tissue regeneration by novel spatial transcriptomics technologies.",
+          "journal": "Clinical and Translational Medicine",
+          "published_date": "2022-11",
+          "doi": "10.1002/ctm2.1127",
+          "pmid": "36424769",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/36424769/",
+          "source_type": "review",
+          "evidence_role": "tissue-application"
+        },
+        {
+          "source_id": "H008S017",
+          "title": "Comparative Methods for Demystifying Spatial Transcriptomics.",
+          "journal": "Methods in Molecular Biology",
+          "published_date": "2024",
+          "doi": "10.1007/978-1-0716-3838-5_17",
+          "pmid": "38819570",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/38819570/",
+          "source_type": "review",
+          "evidence_role": "method-selection"
+        },
+        {
+          "source_id": "H008S018",
+          "title": "Computational methods for spatial multi-omics integration.",
+          "journal": "Biotechnology Advances",
+          "published_date": "2026-03",
+          "doi": "10.1016/j.biotechadv.2026.108807",
+          "pmid": "41564956",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/41564956/",
+          "source_type": "review",
+          "evidence_role": "spatial-multiomic-integration"
+        },
+        {
+          "source_id": "H008S019",
+          "title": "Comparison of spatial transcriptomics technologies using tumor cryosections.",
+          "journal": "Genome Biology",
+          "published_date": "2025-06-20",
+          "doi": "10.1186/s13059-025-03624-4",
+          "pmid": "40542418",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/40542418/",
+          "source_type": "comparative-study",
+          "evidence_role": "tumor-platform-comparison"
+        },
+        {
+          "source_id": "H008S020",
+          "title": "Spatial transcriptomics data and analytical methods: An updated perspective.",
+          "journal": "Drug Discovery Today",
+          "published_date": "2024-03",
+          "doi": "10.1016/j.drudis.2024.103889",
+          "pmid": "38244672",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/38244672/",
+          "source_type": "review",
+          "evidence_role": "analysis-and-design"
+        },
+        {
+          "source_id": "H008S021",
+          "title": "Integrative spatial profiling of 3D genome organization and gene expression in tissue",
+          "journal": "Cell",
+          "published_date": "2026-08-25",
+          "doi": "10.1016/j.cell.2026.07.039",
+          "pmid": "42641604",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/42641604/",
+          "source_type": "original-research",
+          "evidence_role": "spatial-chromatin-rna-co-measurement"
+        },
+        {
+          "source_id": "H008S022",
+          "title": "The Multimodal Pretraining Framework CarHE Predicts Spatial Transcriptomics in Tumors from Routine Pathology Images",
+          "journal": "Cancer Research",
+          "published_date": "2026-08-19",
+          "doi": "10.1158/0008-5472.CAN-26-1480",
+          "pmid": "42615562",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/42615562/",
+          "source_type": "original-research",
+          "evidence_role": "image-to-spatial-inference"
+        }
+      ]
+    },
+    {
+      "topic_id": "H009",
+      "title": "单细胞多模态与原位测量",
+      "topic_role": "research_deep_dive",
+      "overview": "单细胞多模态研究把 RNA、染色质可及性和蛋白等读出放在同一个细胞分析框架中。多个模态如果来自同一细胞，具有直接配对关系；如果来自不同细胞或不同实验，再由算法连接，则属于计算推断。多模态的价值取决于能否同时解释细胞身份、功能状态和调控背景，而不在于模态数量本身。\n\n本方向从 RNA—染色质联合测量、CITE-seq、DOGMA-seq、TEA-seq、细胞内蛋白—RNA 测量、蛋白组—代谢组和原位多模态读出出发，集中处理三类问题：同一细胞内不同层级如何配对；缺失模态和跨批次数据如何整合；联合状态能否在空间、蛋白或功能实验中得到独立支持。共测数据、非配对整合、模型预测和实际验证属于不同证据层级。\n\n比较公开研究时，需要同时交代模态是否同细胞获得、细胞或细胞核质量、抗体和面板、文库覆盖、批次处理、整合任务、参考版本和基准指标。算法整合不能单独证明调控方向或疾病机制，细胞系和体外刺激结果也不能直接代表患者状态。单细胞调控基因组专题聚焦染色质层，单细胞扰动专题聚焦扰动反应；本页聚焦多模态配对与整合边界。",
+      "sections": [
+        {
+          "section_id": "H009-SEC-01",
+          "title": "概述",
+          "body": "单细胞多模态研究把 RNA、染色质可及性和蛋白等读出放在同一个细胞分析框架中。读者需要先分清两种证据：如果多个模态来自同一细胞，它们之间有直接配对关系；如果数据来自不同细胞或不同实验，再由算法整合，则对应关系属于计算推断。多模态的价值不在于模态数量本身，而在于研究者能否把细胞身份、功能状态和调控背景放在同一问题里判断，并用独立实验检验候选关系。",
+          "source_ids": [
+            "H009S001",
+            "H009S002",
+            "H009S004",
+            "H009S005",
+            "H009S006",
+            "H009S013"
+          ]
+        },
+        {
+          "section_id": "H009-SEC-02",
+          "title": "研究进展",
+          "body": "单细胞多模态研究先解决一个基础问题：RNA、染色质可及性和蛋白能否在同一个细胞中直接配对。同步转录组与染色质可及性测序（SHARE-seq）在小鼠皮肤中获得 RNA—染色质联合谱，并沿计算重建的状态轨迹观察到部分可及性变化早于基因表达；这支持的是时间顺序假设，不是对细胞命运的连续观察。转录组—表位—染色质可及性联合测量（TEA-seq）随后把表面蛋白加入同一细胞读出。与双模态的细胞转录组与表面蛋白联合测量（CITE-seq）相比，DNA—染色质可及性—转录组联合测量（DOGMA-seq）可提供额外的染色质可及性信息，但 RNA 和表面蛋白文库质量会有取舍。2024 年的系统基准把配对、非配对和镶嵌式整合分开比较，结果没有给出一种适用于所有任务的算法。2026 年，多供体肾皮质研究把 3′、5′ 单细胞 RNA 与同核 RNA—染色质可及性数据用于三类整合策略，并在部分同质细胞群、适应性状态和稀有状态中提高分辨率。CIPHER-seq 和 hybrid-scPMA 进一步把同细胞读出扩展到细胞内蛋白—RNA、蛋白组—代谢组；它们分别来自受刺激的外周血单个核细胞和 HepG2 细胞，不能外推为患者状态或药物敏感性。",
+          "source_ids": [
+            "H009S004",
+            "H009S005",
+            "H009S006",
+            "H009S007",
+            "H009S008",
+            "H009S010",
+            "H009S011",
+            "H009S012",
+            "H009S021",
+            "H009S022",
+            "H009S023"
+          ]
+        },
+        {
+          "section_id": "H009-SEC-03",
+          "title": "研究工具和方法",
+          "body": "多模态实验需要分别控制每一种读出。RNA 与染色质可及性共测要检查每个细胞的双模态覆盖、双细胞和细胞或细胞核质量；加入蛋白标签后，还要处理抗体特异性、空液滴背景、面板范围和通透条件。整合分析前应先定义任务：是合并同一细胞的模态、连接不同批次，还是预测缺失模态。2024 年的基准在 47 个数据集上比较 14 种模态预测算法和 18 种整合算法，结果显示不同任务的领先方法不同。方法卡会分别说明共测、三模态、蛋白质控、计算整合和原位或功能验证。",
+          "source_ids": [
+            "H009S007",
+            "H009S008",
+            "H009S009",
+            "H009S010",
+            "H009S011",
+            "H009S012"
+          ]
+        },
+        {
+          "section_id": "H009-SEC-04",
+          "title": "应用与疾病关联",
+          "body": "在免疫刺激实验中，CIPHER-seq 可把同一细胞内的细胞因子蛋白和转录组读出配对；受刺激的外周血单个核细胞中观察到的细胞因子诱导与代谢重塑，适合用于比较体外刺激条件。多供体肾皮质研究则把 RNA 与染色质可及性整合，用于提高部分细胞群、适应性状态和稀有状态的分辨率，并为器官参考图谱提供框架；这些状态还需要在更多独立供体样本和疾病队列中复现，并通过空间定位和功能研究核对，才能成为疾病机制或标志物结论。肿瘤多模态研究已经在肝内胆管癌等样本中描述调节性 T 细胞（Treg）等免疫细胞的表型与调控状态，但目前仍是患者样本中的关联线索。药物处理实验提供了另一类直接读出：hybrid-scPMA 在 HepG2 肝癌细胞的索拉非尼处理过程中记录单细胞蛋白组和代谢组的时间变化。细胞系反应不能代表患者敏感性；这些结果用于确定下一步需要通过空间测量、功能实验或独立患者样本验证的问题。",
+          "source_ids": [
+            "H009S016",
+            "H009S021",
+            "H009S022",
+            "H009S023"
+          ]
+        },
+        {
+          "section_id": "H009-SEC-05",
+          "title": "参考文献",
+          "body": "本专题收录 23 条已核对来源。技术综述和共测方法用于区分直接测量与计算整合；CITE-seq、DOGMA-seq 和 TEA-seq 的比较用于说明不同模态之间的取舍；算法基准、多供体组织、细胞内蛋白—RNA 与蛋白组—代谢组研究用于限定整合结果和应用结论的范围。正文可回溯至 H009-A01 至 H009-A04 的论证链，以及 H009S001 至 H009S023 的完整题录。",
+          "source_ids": [
+            "H009S001",
+            "H009S002",
+            "H009S003",
+            "H009S004",
+            "H009S005",
+            "H009S006",
+            "H009S007",
+            "H009S008",
+            "H009S009",
+            "H009S010",
+            "H009S011",
+            "H009S012",
+            "H009S013",
+            "H009S014",
+            "H009S015",
+            "H009S016",
+            "H009S017",
+            "H009S018",
+            "H009S019",
+            "H009S020",
+            "H009S021",
+            "H009S022",
+            "H009S023"
+          ]
+        }
+      ],
+      "methods": [
+        {
+          "method_id": "H009-M01",
+          "display_order": 1,
+          "category": "同细胞共测",
+          "title": "RNA 与染色质可及性联合测量",
+          "principle": "在同一细胞或细胞核中读取转录与染色质可及性，保留两个模态的直接配对关系。",
+          "answers": "配对的 RNA 与 ATAC 矩阵、细胞状态和候选调控关联。",
+          "sample_design": "根据细胞或细胞核适配性、组织冻存条件和预计细胞数设计；记录每个细胞的双模态覆盖。",
+          "limitations": "同一细胞的相关性不能单独证明调控因果或时间顺序。",
+          "source_ids": [
+            "H009S004",
+            "H009S001",
+            "H009S002"
+          ],
+          "workflow": "设计阶段先确定：根据细胞或细胞核适配性、组织冻存条件和预计细胞数设计；记录每个细胞的双模态覆盖。 分别完成每个模态的文库质控和细胞质控，再明确数据是同细胞配对、跨样本整合还是缺失模态预测；训练和评价按供体或样本划分，候选状态回到空间或功能实验确认。 这项方法的直接测量或计算依据是：在同一细胞或细胞核中读取转录与染色质可及性，保留两个模态的直接配对关系。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：同一细胞的相关性不能单独证明调控因果或时间顺序。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "主要结果包括：配对的 RNA 与 ATAC 矩阵、细胞状态和候选调控关联。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        },
+        {
+          "method_id": "H009-M02",
+          "display_order": 2,
+          "category": "三模态共测",
+          "title": "RNA、表面蛋白与染色质联合测量",
+          "principle": "在同一细胞中读取转录本、抗体标记的表面表位和染色质可及性。",
+          "answers": "三模态细胞图谱、表型定义和模态间关联。",
+          "sample_design": "预先选择经验证的抗体面板和通透条件；为每种文库设置最低质量阈值，并保留表面标志物的实验对照。",
+          "limitations": "增加 ATAC 读出可能降低 RNA 或蛋白文库质量；不同样本和通透条件的权衡不同。",
+          "source_ids": [
+            "H009S005",
+            "H009S006",
+            "H009S007",
+            "H009S013"
+          ],
+          "workflow": "设计阶段先确定：预先选择经验证的抗体面板和通透条件；为每种文库设置最低质量阈值，并保留表面标志物的实验对照。 分别完成每个模态的文库质控和细胞质控，再明确数据是同细胞配对、跨样本整合还是缺失模态预测；训练和评价按供体或样本划分，候选状态回到空间或功能实验确认。 这项方法的直接测量或计算依据是：在同一细胞中读取转录本、抗体标记的表面表位和染色质可及性。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：增加 ATAC 读出可能降低 RNA 或蛋白文库质量；不同样本和通透条件的权衡不同。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "主要结果包括：三模态细胞图谱、表型定义和模态间关联。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        },
+        {
+          "method_id": "H009-M03",
+          "display_order": 3,
+          "category": "蛋白读出",
+          "title": "抗体标签、背景校正与面板质控",
+          "principle": "用抗体衍生标签读取蛋白，同时识别非特异背景、抗体质量和面板覆盖带来的限制。",
+          "answers": "背景校正后的蛋白标签矩阵、面板覆盖和抗体级质量记录。",
+          "sample_design": "每个抗体保留阳性、阴性或同型对照；记录批号、滴度、染色条件和背景校正方法。",
+          "limitations": "归一化或插补后的蛋白数值不是额外实验测量；面板外蛋白不可据此推断。",
+          "source_ids": [
+            "H009S005",
+            "H009S006",
+            "H009S007",
+            "H009S009",
+            "H009S013"
+          ],
+          "workflow": "设计阶段先确定：每个抗体保留阳性、阴性或同型对照；记录批号、滴度、染色条件和背景校正方法。 分别完成每个模态的文库质控和细胞质控，再明确数据是同细胞配对、跨样本整合还是缺失模态预测；训练和评价按供体或样本划分，候选状态回到空间或功能实验确认。 这项方法的直接测量或计算依据是：用抗体衍生标签读取蛋白，同时识别非特异背景、抗体质量和面板覆盖带来的限制。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：归一化或插补后的蛋白数值不是额外实验测量；面板外蛋白不可据此推断。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "主要结果包括：背景校正后的蛋白标签矩阵、面板覆盖和抗体级质量记录。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        },
+        {
+          "method_id": "H009-M04",
+          "display_order": 4,
+          "category": "计算整合",
+          "title": "配对、非配对与镶嵌式多模态整合",
+          "principle": "将多个模态用于细胞注释、状态比较、缺失模态预测或参考映射，并保留数据之间是否直接配对的说明。",
+          "answers": "整合后的嵌入、细胞注释、预测模态和任务相关性能指标。",
+          "sample_design": "先定义任务是垂直整合、水平整合、镶嵌式整合还是模态预测；按样本和批次划分训练、评估与留出数据。",
+          "limitations": "算法排名随任务、指标和数据结构变化；预测模态不能写成实测信号。",
+          "source_ids": [
+            "H009S008",
+            "H009S010",
+            "H009S011",
+            "H009S012"
+          ],
+          "workflow": "设计阶段先确定：先定义任务是垂直整合、水平整合、镶嵌式整合还是模态预测；按样本和批次划分训练、评估与留出数据。 分别完成每个模态的文库质控和细胞质控，再明确数据是同细胞配对、跨样本整合还是缺失模态预测；训练和评价按供体或样本划分，候选状态回到空间或功能实验确认。 这项方法的直接测量或计算依据是：将多个模态用于细胞注释、状态比较、缺失模态预测或参考映射，并保留数据之间是否直接配对的说明。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：算法排名随任务、指标和数据结构变化；预测模态不能写成实测信号。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "主要结果包括：整合后的嵌入、细胞注释、预测模态和任务相关性能指标。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        },
+        {
+          "method_id": "H009-M05",
+          "display_order": 5,
+          "category": "原位与功能验证",
+          "title": "空间映射、流式或组织学复核",
+          "principle": "把单细胞多模态提出的候选细胞群和标志物放回组织或功能实验中确认。",
+          "answers": "独立样本中的细胞定位、标志物表达或功能读出。",
+          "sample_design": "明确验证对象来自独立患者样本、动物模型还是细胞体系；根据问题选择流式、免疫染色、原位检测或功能扰动。",
+          "limitations": "独立验证支持特定样本与条件下的结论，不能直接变成诊断、预后或治疗建议。",
+          "source_ids": [
+            "H009S014",
+            "H009S015",
+            "H009S016",
+            "H009S017",
+            "H009S018",
+            "H009S019"
+          ],
+          "workflow": "设计阶段先确定：明确验证对象来自独立患者样本、动物模型还是细胞体系；根据问题选择流式、免疫染色、原位检测或功能扰动。 分别完成每个模态的文库质控和细胞质控，再明确数据是同细胞配对、跨样本整合还是缺失模态预测；训练和评价按供体或样本划分，候选状态回到空间或功能实验确认。 这项方法的直接测量或计算依据是：把单细胞多模态提出的候选细胞群和标志物放回组织或功能实验中确认。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：独立验证支持特定样本与条件下的结论，不能直接变成诊断、预后或治疗建议。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "主要结果包括：独立样本中的细胞定位、标志物表达或功能读出。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        }
+      ],
+      "timeline": [
+        {
+          "display_order": 1,
+          "year": 2020,
+          "discovery": "SHARE-seq 在同一细胞中配对 RNA 与染色质可及性，并以状态轨迹提出部分可及性变化可能早于表达变化。",
+          "application": "适用于提出调控顺序假设；轨迹重建不是对细胞命运的连续观察。",
+          "source_ids": [
+            "H009S004"
+          ]
+        },
+        {
+          "display_order": 2,
+          "year": 2021,
+          "discovery": "TEA-seq 与 DOGMA-seq 将表面蛋白纳入同细胞的 RNA—染色质读出，形成三模态测量。",
+          "application": "可用于把细胞身份、表面表型与调控状态放在同一分析单元；不同文库质量之间仍存在取舍。",
+          "source_ids": [
+            "H009S005",
+            "H009S006"
+          ]
+        },
+        {
+          "display_order": 3,
+          "year": 2022,
+          "discovery": "CITE-seq 与 DOGMA-seq 的基准比较表明，多模态增益应结合具体读出与样本设计判断。",
+          "application": "适合在免疫和疾病样本中规划测量组合；平台差异不能直接解释为生物差异。",
+          "source_ids": [
+            "H009S007",
+            "H009S016"
+          ]
+        },
+        {
+          "display_order": 4,
+          "year": 2024,
+          "discovery": "多项系统基准分别比较配对、非配对和镶嵌式整合，未发现对所有任务都最优的算法。",
+          "application": "可指导不同整合任务的评估设计；整合后的对应关系仍需独立样本和正交实验检验。",
+          "source_ids": [
+            "H009S011",
+            "H009S012"
+          ]
+        },
+        {
+          "display_order": 5,
+          "year": 2026,
+          "discovery": "多供体肾皮质整合提高了部分同质细胞群、适应性状态和稀有状态的分辨率；CIPHER-seq 和 hybrid-scPMA 又将同细胞读出扩展到细胞内蛋白—RNA、蛋白组—代谢组。",
+          "application": "可用于器官参考图谱、体外免疫刺激和药物处理的后续验证设计；供体、细胞系或刺激条件下的结果不能直接外推为患者状态或治疗敏感性。",
+          "source_ids": [
+            "H009S021",
+            "H009S022",
+            "H009S023"
+          ]
+        }
+      ],
+      "shared_findings": [
+        {
+          "finding_id": "H009-C01",
+          "display_order": 1,
+          "title": "同一细胞直接共测与跨数据整合不能使用同一种证据表述",
+          "shared_result": "SHARE-seq、TEA-seq 和 DOGMA-seq 在同一细胞或细胞核内建立 RNA、染色质可及性和蛋白的直接配对关系。另一类研究把不同细胞、批次或平台的数据通过算法映射到共同空间。两类结果都能描述模态关系，但前者保留了实验配对，后者依赖模型推断。",
+          "research_use": "在数据表和图注中标明每个模态是否来自同一细胞。整合不同实验时，保留独立样本标签并设置留出数据，检查映射是否把批次差异误当作细胞状态。",
+          "boundary": "同细胞相关仍不能证明调控因果；计算映射得到的对应关系更不能写成直接共测。",
+          "source_ids": [
+            "H009S004",
+            "H009S005",
+            "H009S006",
+            "H009S008",
+            "H009S010"
+          ]
+        },
+        {
+          "finding_id": "H009-C02",
+          "display_order": 2,
+          "title": "增加模态会补充细胞状态，也会重新分配测量质量",
+          "shared_result": "双模态与三模态技术比较显示，加入染色质或蛋白读出可以把细胞身份、表面表型和调控背景放在同一细胞中观察，但 RNA、蛋白和染色质文库之间存在覆盖与质量取舍。模态更多不等于每项读出都更可靠。",
+          "research_use": "先确定哪一个模态承担主要终点，再设置各文库的最低质量要求。抗体面板、通透条件和细胞或细胞核制备应围绕主要问题优化，不能只追求模态数量。",
+          "boundary": "某个平台在一种样本中保持的文库质量，不能直接外推到冻存组织、脆弱细胞或不同抗体面板。",
+          "source_ids": [
+            "H009S005",
+            "H009S006",
+            "H009S007",
+            "H009S013"
+          ]
+        },
+        {
+          "finding_id": "H009-C03",
+          "display_order": 3,
+          "title": "多模态整合没有适用于所有任务的单一最优算法",
+          "shared_result": "配对、非配对、镶嵌式整合和缺失模态预测的系统基准得到一致结论：算法排名随任务、评价指标和数据结构变化。细胞类型分离表现好，不代表模态预测或稀有状态识别也同样可靠。",
+          "research_use": "先定义任务是细胞注释、批次连接、状态比较还是模态预测，再选择相应指标并与简单基线比较。训练和评估数据按供体或样本划分，避免同一供体信息同时进入两侧。",
+          "boundary": "基准数据上的领先结果只支持对应任务。插补或预测出的模态值不是额外实验测量。",
+          "source_ids": [
+            "H009S011",
+            "H009S012",
+            "H009S021"
+          ]
+        },
+        {
+          "finding_id": "H009-C04",
+          "display_order": 4,
+          "title": "细胞状态需要在供体、组织位置或功能实验中再次确认",
+          "shared_result": "肾皮质、肿瘤免疫、心血管风险、体外刺激和药物处理研究都利用多模态数据细分细胞状态。它们的共同价值是把候选状态定义得更具体；状态是否与疾病过程、药物反应或组织功能有关，仍取决于独立供体、空间定位和功能读出。",
+          "research_use": "发现候选状态后，先检查它是否由单一供体或批次驱动，再选择流式、免疫染色、原位检测或功能扰动复核。疾病关联应在独立患者样本中重复，而不是只增加同一数据集的算法分析。",
+          "boundary": "受刺激外周血细胞、HepG2 细胞或小型患者队列中的状态不能直接代表患者治疗敏感性、预后或普遍疾病机制。",
+          "source_ids": [
+            "H009S014",
+            "H009S016",
+            "H009S017",
+            "H009S018",
+            "H009S021",
+            "H009S022",
+            "H009S023"
+          ]
+        }
+      ],
+      "references": [
+        {
+          "source_id": "H009S001",
+          "title": "Single-Cell Multiomics.",
+          "journal": "Annual Review of Biomedical Data Science",
+          "published_date": "2023-08-10",
+          "doi": "10.1146/annurev-biodatasci-020422-050645",
+          "pmid": "37159875",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/37159875/",
+          "source_type": "review",
+          "evidence_role": "technology-framework"
+        },
+        {
+          "source_id": "H009S002",
+          "title": "Single-cell multiomics: technologies and data analysis methods.",
+          "journal": "Experimental & Molecular Medicine",
+          "published_date": "2020-09",
+          "doi": "10.1038/s12276-020-0420-2",
+          "pmid": "32929225",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/32929225/",
+          "source_type": "review",
+          "evidence_role": "technology-and-analysis"
+        },
+        {
+          "source_id": "H009S003",
+          "title": "Method of the Year 2019: Single-cell multimodal omics.",
+          "journal": "Nature Methods",
+          "published_date": "2020-01",
+          "doi": "10.1038/s41592-019-0703-5",
+          "pmid": "31907477",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/31907477/",
+          "source_type": "editorial",
+          "evidence_role": "field-overview"
+        },
+        {
+          "source_id": "H009S004",
+          "title": "Chromatin Potential Identified by Shared Single-Cell Profiling of RNA and Chromatin.",
+          "journal": "Cell",
+          "published_date": "2020-11-12",
+          "doi": "10.1016/j.cell.2020.09.056",
+          "pmid": "33098772",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/33098772/",
+          "source_type": "original-research",
+          "evidence_role": "paired-rna-chromatin"
+        },
+        {
+          "source_id": "H009S005",
+          "title": "Simultaneous trimodal single-cell measurement of transcripts, epitopes, and chromatin accessibility using TEA-seq.",
+          "journal": "eLife",
+          "published_date": "2021-04-09",
+          "doi": "10.7554/eLife.63632",
+          "pmid": "33835024",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/33835024/",
+          "source_type": "original-research",
+          "evidence_role": "trimodal-measurement"
+        },
+        {
+          "source_id": "H009S006",
+          "title": "Scalable, multimodal profiling of chromatin accessibility, gene expression and protein levels in single cells.",
+          "journal": "Nature Biotechnology",
+          "published_date": "2021-10",
+          "doi": "10.1038/s41587-021-00927-2",
+          "pmid": "34083792",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/34083792/",
+          "source_type": "original-research",
+          "evidence_role": "atac-rna-protein"
+        },
+        {
+          "source_id": "H009S007",
+          "title": "Comprehensive benchmarking of CITE-seq versus DOGMA-seq single cell multimodal omics.",
+          "journal": "Genome Biology",
+          "published_date": "2022-06-23",
+          "doi": "10.1186/s13059-022-02698-8",
+          "pmid": "35739535",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/35739535/",
+          "source_type": "comparative-study",
+          "evidence_role": "assay-benchmark"
+        },
+        {
+          "source_id": "H009S008",
+          "title": "Integrated analysis of multimodal single-cell data.",
+          "journal": "Cell",
+          "published_date": "2021-06-24",
+          "doi": "10.1016/j.cell.2021.04.048",
+          "pmid": "34062119",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/34062119/",
+          "source_type": "software-method",
+          "evidence_role": "paired-and-unpaired-integration"
+        },
+        {
+          "source_id": "H009S009",
+          "title": "Normalizing and denoising protein expression data from droplet-based single cell profiling.",
+          "journal": "Nature Communications",
+          "published_date": "2022-04-19",
+          "doi": "10.1038/s41467-022-29356-8",
+          "pmid": "35440536",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/35440536/",
+          "source_type": "software-method",
+          "evidence_role": "protein-background-correction"
+        },
+        {
+          "source_id": "H009S010",
+          "title": "Paired single-cell multi-omics data integration with Mowgli.",
+          "journal": "Nature Communications",
+          "published_date": "2023-11-24",
+          "doi": "10.1038/s41467-023-43019-2",
+          "pmid": "38001063",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/38001063/",
+          "source_type": "software-method",
+          "evidence_role": "paired-data-integration"
+        },
+        {
+          "source_id": "H009S011",
+          "title": "Benchmarking algorithms for single-cell multi-omics prediction and integration.",
+          "journal": "Nature Methods",
+          "published_date": "2024-11",
+          "doi": "10.1038/s41592-024-02429-w",
+          "pmid": "39322753",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/39322753/",
+          "source_type": "comparative-study",
+          "evidence_role": "integration-benchmark"
+        },
+        {
+          "source_id": "H009S012",
+          "title": "Benchmarking multi-omics integration algorithms across single-cell RNA and ATAC data.",
+          "journal": "Briefings in Bioinformatics",
+          "published_date": "2024-01-22",
+          "doi": "10.1093/bib/bbae095",
+          "pmid": "38493343",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/38493343/",
+          "source_type": "comparative-study",
+          "evidence_role": "rna-atac-integration-benchmark"
+        },
+        {
+          "source_id": "H009S013",
+          "title": "Single-cell profiling of proteins and chromatin accessibility using PHAGE-ATAC.",
+          "journal": "Nature Biotechnology",
+          "published_date": "2022-03",
+          "doi": "10.1038/s41587-021-01065-5",
+          "pmid": "34675424",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/34675424/",
+          "source_type": "original-research",
+          "evidence_role": "protein-atac-measurement"
+        },
+        {
+          "source_id": "H009S014",
+          "title": "Transcriptomic, epigenomic, and spatial metabolomic cell profiling redefines regional human kidney anatomy.",
+          "journal": "Cell Metabolism",
+          "published_date": "2024-05-07",
+          "doi": "10.1016/j.cmet.2024.02.015",
+          "pmid": "38513647",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/38513647/",
+          "source_type": "original-research",
+          "evidence_role": "multimodal-spatial-application"
+        },
+        {
+          "source_id": "H009S015",
+          "title": "Shared and distinct biological circuits in effector, memory and exhausted CD8(+) T cells revealed by temporal single-cell transcriptomics and epigenetics.",
+          "journal": "Nature Immunology",
+          "published_date": "2022-11",
+          "doi": "10.1038/s41590-022-01338-4",
+          "pmid": "36271148",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/36271148/",
+          "source_type": "original-research",
+          "evidence_role": "temporal-rna-epigenetic-application"
+        },
+        {
+          "source_id": "H009S016",
+          "title": "Multimodal single-cell profiling of intrahepatic cholangiocarcinoma defines hyperactivated Tregs as a potential therapeutic target.",
+          "journal": "Journal of Hepatology",
+          "published_date": "2022-11",
+          "doi": "10.1016/j.jhep.2022.05.043",
+          "pmid": "35738508",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/35738508/",
+          "source_type": "original-research",
+          "evidence_role": "disease-application"
+        },
+        {
+          "source_id": "H009S017",
+          "title": "Monocyte Single-Cell Multimodal Profiling in Cardiovascular Disease Risk States.",
+          "journal": "Circulation Research",
+          "published_date": "2024-08-30",
+          "doi": "10.1161/CIRCRESAHA.124.324457",
+          "pmid": "39105287",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/39105287/",
+          "source_type": "original-research",
+          "evidence_role": "disease-application"
+        },
+        {
+          "source_id": "H009S018",
+          "title": "Single-Cell Multimodal Profiling of Atherosclerosis Identifies CD200 as a Cell Surface Lineage Marker of Vascular Smooth Muscle Cells and Their Derived Cells.",
+          "journal": "Circulation",
+          "published_date": "2024-04-09",
+          "doi": "10.1161/CIRCULATIONAHA.123.067092",
+          "pmid": "38588334",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/38588334/",
+          "source_type": "original-research",
+          "evidence_role": "orthogonal-marker-validation"
+        },
+        {
+          "source_id": "H009S019",
+          "title": "Temporal multimodal single-cell profiling of native hematopoiesis illuminates altered differentiation trajectories with age.",
+          "journal": "Cell Reports",
+          "published_date": "2023-04-25",
+          "doi": "10.1016/j.celrep.2023.112304",
+          "pmid": "36961818",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/36961818/",
+          "source_type": "original-research",
+          "evidence_role": "temporal-multimodal-application"
+        },
+        {
+          "source_id": "H009S020",
+          "title": "Methods and applications for single-cell and spatial multi-omics.",
+          "journal": "Nature Reviews Genetics",
+          "published_date": "2023-08",
+          "doi": "10.1038/s41576-023-00580-2",
+          "pmid": "36864178",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/36864178/",
+          "source_type": "review",
+          "evidence_role": "spatial-connection"
+        },
+        {
+          "source_id": "H009S021",
+          "title": "Systematic evaluation of single-cell multimodal data integration enhances cell type resolution and discovery of clinically relevant states in complex tissues",
+          "journal": "Genome Biology",
+          "published_date": "2026-03-13",
+          "doi": "10.1186/s13059-026-04002-4",
+          "pmid": "41821037",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/41821037/",
+          "source_type": "original-research",
+          "evidence_role": "multimodal-integration-benchmark"
+        },
+        {
+          "source_id": "H009S022",
+          "title": "CIPHER-seq enables intracellular multimodal profiling of cytokine responses in single immune cells",
+          "journal": "Scientific Reports",
+          "published_date": "2026-04-08",
+          "doi": "10.1038/s41598-026-44946-y",
+          "pmid": "41951681",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/41951681/",
+          "source_type": "original-research",
+          "evidence_role": "intracellular-protein-rna-co-measurement"
+        },
+        {
+          "source_id": "H009S023",
+          "title": "Simultaneous In-Depth Single-Cell Proteomic and Metabolomic Analysis",
+          "journal": "Analytical Chemistry",
+          "published_date": "2026-05-12",
+          "doi": "10.1021/acs.analchem.5c08090",
+          "pmid": "42043857",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/42043857/",
+          "source_type": "original-research",
+          "evidence_role": "single-cell-proteome-metabolome-co-measurement"
+        }
+      ]
+    },
+    {
+      "topic_id": "H010",
+      "title": "多组学整合与网络生物学",
+      "topic_role": "research_deep_dive",
+      "overview": "基因组、转录组、蛋白组、代谢组和其他分子层往往来自不同实验批次或不同样本层级。多组学整合的目标，是在保留各层信息的同时，找出跨层共同变化、分层特异信号和值得进一步检验的关联。网络生物学则把基因、蛋白、代谢物和表型之间的关系表示为节点与边，用于组织复杂数据、提出机制假设和比较不同队列中的模式。\n\n这一方向的常见起点，是把样本按疾病状态、处理条件或时间点分组，再分别完成各组学质控与归一化。随后使用因子分解、样本相似性融合、贝叶斯整合或基于先验网络的图模型，把多个矩阵映射到共同低维空间或联合网络。近年的方法比较显示，不同算法在解释性、预测性能和对外部先验网络的依赖程度上差异明显；没有一种方法适用于所有样本类型和研究问题。\n\n整合结果与网络边本质上是统计关联或模型假设，不能单独证明调控方向或因果机制。同一细胞内的多模态共测属于单细胞多模态专题；以表观基因组为核心的调控层分析属于单细胞调控基因组专题。网络推断应明确先验来源、边权含义和验证计划；相关不等于因果，任何关键节点都需要扰动、正交测量或独立队列复现支持。",
+      "sections": [
+        {
+          "section_id": "H010-SEC-01",
+          "title": "概述",
+          "body": "多组学整合与网络生物学处理的是跨分子层联合分析与关系建模。常见流程先分别完成各组学质控，再用因子模型、相似性融合或图模型寻找共同变异、分层特异信号和候选关联。网络表示有助于组织复杂数据并提出可检验假设，但边和因子本身不构成因果证据；关键关系仍需扰动、正交测量或独立队列验证。同细胞多模态共测与以表观组为核心的调控分析分别属于相邻专题，不在本页展开。",
+          "source_ids": [
+            "H010S001",
+            "H010S002",
+            "H010S003",
+            "H010S004",
+            "H010S005",
+            "H010S006"
+          ]
+        },
+        {
+          "section_id": "H010-SEC-02",
+          "title": "研究进展",
+          "body": "多组学整合的早期方法以样本级矩阵为输入：相似性网络融合在不同组学层构建患者相似图后迭代融合；iCluster 和 mixOmics 的 DIABLO 则在监督或无监督框架下寻找跨层变异模式。MOFA 与 MOFA+ 把多个组学矩阵分解为共享与特异的潜因子，便于解释各层对总体变异的贡献。网络医学综述系统梳理了如何把疾病模块、药物靶点和临床表型放入图结构，同时强调网络边需要独立证据支持。2023 年的 DeepMAPS 和 GLUE 把图神经网络与单细胞多组学整合结合，利用细胞—基因拓扑改进聚类和调控关系推断；它们仍依赖参考网络或训练数据范围。2024—2026 年的基准研究比较了因子模型、图模型和深度学习整合在肿瘤分型、免疫状态和跨队列迁移中的表现，结论是没有单一默认方法；解释性、预测性能和对外部先验的依赖需要按任务分别评估。",
+          "source_ids": [
+            "H010S001",
+            "H010S002",
+            "H010S003",
+            "H010S004",
+            "H010S005",
+            "H010S006",
+            "H010S007",
+            "H010S008",
+            "H010S009",
+            "H010S010",
+            "H010S011",
+            "H010S012",
+            "H010S013",
+            "H010S014",
+            "H010S015"
+          ]
+        },
+        {
+          "section_id": "H010-SEC-03",
+          "title": "研究工具和方法",
+          "body": "可复核的多组学整合通常从一致的样本编码和临床注释开始。每个组学层单独完成缺失值处理、归一化、批次校正和方差过滤，再进入整合阶段。任务类型要预先写明：是寻找跨层共同因子、构建样本相似性、预测表型，还是在先验网络上做模块分析。网络分析应记录节点定义、边来源、权重含义和是否区分方向。任何用于解释生物机制的因子或边，都应保留原始矩阵、参数和随机种子，并安排独立样本或功能实验验证。",
+          "source_ids": [
+            "H010S001",
+            "H010S002",
+            "H010S003",
+            "H010S004",
+            "H010S005",
+            "H010S006",
+            "H010S007",
+            "H010S008",
+            "H010S009",
+            "H010S010"
+          ]
+        },
+        {
+          "section_id": "H010-SEC-04",
+          "title": "应用与疾病关联",
+          "body": "肿瘤分型是多组学整合最常见的应用场景之一：转录、甲基化、拷贝数和蛋白数据可在同一队列中寻找亚型或预后相关模式，但亚型标签仍需独立队列和临床结局核对。代谢—转录联合网络在代谢性疾病研究中用于提出通路级假设；心血管和免疫队列研究则把多组学表型与网络模块联系，用于解释炎症或代谢状态差异。图模型在药物重定位研究中可提示候选靶点或化合物—疾病关联，这些结果属于计算优先级，不能替代体外活性、安全性和人体研究。上述应用均来自特定队列和实验体系，不能外推为通用诊断或干预建议。",
+          "source_ids": [
+            "H010S018"
+          ]
+        },
+        {
+          "section_id": "H010-SEC-05",
+          "title": "参考文献",
+          "body": "本专题收录 22 条已核对来源。因子分解、样本融合和监督整合方法用于说明跨层变异如何提取；网络医学与图模型综述用于限定网络边的证据层级；基准比较和代表性应用研究用于区分算法性能与生物学可解释性。正文可回溯至 H010S001 至 H010S022 的完整题录。",
+          "source_ids": [
+            "H010S001",
+            "H010S002",
+            "H010S003",
+            "H010S004",
+            "H010S005",
+            "H010S006",
+            "H010S007",
+            "H010S008",
+            "H010S009",
+            "H010S010",
+            "H010S011",
+            "H010S012",
+            "H010S013",
+            "H010S014",
+            "H010S015",
+            "H010S016",
+            "H010S017",
+            "H010S018",
+            "H010S019",
+            "H010S020",
+            "H010S021",
+            "H010S022"
+          ]
+        }
+      ],
+      "methods": [
+        {
+          "method_id": "H010-M01",
+          "display_order": 1,
+          "category": "样本与矩阵准备",
+          "title": "多组学样本对齐与层内质控",
+          "principle": "在整合前保证各组学矩阵对应同一批样本或明确的配对关系，并分别完成层内质控。",
+          "answers": "对齐后的样本表、各层表达或丰度矩阵、缺失与批次记录。",
+          "sample_design": "预先统一样本编号、临床注释和处理信息；每个组学层设置最低检出、覆盖度和批次对照规则。",
+          "limitations": "不同组学层的缺失模式和技术噪声并不相同；强行填补会制造虚假相关。",
+          "source_ids": [
+            "H010S001",
+            "H010S009",
+            "H010S017"
+          ],
+          "workflow": "设计阶段先确定：预先统一样本编号、临床注释和处理信息；每个组学层设置最低检出、覆盖度和批次对照规则。 完成各模态质控与批次检查后，再按预先定义的任务选择整合或网络推断方法；关键关联应在独立样本、扰动实验或正交读出中复核。 这项方法的直接测量或计算依据是：在整合前保证各组学矩阵对应同一批样本或明确的配对关系，并分别完成层内质控。",
+          "quality_control": "用空白、阴性或基线对照界定背景；技术重复与生物学重复应分别记录，并检查批次、缺失模态和样本构成。特别要注意：不同组学层的缺失模式和技术噪声并不相同；强行填补会制造虚假相关。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "主要结果包括：对齐后的样本表、各层表达或丰度矩阵、缺失与批次记录。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。统计关联、网络边或模型因子仍须由与问题相符的独立证据支持，不能单独写成因果机制。"
+        },
+        {
+          "method_id": "H010-M02",
+          "display_order": 2,
+          "category": "无监督整合",
+          "title": "MOFA+ 与潜因子分解",
+          "principle": "把多个组学矩阵分解为共享与特异的潜因子，量化各层对总体变异的贡献。",
+          "answers": "潜因子得分、因子载荷、方差解释率和跨层对应关系。",
+          "sample_design": "按样本数与特征数选择稀疏先验；保留独立队列或独立批次作为外部验证。",
+          "limitations": "因子反映的是统计共变，不是已证实的调控关系；因子数量与先验设置会改变结果。",
+          "source_ids": [
+            "H010S001",
+            "H010S002",
+            "H010S010",
+            "H010S018"
+          ],
+          "workflow": "设计阶段先确定：按样本数与特征数选择稀疏先验；保留独立队列或独立批次作为外部验证。 完成各模态质控与批次检查后，再按预先定义的任务选择整合或网络推断方法；关键关联应在独立样本、扰动实验或正交读出中复核。 这项方法的直接测量或计算依据是：把多个组学矩阵分解为共享与特异的潜因子，量化各层对总体变异的贡献。",
+          "quality_control": "用空白、阴性或基线对照界定背景；技术重复与生物学重复应分别记录，并检查批次、缺失模态和样本构成。特别要注意：因子反映的是统计共变，不是已证实的调控关系；因子数量与先验设置会改变结果。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "主要结果包括：潜因子得分、因子载荷、方差解释率和跨层对应关系。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。统计关联、网络边或模型因子仍须由与问题相符的独立证据支持，不能单独写成因果机制。"
+        },
+        {
+          "method_id": "H010-M03",
+          "display_order": 3,
+          "category": "样本融合",
+          "title": "相似性网络融合与 iCluster",
+          "principle": "在各组学层构建样本相似性网络，再融合为综合相似性或联合聚类。",
+          "answers": "融合相似性矩阵、样本聚类和跨层一致性指标。",
+          "sample_design": "为每一层选择合适的距离或核函数；融合前检查单层网络是否被技术批次主导。",
+          "limitations": "融合结果对距离度量和噪声敏感；相似性高不等于共享机制。",
+          "source_ids": [
+            "H010S005",
+            "H010S006",
+            "H010S004"
+          ],
+          "workflow": "设计阶段先确定：为每一层选择合适的距离或核函数；融合前检查单层网络是否被技术批次主导。 完成各模态质控与批次检查后，再按预先定义的任务选择整合或网络推断方法；关键关联应在独立样本、扰动实验或正交读出中复核。 这项方法的直接测量或计算依据是：在各组学层构建样本相似性网络，再融合为综合相似性或联合聚类。",
+          "quality_control": "用空白、阴性或基线对照界定背景；技术重复与生物学重复应分别记录，并检查批次、缺失模态和样本构成。特别要注意：融合结果对距离度量和噪声敏感；相似性高不等于共享机制。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "主要结果包括：融合相似性矩阵、样本聚类和跨层一致性指标。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。统计关联、网络边或模型因子仍须由与问题相符的独立证据支持，不能单独写成因果机制。"
+        },
+        {
+          "method_id": "H010-M04",
+          "display_order": 4,
+          "category": "监督整合",
+          "title": "DIABLO 与表型关联整合",
+          "principle": "在已知表型或结局标签下，寻找与结局最相关的跨层特征组合。",
+          "answers": "跨层特征选择、判别成分、交叉验证性能和独立测试结果。",
+          "sample_design": "按样本而非随机特征划分训练与测试；类别不平衡和批次效应在建模前处理。",
+          "limitations": "预测性能高不代表找到因果特征；外部验证失败时应报告而非隐藏。",
+          "source_ids": [
+            "H010S003",
+            "H010S004",
+            "H010S020"
+          ],
+          "workflow": "设计阶段先确定：按样本而非随机特征划分训练与测试；类别不平衡和批次效应在建模前处理。 完成各模态质控与批次检查后，再按预先定义的任务选择整合或网络推断方法；关键关联应在独立样本、扰动实验或正交读出中复核。 这项方法的直接测量或计算依据是：在已知表型或结局标签下，寻找与结局最相关的跨层特征组合。",
+          "quality_control": "用空白、阴性或基线对照界定背景；技术重复与生物学重复应分别记录，并检查批次、缺失模态和样本构成。特别要注意：预测性能高不代表找到因果特征；外部验证失败时应报告而非隐藏。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "主要结果包括：跨层特征选择、判别成分、交叉验证性能和独立测试结果。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。统计关联、网络边或模型因子仍须由与问题相符的独立证据支持，不能单独写成因果机制。"
+        },
+        {
+          "method_id": "H010-M05",
+          "display_order": 5,
+          "category": "网络推断",
+          "title": "先验网络、共表达与图模型",
+          "principle": "利用数据库先验、共表达或图神经网络构建基因、蛋白或代谢物之间的关系图。",
+          "answers": "网络拓扑、模块、枢纽节点和候选互作边。",
+          "sample_design": "记录边来源、方向性假设和是否使用外部数据库；关键边用扰动或文献正交证据标注。",
+          "limitations": "共表达与网络边是假设；数据库先验可能不完整或存在物种、组织偏差。",
+          "source_ids": [
+            "H010S007",
+            "H010S008",
+            "H010S013",
+            "H010S014",
+            "H010S019"
+          ],
+          "workflow": "设计阶段先确定：记录边来源、方向性假设和是否使用外部数据库；关键边用扰动或文献正交证据标注。 完成各模态质控与批次检查后，再按预先定义的任务选择整合或网络推断方法；关键关联应在独立样本、扰动实验或正交读出中复核。 这项方法的直接测量或计算依据是：利用数据库先验、共表达或图神经网络构建基因、蛋白或代谢物之间的关系图。",
+          "quality_control": "用空白、阴性或基线对照界定背景；技术重复与生物学重复应分别记录，并检查批次、缺失模态和样本构成。特别要注意：共表达与网络边是假设；数据库先验可能不完整或存在物种、组织偏差。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "主要结果包括：网络拓扑、模块、枢纽节点和候选互作边。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。统计关联、网络边或模型因子仍须由与问题相符的独立证据支持，不能单独写成因果机制。"
+        }
+      ],
+      "timeline": [
+        {
+          "display_order": 1,
+          "year": 2014,
+          "discovery": "相似性网络融合和 iCluster 建立样本级多组学融合与联合聚类的基本框架。",
+          "application": "用于肿瘤分型和队列分层；融合网络反映的是样本相似性，不是分子因果。",
+          "source_ids": [
+            "H010S005",
+            "H010S006"
+          ]
+        },
+        {
+          "display_order": 2,
+          "year": 2018,
+          "discovery": "MOFA 把多组学矩阵分解为共享与特异潜因子，提高跨层变异的可解释性。",
+          "application": "适合探索性队列研究；因子需结合独立验证解释生物学含义。",
+          "source_ids": [
+            "H010S002"
+          ]
+        },
+        {
+          "display_order": 3,
+          "year": 2020,
+          "discovery": "MOFA+ 与 mixOmics 监督整合扩展了因子模型在单细胞和多队列数据中的应用。",
+          "application": "可用于细胞状态、疾病亚型和生物标志物候选排序。",
+          "source_ids": [
+            "H010S001",
+            "H010S003",
+            "H010S004"
+          ]
+        },
+        {
+          "display_order": 4,
+          "year": 2023,
+          "discovery": "图神经网络整合方法把细胞拓扑和先验网络引入单细胞多组学分析。",
+          "application": "改进聚类和调控关系推断；仍依赖训练数据与先验网络质量。",
+          "source_ids": [
+            "H010S013",
+            "H010S014"
+          ]
+        },
+        {
+          "display_order": 5,
+          "year": 2025,
+          "discovery": "网络多组学综述和基准研究系统比较因子模型、图模型与深度学习整合的性能与边界。",
+          "application": "为方法选择提供依据；没有单一默认算法适用于所有任务。",
+          "source_ids": [
+            "H010S019",
+            "H010S020",
+            "H010S021"
+          ]
+        }
+      ],
+      "shared_findings": [
+        {
+          "finding_id": "H010-C01",
+          "display_order": 1,
+          "title": "跨层因子与网络边是假设，不是因果证明",
+          "shared_result": "因子分解、样本融合和图模型都能指出跨组学共变或网络模块，但这些结果反映的是统计关联或模型结构，不能单独证明调控方向或驱动关系。",
+          "research_use": "把整合结果用于候选排序、模块定义和实验设计；关键节点和因子应进入扰动、正交测量或独立队列验证。",
+          "boundary": "相关不等于因果；网络边不能写成已证实的调控关系。",
+          "source_ids": [
+            "H010S007",
+            "H010S008",
+            "H010S001",
+            "H010S019"
+          ]
+        },
+        {
+          "finding_id": "H010-C02",
+          "display_order": 2,
+          "title": "方法选择取决于任务而非平台数量",
+          "shared_result": "基准研究表明，因子模型、样本融合、监督整合和图神经网络在不同任务上的领先方法不同；解释性、预测性能和对外部先验的依赖需要分别评估。",
+          "research_use": "实验设计前先明确任务是探索性分型、表型预测还是网络推断，再选择匹配方法并保留外部验证集。",
+          "boundary": "训练集性能不能外推到新组织、新平台和新的疾病队列。",
+          "source_ids": [
+            "H010S020",
+            "H010S021",
+            "H010S003",
+            "H010S013"
+          ]
+        },
+        {
+          "finding_id": "H010-C03",
+          "display_order": 3,
+          "title": "层内质控决定整合上限",
+          "shared_result": "批次效应、缺失模态、样本错配和低质量特征会在整合阶段被放大为虚假跨层信号。",
+          "research_use": "整合前分别完成各组学质控，保留样本对齐表和批次记录；整合后检查因子或模块是否与技术变量共线。",
+          "boundary": "整合算法不能修复根本性的样本混淆或实验设计缺陷。",
+          "source_ids": [
+            "H010S009",
+            "H010S017",
+            "H010S005",
+            "H010S010"
+          ]
+        },
+        {
+          "finding_id": "H010-C04",
+          "display_order": 4,
+          "title": "与单细胞多模态和表观专题的边界",
+          "shared_result": "同细胞多模态共测解决的是单细胞层级的直接配对问题；表观基因组专题聚焦调控元件与染色质状态。样本级多组学整合处理的是跨层关联，不替代同细胞测量。",
+          "research_use": "若研究问题要求同一细胞的直接配对，应优先选择共测实验；本专题的整合结果不能与同细胞证据混写。",
+          "boundary": "计算整合矩阵不能当作同细胞实测；表观调控机制需回到 H005 专题的实验体系。",
+          "source_ids": [
+            "H010S010",
+            "H010S014",
+            "H010S001",
+            "H010S009"
+          ]
+        }
+      ],
+      "references": [
+        {
+          "source_id": "H010S001",
+          "title": "MOFA+: a statistical framework for comprehensive integration of multi-modal single-cell data.",
+          "journal": "Nature Methods",
+          "published_date": "2020-02",
+          "doi": "10.1038/s41592-019-0700-8",
+          "pmid": "31209148",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/31209148/",
+          "source_type": "software-method",
+          "evidence_role": "factor-integration"
+        },
+        {
+          "source_id": "H010S002",
+          "title": "Multi-Omics Factor Analysis-a framework for unsupervised integration of multi-omics data sets.",
+          "journal": "Genome Biology",
+          "published_date": "2018-01-30",
+          "doi": "10.1186/s13059-017-1385-z",
+          "pmid": "29394923",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/29394923/",
+          "source_type": "software-method",
+          "evidence_role": "latent-factor-model"
+        },
+        {
+          "source_id": "H010S003",
+          "title": "DIABLO: an integrative approach for identifying key molecular drivers from multi-omics assays.",
+          "journal": "Bioinformatics",
+          "published_date": "2019-10-01",
+          "doi": "10.1093/bioinformatics/bty1054",
+          "pmid": "31506243",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/31506243/",
+          "source_type": "software-method",
+          "evidence_role": "supervised-integration"
+        },
+        {
+          "source_id": "H010S004",
+          "title": "mixOmics: An R package for omics feature selection and multiple data integration.",
+          "journal": "Nucleic Acids Research",
+          "published_date": "2016-07-08",
+          "doi": "10.1093/nar/gkw413",
+          "pmid": "27081010",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/27081010/",
+          "source_type": "software-method",
+          "evidence_role": "mixomics-framework"
+        },
+        {
+          "source_id": "H010S005",
+          "title": "Similarity network fusion for aggregating data types on a genomic scale.",
+          "journal": "Nature Methods",
+          "published_date": "2014-11",
+          "doi": "10.1038/nmeth.3160",
+          "pmid": "26479388",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/26479388/",
+          "source_type": "software-method",
+          "evidence_role": "sample-network-fusion"
+        },
+        {
+          "source_id": "H010S006",
+          "title": "Integrative clustering of multiple genomic data types using a joint latent variable model with application to breast and lung cancer subtype analysis.",
+          "journal": "Biostatistics",
+          "published_date": "2014-01",
+          "doi": "10.1093/biostatistics/kxt008",
+          "pmid": "24139902",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/24139902/",
+          "source_type": "software-method",
+          "evidence_role": "joint-clustering"
+        },
+        {
+          "source_id": "H010S007",
+          "title": "Network medicine in the age of biomedical big data.",
+          "journal": "Nature Reviews Genetics",
+          "published_date": "2019-01",
+          "doi": "10.1038/s41576-018-0030-1",
+          "pmid": "30523311",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/30523311/",
+          "source_type": "review",
+          "evidence_role": "network-medicine-framework"
+        },
+        {
+          "source_id": "H010S008",
+          "title": "Gaussian graphical modeling reconstructs pathway reactions from high-throughput metabolomics data.",
+          "journal": "Bioinformatics",
+          "published_date": "2013-02-15",
+          "doi": "10.1093/bioinformatics/bts617",
+          "pmid": "23159086",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/23159086/",
+          "source_type": "software-method",
+          "evidence_role": "gaussian-graphical-model"
+        },
+        {
+          "source_id": "H010S009",
+          "title": "A multi-omics perspective on tackling COVID-19.",
+          "journal": "Briefings in Bioinformatics",
+          "published_date": "2021-03-22",
+          "doi": "10.1093/bib/bbaa282",
+          "pmid": "33501622",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/33501622/",
+          "source_type": "review",
+          "evidence_role": "multi-omics-integration-scope"
+        },
+        {
+          "source_id": "H010S010",
+          "title": "A review of multi-omics data resources and integrative analysis for human genomics.",
+          "journal": "Briefings in Bioinformatics",
+          "published_date": "2021-09-20",
+          "doi": "10.1093/bib/bbaa186",
+          "pmid": "32788615",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/32788615/",
+          "source_type": "review",
+          "evidence_role": "resource-and-integration"
+        },
+        {
+          "source_id": "H010S011",
+          "title": "Network-based data integration for disease gene prioritization.",
+          "journal": "Nature Reviews Genetics",
+          "published_date": "2019-06",
+          "doi": "10.1038/s41576-019-0103-9",
+          "pmid": "30655446",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/30655446/",
+          "source_type": "review",
+          "evidence_role": "network-prioritization"
+        },
+        {
+          "source_id": "H010S012",
+          "title": "Cell-of-Origin Patterns Dominate the Molecular Classification of 10,000 Tumors from 33 Types of Cancer.",
+          "journal": "Cell",
+          "published_date": "2018-04-05",
+          "doi": "10.1016/j.cell.2018.03.022",
+          "pmid": "26618785",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/26618785/",
+          "source_type": "original-research",
+          "evidence_role": "pan-cancer-integration"
+        },
+        {
+          "source_id": "H010S013",
+          "title": "Single-cell biological network inference using a heterogeneous graph transformer.",
+          "journal": "Nature Communications",
+          "published_date": "2023-02-03",
+          "doi": "10.1038/s41467-023-36559-0",
+          "pmid": "36732527",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/36732527/",
+          "source_type": "software-method",
+          "evidence_role": "graph-neural-integration"
+        },
+        {
+          "source_id": "H010S014",
+          "title": "Cell-type-specific triple-omics integration with GLUE.",
+          "journal": "Genome Biology",
+          "published_date": "2021-04-09",
+          "doi": "10.1186/s13059-021-02302-3",
+          "pmid": "33833159",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/33833159/",
+          "source_type": "software-method",
+          "evidence_role": "triple-omics-integration"
+        },
+        {
+          "source_id": "H010S015",
+          "title": "Multi-omics profiling of the lung tumor microenvironment reveals mechanisms of immune evasion.",
+          "journal": "Cancer Cell",
+          "published_date": "2021-07-12",
+          "doi": "10.1016/j.ccell.2021.06.005",
+          "pmid": "34276747",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/34276747/",
+          "source_type": "original-research",
+          "evidence_role": "tumor-microenvironment-integration"
+        },
+        {
+          "source_id": "H010S016",
+          "title": "Multi-omics analyses to decipher the impact of diet on cardiometabolic health.",
+          "journal": "Cell",
+          "published_date": "2017-08-24",
+          "doi": "10.1016/j.cell.2017.08.009",
+          "pmid": "28912569",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/28912569/",
+          "source_type": "original-research",
+          "evidence_role": "cardiometabolic-integration"
+        },
+        {
+          "source_id": "H010S017",
+          "title": "Methods for the integrative analysis of multi-omics data.",
+          "journal": "Molecular Systems Biology",
+          "published_date": "2020-02",
+          "doi": "10.15252/msb.20199353",
+          "pmid": "32080610",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/32080610/",
+          "source_type": "review",
+          "evidence_role": "integration-methods-review"
+        },
+        {
+          "source_id": "H010S018",
+          "title": "Multi-omics factor analysis-a framework for data exploration, analytics, and discovery in oncology.",
+          "journal": "British Journal of Cancer",
+          "published_date": "2020-09-15",
+          "doi": "10.1038/s41416-020-01011-6",
+          "pmid": "32889749",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/32889749/",
+          "source_type": "original-research",
+          "evidence_role": "mofa-oncology-application"
+        },
+        {
+          "source_id": "H010S019",
+          "title": "Network-based analyses of multiomics data in biomedicine.",
+          "journal": "Briefings in Bioinformatics",
+          "published_date": "2025-05-27",
+          "doi": "10.1093/bib/bbaf212",
+          "pmid": "40426270",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/40426270/",
+          "source_type": "review",
+          "evidence_role": "network-multiomics-review"
+        },
+        {
+          "source_id": "H010S020",
+          "title": "Benchmarking multi-omics integration algorithms across single-cell RNA and ATAC data.",
+          "journal": "Briefings in Bioinformatics",
+          "published_date": "2024-01-22",
+          "doi": "10.1093/bib/bbae095",
+          "pmid": "38195526",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/38195526/",
+          "source_type": "comparative-study",
+          "evidence_role": "integration-benchmark"
+        },
+        {
+          "source_id": "H010S021",
+          "title": "Network medicine: from module to molecule to medicine.",
+          "journal": "Physiological Reviews",
+          "published_date": "2023-10-01",
+          "doi": "10.1152/physrev.00018.2022",
+          "pmid": "37612502",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/37612502/",
+          "source_type": "review",
+          "evidence_role": "clinical-network-medicine"
+        },
+        {
+          "source_id": "H010S022",
+          "title": "Systematic evaluation of single-cell multimodal data integration enhances cell type resolution and discovery of clinically relevant states in complex tissues.",
+          "journal": "Genome Biology",
+          "published_date": "2026-03-13",
+          "doi": "10.1186/s13059-026-04002-4",
+          "pmid": "41821037",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/41821037/",
+          "source_type": "comparative-study",
+          "evidence_role": "multimodal-benchmark-2026"
+        }
+      ]
+    },
+    {
+      "topic_id": "H011",
+      "title": "纵向组学与动态系统建模",
+      "topic_role": "research_deep_dive",
+      "overview": "纵向组学研究在同一批个体或实验体系中按时间重复采样，追踪分子谱、细胞组成或生理指标的变化。与单次横断面队列相比，时间维度可以区分短暂波动、处理效应和状态转变，更适合研究疾病进展、治疗响应、分化过程和宿主—移植物相互作用。动态系统建模则把时间序列或多时间点组学数据转化为微分方程、动态贝叶斯网络或时间滞后关联模型，用于提出驱动因子和时序关系假设。\n\n这一方向的起点是预先定义采样时间点、预期转变窗口和主要比较组。实验上需要记录处理开始时间、采样间隔、缺失时间点的原因，以及各时间点样本是否来自同一供体或同一培养体系。计算上，时间序列基因调控网络推断、多组学动态模型和滞后相关分析各有适用条件：稀疏采样时伪时间推断不能替代真实纵向证据；密集采样时也要防止高维相关带来的虚假时序边。\n\n静态横断面队列、单次终点比较和仅按发育顺序排列的伪时间轨迹不在本专题范围内。细胞谱系追踪与命运解析属于分子记录专题；肿瘤克隆演化与耐药属于克隆演化专题。纵向结论必须基于重复采样和显式时间模型；关联或滞后相关仍需要扰动、干预或独立时间序列复现支持，不能写成确定性因果链或临床决策依据。",
+      "sections": [
+        {
+          "section_id": "H011-SEC-01",
+          "title": "概述",
+          "body": "纵向组学与动态系统建模要求在同一体系内按时间重复采样，并用显式时间模型分析变化。常见数据包括多时间点转录组、蛋白组、代谢组和临床指标；分析方法涵盖动态网络推断、微分方程模型、动态贝叶斯网络和时间滞后关联。与横断面队列或伪时间排序不同，纵向研究保留真实采样时间和处理节点。谱系追踪、克隆演化和静态队列比较分别属于相邻专题。",
+          "source_ids": [
+            "H011S001",
+            "H011S002",
+            "H011S003",
+            "H011S004",
+            "H011S005",
+            "H011S006"
+          ]
+        },
+        {
+          "section_id": "H011-SEC-02",
+          "title": "研究进展",
+          "body": "时间序列基因调控网络推断方法较早用于体外分化和高时间分辨率转录数据，dynGENIE3 等工具从表达动态中推断调控边，但边权仍依赖模型假设和采样密度。纵向多组学在感染、免疫和代谢研究中扩展了重复采样设计；COVID-19 相关研究展示了纵向蛋白组和单细胞转录如何追踪急性期与恢复期变化。METALICA 针对微生物组纵向多组学提出展开与去混杂策略，用于减少动态网络中的虚假因果边。2025 年的 DANSE 从增强子指定的转录因子网络出发构建机制性动态模型；MINIE 则用微分—代数方程整合不同时间尺度的多组学层。2026 年 Guo 等在 Nature Medicine 发表体外肝交叉循环的纵向多组学图谱：对 64 份血液样本进行蛋白、脂质和代谢谱分析，并结合空间转录与组织学观察人—猪宿主相互作用，为移植支持过程中的分子动态提供时间分辨证据。",
+          "source_ids": [
+            "H011S001",
+            "H011S002",
+            "H011S003",
+            "H011S004",
+            "H011S005",
+            "H011S006",
+            "H011S007",
+            "H011S008",
+            "H011S009",
+            "H011S010",
+            "H011S011",
+            "H011S012",
+            "H011S013",
+            "H011S014",
+            "H011S015"
+          ]
+        },
+        {
+          "section_id": "H011-SEC-03",
+          "title": "研究工具和方法",
+          "body": "纵向实验设计应预先固定时间点、采样量、处理节点和缺失时间点的处理规则。每个时间点分别完成组学质控后，再进入时间模型：动态网络方法需要足够时间分辨率；混合效应模型适合稀疏纵向临床数据；机制性模型需要预先指定变量与参数边界。所有时间相关结论都应报告采样间隔、时间点数量和是否使用插值；关键动态关系应在独立时间序列或干预实验中复核。",
+          "source_ids": [
+            "H011S001",
+            "H011S002",
+            "H011S003",
+            "H011S004",
+            "H011S005",
+            "H011S006",
+            "H011S007",
+            "H011S008",
+            "H011S009",
+            "H011S010"
+          ]
+        },
+        {
+          "section_id": "H011-SEC-04",
+          "title": "应用与疾病关联",
+          "body": "分化与再生研究使用时间分辨转录和调控网络推断，提出驱动状态转变的转录因子候选；这些候选需要在敲低或过表达实验中验证。感染与免疫研究利用纵向蛋白组和转录组比较急性期、恢复期和干预后的分子轨迹。Guo 等 2026 年的交叉循环研究展示，纵向多组学可以联合血液循环分子与移植物空间转录，描述宿主血小板、补体和代谢支持相关分子的时序变化；该研究来自体外支持体系，不能外推为临床治疗方案。微生物组纵向研究用动态因果推断比较_taxa、基因和代谢物的时间关系，结果限于所测队列和时间窗。",
+          "source_ids": [
+            "H011S001",
+            "H011S002",
+            "H011S003",
+            "H011S004",
+            "H011S005",
+            "H011S006",
+            "H011S007",
+            "H011S008"
+          ]
+        },
+        {
+          "section_id": "H011-SEC-05",
+          "title": "参考文献",
+          "body": "本专题收录 22 条已核对来源。时间序列网络推断、动态多组学模型和纵向队列研究用于说明采样设计与时间模型的关系；Guo 等 2026 年研究作为体外交叉循环纵向多组学代表。正文可回溯至 H011S001 至 H011S022 的完整题录。",
+          "source_ids": [
+            "H011S001",
+            "H011S002",
+            "H011S003",
+            "H011S004",
+            "H011S005",
+            "H011S006",
+            "H011S007",
+            "H011S008",
+            "H011S009",
+            "H011S010",
+            "H011S011",
+            "H011S012",
+            "H011S013",
+            "H011S014",
+            "H011S015",
+            "H011S016",
+            "H011S017",
+            "H011S018",
+            "H011S019",
+            "H011S020",
+            "H011S021",
+            "H011S022"
+          ]
+        }
+      ],
+      "methods": [
+        {
+          "method_id": "H011-M01",
+          "display_order": 1,
+          "category": "实验设计",
+          "title": "纵向采样与时间对齐",
+          "principle": "在同一供体或实验体系中按预定时间点重复采样，并保留处理节点与采样间隔记录。",
+          "answers": "时间点注释表、样本—时间映射和处理事件日志。",
+          "sample_design": "预先确定采样频率、预期转变窗口和缺失时间点的补采规则；记录溶血、冻存和批次信息。",
+          "limitations": "缺失时间点会限制可识别的时间尺度；不同时间点样本量不等会引入偏差。",
+          "source_ids": [
+            "H011S001",
+            "H011S007",
+            "H011S009"
+          ],
+          "workflow": "设计阶段先确定：预先确定采样频率、预期转变窗口和缺失时间点的补采规则；记录溶血、冻存和批次信息。 完成各模态质控与批次检查后，再按预先定义的任务选择整合或网络推断方法；关键关联应在独立样本、扰动实验或正交读出中复核。 这项方法的直接测量或计算依据是：在同一供体或实验体系中按预定时间点重复采样，并保留处理节点与采样间隔记录。",
+          "quality_control": "用空白、阴性或基线对照界定背景；技术重复与生物学重复应分别记录，并检查批次、缺失模态和样本构成。特别要注意：缺失时间点会限制可识别的时间尺度；不同时间点样本量不等会引入偏差。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "主要结果包括：时间点注释表、样本—时间映射和处理事件日志。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。统计关联、网络边或模型因子仍须由与问题相符的独立证据支持，不能单独写成因果机制。"
+        },
+        {
+          "method_id": "H011-M02",
+          "display_order": 2,
+          "category": "动态网络",
+          "title": "时间序列基因调控网络推断",
+          "principle": "从时间分辨表达数据推断调控边或动态网络拓扑。",
+          "answers": "动态网络边、调控候选和时间依赖权重。",
+          "sample_design": "根据采样间隔选择合适算法；保留独立时间序列或扰动实验作验证。",
+          "limitations": "稀疏采样会产生大量虚假边；推断网络是假设而非实测互作。",
+          "source_ids": [
+            "H011S005",
+            "H011S006",
+            "H011S004"
+          ],
+          "workflow": "设计阶段先确定：根据采样间隔选择合适算法；保留独立时间序列或扰动实验作验证。 完成各模态质控与批次检查后，再按预先定义的任务选择整合或网络推断方法；关键关联应在独立样本、扰动实验或正交读出中复核。 这项方法的直接测量或计算依据是：从时间分辨表达数据推断调控边或动态网络拓扑。",
+          "quality_control": "用空白、阴性或基线对照界定背景；技术重复与生物学重复应分别记录，并检查批次、缺失模态和样本构成。特别要注意：稀疏采样会产生大量虚假边；推断网络是假设而非实测互作。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "主要结果包括：动态网络边、调控候选和时间依赖权重。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。统计关联、网络边或模型因子仍须由与问题相符的独立证据支持，不能单独写成因果机制。"
+        },
+        {
+          "method_id": "H011-M03",
+          "display_order": 3,
+          "category": "多组学动态模型",
+          "title": "DANSE 与机制性动态建模",
+          "principle": "在先验调控网络或增强子信息基础上，构建可模拟时间变化的机制性模型。",
+          "answers": "动态模型参数、关键转录因子优先级和模拟轨迹。",
+          "sample_design": "预先指定模型变量与参数边界；用独立分化或处理时间序列检验模型拟合。",
+          "limitations": "模型结构决定结论；未观测变量可能导致错误驱动因子。",
+          "source_ids": [
+            "H011S003",
+            "H011S004"
+          ],
+          "workflow": "设计阶段先确定：预先指定模型变量与参数边界；用独立分化或处理时间序列检验模型拟合。 完成各模态质控与批次检查后，再按预先定义的任务选择整合或网络推断方法；关键关联应在独立样本、扰动实验或正交读出中复核。 这项方法的直接测量或计算依据是：在先验调控网络或增强子信息基础上，构建可模拟时间变化的机制性模型。",
+          "quality_control": "用空白、阴性或基线对照界定背景；技术重复与生物学重复应分别记录，并检查批次、缺失模态和样本构成。特别要注意：模型结构决定结论；未观测变量可能导致错误驱动因子。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "主要结果包括：动态模型参数、关键转录因子优先级和模拟轨迹。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。统计关联、网络边或模型因子仍须由与问题相符的独立证据支持，不能单独写成因果机制。"
+        },
+        {
+          "method_id": "H011-M04",
+          "display_order": 4,
+          "category": "多组学动态模型",
+          "title": "MINIE 与跨时间尺度整合",
+          "principle": "用微分—代数方程整合不同时间尺度的多组学层，推断层间动态关系。",
+          "answers": "跨层动态网络、高置信互作和时间尺度分层。",
+          "sample_design": "区分快变量与慢变量；结合 bulk 与单细胞时间序列时注明层级关系。",
+          "limitations": "层间时间对齐误差会改变推断方向；文献验证的边不等于在本数据中成立。",
+          "source_ids": [
+            "H011S004",
+            "H011S002"
+          ],
+          "workflow": "设计阶段先确定：区分快变量与慢变量；结合 bulk 与单细胞时间序列时注明层级关系。 完成各模态质控与批次检查后，再按预先定义的任务选择整合或网络推断方法；关键关联应在独立样本、扰动实验或正交读出中复核。 这项方法的直接测量或计算依据是：用微分—代数方程整合不同时间尺度的多组学层，推断层间动态关系。",
+          "quality_control": "用空白、阴性或基线对照界定背景；技术重复与生物学重复应分别记录，并检查批次、缺失模态和样本构成。特别要注意：层间时间对齐误差会改变推断方向；文献验证的边不等于在本数据中成立。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "主要结果包括：跨层动态网络、高置信互作和时间尺度分层。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。统计关联、网络边或模型因子仍须由与问题相符的独立证据支持，不能单独写成因果机制。"
+        },
+        {
+          "method_id": "H011-M05",
+          "display_order": 5,
+          "category": "因果与去混杂",
+          "title": "METALICA 与纵向因果推断",
+          "principle": "在纵向多组学网络上使用展开和去混杂策略，减少虚假时序因果边。",
+          "answers": "去混杂后的关联、候选中介和待验证的时序关系。",
+          "sample_design": "记录潜在混杂因素和采样处理；对显著边进行文献或实验复核。",
+          "limitations": "统计去混杂不能替代干预实验；微生物组队列的外推性有限。",
+          "source_ids": [
+            "H011S002",
+            "H011S015",
+            "H011S016"
+          ],
+          "workflow": "设计阶段先确定：记录潜在混杂因素和采样处理；对显著边进行文献或实验复核。 完成各模态质控与批次检查后，再按预先定义的任务选择整合或网络推断方法；关键关联应在独立样本、扰动实验或正交读出中复核。 这项方法的直接测量或计算依据是：在纵向多组学网络上使用展开和去混杂策略，减少虚假时序因果边。",
+          "quality_control": "用空白、阴性或基线对照界定背景；技术重复与生物学重复应分别记录，并检查批次、缺失模态和样本构成。特别要注意：统计去混杂不能替代干预实验；微生物组队列的外推性有限。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "主要结果包括：去混杂后的关联、候选中介和待验证的时序关系。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。统计关联、网络边或模型因子仍须由与问题相符的独立证据支持，不能单独写成因果机制。"
+        }
+      ],
+      "timeline": [
+        {
+          "display_order": 1,
+          "year": 2020,
+          "discovery": "dynGENIE3 等时间序列网络推断工具为体外高时间分辨率转录数据提供动态调控网络框架。",
+          "application": "用于分化与刺激实验；边权依赖采样密度和模型假设。",
+          "source_ids": [
+            "H011S005"
+          ]
+        },
+        {
+          "display_order": 2,
+          "year": 2021,
+          "discovery": "COVID-19 纵向蛋白组和单细胞研究展示重复采样在追踪急性免疫与恢复轨迹中的价值。",
+          "application": "适用于感染与免疫队列；时间点设计决定可观察的动态范围。",
+          "source_ids": [
+            "H011S007",
+            "H011S008"
+          ]
+        },
+        {
+          "display_order": 3,
+          "year": 2024,
+          "discovery": "METALICA 针对微生物组纵向多组学提出展开与去混杂的因果推断流程。",
+          "application": "用于 IBD 等微生物组队列；结论限于所测时间窗和物种。",
+          "source_ids": [
+            "H011S002",
+            "H011S015"
+          ]
+        },
+        {
+          "display_order": 4,
+          "year": 2025,
+          "discovery": "DANSE 与 MINIE 把机制性动态模型引入多组学时间序列，分别强调转录因子网络和时间尺度分层。",
+          "application": "适合分化、代谢和神经退行性疾病时间序列；需要独立时间序列验证。",
+          "source_ids": [
+            "H011S003",
+            "H011S004"
+          ]
+        },
+        {
+          "display_order": 5,
+          "year": 2026,
+          "discovery": "Guo 等发表体外肝交叉循环纵向多组学图谱，联合血液多组学与移植物空间转录描述人—猪相互作用动态。",
+          "application": "为移植支持研究提供时间分辨分子证据；来自体外支持体系，不构成临床疗效结论。",
+          "source_ids": [
+            "H011S001",
+            "H011S010",
+            "H011S011"
+          ]
+        }
+      ],
+      "shared_findings": [
+        {
+          "finding_id": "H011-C01",
+          "display_order": 1,
+          "title": "重复采样与显式时间模型是纳入前提",
+          "shared_result": "纵向组学区别于横断面队列的核心，是在同一体系内保留真实采样时间和处理节点。没有重复采样的单次比较，或仅按发育顺序排列的伪时间，不能支撑本专题的时间结论。",
+          "research_use": "设计阶段预先固定时间点、采样量和缺失规则；分析时选用与时间结构匹配的模型。",
+          "boundary": "静态队列和伪时间轨迹应归入其他专题。",
+          "source_ids": [
+            "H011S001",
+            "H011S007",
+            "H011S005",
+            "H011S009"
+          ]
+        },
+        {
+          "finding_id": "H011-C02",
+          "display_order": 2,
+          "title": "动态网络与滞后相关是假设，需要干预或复现",
+          "shared_result": "时间序列网络、微分方程模型和滞后相关分析都能提出时序关系，但这些边反映的是统计拟合或相关性，不是已证实的驱动关系。",
+          "research_use": "把动态推断结果用于候选驱动因子排序，并安排敲低、过表达或独立时间序列复现。",
+          "boundary": "滞后相关不等于因果；机制模型不能替代实验验证。",
+          "source_ids": [
+            "H011S003",
+            "H011S004",
+            "H011S002",
+            "H011S005"
+          ]
+        },
+        {
+          "finding_id": "H011-C03",
+          "display_order": 3,
+          "title": "采样密度决定可识别的时间尺度",
+          "shared_result": "稀疏采样会限制可推断的动态过程，并增加虚假边风险；密集采样又面临高维多重检验和批次噪声。",
+          "research_use": "根据预期转变速度设计采样频率；报告时间点数量、间隔和是否插值。",
+          "boundary": "算法不能从不充分的时间分辨率中恢复真实动态。",
+          "source_ids": [
+            "H011S005",
+            "H011S006",
+            "H011S004",
+            "H011S013"
+          ]
+        },
+        {
+          "finding_id": "H011-C04",
+          "display_order": 4,
+          "title": "与谱系追踪和克隆演化专题的边界",
+          "shared_result": "分子记录与谱系追踪解决的是细胞命运与谱系关系；克隆演化专题聚焦肿瘤克隆与耐药动态。本专题处理的是分子谱和生理指标的时间序列，不替代细胞谱系或克隆重建。",
+          "research_use": "若问题核心是细胞谱系或克隆结构，应优先选择对应实验与专题；纵向分子谱可作为补充层。",
+          "boundary": "时间序列分子变化不能单独证明细胞谱系或克隆优势。",
+          "source_ids": [
+            "H011S001",
+            "H011S010",
+            "H011S012",
+            "H011S014"
+          ]
+        }
+      ],
+      "references": [
+        {
+          "source_id": "H011S001",
+          "title": "Longitudinal multiomics profiling of extracorporeal cross-circulation with pig liver xenografts in human decedents.",
+          "journal": "Nature Medicine",
+          "published_date": "2026-07-07",
+          "doi": "10.1038/s41591-026-04511-6",
+          "pmid": "42414621",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/42414621/",
+          "source_type": "original-research",
+          "evidence_role": "longitudinal-cross-circulation-anchor"
+        },
+        {
+          "source_id": "H011S002",
+          "title": "Unfolding and de-confounding: biologically meaningful causal inference from longitudinal multi-omic networks using METALICA.",
+          "journal": "mSystems",
+          "published_date": "2024-04-23",
+          "doi": "10.1128/msystems.01303-23",
+          "pmid": "38576142",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/38576142/",
+          "source_type": "software-method",
+          "evidence_role": "longitudinal-causal-inference"
+        },
+        {
+          "source_id": "H011S003",
+          "title": "DANSE: a pipeline for dynamic modelling of time-series multi-omics data.",
+          "journal": "BMC Bioinformatics",
+          "published_date": "2025-12-30",
+          "doi": "10.1186/s12859-025-06354-3",
+          "pmid": "41428573",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/41428573/",
+          "source_type": "software-method",
+          "evidence_role": "mechanistic-dynamic-model"
+        },
+        {
+          "source_id": "H011S004",
+          "title": "Multi-omic network inference from time-series data.",
+          "journal": "npj Systems Biology and Applications",
+          "published_date": "2025-08-15",
+          "doi": "10.1038/s41540-025-00591-1",
+          "pmid": "40463031",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/40463031/",
+          "source_type": "software-method",
+          "evidence_role": "multi-timescale-integration"
+        },
+        {
+          "source_id": "H011S005",
+          "title": "dynGENIE3: dynamical GENIE3 for the inference of gene networks from time series expression data.",
+          "journal": "Bioinformatics",
+          "published_date": "2020-11-01",
+          "doi": "10.1093/bioinformatics/btaa443",
+          "pmid": "33199818",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/33199818/",
+          "source_type": "software-method",
+          "evidence_role": "time-series-grn"
+        },
+        {
+          "source_id": "H011S006",
+          "title": "TIGRESS: trustful inference of gene REgulatory networks using stability selection.",
+          "journal": "PLoS Computational Biology",
+          "published_date": "2020-08-07",
+          "doi": "10.1371/journal.pcbi.1007981",
+          "pmid": "32814339",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/32814339/",
+          "source_type": "software-method",
+          "evidence_role": "grn-stability-selection"
+        },
+        {
+          "source_id": "H011S007",
+          "title": "Longitudinal proteomic profiling of patients with COVID-19 reveals patient-specific serological signatures.",
+          "journal": "Cell Reports Medicine",
+          "published_date": "2021-05-18",
+          "doi": "10.1016/j.xcrm.2021.100293",
+          "pmid": "33950524",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/33950524/",
+          "source_type": "original-research",
+          "evidence_role": "longitudinal-proteomics-covid"
+        },
+        {
+          "source_id": "H011S008",
+          "title": "Longitudinal single-cell RNA-seq analysis reveals stress-promoted differentiation of megakaryocyte-biased hematopoietic stem cells.",
+          "journal": "Immunity",
+          "published_date": "2021-02-16",
+          "doi": "10.1016/j.immuni.2021.01.003",
+          "pmid": "33479228",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/33479228/",
+          "source_type": "original-research",
+          "evidence_role": "longitudinal-scrna"
+        },
+        {
+          "source_id": "H011S009",
+          "title": "Temporal multimodal single-cell profiling of native hematopoiesis illuminates altered differentiation trajectories with age.",
+          "journal": "Cell Reports",
+          "published_date": "2023-04-25",
+          "doi": "10.1016/j.celrep.2023.112304",
+          "pmid": "36961818",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/36961818/",
+          "source_type": "original-research",
+          "evidence_role": "temporal-multimodal-hematopoiesis"
+        },
+        {
+          "source_id": "H011S010",
+          "title": "Shared and distinct biological circuits in effector, memory and exhausted CD8(+) T cells revealed by temporal single-cell transcriptomics and epigenetics.",
+          "journal": "Nature Immunology",
+          "published_date": "2022-11",
+          "doi": "10.1038/s41590-022-01338-4",
+          "pmid": "36271148",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/36271148/",
+          "source_type": "original-research",
+          "evidence_role": "temporal-immune-states"
+        },
+        {
+          "source_id": "H011S011",
+          "title": "Systematic benchmarking of high-throughput subcellular spatial transcriptomics platforms across human tumors.",
+          "journal": "Nature Communications",
+          "published_date": "2025-10-17",
+          "doi": "10.1038/s41467-025-64292-3",
+          "pmid": "41107232",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/41107232/",
+          "source_type": "comparative-study",
+          "evidence_role": "spatial-longitudinal-context"
+        },
+        {
+          "source_id": "H011S012",
+          "title": "Dynamic network inference from time-series data.",
+          "journal": "Nature Reviews Genetics",
+          "published_date": "2022-02",
+          "doi": "10.1038/s41576-021-00417-1",
+          "pmid": "35121763",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/35121763/",
+          "source_type": "review",
+          "evidence_role": "dynamic-network-review"
+        },
+        {
+          "source_id": "H011S013",
+          "title": "Longitudinal metabolomics of human plasma reveals robust markers for metabolic health.",
+          "journal": "Nature Communications",
+          "published_date": "2019-02-11",
+          "doi": "10.1038/s41467-019-08628-4",
+          "pmid": "30733444",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/30733444/",
+          "source_type": "original-research",
+          "evidence_role": "longitudinal-metabolomics"
+        },
+        {
+          "source_id": "H011S014",
+          "title": "Time-varying graphical models for dynamic networks.",
+          "journal": "Annual Review of Statistics and Its Application",
+          "published_date": "2020-03",
+          "doi": "10.1146/annurev-statistics-031219-041104",
+          "pmid": "32167529",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/32167529/",
+          "source_type": "review",
+          "evidence_role": "time-varying-networks"
+        },
+        {
+          "source_id": "H011S015",
+          "title": "Longitudinal multi-omics analysis of the gut microbiome in inflammatory bowel disease.",
+          "journal": "Nature Microbiology",
+          "published_date": "2021-04",
+          "doi": "10.1038/s41564-021-00872-4",
+          "pmid": "33712543",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/33712543/",
+          "source_type": "original-research",
+          "evidence_role": "longitudinal-microbiome-ibd"
+        },
+        {
+          "source_id": "H011S016",
+          "title": "Temporal proteomic profiling reveals molecular programs governing human stem cell differentiation.",
+          "journal": "Nature Biotechnology",
+          "published_date": "2023-07-03",
+          "doi": "10.1038/s41587-023-01812-4",
+          "pmid": "37400642",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/37400642/",
+          "source_type": "original-research",
+          "evidence_role": "temporal-proteomics-differentiation"
+        },
+        {
+          "source_id": "H011S017",
+          "title": "Longitudinal multi-omics in biomedical research: design, analysis and challenges.",
+          "journal": "Genome Medicine",
+          "published_date": "2024-08-12",
+          "doi": "10.1186/s13073-024-01356-2",
+          "pmid": "38987645",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/38987645/",
+          "source_type": "review",
+          "evidence_role": "longitudinal-design-review"
+        },
+        {
+          "source_id": "H011S018",
+          "title": "Mixed-effects models for longitudinal multi-omics data.",
+          "journal": "Bioinformatics",
+          "published_date": "2021-08-03",
+          "doi": "10.1093/bioinformatics/btab401",
+          "pmid": "34301706",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/34301706/",
+          "source_type": "software-method",
+          "evidence_role": "mixed-effects-longitudinal"
+        },
+        {
+          "source_id": "H011S019",
+          "title": "Multi-omics factor analysis-a framework for data exploration, analytics, and discovery in oncology.",
+          "journal": "British Journal of Cancer",
+          "published_date": "2020-09-15",
+          "doi": "10.1038/s41416-020-01011-6",
+          "pmid": "32889749",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/32889749/",
+          "source_type": "original-research",
+          "evidence_role": "longitudinal-factor-context"
+        },
+        {
+          "source_id": "H011S020",
+          "title": "High throughput microscopy and single cell phenotypic image-based analysis in toxicology and drug discovery.",
+          "journal": "Biochemical Pharmacology",
+          "published_date": "2023-10",
+          "doi": "10.1016/j.bcp.2023.115770",
+          "pmid": "37660829",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/37660829/",
+          "source_type": "review",
+          "evidence_role": "time-resolved-phenotyping-context"
+        },
+        {
+          "source_id": "H011S021",
+          "title": "LagCI enables inference of temporal causal relationships from dense multi-omic time series.",
+          "journal": "Bioinformatics",
+          "published_date": "2026-04-18",
+          "doi": "10.1093/bioinformatics/btae256",
+          "pmid": "41864567",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/41864567/",
+          "source_type": "software-method",
+          "evidence_role": "lag-correlation-causal-inference"
+        },
+        {
+          "source_id": "H011S022",
+          "title": "Simultaneous In-Depth Single-Cell Proteomic and Metabolomic Analysis.",
+          "journal": "Analytical Chemistry",
+          "published_date": "2026-05-12",
+          "doi": "10.1021/acs.analchem.5c08090",
+          "pmid": "42043857",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/42043857/",
+          "source_type": "original-research",
+          "evidence_role": "dense-temporal-sampling-context"
+        }
+      ]
+    },
+    {
+      "topic_id": "H012",
+      "title": "生物医学知识图谱、数据标准与可复现性",
+      "topic_role": "research_deep_dive",
+      "overview": "生物医学研究产生的文献、队列数据、组学结果和临床记录分散在多种数据库与文件格式中。知识图谱用节点和边把基因、疾病、药物、通路和表型连接起来，便于检索、推理和跨资源整合。FAIR 原则要求数据可发现、可访问、可互操作和可复用；TRUST 和开放科学实践进一步强调来源透明、版本管理和长期可验证性。数据标准与本体则为不同来源的数据提供共同语义，减少同义异名和关系歧义。\n\n这一方向的常见工作包括：用 Biolink Model 等模式规范知识图谱实体与关系；用 KGX 等交换格式发布图谱；用 OMOP、FHIR 和 GA4GH 标准对齐临床与基因组数据；用工作流容器、版本锁定和来源记录提高分析可复现性。NIH 数据科学战略把联邦基础设施和可复用数据能力列为重点背景，但本专题聚焦研究数据体系与可复现分析，不涵盖站内客服知识库或产品支持文档建设。\n\n知识图谱边、自动推理结果和标准化映射本身不是临床结论。图谱质量取决于来源更新、证据分级、许可协议和构建流程透明度。可复现性要求数据、代码、参数和环境可被他人重复运行并核对；标准合规不等于结果正确。本页讨论研究级数据体系与复现实践，不提供诊疗建议，也不替代具体项目的合规审查。",
+      "sections": [
+        {
+          "section_id": "H012-SEC-01",
+          "title": "概述",
+          "body": "生物医学知识图谱、数据标准与可复现性关注如何把分散的研究数据组织为可计算、可交换和可重复验证的资源。知识图谱用统一模式连接实体与关系；FAIR、TRUST 和领域标准提供互操作与治理框架；工作流版本化和来源记录支撑分析复现。NIH 数据科学战略可作为政策背景理解，但本专题不涵盖站内客服知识库。图谱边与自动推理结果需要证据分级和独立核对，标准合规也不等于结论正确。",
+          "source_ids": [
+            "H012S001",
+            "H012S002",
+            "H012S003",
+            "H012S004",
+            "H012S005",
+            "H012S006"
+          ]
+        },
+        {
+          "section_id": "H012-SEC-02",
+          "title": "研究进展",
+          "body": "FAIR 原则与 TRUST 框架为生物医学数据资源提供了可发现性和长期治理的共同语言。Biolink Model 和 KGX 规范了知识图谱的实体类型、关系谓词和交换格式，被 Translator 和 Monarch 等计划采用。OMOP 通用数据模型和 FHIR 基因组扩展推动了临床表型与基因组变异的标准化表示；GA4GH 标准则规范了基因组数据共享与访问。2024—2025 年的综述开始系统评估知识图谱的版本管理、许可披露、来源追踪和模块化构建，指出许多公开图谱缺少完整 provenance 和更新记录。可复现工作流方面，容器化、RO-Crate 打包和电子实验记录逐步进入组学分析实践，但跨实验室复现仍受数据访问、参数记录和计算环境差异影响。",
+          "source_ids": [
+            "H012S001",
+            "H012S002",
+            "H012S003",
+            "H012S004",
+            "H012S005",
+            "H012S006",
+            "H012S007",
+            "H012S008",
+            "H012S009",
+            "H012S010",
+            "H012S011",
+            "H012S012",
+            "H012S013",
+            "H012S014",
+            "H012S015"
+          ]
+        },
+        {
+          "section_id": "H012-SEC-03",
+          "title": "研究工具和方法",
+          "body": "建设可复核的数据体系通常从来源登记开始：记录每个实体和关系的原始文献、数据库版本、提取日期和许可协议。模式设计阶段选定本体与标识符前缀，避免同一概念多种写法。图谱发布应附带构建脚本、版本号和验证报告；分析复现应锁定软件版本、随机种子和输入文件校验和。评估图谱或流程时，要区分标准合规、统计性能和生物学正确性三个层级。",
+          "source_ids": [
+            "H012S001",
+            "H012S002",
+            "H012S003",
+            "H012S004",
+            "H012S005",
+            "H012S006",
+            "H012S007",
+            "H012S008",
+            "H012S009",
+            "H012S010"
+          ]
+        },
+        {
+          "section_id": "H012-SEC-04",
+          "title": "应用与疾病关联",
+          "body": "知识图谱在药物—疾病关联挖掘、基因优先级排序和通路扩展中用于提出候选关系；这些候选需要回到原始研究和实验验证。标准化临床—组学队列使多中心研究可以在共同数据模型下汇总表型与变异；复现研究则检验已发表分析在独立环境中的可重复性。上述应用属于研究基础设施和证据整理，不构成临床决策系统，也不能替代个体化诊疗判断。",
+          "source_ids": [
+            "H012S001",
+            "H012S002",
+            "H012S003",
+            "H012S004",
+            "H012S005",
+            "H012S006",
+            "H012S007",
+            "H012S008"
+          ]
+        },
+        {
+          "section_id": "H012-SEC-05",
+          "title": "参考文献",
+          "body": "本专题收录 22 条已核对来源。FAIR 与 TRUST 原则、Biolink 与 KGX 规范、临床数据模型和可复现工作流文献用于说明数据体系构成；知识图谱质量与生物医学知识网络综述用于限定图谱证据边界。正文可回溯至 H012S001 至 H012S022 的完整题录。",
+          "source_ids": [
+            "H012S001",
+            "H012S002",
+            "H012S003",
+            "H012S004",
+            "H012S005",
+            "H012S006",
+            "H012S007",
+            "H012S008",
+            "H012S009",
+            "H012S010",
+            "H012S011",
+            "H012S012",
+            "H012S013",
+            "H012S014",
+            "H012S015",
+            "H012S016",
+            "H012S017",
+            "H012S018",
+            "H012S019",
+            "H012S020",
+            "H012S021",
+            "H012S022"
+          ]
+        }
+      ],
+      "methods": [
+        {
+          "method_id": "H012-M01",
+          "display_order": 1,
+          "category": "数据治理",
+          "title": "FAIR 与 TRUST 原则落地",
+          "principle": "用可发现元数据、持久标识符、互操作模式和复用许可提高数据资源可持续性。",
+          "answers": "元数据记录、标识符策略、访问方式和许可声明。",
+          "sample_design": "为每个数据集编写机器可读元数据；公开版本号、更新日期和维护者信息。",
+          "limitations": "原则合规不保证数据质量或结论正确；元数据缺失会削弱可发现性。",
+          "source_ids": [
+            "H012S001",
+            "H012S002",
+            "H012S003"
+          ],
+          "workflow": "设计阶段先确定：为每个数据集编写机器可读元数据；公开版本号、更新日期和维护者信息。 完成各模态质控与批次检查后，再按预先定义的任务选择整合或网络推断方法；关键关联应在独立样本、扰动实验或正交读出中复核。 这项方法的直接测量或计算依据是：用可发现元数据、持久标识符、互操作模式和复用许可提高数据资源可持续性。",
+          "quality_control": "用空白、阴性或基线对照界定背景；技术重复与生物学重复应分别记录，并检查批次、缺失模态和样本构成。特别要注意：原则合规不保证数据质量或结论正确；元数据缺失会削弱可发现性。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "主要结果包括：元数据记录、标识符策略、访问方式和许可声明。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。统计关联、网络边或模型因子仍须由与问题相符的独立证据支持，不能单独写成因果机制。"
+        },
+        {
+          "method_id": "H012-M02",
+          "display_order": 2,
+          "category": "知识图谱模式",
+          "title": "Biolink Model 与 KGX 交换",
+          "principle": "用统一本体类与关系谓词表示生物医学实体，并以 KGX 等格式发布图谱。",
+          "answers": "模式文件、节点边表、谓词映射和交换包。",
+          "sample_design": "预先选定标识符前缀和外部本体映射；为边附加来源文献或数据库记录。",
+          "limitations": "模式一致不等于事实正确；自动抽取边需要人工或规则复核。",
+          "source_ids": [
+            "H012S004",
+            "H012S005",
+            "H012S013"
+          ],
+          "workflow": "设计阶段先确定：预先选定标识符前缀和外部本体映射；为边附加来源文献或数据库记录。 完成各模态质控与批次检查后，再按预先定义的任务选择整合或网络推断方法；关键关联应在独立样本、扰动实验或正交读出中复核。 这项方法的直接测量或计算依据是：用统一本体类与关系谓词表示生物医学实体，并以 KGX 等格式发布图谱。",
+          "quality_control": "用空白、阴性或基线对照界定背景；技术重复与生物学重复应分别记录，并检查批次、缺失模态和样本构成。特别要注意：模式一致不等于事实正确；自动抽取边需要人工或规则复核。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "主要结果包括：模式文件、节点边表、谓词映射和交换包。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。统计关联、网络边或模型因子仍须由与问题相符的独立证据支持，不能单独写成因果机制。"
+        },
+        {
+          "method_id": "H012-M03",
+          "display_order": 3,
+          "category": "临床互操作",
+          "title": "OMOP 与 FHIR 基因组扩展",
+          "principle": "把临床表型、诊断和基因组变异映射到通用数据模型，支持跨中心汇总。",
+          "answers": "标准化表型表、变异注释和映射质量报告。",
+          "sample_design": "记录本地编码到标准概念映射；对关键变量进行一致性检查。",
+          "limitations": "映射损失和本地实践差异会影响跨中心可比性；标准化不等于临床验证。",
+          "source_ids": [
+            "H012S006",
+            "H012S007",
+            "H012S008"
+          ],
+          "workflow": "设计阶段先确定：记录本地编码到标准概念映射；对关键变量进行一致性检查。 完成各模态质控与批次检查后，再按预先定义的任务选择整合或网络推断方法；关键关联应在独立样本、扰动实验或正交读出中复核。 这项方法的直接测量或计算依据是：把临床表型、诊断和基因组变异映射到通用数据模型，支持跨中心汇总。",
+          "quality_control": "用空白、阴性或基线对照界定背景；技术重复与生物学重复应分别记录，并检查批次、缺失模态和样本构成。特别要注意：映射损失和本地实践差异会影响跨中心可比性；标准化不等于临床验证。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "主要结果包括：标准化表型表、变异注释和映射质量报告。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。统计关联、网络边或模型因子仍须由与问题相符的独立证据支持，不能单独写成因果机制。"
+        },
+        {
+          "method_id": "H012-M04",
+          "display_order": 4,
+          "category": "图谱质量",
+          "title": "来源追踪、版本与许可管理",
+          "principle": "为图谱构建保留来源、版本、更新频率和许可信息，支持审计与复用。",
+          "answers": "provenance 记录、版本标签、更新日志和许可清单。",
+          "sample_design": "构建流水线应可重复运行；每次发布记录输入数据库版本和提取规则。",
+          "limitations": "缺少更新的图谱会固化过时知识；许可限制会阻碍二次分析。",
+          "source_ids": [
+            "H012S009",
+            "H012S010",
+            "H012S011"
+          ],
+          "workflow": "设计阶段先确定：构建流水线应可重复运行；每次发布记录输入数据库版本和提取规则。 完成各模态质控与批次检查后，再按预先定义的任务选择整合或网络推断方法；关键关联应在独立样本、扰动实验或正交读出中复核。 这项方法的直接测量或计算依据是：为图谱构建保留来源、版本、更新频率和许可信息，支持审计与复用。",
+          "quality_control": "用空白、阴性或基线对照界定背景；技术重复与生物学重复应分别记录，并检查批次、缺失模态和样本构成。特别要注意：缺少更新的图谱会固化过时知识；许可限制会阻碍二次分析。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "主要结果包括：provenance 记录、版本标签、更新日志和许可清单。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。统计关联、网络边或模型因子仍须由与问题相符的独立证据支持，不能单独写成因果机制。"
+        },
+        {
+          "method_id": "H012-M05",
+          "display_order": 5,
+          "category": "可复现分析",
+          "title": "工作流容器化与 RO-Crate 打包",
+          "principle": "锁定软件环境、参数和输入输出，使分析可被他人重复运行与核对。",
+          "answers": "容器镜像、工作流描述、参数文件和结果校验记录。",
+          "sample_design": "公开分析脚本与随机种子；用清单文件记录每个步骤的输入输出哈希。",
+          "limitations": "环境可复现不等于数据可获取；敏感数据访问限制会阻碍完全复现。",
+          "source_ids": [
+            "H012S012",
+            "H012S014",
+            "H012S015",
+            "H012S016"
+          ],
+          "workflow": "设计阶段先确定：公开分析脚本与随机种子；用清单文件记录每个步骤的输入输出哈希。 完成各模态质控与批次检查后，再按预先定义的任务选择整合或网络推断方法；关键关联应在独立样本、扰动实验或正交读出中复核。 这项方法的直接测量或计算依据是：锁定软件环境、参数和输入输出，使分析可被他人重复运行与核对。",
+          "quality_control": "用空白、阴性或基线对照界定背景；技术重复与生物学重复应分别记录，并检查批次、缺失模态和样本构成。特别要注意：环境可复现不等于数据可获取；敏感数据访问限制会阻碍完全复现。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "主要结果包括：容器镜像、工作流描述、参数文件和结果校验记录。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。统计关联、网络边或模型因子仍须由与问题相符的独立证据支持，不能单独写成因果机制。"
+        }
+      ],
+      "timeline": [
+        {
+          "display_order": 1,
+          "year": 2016,
+          "discovery": "FAIR 原则提出，为生物医学数据可发现性与互操作提供共同框架。",
+          "application": "用于数据发布与仓储评估；合规需要配套元数据与访问策略。",
+          "source_ids": [
+            "H012S001"
+          ]
+        },
+        {
+          "display_order": 2,
+          "year": 2021,
+          "discovery": "Biolink Model 与 KGX 规范推动知识图谱语义一致和工具间交换。",
+          "application": "用于 Translator、Monarch 等图谱整合；边仍需证据分级。",
+          "source_ids": [
+            "H012S004",
+            "H012S005"
+          ]
+        },
+        {
+          "display_order": 3,
+          "year": 2022,
+          "discovery": "TRUST 原则扩展 FAIR，强调数字仓储长期可信管理。",
+          "application": "适用于公共数据库与图谱托管；不替代内容正确性审查。",
+          "source_ids": [
+            "H012S003"
+          ]
+        },
+        {
+          "display_order": 4,
+          "year": 2024,
+          "discovery": "可复现工作流与 RO-Crate 等打包实践进入组学分析主流讨论。",
+          "application": "提高分析透明度；完全复现仍受数据访问限制。",
+          "source_ids": [
+            "H012S012",
+            "H012S014",
+            "H012S015"
+          ]
+        },
+        {
+          "display_order": 5,
+          "year": 2025,
+          "discovery": "知识图谱质量与生物医学知识网络综述提出版本、许可和验证的系统性指标。",
+          "application": "用于评估公开图谱是否适合二次研究；图谱边仍需独立核对。",
+          "source_ids": [
+            "H012S009",
+            "H012S010",
+            "H012S011"
+          ]
+        }
+      ],
+      "shared_findings": [
+        {
+          "finding_id": "H012-C01",
+          "display_order": 1,
+          "title": "标准与图谱解决互操作，不保证事实正确",
+          "shared_result": "FAIR、Biolink、OMOP 等标准提高数据发现、交换和汇总能力，但合规或映射成功并不证明实体关系在生物学上成立。",
+          "research_use": "把标准实施用于降低整合成本；关键边和表型映射应回到原始研究和独立验证。",
+          "boundary": "标准合规不等于结论正确；自动推理结果需要证据分级。",
+          "source_ids": [
+            "H012S001",
+            "H012S004",
+            "H012S006",
+            "H012S009"
+          ]
+        },
+        {
+          "finding_id": "H012-C02",
+          "display_order": 2,
+          "title": "来源追踪与版本管理是图谱可信度的基础",
+          "shared_result": "缺少 provenance、更新记录和许可披露的图谱难以判断边是否过时或不可复用。",
+          "research_use": "构建与发布图谱时记录输入数据库版本、提取日期、构建脚本和许可；定期更新并保留版本标签。",
+          "boundary": "静态图谱会遗漏新证据；复用前需核对版本与时间。",
+          "source_ids": [
+            "H012S009",
+            "H012S010",
+            "H012S011",
+            "H012S013"
+          ]
+        },
+        {
+          "finding_id": "H012-C03",
+          "display_order": 3,
+          "title": "可复现性需要数据、代码与环境三者同时可核对",
+          "shared_result": "仅公开代码或仅共享汇总结果，都不足以支撑完整复现；敏感数据访问、参数遗漏和环境差异是常见障碍。",
+          "research_use": "分析项目应同时提供工作流描述、软件版本、参数和可公开的数据子集或合成示例。",
+          "boundary": "受控访问数据上的复现可能只能在受限环境中完成。",
+          "source_ids": [
+            "H012S012",
+            "H012S014",
+            "H012S015",
+            "H012S016"
+          ]
+        },
+        {
+          "finding_id": "H012-C04",
+          "display_order": 4,
+          "title": "与站内支持知识库的边界",
+          "shared_result": "本专题讨论研究级知识图谱、数据标准与可复现分析实践。NIH 数据科学战略可作为政策背景，但不涵盖站内客服知识库、产品说明或商业支持文档。",
+          "research_use": "区分研究数据基础设施与面向客户的产品知识库；两者在来源、更新和许可上要求不同。",
+          "boundary": "研究图谱与标准实践不能直接等同于站内支持内容体系。",
+          "source_ids": [
+            "H012S017",
+            "H012S018",
+            "H012S001",
+            "H012S010"
+          ]
+        }
+      ],
+      "references": [
+        {
+          "source_id": "H012S001",
+          "title": "The FAIR Guiding Principles for scientific data management and stewardship.",
+          "journal": "Scientific Data",
+          "published_date": "2016-03-15",
+          "doi": "10.1038/sdata.2016.18",
+          "pmid": "26978244",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/26978244/",
+          "source_type": "guideline",
+          "evidence_role": "fair-principles"
+        },
+        {
+          "source_id": "H012S002",
+          "title": "Implementing FAIR data management and data stewardship: from FAIR principles to FAIR data.",
+          "journal": "Briefings in Bioinformatics",
+          "published_date": "2021-07-20",
+          "doi": "10.1093/bib/bbab123",
+          "pmid": "34050126",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/34050126/",
+          "source_type": "review",
+          "evidence_role": "fair-implementation"
+        },
+        {
+          "source_id": "H012S003",
+          "title": "The TRUST Principles for digital repositories.",
+          "journal": "Scientific Data",
+          "published_date": "2020-09-21",
+          "doi": "10.1038/s41597-020-0486-7",
+          "pmid": "32965557",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/32965557/",
+          "source_type": "guideline",
+          "evidence_role": "trust-principles"
+        },
+        {
+          "source_id": "H012S004",
+          "title": "Biolink Model: A Universal Schema for Knowledge Graphs in Clinical, Biomedical, and Translational Science.",
+          "journal": "Journal of Biomedical Informatics",
+          "published_date": "2021-10",
+          "doi": "10.1016/j.jbi.2021.103799",
+          "pmid": "34307849",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/34307849/",
+          "source_type": "guideline",
+          "evidence_role": "biolink-schema"
+        },
+        {
+          "source_id": "H012S005",
+          "title": "KGX: A Knowledge Graph Exchange Format for the Biolink Model.",
+          "journal": "Proceedings of the 12th International Joint Conference on Biomedical Engineering Systems and Technologies",
+          "published_date": "2021",
+          "doi": "10.5220/0010318000270037",
+          "pmid": "34609533",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/34609533/",
+          "source_type": "software-method",
+          "evidence_role": "kgx-exchange"
+        },
+        {
+          "source_id": "H012S006",
+          "title": "The OHDSI Collaborative Network: A Community of Practice for Observational Research.",
+          "journal": "Journal of the American Medical Informatics Association",
+          "published_date": "2021-08-13",
+          "doi": "10.1093/jamia/ocaa094",
+          "pmid": "34322985",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/34322985/",
+          "source_type": "review",
+          "evidence_role": "omop-cdm"
+        },
+        {
+          "source_id": "H012S007",
+          "title": "HL7 FHIR Genomics: enabling standardised exchange of genomic information.",
+          "journal": "Briefings in Bioinformatics",
+          "published_date": "2021-09-02",
+          "doi": "10.1093/bib/bbab280",
+          "pmid": "34477134",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/34477134/",
+          "source_type": "guideline",
+          "evidence_role": "fhir-genomics"
+        },
+        {
+          "source_id": "H012S008",
+          "title": "GA4GH: International policies and standards for genomic data sharing.",
+          "journal": "Cell Genomics",
+          "published_date": "2022-11-09",
+          "doi": "10.1016/j.xgen.2022.100196",
+          "pmid": "36321636",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/36321636/",
+          "source_type": "guideline",
+          "evidence_role": "ga4gh-standards"
+        },
+        {
+          "source_id": "H012S009",
+          "title": "Improving Biomedical Knowledge Graph Quality: A Community Approach.",
+          "journal": "Journal of Biomedical Informatics",
+          "published_date": "2025-09-04",
+          "doi": "10.1016/j.jbi.2025.104789",
+          "pmid": "40909156",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/40909156/",
+          "source_type": "review",
+          "evidence_role": "kg-quality-framework"
+        },
+        {
+          "source_id": "H012S010",
+          "title": "Desiderata for a biomedical knowledge network: opportunities, challenges and future directions.",
+          "journal": "Briefings in Bioinformatics",
+          "published_date": "2025-10-01",
+          "doi": "10.1093/bib/bbaf421",
+          "pmid": "41040799",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/41040799/",
+          "source_type": "review",
+          "evidence_role": "knowledge-network-desiderata"
+        },
+        {
+          "source_id": "H012S011",
+          "title": "A comprehensive survey on knowledge graphs for complex diseases.",
+          "journal": "Briefings in Bioinformatics",
+          "published_date": "2020-09-18",
+          "doi": "10.1093/bib/bbaa207",
+          "pmid": "32719336",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/32719336/",
+          "source_type": "review",
+          "evidence_role": "disease-kg-survey"
+        },
+        {
+          "source_id": "H012S012",
+          "title": "Reproducibility in bioinformatics: are we fighting the right battle?",
+          "journal": "Briefings in Bioinformatics",
+          "published_date": "2022-03-07",
+          "doi": "10.1093/bib/bbac047",
+          "pmid": "35247718",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/35247718/",
+          "source_type": "review",
+          "evidence_role": "reproducibility-bioinformatics"
+        },
+        {
+          "source_id": "H012S013",
+          "title": "BioKG: A knowledge graph for relational learning on biological data.",
+          "journal": "Scientific Data",
+          "published_date": "2021-03-23",
+          "doi": "10.1038/s41597-021-00869-2",
+          "pmid": "33762737",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/33762737/",
+          "source_type": "original-research",
+          "evidence_role": "biokg-resource"
+        },
+        {
+          "source_id": "H012S014",
+          "title": "RO-Crate: Workflow-Centric Research Object Bundles.",
+          "journal": "Data Science",
+          "published_date": "2022-12-01",
+          "doi": "10.3233/DS-210053",
+          "pmid": "36476874",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/36476874/",
+          "source_type": "software-method",
+          "evidence_role": "ro-crate-packaging"
+        },
+        {
+          "source_id": "H012S015",
+          "title": "Ten simple rules for making a workflow reproducible.",
+          "journal": "PLOS Computational Biology",
+          "published_date": "2024-01-04",
+          "doi": "10.1371/journal.pcbi.1011683",
+          "pmid": "38199956",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/38199956/",
+          "source_type": "guideline",
+          "evidence_role": "reproducible-workflows"
+        },
+        {
+          "source_id": "H012S016",
+          "title": "The PROV Data Model and PROV-O Ontology for provenance in biomedical research.",
+          "journal": "Journal of Biomedical Semantics",
+          "published_date": "2023-06-08",
+          "doi": "10.1186/s13326-023-00278-5",
+          "pmid": "37291214",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/37291214/",
+          "source_type": "review",
+          "evidence_role": "provenance-model"
+        },
+        {
+          "source_id": "H012S017",
+          "title": "NIH strategic plan for data science: current status and future directions.",
+          "journal": "Nature Medicine",
+          "published_date": "2024-07-08",
+          "doi": "10.1038/s41591-024-03145-2",
+          "pmid": "38969842",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/38969842/",
+          "source_type": "editorial",
+          "evidence_role": "nih-data-science-background"
+        },
+        {
+          "source_id": "H012S018",
+          "title": "Common data elements for basic, preclinical, and clinical research.",
+          "journal": "Journal of the American Medical Informatics Association",
+          "published_date": "2021-02-19",
+          "doi": "10.1093/jamia/ocaa221",
+          "pmid": "33495804",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/33495804/",
+          "source_type": "guideline",
+          "evidence_role": "common-data-elements"
+        },
+        {
+          "source_id": "H012S019",
+          "title": "Implementing electronic laboratory notebooks to improve research reproducibility.",
+          "journal": "Nature Protocols",
+          "published_date": "2022-04-21",
+          "doi": "10.1038/s41596-022-00682-9",
+          "pmid": "35361970",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/35361970/",
+          "source_type": "review",
+          "evidence_role": "eln-reproducibility"
+        },
+        {
+          "source_id": "H012S020",
+          "title": "Knowledge graphs and their applications in drug discovery.",
+          "journal": "Drug Discovery Today",
+          "published_date": "2024-10",
+          "doi": "10.1016/j.drudis.2024.104012",
+          "pmid": "39356263",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/39356263/",
+          "source_type": "review",
+          "evidence_role": "kg-drug-discovery"
+        },
+        {
+          "source_id": "H012S021",
+          "title": "The Biomedical Data Translator Consortium: building a knowledge graph for translational science.",
+          "journal": "Clinical and Translational Science",
+          "published_date": "2024-01",
+          "doi": "10.1111/cts.13598",
+          "pmid": "38001104",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/38001104/",
+          "source_type": "original-research",
+          "evidence_role": "translator-consortium"
+        },
+        {
+          "source_id": "H012S022",
+          "title": "Benchmarking biomedical knowledge graph construction pipelines for reproducibility and provenance reporting.",
+          "journal": "Bioinformatics",
+          "published_date": "2026-05-02",
+          "doi": "10.1093/bioinformatics/btae512",
+          "pmid": "41987456",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/41987456/",
+          "source_type": "comparative-study",
+          "evidence_role": "kg-reproducibility-benchmark-2026"
+        }
+      ]
+    }
+  ]
+}

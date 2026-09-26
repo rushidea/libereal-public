@@ -1,0 +1,489 @@
+{
+  "releaseId": "h022-public-2026-08-21-v0.8-sol",
+  "asOfDate": "2026-08-21",
+  "researchWindow": "2020–2026",
+  "categoryId": "C08",
+  "hotspotId": "H022",
+  "title": "肿瘤空间免疫",
+  "subtitle": "不同组织部位形成不同的免疫状态",
+  "summary": "肿瘤中的免疫反应呈明显的区域差异。肿瘤实质区、侵袭边缘、邻近基质、血管周围区域、纤维化或低氧区和三级淋巴结构常有不同的细胞组成与信号环境；整块组织或单一免疫标志物容易把这些局部关系平均掉。空间免疫研究因此需要同时观察哪些免疫细胞进入肿瘤、停在哪里以及与哪些细胞接触。\n\n本方向从空间转录组、单细胞与单核图谱、多重蛋白成像、免疫受体组库、病理分区和患者来源或动物模型出发，集中处理三类问题：免疫细胞和组织结构如何共同形成局部状态；三级淋巴结构、血管、基质和髓系细胞如何改变免疫进入与功能；这些空间关系如何随癌症类型、病灶位置和治疗时间变化。空间测量、细胞注释、受体克隆和功能扰动构成相互补充的证据层级。\n\n比较公开研究时，需要同时交代癌症类型、病灶和组织区域、取样时间、既往治疗、细胞与蛋白面板、空间分辨率、TLS 成熟度、图像分割和独立验证。空间共定位或免疫浸润关联不能单独证明治疗反应或因果机制；原发灶也不能自动代表转移灶。细胞图谱与肿瘤生态专题提供相邻背景，本页聚焦肿瘤组织中的空间免疫组织和跨癌症比较边界。",
+  "scopeNote": "本页综合多种癌症的代表性研究，重点比较不同组织部位的免疫状态，以及跨癌症反复出现的共性和差异。",
+  "spatialThemes": [
+    {
+      "id": "H022-SP-001",
+      "displayOrder": 1,
+      "title": "肿瘤实质区、侵袭边缘与邻近基质",
+      "location": "肿瘤细胞集中的区域、肿瘤向周围组织扩展的前沿，以及与其相邻的间质。",
+      "immuneDifference": "免疫细胞可能深入肿瘤实质，也可能停留在侵袭边缘或邻近基质；还有一些区域几乎没有淋巴细胞。三种状态分别反映免疫浸润、免疫排斥和免疫缺失。",
+      "commonality": "多种癌症都存在同一病灶内的区域差异。仅看整张切片的免疫细胞数量，容易掩盖免疫细胞究竟进入了肿瘤、停在边缘，还是集中在间质。",
+      "variation": "肺腺癌可在同一肿瘤内同时出现免疫活跃区和免疫低反应区；三阴性乳腺癌常见浸润型、排斥型和免疫细胞稀少型；皮肤鳞状细胞癌的侵袭前沿可形成成纤维细胞和血管富集的局部结构；胶质母细胞瘤缺少典型上皮肿瘤边界，其空间组织更多受到星形胶质细胞和髓系细胞影响。",
+      "researchValue": "分析时应分别记录肿瘤实质、侵袭边缘和邻近基质中的细胞组成与相互距离，并保留同一病灶内多个区域的信息。",
+      "sourceIds": [
+        "H022D001",
+        "H022D006",
+        "H022D018",
+        "H022D019",
+        "H022D021",
+        "H022D022",
+        "H022D024"
+      ]
+    },
+    {
+      "id": "H022-SP-002",
+      "displayOrder": 2,
+      "title": "三级淋巴结构：肿瘤局部形成的免疫组织",
+      "location": "肿瘤内部、侵袭边缘或邻近间质中，由 B 细胞区、T 细胞区、抗原呈递细胞和特殊血管共同构成的局部淋巴样结构。",
+      "immuneDifference": "成熟的三级淋巴结构（TLS）能够支持抗原呈递、B 细胞成熟和 T 细胞活化；松散的淋巴细胞聚集与结构成熟的 TLS 在功能上有明显差异。",
+      "commonality": "TLS 在黑色素瘤、肾癌、肺癌和多种实体瘤中反复出现，并常与较活跃的局部免疫反应相关。判断其意义需要同时考虑成熟程度、所在部位和周围基质。",
+      "variation": "黑色素瘤和肾癌研究显示，TLS 内可出现不同阶段的 B 细胞反应；多癌种队列提示成熟 TLS 与免疫检查点抑制剂疗效相关；部分非小细胞肺癌即使存在成熟 TLS，周围的成纤维细胞和免疫排斥状态仍可能限制治疗反应。",
+      "researchValue": "检测面板除 CD3、CD8 和 CD20 外，还应根据研究目的覆盖滤泡树突状细胞、生发中心、浆细胞和高内皮微静脉等成熟度与功能信息，并标明 TLS 与肿瘤的相对位置。",
+      "sourceIds": [
+        "H022D002",
+        "H022D003",
+        "H022D004",
+        "H022D005",
+        "H022D008",
+        "H022D027"
+      ]
+    },
+    {
+      "id": "H022-SP-003",
+      "displayOrder": 3,
+      "title": "血管周围区域：免疫细胞进入肿瘤的通道",
+      "location": "肿瘤内小静脉、高内皮微静脉及其周围的内皮细胞、周细胞、平滑肌细胞和免疫细胞所处区域。",
+      "immuneDifference": "免疫细胞离开血液并进入组织，需要经过血管内皮。部分血管周围区域能够募集和放行淋巴细胞；异常血管、低氧和较高的组织间压力则会限制这一过程。",
+      "commonality": "血管既是免疫细胞进入肿瘤的通道，也可能成为进入障碍。血管类型、趋化因子分布和周围基质共同决定淋巴细胞在哪些位置进入组织。",
+      "variation": "乳腺癌中发现的 ACKR1 阳性小静脉及其周围细胞可形成促进淋巴细胞外渗的局部环境；脑肿瘤的血管周围免疫状态还受到血脑屏障、星形胶质细胞和肿瘤来源影响；皮肤鳞状细胞癌的侵袭前沿则可形成成纤维细胞与血管共同参与的局部结构。",
+      "researchValue": "若研究目标涉及免疫浸润，应把血管类型、内皮黏附分子、趋化因子和血管到免疫细胞的距离纳入检测，而不宜只统计组织中的淋巴细胞总量。",
+      "sourceIds": [
+        "H022D019",
+        "H022D021",
+        "H022D023",
+        "H022D025"
+      ]
+    },
+    {
+      "id": "H022-SP-004",
+      "displayOrder": 4,
+      "title": "纤维化、低氧与髓系细胞富集区",
+      "location": "胶原和成纤维细胞较多、供血不足或髓系细胞聚集的局部区域，常见于肿瘤实质与基质交界处或肿瘤内部。",
+      "immuneDifference": "这些区域可通过致密细胞外基质、异常血管、代谢压力和免疫抑制性髓系细胞，减少 T 细胞进入或削弱其效应功能。不同障碍可以同时存在。",
+      "commonality": "免疫排斥往往由局部结构和多类细胞共同维持，单个分子很少能够完整解释。成纤维细胞、胶原、髓系细胞、低氧和血管异常是多种癌症中反复出现的组成部分。",
+      "variation": "胰腺导管腺癌可在同一病灶内形成基质稀少区、过渡区和反应性纤维化区；三阴性乳腺癌的排斥型区域常伴随胶原、TGF-β 或 VEGF 相关程序，而免疫细胞稀少型可呈现不同的髓系细胞状态；结直肠癌侵袭边缘、肺癌 TLS 周围和卵巢癌恶性细胞状态也各有不同的排斥机制。",
+      "researchValue": "检测时宜同时覆盖成纤维细胞、细胞外基质、血管、低氧、髓系细胞和 T 细胞状态，并在图像中确认这些因素是否出现在同一局部区域。",
+      "sourceIds": [
+        "H022D006",
+        "H022D008",
+        "H022D013",
+        "H022D014",
+        "H022D018",
+        "H022D020",
+        "H022D024",
+        "H022D026"
+      ]
+    },
+    {
+      "id": "H022-SP-005",
+      "displayOrder": 5,
+      "title": "病灶部位与治疗过程会改变空间免疫状态",
+      "location": "原发灶、不同转移灶，以及治疗前、治疗早期和治疗后的同一病灶。",
+      "immuneDifference": "免疫细胞的组成、位置和相互作用会随器官环境、病灶演化和治疗发生变化。原发灶的一次取样不能完全代表当前转移灶，治疗前的状态也不能代替治疗后的状态。",
+      "commonality": "多种癌症都显示出取样部位和取样时间带来的空间差异。跨病灶或纵向比较时，稳定出现的空间特征通常比单个时间点的偶然变化更值得关注。",
+      "variation": "尿路上皮癌的原发灶与转移灶可出现不同的空间免疫表型；三阴性乳腺癌在治疗过程中可形成不同的反应轨迹；原发性脑肿瘤与脑转移瘤受到不同细胞环境影响；胰腺癌原发灶和转移灶可共享纤维化、代谢和免疫抑制程序，但这些状态的比例和排列随病灶部位改变。",
+      "researchValue": "研究设计应明确癌症类型、病灶来源、取样时间和既往治疗；条件允许时，应比较同一患者的多个病灶或多个时间点。",
+      "sourceIds": [
+        "H022D007",
+        "H022D011",
+        "H022D012",
+        "H022D016",
+        "H022D017",
+        "H022D019",
+        "H022D026"
+      ]
+    }
+  ],
+  "spatialMethods": [
+    {
+      "id": "H022-M001",
+      "displayOrder": 1,
+      "category": "空间 RNA 测序",
+      "title": "基于空间条形码捕获的转录组测序",
+      "summary": "在完整组织切片上记录 RNA 的来源坐标，再进行测序。常见结果是一张组织图像和与每个捕获点或网格对应的基因表达矩阵。",
+      "principle": "组织切片贴附在带有空间条形码探针的载玻片上。RNA 释放后被附近探针捕获，形成同时带有基因信息和位置编码的文库。分析时将表达矩阵与苏木精—伊红染色或免疫荧光图像配准，并结合单细胞参考数据推算每个捕获区域中的细胞组成。",
+      "answers": "适合比较肿瘤实质、侵袭边缘、基质和三级淋巴结构中的转录程序，也可寻找随空间位置变化的基因，以及可能发生在相邻细胞之间的配体—受体信号。",
+      "sampleDesign": "新鲜冷冻和福尔马林固定石蜡包埋（FFPE）组织使用的试剂体系不同，建库前应确认组织处理方式与平台兼容。研究设计需要保留病理标注，并覆盖病灶内多个区域；只取一个视野容易遗漏空间异质性。",
+      "workflow": "建库前确认组织处理方式与平台兼容，并保留病理标注、覆盖病灶内多个区域。组织切片贴附在带有空间条形码探针的载玻片上，RNA 释放后被附近探针捕获，形成同时带有基因信息和位置编码的文库。测序后将表达矩阵与苏木精—伊红染色或免疫荧光图像配准，并结合单细胞参考数据推算每个捕获区域中的细胞组成。",
+      "qualityControl": "新鲜冷冻和福尔马林固定石蜡包埋（FFPE）使用不同试剂体系，不相容组合不能进入同一比较。只取一个视野视为取样不足。分析时检查捕获点是否覆盖预定病理区域、图像配准是否稳定，以及细胞组成是否过度依赖单一参考。关键空间模式需用原位 RNA 或蛋白成像复核，不能只依赖捕获点分解。",
+      "resultInterpretation": "结果可比较肿瘤实质、侵袭边缘、基质和三级淋巴结构中的转录程序，也可寻找随空间位置变化的基因。一个捕获点或网格可能包含多个细胞，细胞类型常依赖计算分解。RNA 丰度不能代替蛋白表达或细胞功能；配体和受体在相邻区域表达，也不能单独证明两类细胞发生了直接通信。",
+      "limitations": "一个捕获点或网格可能包含多个细胞，细胞类型常依赖计算分解。RNA 丰度不能代替蛋白表达或细胞功能；配体和受体在相邻区域表达，也不能单独证明两类细胞发生了直接通信。",
+      "sourceIds": [
+        "H022D001",
+        "H022D006",
+        "H022D020",
+        "H022D026"
+      ]
+    },
+    {
+      "id": "H022-M002",
+      "displayOrder": 2,
+      "category": "空间 RNA 成像",
+      "title": "原位杂交或原位测序型空间 RNA",
+      "summary": "在组织中直接识别单个 RNA 分子，并保留其细胞内位置。此类方法通常达到单细胞或亚细胞分辨率，但检测基因多由实验前设定。",
+      "principle": "针对目标 RNA 设计带有编码信息的探针，通过多轮杂交、成像和信号解码识别不同转录本。细胞核和膜信号用于划分细胞边界，再将每个 RNA 分子归入相应细胞或细胞外区域。",
+      "answers": "适合确认某个细胞状态位于肿瘤实质、边缘还是血管周围，也能比较同一细胞内不同转录本的位置，并测量表达特定基因的细胞与肿瘤细胞、血管或三级淋巴结构之间的距离。",
+      "sampleDesign": "基因面板应同时包含细胞身份、功能状态和组织结构标记。需要在目标组织上预先检查 RNA 保存情况、组织自发荧光和细胞分割效果；肿瘤细胞密集或形态不规则时，膜标记尤其重要。",
+      "workflow": "基因面板应同时包含细胞身份、功能状态和组织结构标记。针对目标 RNA 设计带有编码信息的探针，通过多轮杂交、成像和信号解码识别不同转录本。细胞核和膜信号用于划分细胞边界，再将每个 RNA 分子归入相应细胞或细胞外区域。",
+      "qualityControl": "需要在目标组织上预先检查 RNA 保存情况、组织自发荧光和细胞分割效果；肿瘤细胞密集或形态不规则时，膜标记尤其重要。未通过分割和背景检查的视野不能用于细胞定位比较。关键定位结果应与独立切片或蛋白成像对照。",
+      "resultInterpretation": "结果可确认某个细胞状态位于肿瘤实质、边缘还是血管周围，也能比较同一细胞内不同转录本的位置，并测量表达特定基因的细胞与肿瘤细胞、血管或三级淋巴结构之间的距离。检测范围受探针面板限制，未列入面板的基因无法在后续分析中补回。高表达转录本可能造成信号拥挤，细胞分割误差也会把 RNA 分配给错误的细胞。",
+      "limitations": "检测范围受探针面板限制，未列入面板的基因无法在后续分析中补回。高表达转录本可能造成信号拥挤，细胞分割误差也会把 RNA 分配给错误的细胞。",
+      "sourceIds": [
+        "H022D013",
+        "H022D021",
+        "H022D023"
+      ]
+    },
+    {
+      "id": "H022-M003",
+      "displayOrder": 3,
+      "category": "多重蛋白成像",
+      "title": "在同一张切片上测量多种蛋白",
+      "summary": "循环免疫荧光、索引共检测技术（CODEX）、成像质谱流式（IMC）和多重离子束成像（MIBI）都使用抗体识别蛋白，可在单细胞尺度保留细胞位置和组织结构。",
+      "principle": "循环荧光方法通过多轮显色和成像读取带有荧光或 DNA 条形码的抗体；IMC 和 MIBI 使用金属同位素标记抗体，再通过激光烧蚀或离子束逐点读取信号。图像分析需要完成细胞分割、细胞类型判定和空间邻域计算。",
+      "answers": "适合同时识别肿瘤细胞、T 细胞、B 细胞、髓系细胞、成纤维细胞和血管，并检测增殖、抗原呈递、免疫检查点或信号通路蛋白。结果可用于计算细胞密度、相互距离、直接接触和局部细胞组合。",
+      "sampleDesign": "抗体克隆应逐一在相同固定和抗原修复条件下验证。面板设计需要避免功能重复，同时保留细胞身份与状态标记。视野选择应依据病理区域分层，不能只拍摄免疫细胞最密集的位置。",
+      "workflow": "抗体克隆应逐一在相同固定和抗原修复条件下验证。面板设计需要避免功能重复，同时保留细胞身份与状态标记。循环荧光方法通过多轮显色和成像读取带有荧光或 DNA 条形码的抗体；成像质谱流式（IMC）和多重离子束成像（MIBI）使用金属同位素标记抗体，再通过激光烧蚀或离子束逐点读取信号。图像分析需要完成细胞分割、细胞类型判定和空间邻域计算。",
+      "qualityControl": "视野选择应依据病理区域分层，不能只拍摄免疫细胞最密集的位置。循环荧光需检查组织自发荧光、信号残留和轮次配准；金属成像需评估检测面积是否覆盖预定区域。细胞类型判定应回看原始通道，不能只依赖聚类标签。关键邻域结果宜用独立切片或另一种成像方法复核。",
+      "resultInterpretation": "结果可用于同时识别肿瘤细胞、T 细胞、B 细胞、髓系细胞、成纤维细胞和血管，并计算细胞密度、相互距离、直接接触和局部细胞组合。结果依赖抗体特异性、表位保存和细胞分割质量。空间邻近和接触可提出机制问题，不能单独证明细胞功能或治疗反应。",
+      "limitations": "结果依赖抗体特异性、表位保存和细胞分割质量。循环荧光会受到组织自发荧光、信号残留和轮次配准误差影响；金属成像通常检测面积较小，取样区域是否具有代表性需要单独评估。",
+      "sourceIds": [
+        "H022D001",
+        "H022D007",
+        "H022D011",
+        "H022D019",
+        "H022D024"
+      ]
+    },
+    {
+      "id": "H022-M004",
+      "displayOrder": 4,
+      "category": "单细胞与空间数据整合",
+      "title": "先识别细胞状态，再把细胞映射回组织",
+      "summary": "单细胞 RNA 测序或单核 RNA 测序可较完整地划分细胞类型和状态，空间数据则保留组织位置。两类数据结合后，可解释空间捕获区域中包含哪些细胞，或把单细胞定义的状态定位到组织切片。",
+      "principle": "组织经解离后获得单细胞或细胞核转录组。分析程序使用两类数据共有的基因，将单细胞参考中的细胞类型映射到空间数据；对于包含多个细胞的捕获点，常采用计算分解估计各类细胞的比例。",
+      "answers": "适合区分表型接近的 T 细胞、髓系细胞或成纤维细胞状态，并判断这些状态偏向肿瘤实质、边缘、血管周围还是三级淋巴结构。也可比较原发灶、转移灶和治疗前后的细胞状态变化。",
+      "sampleDesign": "单细胞参考和空间切片应尽量来自同一病灶或可比较的患者队列。组织解离方案、细胞核与完整细胞的差异、批次和取样区域都需要记录；跨患者映射时应保留患者层面的统计分析。",
+      "workflow": "单细胞参考和空间切片应尽量来自同一病灶或可比较的患者队列。组织经解离后获得单细胞或细胞核转录组。分析程序使用两类数据共有的基因，将单细胞参考中的细胞类型映射到空间数据；对于包含多个细胞的捕获点，常采用计算分解估计各类细胞的比例。",
+      "qualityControl": "组织解离方案、细胞核与完整细胞的差异、批次和取样区域都需要记录；跨患者映射时应保留患者层面的统计分析。映射前检查两类数据的基因重叠、双细胞比例和批次分布。推算出的相邻细胞需要原位 RNA 或蛋白成像确认。",
+      "resultInterpretation": "结果可区分表型接近的 T 细胞、髓系细胞或成纤维细胞状态，并判断这些状态偏向肿瘤实质、边缘、血管周围还是三级淋巴结构。计算映射得到的是模型估计，不能视为直接观测。组织解离会丢失空间关系，并可能选择性损失脆弱或体积较大的细胞。",
+      "limitations": "组织解离会丢失空间关系，并可能选择性损失脆弱或体积较大的细胞。计算映射得到的是模型估计，不能视为直接观测；推算出的相邻细胞也需要原位 RNA 或蛋白成像确认。",
+      "sourceIds": [
+        "H022D001",
+        "H022D013",
+        "H022D021",
+        "H022D023",
+        "H022D026"
+      ]
+    },
+    {
+      "id": "H022-M005",
+      "displayOrder": 5,
+      "category": "免疫受体组库分析",
+      "title": "B 细胞受体与 T 细胞受体测序追踪淋巴细胞克隆",
+      "summary": "B 细胞受体（BCR）和 T 细胞受体（TCR）的不同链由 V、J 或 V、D、J 基因片段重排形成。测序可根据受体序列识别克隆型，并比较不同组织区域、病灶或时间点之间是否存在相同或扩增的淋巴细胞克隆。",
+      "principle": "批量组库测序从组织或分选细胞中读取大量受体序列；单细胞 V(D)J 测序可将受体序列与同一细胞的转录状态配对。BCR 分析还可观察重链与轻链配对、体细胞高频突变（SHM）和抗体类别转换，TCR 分析则常关注 α 链与 β 链配对及克隆扩增。",
+      "answers": "在三级淋巴结构研究中，BCR 可用于判断是否存在局部 B 细胞克隆扩增、亲和力成熟和抗体类别转换。TCR 可用于追踪同一 T 细胞克隆是否分布在肿瘤实质、侵袭边缘、转移灶或治疗后的样本中。",
+      "sampleDesign": "取样时应区分肿瘤、邻近组织、三级淋巴结构和外周血，并记录组织区域和时间点。单细胞 V(D)J 测序通常需要高质量活细胞；石蜡样本更适合经过验证的靶向或批量组库方法。",
+      "workflow": "取样时应区分肿瘤、邻近组织、三级淋巴结构和外周血，并记录组织区域和时间点。批量组库测序从组织或分选细胞中读取大量受体序列；单细胞 V(D)J 测序可将受体序列与同一细胞的转录状态配对。B 细胞受体（BCR）分析还可观察重链与轻链配对、体细胞高频突变和抗体类别转换，T 细胞受体（TCR）分析则常关注 α 链与 β 链配对及克隆扩增。",
+      "qualityControl": "单细胞 V(D)J 测序通常需要高质量活细胞；石蜡样本更适合经过验证的靶向或批量组库方法。分析时分别记录取样区域、细胞分选方式和扩增阈值。要保留空间信息，需要结合区域显微切割、配对切片或空间成像，不能把整块组织的克隆频率直接写成某个微区的结果。",
+      "resultInterpretation": "在三级淋巴结构研究中，BCR 可用于判断是否存在局部 B 细胞克隆扩增、亲和力成熟和抗体类别转换。TCR 可用于追踪同一 T 细胞克隆是否分布在肿瘤实质、侵袭边缘、转移灶或治疗后的样本中。克隆扩增提示淋巴细胞经历了选择或增殖，受体序列本身不能说明识别的抗原，也不能确定该克隆具有抗肿瘤功能。",
+      "limitations": "克隆扩增提示淋巴细胞经历了选择或增殖，受体序列本身不能说明识别的抗原，也不能确定该克隆具有抗肿瘤功能。要保留空间信息，需要结合区域显微切割、配对切片或空间成像。",
+      "sourceIds": [
+        "H022D002",
+        "H022D003",
+        "H022D005"
+      ]
+    },
+    {
+      "id": "H022-M006",
+      "displayOrder": 6,
+      "category": "功能验证",
+      "title": "在保留组织环境的条件下检验候选机制",
+      "summary": "患者来源肿瘤组织块、肿瘤类器官与免疫细胞共培养、免疫系统完整的动物模型及空间扰动技术，可用于观察改变某个细胞或分子后，免疫细胞的位置和功能是否随之变化。",
+      "principle": "组织块培养尽量保留原有细胞和局部结构；类器官共培养重建选定的肿瘤—免疫关系；CRISPR 基因编辑筛选或药理干预用于改变候选基因和通路。干预前后可结合空间 RNA 或多重蛋白成像，比较 T 细胞进入、髓系细胞富集和基质结构变化。",
+      "answers": "适合检验空间图谱提出的候选机制，例如成纤维细胞程序是否限制 T 细胞进入、血管周围趋化因子是否影响淋巴细胞外渗，或改变细胞外基质后免疫排斥是否减轻。",
+      "sampleDesign": "实验应预先设定可测量的空间指标，并保留未处理对照、阴性扰动和独立样本。患者来源组织块适合短期观察，类器官和动物模型则需要说明缺失了哪些患者组织成分。",
+      "workflow": "实验应预先设定可测量的空间指标，并保留未处理对照、阴性扰动和独立样本。组织块培养尽量保留原有细胞和局部结构；类器官共培养重建选定的肿瘤—免疫关系；CRISPR 基因编辑筛选或药理干预用于改变候选基因和通路。干预前后可结合空间 RNA 或多重蛋白成像，比较 T 细胞进入、髓系细胞富集和基质结构变化。",
+      "qualityControl": "患者来源组织块适合短期观察，类器官和动物模型则需要说明缺失了哪些患者组织成分。每次干预保留对照和独立重复，空间读出回到原始图像检查。模型中得到的因果关系，仍需在独立患者样本中确认是否同样出现。",
+      "resultInterpretation": "结果适合检验空间图谱提出的候选机制，例如成纤维细胞程序是否限制 T 细胞进入、血管周围趋化因子是否影响淋巴细胞外渗，或改变细胞外基质后免疫排斥是否减轻。离体培养会改变细胞状态，类器官难以完整保留血管和系统性免疫，动物模型与患者肿瘤也有差异。功能实验支持特定模型中的因果关系，不能直接写成人体治疗结论。",
+      "limitations": "离体培养会改变细胞状态，类器官难以完整保留血管和系统性免疫，动物模型与患者肿瘤也有差异。功能实验支持特定模型中的因果关系，仍需在独立患者样本中确认其临床相关性。",
+      "sourceIds": [
+        "H022D009",
+        "H022D013",
+        "H022D014",
+        "H022D015"
+      ]
+    }
+  ],
+  "references": [
+    {
+      "number": 1,
+      "id": "H022D002",
+      "sourceType": "primary_research",
+      "title": "Tertiary lymphoid structures improve immunotherapy and survival in melanoma",
+      "citation": "Cabrita R et al. Nature",
+      "year": 2020,
+      "doi": "10.1038/s41586-019-1914-8",
+      "url": "https://doi.org/10.1038/s41586-019-1914-8"
+    },
+    {
+      "number": 2,
+      "id": "H022D003",
+      "sourceType": "primary_research",
+      "title": "B cells and tertiary lymphoid structures promote immunotherapy response",
+      "citation": "Helmink BA; Reddy SM; Gao J et al. Nature",
+      "year": 2020,
+      "doi": "10.1038/s41586-019-1922-8",
+      "url": "https://doi.org/10.1038/s41586-019-1922-8"
+    },
+    {
+      "number": 3,
+      "id": "H022D018",
+      "sourceType": "primary_research",
+      "title": "Geospatial immune variability illuminates differential evolution of lung adenocarcinoma",
+      "citation": "AbdulJabbar K; Raza SEA; Rosenthal R et al. Nature Medicine",
+      "year": 2020,
+      "doi": "10.1038/s41591-020-0900-x",
+      "url": "https://doi.org/10.1038/s41591-020-0900-x"
+    },
+    {
+      "number": 4,
+      "id": "H022D021",
+      "sourceType": "primary_research",
+      "title": "Multimodal analysis of composition and spatial architecture in human squamous cell carcinoma",
+      "citation": "Ji AL; Rubin AJ; Thrane K et al. Cell",
+      "year": 2020,
+      "doi": "10.1016/j.cell.2020.05.039",
+      "url": "https://doi.org/10.1016/j.cell.2020.05.039"
+    },
+    {
+      "number": 5,
+      "id": "H022D009",
+      "sourceType": "primary_research",
+      "title": "An ex vivo tumor fragment platform to dissect response to PD-1 blockade in cancer",
+      "citation": "Voabil P; de Bruijn M; Roelofsen LM et al. Nature Medicine",
+      "year": 2021,
+      "doi": "10.1038/s41591-021-01398-3",
+      "url": "https://doi.org/10.1038/s41591-021-01398-3"
+    },
+    {
+      "number": 6,
+      "id": "H022D004",
+      "sourceType": "primary_research",
+      "title": "Mature tertiary lymphoid structures predict immune checkpoint inhibitor efficacy in solid tumors independently of PD-L1 expression",
+      "citation": "Vanhersecke L; Brunet M; Guegan JP et al. Nature Cancer",
+      "year": 2021,
+      "doi": "10.1038/s43018-021-00232-6",
+      "url": "https://doi.org/10.1038/s43018-021-00232-6"
+    },
+    {
+      "number": 7,
+      "id": "H022D024",
+      "sourceType": "primary_research",
+      "title": "Spatial immunophenotypes predict response to anti-PD1 treatment and capture distinct paths of T cell evasion in triple negative breast cancer",
+      "citation": "Hammerl D; Martens JWM; Timmermans M et al. Nature Communications",
+      "year": 2021,
+      "doi": "10.1038/s41467-021-25962-0",
+      "url": "https://doi.org/10.1038/s41467-021-25962-0"
+    },
+    {
+      "number": 8,
+      "id": "H022D020",
+      "sourceType": "primary_research",
+      "title": "Spatially confined sub-tumor microenvironments in pancreatic cancer",
+      "citation": "Grünwald BT; Devisme A; Andrieux G et al. Cell",
+      "year": 2021,
+      "doi": "10.1016/j.cell.2021.09.022",
+      "url": "https://doi.org/10.1016/j.cell.2021.09.022"
+    },
+    {
+      "number": 9,
+      "id": "H022D005",
+      "sourceType": "primary_research",
+      "title": "Tertiary lymphoid structures generate and propagate anti-tumor antibody-producing plasma cells in renal cell cancer",
+      "citation": "Meylan M et al. Immunity",
+      "year": 2022,
+      "doi": "10.1016/j.immuni.2022.02.001",
+      "url": "https://doi.org/10.1016/j.immuni.2022.02.001"
+    },
+    {
+      "number": 10,
+      "id": "H022D022",
+      "sourceType": "primary_research",
+      "title": "The spatial landscape of progression and immunoediting in primary melanoma at single-cell resolution",
+      "citation": "Nirmal AJ; Maliga Z; Vallius T et al. Cancer Discovery",
+      "year": 2022,
+      "doi": "10.1158/2159-8290.CD-21-1357",
+      "url": "https://doi.org/10.1158/2159-8290.CD-21-1357"
+    },
+    {
+      "number": 11,
+      "id": "H022D016",
+      "sourceType": "primary_research",
+      "title": "Spatial Immunephenotypes of Distant Metastases but not Matched Primary Urothelial Carcinomas Predict Response to Immune Checkpoint Inhibition",
+      "citation": "Erlmeier F; Klümper N; Landgraf L et al. European Urology",
+      "year": 2023,
+      "doi": "10.1016/j.eururo.2022.10.020",
+      "url": "https://doi.org/10.1016/j.eururo.2022.10.020"
+    },
+    {
+      "number": 12,
+      "id": "H022D019",
+      "sourceType": "primary_research",
+      "title": "Single-cell spatial immune landscapes of primary and metastatic brain tumours",
+      "citation": "Karimi E; Yu MW; Maritan SM et al. Nature",
+      "year": 2023,
+      "doi": "10.1038/s41586-022-05680-3",
+      "url": "https://doi.org/10.1038/s41586-022-05680-3"
+    },
+    {
+      "number": 13,
+      "id": "H022D011",
+      "sourceType": "primary_research",
+      "title": "Spatial predictors of immunotherapy response in triple-negative breast cancer",
+      "citation": "Wang XQ; Danenberg E; Huang CS et al. Nature",
+      "year": 2023,
+      "doi": "10.1038/s41586-023-06498-3",
+      "url": "https://doi.org/10.1038/s41586-023-06498-3"
+    },
+    {
+      "number": 14,
+      "id": "H022D013",
+      "sourceType": "primary_research",
+      "title": "Mapping spatial organization and genetic cell-state regulators to target immune evasion in ovarian cancer",
+      "citation": "Yeh CY; Aguirre K; Laveroni O et al. Nature Immunology",
+      "year": 2024,
+      "doi": "10.1038/s41590-024-01943-5",
+      "url": "https://doi.org/10.1038/s41590-024-01943-5"
+    },
+    {
+      "number": 15,
+      "id": "H022D017",
+      "sourceType": "primary_research",
+      "title": "Single-cell and spatial profiling identify three response trajectories to pembrolizumab and radiation therapy in triple negative breast cancer",
+      "citation": "Shiao SL; Gouin KH; Ing N et al. Cancer Cell",
+      "year": 2024,
+      "doi": "10.1016/j.ccell.2023.12.012",
+      "url": "https://doi.org/10.1016/j.ccell.2023.12.012"
+    },
+    {
+      "number": 16,
+      "id": "H022D012",
+      "sourceType": "primary_research",
+      "title": "Spatial relationships in the urothelial and head and neck tumor microenvironment predict response to combination immune checkpoint inhibitors",
+      "citation": "Gil-Jimenez A; van Dijk N; Vos JL et al. Nature Communications",
+      "year": 2024,
+      "doi": "10.1038/s41467-024-46450-1",
+      "url": "https://doi.org/10.1038/s41467-024-46450-1"
+    },
+    {
+      "number": 17,
+      "id": "H022D026",
+      "sourceType": "primary_research",
+      "title": "Spatial transcriptomic analysis of primary and metastatic pancreatic cancers highlights tumor microenvironmental heterogeneity",
+      "citation": "Khaliq AM; Rajamohan M; Saeed O et al. Nature Genetics",
+      "year": 2024,
+      "doi": "10.1038/s41588-024-01914-4",
+      "url": "https://doi.org/10.1038/s41588-024-01914-4"
+    },
+    {
+      "number": 18,
+      "id": "H022D027",
+      "sourceType": "review",
+      "title": "Tertiary lymphoid structures as determinants of tumour immunity and response to immunotherapy",
+      "citation": "Teillaud JL; Dieu-Nosjean MC; Germain C et al. Nature Reviews Cancer",
+      "year": 2024,
+      "doi": "10.1038/s41568-024-00728-0",
+      "url": "https://doi.org/10.1038/s41568-024-00728-0"
+    },
+    {
+      "number": 19,
+      "id": "H022D001",
+      "sourceType": "primary_research",
+      "title": "Tumour evolution and microenvironment interactions in 2D and 3D space",
+      "citation": "Mo CK; Liu J; Chen S; HTAN consortium Nature",
+      "year": 2024,
+      "doi": "10.1038/s41586-024-08087-4",
+      "url": "https://doi.org/10.1038/s41586-024-08087-4"
+    },
+    {
+      "number": 20,
+      "id": "H022D006",
+      "sourceType": "primary_research",
+      "title": "Spatially organized tumor-stroma boundary determines the efficacy of immunotherapy in colorectal cancer patients",
+      "citation": "Feng Y; Ma W; Zang Y et al. Nature Communications",
+      "year": 2024,
+      "doi": "10.1038/s41467-024-54710-3",
+      "url": "https://doi.org/10.1038/s41467-024-54710-3"
+    },
+    {
+      "number": 21,
+      "id": "H022D008",
+      "sourceType": "primary_research",
+      "title": "Spatially resolved transcriptomics reveal the determinants of primary resistance to immunotherapy in NSCLC with mature tertiary lymphoid structures",
+      "citation": "Peyraud F; Guegan JP; Rey C et al. Cell Reports Medicine",
+      "year": 2025,
+      "doi": "10.1016/j.xcrm.2025.101934",
+      "url": "https://doi.org/10.1016/j.xcrm.2025.101934"
+    },
+    {
+      "number": 22,
+      "id": "H022D023",
+      "sourceType": "primary_research",
+      "title": "Spatially resolved atlas of breast cancer uncovers intercellular machinery of venular niche governing lymphocyte extravasation",
+      "citation": "Wang X; Wang Z; Liao Q et al. Nature Communications",
+      "year": 2025,
+      "doi": "10.1038/s41467-025-58511-0",
+      "url": "https://doi.org/10.1038/s41467-025-58511-0"
+    },
+    {
+      "number": 23,
+      "id": "H022D025",
+      "sourceType": "review",
+      "title": "Tumour-associated vasculature in T cell homing and immunity: opportunities for cancer therapy",
+      "citation": "Lanitis E; Irving M; Coukos G Nature Reviews Immunology",
+      "year": 2025,
+      "doi": "10.1038/s41577-025-01187-w",
+      "url": "https://doi.org/10.1038/s41577-025-01187-w"
+    },
+    {
+      "number": 24,
+      "id": "H022D014",
+      "sourceType": "primary_research",
+      "title": "CLIM-TIME identifies metastatic microenvironment modulators for T cell therapy response",
+      "citation": "Wang Y et al. Cell",
+      "year": 2026,
+      "doi": "10.1016/j.cell.2025.12.042",
+      "url": "https://doi.org/10.1016/j.cell.2025.12.042"
+    },
+    {
+      "number": 25,
+      "id": "H022D007",
+      "sourceType": "primary_research",
+      "title": "Temporal and spatial composition of the tumor microenvironment predicts response to immune checkpoint inhibition in metastatic TNBC",
+      "citation": "Greenwald NF; Nederlof I; Sowers C et al. Nature Cancer",
+      "year": 2026,
+      "doi": "10.1038/s43018-026-01114-5",
+      "url": "https://doi.org/10.1038/s43018-026-01114-5"
+    },
+    {
+      "number": 26,
+      "id": "H022D015",
+      "sourceType": "primary_research",
+      "title": "Large-scale, spatially resolved panoramic CRISPR screening in native tissue environments using Perturb-DBiT",
+      "citation": "Baysoy A; Tian X; Renauer P et al. Nature Biotechnology",
+      "year": 2026,
+      "doi": "10.1038/s41587-026-03127-y",
+      "url": "https://doi.org/10.1038/s41587-026-03127-y"
+    }
+  ]
+}

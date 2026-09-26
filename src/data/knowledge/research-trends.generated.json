@@ -1,0 +1,620 @@
+{
+  "releaseId": "public-trends-2026-08-21",
+  "asOfDate": "2026-08-21",
+  "researchWindow": "2020–2026",
+  "categoryCount": 15,
+  "hotspotCount": 43,
+  "deferredCount": 2,
+  "registeredSourceCount": 89,
+  "categories": [
+    {
+      "id": "C01",
+      "nameZh": "计算生物医学与人工智能",
+      "nameEn": "Computational Biomedicine and AI",
+      "definition": "以算法模型或计算决策为主要交付物",
+      "inScope": [
+        "基础模型",
+        "多模态学习",
+        "计算设计",
+        "表型分析"
+      ],
+      "outOfScope": [
+        "通用软件",
+        "无生物医学对象的 AI",
+        "临床工作流本身"
+      ],
+      "hotspotCount": 3
+    },
+    {
+      "id": "C02",
+      "nameZh": "基因组、表观基因组与基因组工程",
+      "nameEn": "Genomics Epigenomics and Genome Engineering",
+      "definition": "以 DNA 染色质变异或可编程编辑为主要对象",
+      "inScope": [
+        "长读长",
+        "泛基因组",
+        "调控基因组",
+        "CRISPR 编辑"
+      ],
+      "outOfScope": [
+        "蛋白工程",
+        "仅做 RNA 表达测量"
+      ],
+      "hotspotCount": 3
+    },
+    {
+      "id": "C03",
+      "nameZh": "单细胞与空间生物学",
+      "nameEn": "Single-Cell and Spatial Biology",
+      "definition": "以单细胞或空间分辨率为必要特征",
+      "inScope": [
+        "细胞图谱",
+        "空间组学",
+        "单细胞多模态",
+        "原位测量"
+      ],
+      "outOfScope": [
+        "纯 bulk 组学",
+        "无细胞或空间分辨率的整合"
+      ],
+      "hotspotCount": 3
+    },
+    {
+      "id": "C04",
+      "nameZh": "多组学、系统生物学与数据基础设施",
+      "nameEn": "Multi-Omics Systems Biology and Data Infrastructure",
+      "definition": "以跨层级整合网络解释或可复用数据体系为主要交付物",
+      "inScope": [
+        "多组学整合",
+        "动态模型",
+        "知识图谱",
+        "标准与可复现"
+      ],
+      "outOfScope": [
+        "单一测量平台",
+        "无生物学整合的数据存储"
+      ],
+      "hotspotCount": 3
+    },
+    {
+      "id": "C05",
+      "nameZh": "蛋白质组、结构生物学与蛋白工程",
+      "nameEn": "Proteomics Structural Biology and Protein Engineering",
+      "definition": "以蛋白测量结构或工程化分子为主要对象",
+      "inScope": [
+        "超灵敏蛋白组",
+        "冷冻电镜",
+        "构象动态",
+        "蛋白设计"
+      ],
+      "outOfScope": [
+        "核酸编辑",
+        "小分子临床开发"
+      ],
+      "hotspotCount": 2
+    },
+    {
+      "id": "C06",
+      "nameZh": "细胞生物学、细胞命运与衰老",
+      "nameEn": "Cell Biology Cell Fate and Aging",
+      "definition": "以细胞状态转换稳态和衰老机制为核心问题",
+      "inScope": [
+        "谱系追踪",
+        "细胞可塑性",
+        "衰老",
+        "细胞应激与死亡"
+      ],
+      "outOfScope": [
+        "组织替代工程",
+        "疾病特异治疗开发"
+      ],
+      "hotspotCount": 3
+    },
+    {
+      "id": "C07",
+      "nameZh": "再生医学、类器官与组织模型",
+      "nameEn": "Regenerative Medicine Organoids and Tissue Models",
+      "definition": "以组织构建修复或人体相关模型为主要交付物",
+      "inScope": [
+        "类器官",
+        "器官芯片",
+        "干细胞",
+        "组织工程",
+        "生物制造"
+      ],
+      "outOfScope": [
+        "仅做细胞命运机制",
+        "肿瘤特异药敏结论"
+      ],
+      "hotspotCount": 3
+    },
+    {
+      "id": "C08",
+      "nameZh": "免疫学、炎症与细胞治疗",
+      "nameEn": "Immunology Inflammation and Cell Therapy",
+      "definition": "以免疫机制或工程化免疫细胞为核心问题",
+      "inScope": [
+        "组织免疫",
+        "免疫细胞状态",
+        "CAR-T",
+        "TCR-T",
+        "检查点"
+      ],
+      "outOfScope": [
+        "肿瘤演化本身",
+        "非免疫细胞替代治疗"
+      ],
+      "hotspotCount": 3
+    },
+    {
+      "id": "C09",
+      "nameZh": "肿瘤生物学与精准肿瘤学",
+      "nameEn": "Cancer Biology and Precision Oncology",
+      "definition": "以肿瘤发生演化异质性和治疗反应为核心问题",
+      "inScope": [
+        "肿瘤微环境",
+        "克隆演化",
+        "转移耐药",
+        "精准分层"
+      ],
+      "outOfScope": [
+        "通用免疫机制",
+        "所有疾病通用诊断平台"
+      ],
+      "hotspotCount": 3
+    },
+    {
+      "id": "C10",
+      "nameZh": "神经科学、脑疾病与神经技术",
+      "nameEn": "Neuroscience Brain Disease and Neurotechnology",
+      "definition": "以神经细胞回路脑疾病或神经接口为核心问题",
+      "inScope": [
+        "脑图谱",
+        "连接组",
+        "神经退行性疾病",
+        "脑机接口",
+        "神经调控"
+      ],
+      "outOfScope": [
+        "一般数字健康",
+        "非神经组织模型"
+      ],
+      "hotspotCount": 3
+    },
+    {
+      "id": "C11",
+      "nameZh": "微生物学、感染性疾病与疫苗",
+      "nameEn": "Microbiology Infectious Disease and Vaccines",
+      "definition": "以病原体宿主感染反应疫苗或耐药性为核心问题",
+      "inScope": [
+        "病原体基因组",
+        "监测",
+        "疫苗",
+        "AMR",
+        "宿主病原体互作"
+      ],
+      "outOfScope": [
+        "非感染性慢性炎症",
+        "通用免疫机制"
+      ],
+      "hotspotCount": 3
+    },
+    {
+      "id": "C12",
+      "nameZh": "代谢、微生物组与心代谢健康",
+      "nameEn": "Metabolism Microbiome and Cardiometabolic Health",
+      "definition": "以代谢网络宿主微生物互作或心代谢机制为核心问题",
+      "inScope": [
+        "微生物组代谢物",
+        "免疫代谢",
+        "肥胖",
+        "脂肪肝",
+        "心代谢组学"
+      ],
+      "outOfScope": [
+        "无机制测量的生活方式建议",
+        "感染病原体研究"
+      ],
+      "hotspotCount": 3
+    },
+    {
+      "id": "C13",
+      "nameZh": "生物标志物、诊断与分子成像",
+      "nameEn": "Biomarkers Diagnostics and Molecular Imaging",
+      "definition": "以可测量指标诊断性能或患者分层为主要交付物",
+      "inScope": [
+        "液体活检",
+        "超灵敏诊断",
+        "伴随诊断",
+        "分子成像"
+      ],
+      "outOfScope": [
+        "未经验证的机制关联",
+        "治疗方案推荐"
+      ],
+      "hotspotCount": 2
+    },
+    {
+      "id": "C14",
+      "nameZh": "药物发现、递送与转化药理",
+      "nameEn": "Drug Discovery Delivery and Translational Pharmacology",
+      "definition": "以候选发现递送 PK/PD 或安全性桥接为主要交付物",
+      "inScope": [
+        "筛选",
+        "靶点验证",
+        "RNA/LNP 递送",
+        "ADME/Tox",
+        "转化模型"
+      ],
+      "outOfScope": [
+        "单纯疾病机制",
+        "临床疗效外推"
+      ],
+      "hotspotCount": 3
+    },
+    {
+      "id": "C15",
+      "nameZh": "临床研究、真实世界证据与数字测量",
+      "nameEn": "Clinical Research Real-World Evidence and Digital Measurement",
+      "definition": "以临床研究设计因果证据或连续数字测量为主要交付物",
+      "inScope": [
+        "去中心化试验",
+        "RWE",
+        "目标试验模拟",
+        "数字终点",
+        "精准队列"
+      ],
+      "outOfScope": [
+        "临床诊疗建议",
+        "无验证的消费健康功能"
+      ],
+      "hotspotCount": 3
+    }
+  ],
+  "hotspots": [
+    {
+      "id": "H001",
+      "categoryId": "C01",
+      "nameZh": "多模态生物分子结构与相互作用预测",
+      "nameEn": "Multimodal Biomolecular Structure and Interaction Prediction",
+      "summary": "跨蛋白核酸小分子与复合体的统一结构和相互作用预测",
+      "trendSignal": "2024 年统一深度学习模型扩展至多类生物分子复合体"
+    },
+    {
+      "id": "H002",
+      "categoryId": "C01",
+      "nameZh": "AI 分子设计与虚拟筛选",
+      "nameEn": "AI Molecular Design and Virtual Screening",
+      "summary": "用生成预测和排序模型提出或优选分子与蛋白候选",
+      "trendSignal": "2023–2024 年扩散式蛋白设计和复合体预测均有实验或基准验证"
+    },
+    {
+      "id": "H003",
+      "categoryId": "C01",
+      "nameZh": "AI 表型分析与实验决策支持",
+      "nameEn": "AI Phenotyping and Experimental Decision Support",
+      "summary": "从图像组学或实验响应数据支持机制推断和实验优先级",
+      "trendSignal": "2022 年高内涵成像结合深度学习用于疾病表型建模和筛选"
+    },
+    {
+      "id": "H004",
+      "categoryId": "C02",
+      "nameZh": "长读长、人类泛基因组与复杂变异",
+      "nameEn": "Long Reads Human Pangenomes and Complex Variation",
+      "summary": "解析结构变异单倍型重复区和群体参考偏差",
+      "trendSignal": "2023 年人类泛基因组从单一线性参考转向多样化单倍型资源"
+    },
+    {
+      "id": "H005",
+      "categoryId": "C02",
+      "nameZh": "单细胞调控基因组与表观基因组",
+      "nameEn": "Single-Cell Regulatory and Epigenomic Genomics",
+      "summary": "以单细胞尺度研究染色质调控和表达控制",
+      "trendSignal": "2024 年单细胞联合测量扩展至染色质互作与 RNA 调控关联"
+    },
+    {
+      "id": "H006",
+      "categoryId": "C02",
+      "nameZh": "CRISPR 精准编辑与功能筛选",
+      "nameEn": "Precision CRISPR Editing and Functional Screens",
+      "summary": "使用碱基编辑 prime editing 和扰动筛选解析或改写功能",
+      "trendSignal": "2024 年 prime editing 向可控多位点和更高效率推进"
+    },
+    {
+      "id": "H007",
+      "categoryId": "C03",
+      "nameZh": "高通量单细胞转录组与扰动筛选",
+      "nameEn": "High-Throughput Single-Cell Transcriptomics and Perturbation Screens",
+      "summary": "以单细胞转录读出连接细胞状态和大规模遗传扰动",
+      "trendSignal": "2021 年组合索引显著提升单细胞测量和扰动筛选规模"
+    },
+    {
+      "id": "H008",
+      "categoryId": "C03",
+      "nameZh": "空间转录组与空间多组学",
+      "nameEn": "Spatial Transcriptomics and Spatial Multi-Omics",
+      "summary": "在组织位置上联合分子表达细胞类型和结构",
+      "trendSignal": "2024 年跨空间组学样本的单细胞分辨匹配方法出现"
+    },
+    {
+      "id": "H009",
+      "categoryId": "C03",
+      "nameZh": "单细胞多模态与原位测量",
+      "nameEn": "Single-Cell Multimodal and In Situ Measurement",
+      "summary": "在单细胞或原位层面联合 RNA 蛋白染色质和功能读出",
+      "trendSignal": "2024 年多模态扩展到染色质互作和 RNA 联合读出"
+    },
+    {
+      "id": "H010",
+      "categoryId": "C04",
+      "nameZh": "多组学整合与网络生物学",
+      "nameEn": "Multi-Omics Integration and Network Biology",
+      "summary": "整合分子层级并构建可检验的网络或机制模型",
+      "trendSignal": "2025 年 NIH 数据科学战略继续强调人源数据 AI 和计算方法"
+    },
+    {
+      "id": "H011",
+      "categoryId": "C04",
+      "nameZh": "纵向组学与动态系统建模",
+      "nameEn": "Longitudinal Omics and Dynamic Systems Modeling",
+      "summary": "以重复采样和时间模型研究状态转变和治疗响应",
+      "trendSignal": "2026 年人体相关外循环系统出现纵向多组学应用"
+    },
+    {
+      "id": "H012",
+      "categoryId": "C04",
+      "nameZh": "生物医学知识图谱、数据标准与可复现性",
+      "nameEn": "Biomedical Knowledge Graphs Data Standards and Reproducibility",
+      "summary": "构建可计算知识体系互操作标准和可复现分析基础设施",
+      "trendSignal": "2025 年 NIH 将联邦基础设施和可复用数据能力列为重点"
+    },
+    {
+      "id": "H014",
+      "categoryId": "C05",
+      "nameZh": "冷冻电镜、原位结构与动态构象",
+      "nameEn": "Cryo-EM In Situ Structure and Conformational Dynamics",
+      "summary": "解析大分子复合体原位结构和构象变化",
+      "trendSignal": "2025 年微流控低输入样本制备推动冷冻电镜结构解析"
+    },
+    {
+      "id": "H015",
+      "categoryId": "C05",
+      "nameZh": "从头蛋白设计与工程化生物分子",
+      "nameEn": "De Novo Protein Design and Engineered Biomolecules",
+      "summary": "设计具有目标结构结合或催化功能的新型蛋白分子",
+      "trendSignal": "2023–2024 年扩散式设计和复合体预测均有实验或基准验证"
+    },
+    {
+      "id": "H016",
+      "categoryId": "C06",
+      "nameZh": "分子记录、谱系追踪与命运解析",
+      "nameEn": "Molecular Recording Lineage Tracing and Fate Analysis",
+      "summary": "用可编程记录工具重建细胞事件谱系和状态变化",
+      "trendSignal": "2024 年 DNA 分子记录支持连续事件与谱系关系重建"
+    },
+    {
+      "id": "H017",
+      "categoryId": "C06",
+      "nameZh": "多器官生物衰老与健康寿命机制",
+      "nameEn": "Multi-Organ Biological Aging and Healthspan Mechanisms",
+      "summary": "研究器官生物年龄跨系统联系和慢病风险",
+      "trendSignal": "2023 年纵向人群数据连接跨器官生物年龄与疾病死亡风险"
+    },
+    {
+      "id": "H018",
+      "categoryId": "C06",
+      "nameZh": "细胞器互作与铁死亡",
+      "nameEn": "Organelle Crosstalk and Ferroptosis",
+      "summary": "研究细胞器接触位点如何调控脂质过氧化和细胞死亡",
+      "trendSignal": "2025 年 ER 线粒体接触位点被指向铁死亡敏感性调控"
+    },
+    {
+      "id": "H019",
+      "categoryId": "C07",
+      "nameZh": "患者来源类器官与疾病模型",
+      "nameEn": "Patient-Derived Organoids and Disease Models",
+      "summary": "利用患者细胞构建保留关键组织特征的体外模型",
+      "trendSignal": "2023–2024 年患者来源模型持续用于功能研究和疾病建模"
+    },
+    {
+      "id": "H020",
+      "categoryId": "C07",
+      "nameZh": "器官芯片与微生理系统",
+      "nameEn": "Organs-on-Chips and Microphysiological Systems",
+      "summary": "以微流控和多细胞系统模拟人体组织功能与暴露",
+      "trendSignal": "2022–2024 年类器官芯片集成用于疾病与药物研究"
+    },
+    {
+      "id": "H021",
+      "categoryId": "C07",
+      "nameZh": "类器官与干细胞规模化制造",
+      "nameEn": "Scalable Organoid and Stem-Cell Manufacturing",
+      "summary": "建立可重复可质控和可放大的细胞组织制造流程",
+      "trendSignal": "2026 年综述把规模化可重复生产明确为转化瓶颈"
+    },
+    {
+      "id": "H022",
+      "categoryId": "C08",
+      "nameZh": "空间组织免疫与免疫细胞状态",
+      "nameEn": "Spatial Tissue Immunity and Immune Cell States",
+      "summary": "研究免疫细胞如何在肿瘤边界、TLS 和治疗相关微区中进入、组织并改变状态",
+      "trendSignal": "2020–2026 年研究逐步把边界生态、局部免疫组织和纵向治疗轨迹放进同一解释框架"
+    },
+    {
+      "id": "H023",
+      "categoryId": "C08",
+      "nameZh": "CAR-T、TCR-T 与工程化免疫细胞",
+      "nameEn": "Engineered Immune Cell Therapies",
+      "summary": "工程化 T NK 或其他免疫细胞用于治疗研究",
+      "trendSignal": "2021 年综述把 CAR-T 与组织靶向给药列为关键转化方向"
+    },
+    {
+      "id": "H024",
+      "categoryId": "C08",
+      "nameZh": "免疫检查点与组合免疫调控",
+      "nameEn": "Immune Checkpoints and Combinatorial Immunomodulation",
+      "summary": "调控免疫抑制激活和组合治疗机制",
+      "trendSignal": "2021 年组合免疫调控和组织靶向问题持续受到关注"
+    },
+    {
+      "id": "H025",
+      "categoryId": "C09",
+      "nameZh": "肿瘤异质性与微环境生态",
+      "nameEn": "Tumor Heterogeneity and Microenvironmental Ecosystems",
+      "summary": "研究肿瘤细胞免疫间质和空间生态的异质性",
+      "trendSignal": "2024 年空间组学在多癌种解析肿瘤微区和亚克隆"
+    },
+    {
+      "id": "H026",
+      "categoryId": "C09",
+      "nameZh": "克隆演化、转移与耐药",
+      "nameEn": "Clonal Evolution Metastasis and Resistance",
+      "summary": "追踪克隆选择转移路径和治疗压力下的耐药",
+      "trendSignal": "2025 年纵向 cfDNA 与单细胞数据追踪治疗选择的耐药克隆"
+    },
+    {
+      "id": "H027",
+      "categoryId": "C09",
+      "nameZh": "分子分层与功能精准肿瘤学",
+      "nameEn": "Molecular Stratification and Functional Precision Oncology",
+      "summary": "结合分子分型与患者来源功能测试支持研究分层",
+      "trendSignal": "2023 年患者来源功能检测被定位为基因组分层的补充"
+    },
+    {
+      "id": "H028",
+      "categoryId": "C10",
+      "nameZh": "脑细胞图谱与跨尺度参考图谱",
+      "nameEn": "Brain Cell Atlases and Cross-Scale Reference Maps",
+      "summary": "建立跨物种跨脑区和跨生命周期的脑细胞参考资源",
+      "trendSignal": "2024–2025 年 BICAN 与统一脑细胞图谱持续建设人脑参考资源"
+    },
+    {
+      "id": "H029",
+      "categoryId": "C10",
+      "nameZh": "神经退行性疾病细胞图谱与机制",
+      "nameEn": "Cell Atlases and Mechanisms of Neurodegeneration",
+      "summary": "用脑细胞参考资源识别神经退行相关细胞类型和状态",
+      "trendSignal": "2024 年统一人脑单细胞资源用于神经退行性疾病分析"
+    },
+    {
+      "id": "H030",
+      "categoryId": "C10",
+      "nameZh": "神经接口、高密度记录与神经调控",
+      "nameEn": "Neural Interfaces High-Density Recording and Neuromodulation",
+      "summary": "开发读取刺激和闭环调节神经活动的技术",
+      "trendSignal": "2025 年植入式记录结合连接组用于跨队列解码与闭环调控"
+    },
+    {
+      "id": "H031",
+      "categoryId": "C11",
+      "nameZh": "病原体基因组与基因组监测",
+      "nameEn": "Pathogen Genomics and Genomic Surveillance",
+      "summary": "利用病原体序列追踪传播变异和公共卫生风险",
+      "trendSignal": "2022–2025 年 WHO 战略和 GLASS 持续推进监测能力"
+    },
+    {
+      "id": "H032",
+      "categoryId": "C11",
+      "nameZh": "新型疫苗平台与免疫保护相关物",
+      "nameEn": "Novel Vaccine Platforms and Correlates of Protection",
+      "summary": "研究 RNA 载体等平台及免疫保护读出",
+      "trendSignal": "2024 年 WHO 以疫苗减少耐药负担的评估支持研发优先级"
+    },
+    {
+      "id": "H033",
+      "categoryId": "C11",
+      "nameZh": "抗微生物耐药与新型抗感染策略",
+      "nameEn": "Antimicrobial Resistance and Novel Anti-Infective Strategies",
+      "summary": "研究耐药演化监测和疫苗诊断治疗等干预路径",
+      "trendSignal": "2024–2025 年 WHO 将 AMR 监测疫苗和抗感染研发列为持续优先项"
+    },
+    {
+      "id": "H034",
+      "categoryId": "C12",
+      "nameZh": "微生物组代谢物与宿主互作",
+      "nameEn": "Microbiome Metabolites and Host Interactions",
+      "summary": "解析微生物群代谢物和宿主生理免疫间的机制联系",
+      "trendSignal": "2025 年多组学连接微生物物种代谢物和宿主风险表型"
+    },
+    {
+      "id": "H035",
+      "categoryId": "C12",
+      "nameZh": "代谢性炎症与慢性疾病",
+      "nameEn": "Metabolic Inflammation and Chronic Disease",
+      "summary": "研究代谢失衡炎症和慢性病表型之间的联系",
+      "trendSignal": "2025 年 MASLD 多组学显示微生物代谢异常伴随炎症相关改变"
+    },
+    {
+      "id": "H036",
+      "categoryId": "C12",
+      "nameZh": "肥胖、脂肪肝与心代谢多组学",
+      "nameEn": "Obesity Fatty Liver and Cardiometabolic Multi-Omics",
+      "summary": "用多组学解析肥胖脂肪肝糖尿病和心血管风险机制",
+      "trendSignal": "2025 年人群多组学细化肥胖脂肪肝和心代谢风险分层"
+    },
+    {
+      "id": "H037",
+      "categoryId": "C13",
+      "nameZh": "液体活检与循环分子标志物",
+      "nameEn": "Liquid Biopsy and Circulating Molecular Biomarkers",
+      "summary": "从体液检测核酸蛋白细胞或囊泡标志物",
+      "trendSignal": "2025–2026 年液体活检向多癌早检和低频 cfDNA 检测推进"
+    },
+    {
+      "id": "H038",
+      "categoryId": "C13",
+      "nameZh": "多重与超灵敏分子诊断",
+      "nameEn": "Multiplex and Ultrasensitive Molecular Diagnostics",
+      "summary": "提高低丰度和多指标检测的分析性能",
+      "trendSignal": "2026 年可编程 cfDNA 测序展示低频多重检测能力"
+    },
+    {
+      "id": "H040",
+      "categoryId": "C14",
+      "nameZh": "表型筛选、靶点验证与候选优选",
+      "nameEn": "Phenotypic Screening Target Validation and Candidate Prioritization",
+      "summary": "从筛选命中到机制靶点和候选质量的实验验证链路",
+      "trendSignal": "2023 年压缩式扰动和计算反卷积扩展高内涵筛选规模"
+    },
+    {
+      "id": "H041",
+      "categoryId": "C14",
+      "nameZh": "RNA、脂质纳米颗粒与靶向递送",
+      "nameEn": "RNA Lipid Nanoparticle and Targeted Delivery",
+      "summary": "开发核酸载荷载体组织靶向和细胞内递送策略",
+      "trendSignal": "2025 年研究聚焦 LNP 组织趋向性和胞质递送效率瓶颈"
+    },
+    {
+      "id": "H042",
+      "categoryId": "C14",
+      "nameZh": "PK/PD、ADME/Tox 与人体相关转化模型",
+      "nameEn": "PK PD ADME Tox and Human-Relevant Translational Models",
+      "summary": "桥接暴露药效安全性和人体可预测性的模型与标志物",
+      "trendSignal": "2022–2024 年器官芯片持续用于人体相关药物和毒理模型"
+    },
+    {
+      "id": "H043",
+      "categoryId": "C15",
+      "nameZh": "去中心化临床研究与数字终点",
+      "nameEn": "Decentralized Clinical Research and Digital Endpoints",
+      "summary": "通过远程活动和数字技术改进试验参与与连续终点采集",
+      "trendSignal": "2023 年 FDA 指导覆盖去中心化设计和数字健康数据采集"
+    },
+    {
+      "id": "H044",
+      "categoryId": "C15",
+      "nameZh": "真实世界证据与目标试验模拟",
+      "nameEn": "Real-World Evidence and Target Trial Emulation",
+      "summary": "从 EHR 理赔登记和其他 RWD 构建可用于决策的因果证据",
+      "trendSignal": "2023–2026 年 FDA 持续完善 fit-for-purpose RWD/RWE 方法"
+    },
+    {
+      "id": "H045",
+      "categoryId": "C15",
+      "nameZh": "联邦临床数据、精准队列与实施科学",
+      "nameEn": "Federated Clinical Data Precision Cohorts and Implementation Science",
+      "summary": "连接多机构数据多样化队列和研究成果落地评估",
+      "trendSignal": "2023–2025 年示范项目推进可复用 EHR 数字数据和嵌入式试验"
+    }
+  ]
+}

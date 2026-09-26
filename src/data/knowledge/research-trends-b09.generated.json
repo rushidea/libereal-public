@@ -1,0 +1,2214 @@
+{
+  "schema_version": "research-deep-dive-public-v0.1",
+  "batch_id": "B09",
+  "title": "感染监测、疫苗与核酸递送",
+  "publication_status": "snapshot_ready",
+  "frontend_status": "snapshot_ready",
+  "topics": [
+    {
+      "topic_id": "H031",
+      "title": "病原体基因组与基因组监测",
+      "topic_role": "research_deep_dive",
+      "overview": "病原体基因组监测把测序读段、采样地点、时间和宿主信息放进同一套可比较的坐标，用来回答传播链、谱系替换和输入事件，而不是只报告某一株的序列。公开研究已经覆盖呼吸道病毒、肠道病原、猴痘和医院感染，但能看到什么取决于采样框、测序覆盖、引物方案和元数据完整程度。\n\n本方向从实时谱系追踪、国家与区域监测网络、引物与组装流程、污水基因组学出发，集中处理三类问题：基因组如何被映射到可引用的公共坐标；覆盖不足会漏掉哪些传播事件；污水和多病原采样如何把信号从就诊病例扩展到社区。耐药酶学、新抗感染骨架和噬菌体策略由抗微生物耐药专题处理。\n\n比较公开研究时，需要同时交代病原种类、采样框、测序平台、引物版本、谱系命名和数据共享时滞。基因组监测是研究导航，不是诊疗、商品推荐或监管申报指引。某一地区的谱系比例不能外推为全球传播结构。",
+      "sections": [
+        {
+          "section_id": "H031-SEC-01",
+          "title": "比较不同研究时应先看什么",
+          "body": "| 比较内容 | 应记录的信息 | 关系到什么判断 |\n| --- | --- | --- |\n| 取样框与覆盖 | 病原种类、地理范围、病例定义、测序比例和偏倚来源 | 看到的是局部传播还是采样框本身 |\n| 测序与组装 | 平台、引物或捕获方案、覆盖深度和质量控制阈值 | 缺失片段是否会改变谱系或变异判断 |\n| 谱系与变异注释 | 命名版本、参考基因组、突变定义和谱系分配软件 | 不同研究的谱系标签能否直接比较 |\n| 流行病学元数据 | 采样日期、地点、宿主、旅行史和医院暴露 | 系统发育信号能否对应传播事件 |\n| 共享与时滞 | 数据库、上传延迟、仪表盘和版本记录 | 实时结论是否已被后续数据改写 |",
+          "source_ids": []
+        },
+        {
+          "section_id": "H031-SEC-02",
+          "title": "实时谱系追踪把基因组放进可比较的公共坐标",
+          "body": "Nextstrain 证明病原进化可以按连续更新的系统发育和地理映射对外发布。随后的严重急性呼吸综合征冠状病毒 2 基因组流行病学研究进一步证明，地方公共卫生沟通、变异出现与传播耦合，以及测序基础设施，会共同决定监测能否被独立复用。\n\n这些工作适合作为谱系比较的起点。命名版本、参考基因组和上传时滞必须一并记录，不能把某一周的谱系比例写成稳定的全球结构。",
+          "source_ids": [
+            "H031S001",
+            "H031S002",
+            "H031S003",
+            "H031S004"
+          ]
+        },
+        {
+          "section_id": "H031-SEC-03",
+          "title": "监测网络能力决定能看到哪些传播事件",
+          "body": "亚洲低资源地区的病原基因组监测现况、非洲迅速扩展的测序网络、加拿大公共卫生实验室能力评估，以及非洲病原基因组学综述，共同证明覆盖、培训、试剂和数据治理会限制可见的传播事件。\n\n网络能力研究适合判断某一结论是否受采样框约束。测序数量上升不等于代表性足够；缺少元数据的序列只能支持有限的传播推断。",
+          "source_ids": [
+            "H031S007",
+            "H031S008",
+            "H031S010",
+            "H031S016",
+            "H031S018"
+          ]
+        },
+        {
+          "section_id": "H031-SEC-04",
+          "title": "引物方案和医院感染可视化决定监测能否落地",
+          "body": "ARTIC 网络引物优化证明扩增子方案会直接影响全基因组覆盖和谱系分配。医院感染基因组仪表盘研究进一步证明，把基因组与临床暴露数据放在同一界面，才能支持院内传播假设。人工智能用于病原监测的讨论则提示计算方法可以辅助分型，但不能替代采样设计和元数据。\n\n引物版本和可视化工具应作为方法学变量报告。方案更新后，旧序列的谱系标签需要重新映射，不能沿用过期注释。",
+          "source_ids": [
+            "H031S009",
+            "H031S017",
+            "H031S019"
+          ]
+        },
+        {
+          "section_id": "H031-SEC-05",
+          "title": "污水和多病原监测把采样从就诊病例扩展到社区",
+          "body": "城市污水基因组监测证明可以跟踪阿尔法和德尔塔谱系更替；犹他州污水研究证明奥密克戎可以在临床报告之前被检出。呼吸道、肠道和泌尿病毒的季节性研究，以及亚利桑那州流感基因组监测，进一步证明非临床采样可以覆盖多种病原。\n\n污水信号适合提出社区流行假设。病毒载量、稀释、降解和人口流动性会改变定量解释，不能把污水谱系直接写成个体感染来源。",
+          "source_ids": [
+            "H031S013",
+            "H031S014",
+            "H031S015",
+            "H031S020"
+          ]
+        },
+        {
+          "section_id": "H031-SEC-06",
+          "title": "专题边界：监测不等于耐药机制或抗感染策略",
+          "body": "肺炎链球菌十年基因组监测证明病原基因组可以服务疫苗策略比较；伤寒沙门菌监测证明基因组型与临床结局不必一一对应。猴痘全球基因组监测和仪表盘研究则把该病原纳入可比较的谱系坐标。\n\n本页处理传播、谱系和监测网络。抗微生物耐药机制、新抗感染骨架和噬菌体策略由 H033 专题处理，两页可以交叉引用，但不能把耐药基因检出写成新药证据，也不能把爆发谱系写成抗感染方案。",
+          "source_ids": [
+            "H031S005",
+            "H031S006",
+            "H031S011",
+            "H031S012"
+          ]
+        },
+        {
+          "section_id": "H031-SEC-07",
+          "title": "研究技术",
+          "body": "本专题的技术卡包括监测取样框与覆盖评估、全基因组测序与引物质控、系统发育与谱系分配、污水基因组监测，以及公共数据库与仪表盘版本管理。技术选择取决于需要确认的是覆盖偏倚、谱系替换还是社区信号。",
+          "source_ids": []
+        },
+        {
+          "section_id": "H031-SEC-08",
+          "title": "科研参考范围",
+          "body": "本页用于介绍病原体基因组监测中的证据类型、实验设计和适用范围，用于研究导航。不提供诊疗、商品推荐、监管申报或抗感染用药建议。耐药机制与新型抗感染策略见 H033。",
+          "source_ids": []
+        }
+      ],
+      "methods": [
+        {
+          "method_id": "H031-M01",
+          "display_order": 1,
+          "category": "监测设计",
+          "title": "病例定义、采样框与覆盖评估",
+          "principle": "预先规定病原、地理范围、纳入排除标准和测序比例，并估计采样偏倚对谱系频率的影响。",
+          "answers": "判断监测看到的是传播事件还是采样框本身。",
+          "sample_design": "记录病例定义、哨点分布、测序比例、时间和地理覆盖；保留未测序病例的基线描述。",
+          "limitations": "就诊偏倚和试剂中断会系统性改变可见谱系；覆盖不足时不能外推未采样地区。",
+          "source_ids": [
+            "H031S007",
+            "H031S008",
+            "H031S010",
+            "H031S018"
+          ],
+          "workflow": "设计阶段先确定：记录病例定义、哨点分布、测序比例、时间和地理覆盖；保留未测序病例的基线描述。 记录样本来源、处理条件、读出指标和正交验证；把观察结果与预先定义的研究问题放在同一分析框架中比较。 这项方法的直接测量或计算依据是：预先规定病原、地理范围、纳入排除标准和测序比例，并估计采样偏倚对谱系频率的影响。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：就诊偏倚和试剂中断会系统性改变可见谱系；覆盖不足时不能外推未采样地区。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "结果可用于判断监测看到的是传播事件还是采样框本身。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        },
+        {
+          "method_id": "H031-M02",
+          "display_order": 2,
+          "category": "测序与组装",
+          "title": "全基因组测序、引物方案与质量控制",
+          "principle": "用扩增子、捕获或宏基因组流程获得病原基因组，并按覆盖深度、缺失片段和污染指标过滤。",
+          "answers": "确认谱系和关键变异是否建立在足够覆盖的基因组上。",
+          "sample_design": "报告平台、引物或捕获版本、深度阈值和失败率；方案更新后重新组装关键样本。",
+          "limitations": "引物脱落会造成假缺失；混合感染和污染会扭曲变异调用。",
+          "source_ids": [
+            "H031S009",
+            "H031S004",
+            "H031S019"
+          ],
+          "workflow": "设计阶段先确定：报告平台、引物或捕获版本、深度阈值和失败率；方案更新后重新组装关键样本。 记录样本来源、处理条件、读出指标和正交验证；把观察结果与预先定义的研究问题放在同一分析框架中比较。 这项方法的直接测量或计算依据是：用扩增子、捕获或宏基因组流程获得病原基因组，并按覆盖深度、缺失片段和污染指标过滤。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：引物脱落会造成假缺失；混合感染和污染会扭曲变异调用。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "结果可用于确认谱系和关键变异是否建立在足够覆盖的基因组上。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        },
+        {
+          "method_id": "H031-M03",
+          "display_order": 3,
+          "category": "谱系分析",
+          "title": "系统发育、谱系分配与传播假设",
+          "principle": "把高质量基因组放到公开参考坐标中，结合采样日期和地点提出传播或输入假设。",
+          "answers": "比较谱系替换、输入事件和本地持续传播是否被数据支持。",
+          "sample_design": "固定命名版本、参考集和钟模型假设；报告未分配序列和替代拓扑。",
+          "limitations": "缺少旅行史或采样日期时，系统发育只能给出弱传播约束。",
+          "source_ids": [
+            "H031S001",
+            "H031S002",
+            "H031S003",
+            "H031S010"
+          ],
+          "workflow": "设计阶段先确定：固定命名版本、参考集和钟模型假设；报告未分配序列和替代拓扑。 记录样本来源、处理条件、读出指标和正交验证；把观察结果与预先定义的研究问题放在同一分析框架中比较。 这项方法的直接测量或计算依据是：把高质量基因组放到公开参考坐标中，结合采样日期和地点提出传播或输入假设。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：缺少旅行史或采样日期时，系统发育只能给出弱传播约束。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "结果可用于比较谱系替换、输入事件和本地持续传播是否被数据支持。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        },
+        {
+          "method_id": "H031-M04",
+          "display_order": 4,
+          "category": "环境监测",
+          "title": "污水基因组监测与社区信号",
+          "principle": "对污水或环境样本测序，跟踪社区中的病原谱系和多病毒季节性，而不依赖单一就诊病例。",
+          "answers": "判断社区流行信号是否早于或宽于临床报告。",
+          "sample_design": "记录采样点、流量或人口校正、核酸回收率和对照；关键谱系用临床序列复核。",
+          "limitations": "稀释、降解和人口流动会改变定量；污水阳性不能指定个体感染来源。",
+          "source_ids": [
+            "H031S013",
+            "H031S014",
+            "H031S015",
+            "H031S020"
+          ],
+          "workflow": "设计阶段先确定：记录采样点、流量或人口校正、核酸回收率和对照；关键谱系用临床序列复核。 记录样本来源、处理条件、读出指标和正交验证；把观察结果与预先定义的研究问题放在同一分析框架中比较。 这项方法的直接测量或计算依据是：对污水或环境样本测序，跟踪社区中的病原谱系和多病毒季节性，而不依赖单一就诊病例。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：稀释、降解和人口流动会改变定量；污水阳性不能指定个体感染来源。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "结果可用于判断社区流行信号是否早于或宽于临床报告。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        },
+        {
+          "method_id": "H031-M05",
+          "display_order": 5,
+          "category": "数据共享",
+          "title": "公共数据库、仪表盘与版本管理",
+          "principle": "把序列和最低元数据写入可引用数据库或仪表盘，并保留上传时间和命名版本。",
+          "answers": "评估其他研究能否复用同一监测坐标，以及结论是否已被后续上传改写。",
+          "sample_design": "报告数据库、延迟、仪表盘版本和访问条件；修订谱系后发布变更说明。",
+          "limitations": "延迟上传会造成虚假的本地起源；仪表盘可视化不能代替原始比对。",
+          "source_ids": [
+            "H031S001",
+            "H031S011",
+            "H031S012",
+            "H031S017"
+          ],
+          "workflow": "设计阶段先确定：报告数据库、延迟、仪表盘版本和访问条件；修订谱系后发布变更说明。 记录样本来源、处理条件、读出指标和正交验证；把观察结果与预先定义的研究问题放在同一分析框架中比较。 这项方法的直接测量或计算依据是：把序列和最低元数据写入可引用数据库或仪表盘，并保留上传时间和命名版本。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：延迟上传会造成虚假的本地起源；仪表盘可视化不能代替原始比对。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "结果可用于评估其他研究能否复用同一监测坐标，以及结论是否已被后续上传改写。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        }
+      ],
+      "shared_findings": [
+        {
+          "finding_id": "H031-C01",
+          "display_order": 1,
+          "title": "实时谱系追踪依赖共享坐标和完整元数据",
+          "shared_result": "Nextstrain 与严重急性呼吸综合征冠状病毒 2 基因组流行病学研究证明，连续更新的系统发育只有在命名版本、采样日期和共享时滞被记录时才能被复用。",
+          "research_use": "引用图谱时记录软件、参考集和上传日期；比较不同周次结果时先对齐命名版本。",
+          "boundary": "某一周的谱系比例不是稳定的全球传播结构；本页不提供诊疗建议。",
+          "source_ids": [
+            "H031S001",
+            "H031S002",
+            "H031S003",
+            "H031S004"
+          ]
+        },
+        {
+          "finding_id": "H031-C02",
+          "display_order": 2,
+          "title": "监测网络能力不足会系统性漏掉传播事件",
+          "shared_result": "亚洲、非洲和加拿大的能力评估表明，试剂、培训、哨点分布和数据治理会限制可见谱系，测序数量上升不等于代表性足够。",
+          "research_use": "报告覆盖比例、哨点类型和未测序病例；能力约束作为结果解释的一部分。",
+          "boundary": "不能把高覆盖地区的结论直接外推到未采样地区。",
+          "source_ids": [
+            "H031S007",
+            "H031S008",
+            "H031S010",
+            "H031S016",
+            "H031S018"
+          ]
+        },
+        {
+          "finding_id": "H031-C03",
+          "display_order": 3,
+          "title": "污水监测可以提前给出社区信号，但不能指定个体来源",
+          "shared_result": "城市污水和流感基因组监测证明，非临床采样可以跟踪谱系更替和多病毒季节性，有时早于临床报告。",
+          "research_use": "同步记录流量校正、回收率和对照；关键谱系用临床序列复核。",
+          "boundary": "污水阳性不是个体诊断，也不能单独写成传播链证据。",
+          "source_ids": [
+            "H031S013",
+            "H031S014",
+            "H031S015",
+            "H031S020"
+          ]
+        },
+        {
+          "finding_id": "H031-C04",
+          "display_order": 4,
+          "title": "引物方案和可视化工具是方法学变量",
+          "shared_result": "ARTIC 引物优化和医院感染仪表盘研究说明，扩增子方案与临床元数据整合会改变能被检出和被解释的事件。",
+          "research_use": "固定引物版本、覆盖阈值和仪表盘版本；方案更新后重新映射旧序列。",
+          "boundary": "可视化不能代替原始比对；人工智能辅助分型不能替代采样设计。",
+          "source_ids": [
+            "H031S009",
+            "H031S017",
+            "H031S019"
+          ]
+        },
+        {
+          "finding_id": "H031-C05",
+          "display_order": 5,
+          "title": "基因组监测与耐药机制必须分层",
+          "shared_result": "肺炎链球菌和伤寒监测证明病原基因组可以服务疫苗策略或传播描述，但基因组型不必对应临床结局。猴痘监测扩展了谱系坐标，仍不回答抗感染机制。",
+          "research_use": "传播、谱系和监测网络用本页框架；耐药酶学、新骨架和噬菌体策略转到 H033。",
+          "boundary": "耐药基因检出不是新药证据；爆发谱系不是抗感染方案。两页可交叉引用，结论分开写。",
+          "source_ids": [
+            "H031S005",
+            "H031S006",
+            "H031S011",
+            "H031S012"
+          ]
+        }
+      ],
+      "references": [
+        {
+          "source_id": "H031S001",
+          "title": "Nextstrain: real-time tracking of pathogen evolution.",
+          "authors": "Hadfield J et al.",
+          "journal": "Bioinformatics",
+          "published_date": "2018 Dec 1",
+          "doi": "10.1093/bioinformatics/bty407",
+          "pmid": "29790939",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/29790939/",
+          "source_type": "software-method",
+          "study_context": "pathogen evolution tracking",
+          "study_design": "real-time phylogenetic dashboard",
+          "usable_for": "shared genomic coordinates",
+          "limitations": "resource; depends on uploaded metadata"
+        },
+        {
+          "source_id": "H031S002",
+          "title": "Real-time public health communication of local SARS-CoV-2 genomic epidemiology.",
+          "authors": "Kalinich CC et al.",
+          "journal": "PLoS Biol",
+          "published_date": "2020 Aug",
+          "doi": "10.1371/journal.pbio.3000869",
+          "pmid": "32822393",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/32822393/",
+          "source_type": "primary_research",
+          "study_context": "local SARS-CoV-2 surveillance",
+          "study_design": "public health genomic communication",
+          "usable_for": "local outbreak interpretation",
+          "limitations": "single-jurisdiction design"
+        },
+        {
+          "source_id": "H031S003",
+          "title": "Analysis of SARS-CoV-2 genomic epidemiology reveals disease transmission coupled to variant emergence and allelic variation.",
+          "authors": "Bandoy DJDR et al.",
+          "journal": "Sci Rep",
+          "published_date": "2021 Apr 1",
+          "doi": "10.1038/s41598-021-86265-4",
+          "pmid": "33795722",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/33795722/",
+          "source_type": "primary_research",
+          "study_context": "SARS-CoV-2 genomic epidemiology",
+          "study_design": "variant emergence and transmission",
+          "usable_for": "allelic variation with spread",
+          "limitations": "observational genomic epidemiology"
+        },
+        {
+          "source_id": "H031S004",
+          "title": "SARS-CoV-2 genomic epidemiology: data and sequencing infrastructure.",
+          "authors": "Merhi G et al.",
+          "journal": "Future Microbiol",
+          "published_date": "2022 Sep",
+          "doi": "10.2217/fmb-2021-0207",
+          "pmid": "35899481",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/35899481/",
+          "source_type": "review",
+          "study_context": "SARS-CoV-2 sequencing",
+          "study_design": "data and sequencing infrastructure",
+          "usable_for": "surveillance capacity framing",
+          "limitations": "review; infrastructure varies by country"
+        },
+        {
+          "source_id": "H031S005",
+          "title": "Global genomic pathogen surveillance to inform vaccine strategies: a decade-long expedition in pneumococcal genomics.",
+          "authors": "Bentley SD et al.",
+          "journal": "Genome Med",
+          "published_date": "2021 May 1",
+          "doi": "10.1186/s13073-021-00901-2",
+          "pmid": "34001237",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/34001237/",
+          "source_type": "primary_research",
+          "study_context": "pneumococcal genomics",
+          "study_design": "decade-long global surveillance",
+          "usable_for": "vaccine-strategy comparison",
+          "limitations": "vaccine context; not outbreak-only"
+        },
+        {
+          "source_id": "H031S006",
+          "title": "Pathogen genomic surveillance of typhoidal Salmonella infection in adults and children reveals no association between clinical outcomes and infecting genotypes.",
+          "authors": "Britto CD et al.",
+          "journal": "Trop Med Health",
+          "published_date": "2020",
+          "doi": "10.1186/s41182-020-00247-2",
+          "pmid": "32684794",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/32684794/",
+          "source_type": "primary_research",
+          "study_context": "typhoidal Salmonella",
+          "study_design": "clinical genomic surveillance",
+          "usable_for": "no clinical-outcome association",
+          "limitations": "hospital series; limited outcome link"
+        },
+        {
+          "source_id": "H031S007",
+          "title": "Pathogen genomic surveillance status among lower resource settings in Asia.",
+          "authors": "Getchell M et al.",
+          "journal": "Nat Microbiol",
+          "published_date": "2024 Oct",
+          "doi": "10.1038/s41564-024-01809-4",
+          "pmid": "39317773",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/39317773/",
+          "source_type": "primary_research",
+          "study_context": "Asia lower-resource settings",
+          "study_design": "surveillance status survey",
+          "usable_for": "capacity and coverage gaps",
+          "limitations": "survey; not a single outbreak"
+        },
+        {
+          "source_id": "H031S008",
+          "title": "Strengthening pathogen genomic surveillance for health emergencies: insights from the World Health Organization's regional initiatives.",
+          "authors": "Akande OW et al.",
+          "journal": "Front Public Health",
+          "published_date": "2023",
+          "doi": "10.3389/fpubh.2023.1146730",
+          "pmid": "37361158",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/37361158/",
+          "source_type": "review",
+          "study_context": "WHO regional initiatives",
+          "study_design": "emergency genomic surveillance",
+          "usable_for": "network strengthening",
+          "limitations": "review of programmes"
+        },
+        {
+          "source_id": "H031S009",
+          "title": "Optimization of the SARS-CoV-2 ARTIC Network V4 Primers and Whole Genome Sequencing Protocol.",
+          "authors": "Lambisia AW et al.",
+          "journal": "Front Med (Lausanne)",
+          "published_date": "2022",
+          "doi": "10.3389/fmed.2022.836728",
+          "pmid": "35252269",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/35252269/",
+          "source_type": "primary_research",
+          "study_context": "SARS-CoV-2 ARTIC protocol",
+          "study_design": "primer and protocol optimization",
+          "usable_for": "genome completeness for lineage calls",
+          "limitations": "protocol paper; primer-version specific"
+        },
+        {
+          "source_id": "H031S010",
+          "title": "The evolving SARS-CoV-2 epidemic in Africa: Insights from rapidly expanding genomic surveillance.",
+          "authors": "Tegally H et al.",
+          "journal": "Science",
+          "published_date": "2022 Oct 7",
+          "doi": "10.1126/science.abq5358",
+          "pmid": "36108049",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/36108049/",
+          "source_type": "primary_research",
+          "study_context": "Africa SARS-CoV-2 epidemic",
+          "study_design": "rapidly expanding genomic surveillance",
+          "usable_for": "continental spread insights",
+          "limitations": "coverage still uneven"
+        },
+        {
+          "source_id": "H031S011",
+          "title": "MpoxRadar: a worldwide MPXV genomic surveillance dashboard.",
+          "authors": "Nasri F et al.",
+          "journal": "Nucleic Acids Res",
+          "published_date": "2023 Jul 5",
+          "doi": "10.1093/nar/gkad325",
+          "pmid": "37167010",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/37167010/",
+          "source_type": "software-method",
+          "study_context": "mpox genomics",
+          "study_design": "worldwide MPXV dashboard",
+          "usable_for": "lineage visualization",
+          "limitations": "dashboard resource"
+        },
+        {
+          "source_id": "H031S012",
+          "title": "Global genomic surveillance of monkeypox virus.",
+          "authors": "Otieno JR et al.",
+          "journal": "Nat Med",
+          "published_date": "2025 Jan",
+          "doi": "10.1038/s41591-024-03370-3",
+          "pmid": "39442559",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/39442559/",
+          "source_type": "primary_research",
+          "study_context": "monkeypox virus",
+          "study_design": "global genomic surveillance",
+          "usable_for": "cross-country lineage comparison",
+          "limitations": "surveillance series"
+        },
+        {
+          "source_id": "H031S013",
+          "title": "City-wide wastewater genomic surveillance through the successive emergence of SARS-CoV-2 Alpha and Delta variants.",
+          "authors": "Brunner FS et al.",
+          "journal": "Water Res",
+          "published_date": "2022 Nov 1",
+          "doi": "10.1016/j.watres.2022.119306",
+          "pmid": "36369689",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/36369689/",
+          "source_type": "primary_research",
+          "study_context": "urban wastewater",
+          "study_design": "Alpha and Delta succession",
+          "usable_for": "community lineage tracking",
+          "limitations": "environmental sampling"
+        },
+        {
+          "source_id": "H031S014",
+          "title": "Wastewater Genomic Surveillance Captures Early Detection of Omicron in Utah.",
+          "authors": "Gupta P et al.",
+          "journal": "Microbiol Spectr",
+          "published_date": "2023 Jun 1",
+          "doi": "10.1128/spectrum.00391-23",
+          "pmid": "37154725",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/37154725/",
+          "source_type": "primary_research",
+          "study_context": "Utah wastewater",
+          "study_design": "early Omicron detection",
+          "usable_for": "pre-clinical community signal",
+          "limitations": "single-region wastewater"
+        },
+        {
+          "source_id": "H031S015",
+          "title": "Influenza Virus Genomic Surveillance, Arizona, USA, 2023-2024.",
+          "authors": "Maqsood R et al.",
+          "journal": "Viruses",
+          "published_date": "2024 Apr 2",
+          "doi": "10.3390/v16050692",
+          "pmid": "38793574",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/38793574/",
+          "source_type": "primary_research",
+          "study_context": "Arizona influenza",
+          "study_design": "seasonal genomic surveillance",
+          "usable_for": "respiratory virus monitoring",
+          "limitations": "regional influenza series"
+        },
+        {
+          "source_id": "H031S016",
+          "title": "The rise of pathogen genomics in Africa.",
+          "authors": "Mboowa G et al.",
+          "journal": "F1000Res",
+          "published_date": "2024",
+          "doi": "10.12688/f1000research.147114.2",
+          "pmid": "39464779",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/39464779/",
+          "source_type": "review",
+          "study_context": "Africa pathogen genomics",
+          "study_design": "capacity and network growth",
+          "usable_for": "regional infrastructure",
+          "limitations": "review; heterogeneous programmes"
+        },
+        {
+          "source_id": "H031S017",
+          "title": "HAIviz: an interactive dashboard for visualising and integrating healthcare-associated genomic epidemiological data.",
+          "authors": "Permana B et al.",
+          "journal": "Microb Genom",
+          "published_date": "2024 Feb",
+          "doi": "10.1099/mgen.0.001200",
+          "pmid": "38358326",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/38358326/",
+          "source_type": "software-method",
+          "study_context": "healthcare-associated infection",
+          "study_design": "genomic epidemiology dashboard",
+          "usable_for": "hospital transmission visualization",
+          "limitations": "tooling; needs clinical metadata"
+        },
+        {
+          "source_id": "H031S018",
+          "title": "Public health genomics capacity assessment: readiness for large-scale pathogen genomic surveillance in Canada's public health laboratories.",
+          "authors": "Nadon C et al.",
+          "journal": "BMC Public Health",
+          "published_date": "2022 Sep 2",
+          "doi": "10.1186/s12889-022-14210-9",
+          "pmid": "36153510",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/36153510/",
+          "source_type": "primary_research",
+          "study_context": "Canada public health labs",
+          "study_design": "capacity assessment",
+          "usable_for": "readiness for large-scale surveillance",
+          "limitations": "capacity survey"
+        },
+        {
+          "source_id": "H031S019",
+          "title": "Pathogen genomic surveillance and the AI revolution.",
+          "authors": "Lytras S et al.",
+          "journal": "J Virol",
+          "published_date": "2025 Feb 2",
+          "doi": "10.1128/jvi.01601-24",
+          "pmid": "39878472",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/39878472/",
+          "source_type": "review",
+          "study_context": "pathogen surveillance methods",
+          "study_design": "genomics and AI discussion",
+          "usable_for": "method horizon",
+          "limitations": "review; AI not a substitute for sampling"
+        },
+        {
+          "source_id": "H031S020",
+          "title": "Seasonality of respiratory, enteric, and urinary viruses revealed by wastewater genomic surveillance.",
+          "authors": "Smith MF et al.",
+          "journal": "mSphere",
+          "published_date": "2024 May 2",
+          "doi": "10.1128/msphere.00105-24",
+          "pmid": "38712930",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/38712930/",
+          "source_type": "primary_research",
+          "study_context": "wastewater multi-virus",
+          "study_design": "seasonality of respiratory enteric urinary viruses",
+          "usable_for": "community multi-pathogen signal",
+          "limitations": "environmental; not individual diagnosis"
+        }
+      ]
+    },
+    {
+      "topic_id": "H032",
+      "title": "新型疫苗平台与免疫保护相关物",
+      "topic_role": "research_deep_dive",
+      "overview": "疫苗平台研究比较信使核糖核酸、病毒载体、蛋白亚单位和自扩增核糖核酸如何诱导结合抗体、中和抗体和细胞免疫。保护相关物研究则追问：哪些免疫读出与随后的感染、疾病或重症终点共同变化。这两类工作回答的是免疫测量与终点之间的关系，不是个体诊疗方案。\n\n本方向从平台人体试验、中和抗体保护相关物、系统疫苗学和替代平台出发，集中处理三类问题：不同平台诱导的免疫谱有何差异；中和抗体在哪些终点上可以作为保护相关物；系统疫苗学如何提出机制假设而又保持外推边界。保护相关物是研究分层工具，不是诊断阈值或治疗建议。\n\n比较公开研究时，需要同时交代抗原、平台、剂量、间隔、免疫读出、临床终点和随访窗口。本页是研究导航，不是接种建议、商品推荐或监管申报指引。某一试验中的抗体阈值不能直接写成通用保护标准。",
+      "sections": [
+        {
+          "section_id": "H032-SEC-01",
+          "title": "比较不同研究时应先看什么",
+          "body": "| 比较内容 | 应记录的信息 | 关系到什么判断 |\n| --- | --- | --- |\n| 抗原与平台 | 信使核糖核酸、病毒载体、蛋白亚单位或自扩增核糖核酸，以及抗原设计 | 免疫谱差异来自抗原还是递送平台 |\n| 免疫读出 | 结合抗体、中和抗体、记忆 B 细胞、T 细胞和系统组学 | 保护相关物建立在哪一层免疫测量上 |\n| 保护终点 | 感染、有症状疾病、重症或病原特异读出 | 相关物对应的是哪一类临床或实验终点 |\n| 队列与剂量 | 年龄、既往感染、剂次、间隔和加强针 | 阈值能否迁移到其他人群或剂次 |\n| 外推边界 | 变异株、时间衰减和实验室方法 | 相关物是否仍停留在原试验条件 |",
+          "source_ids": []
+        },
+        {
+          "section_id": "H032-SEC-02",
+          "title": "信使核糖核酸平台在人体试验中诱导了可测量的保护性免疫",
+          "body": "信使核糖核酸疫苗综述先给出了平台原理和早期人体证据。随后的 BNT162b2 与 mRNA-1273 随机试验证明，该平台可以在大规模人群中降低有症状感染风险。针对 BNT162b2 的系统疫苗学研究进一步证明，接种后出现可重复的先天免疫和适应性免疫程序。\n\n这些试验适合比较平台诱导的免疫谱和疾病终点。试验人群、变异株流行期和随访窗口必须保留，不能把单一试验的效力写成所有信使核糖核酸疫苗的通用性能。",
+          "source_ids": [
+            "H032S001",
+            "H032S002",
+            "H032S003",
+            "H032S004"
+          ]
+        },
+        {
+          "section_id": "H032-SEC-03",
+          "title": "中和抗体水平在多项分析中与保护终点共同变化",
+          "body": "中和抗体水平预测有症状感染保护的分析，以及 mRNA-1273 效力试验的免疫相关物分析，证明结合或中和抗体可以在特定终点上作为保护相关物。Plotkin 的保护相关物框架和后续免疫相关物更新，则把这类读出放回更一般的疫苗评价逻辑。加强针研究进一步证明，相关物需要按剂次重新估计。\n\n抗体相关物适合作为研究分层和桥接假设。实验室方法、变异株和衰减曲线不同时，阈值不能直接搬用。保护相关物也不是个体是否需要治疗的判断依据。",
+          "source_ids": [
+            "H032S005",
+            "H032S006",
+            "H032S012",
+            "H032S013",
+            "H032S015"
+          ]
+        },
+        {
+          "section_id": "H032-SEC-04",
+          "title": "病毒载体和蛋白亚单位提供不同的免疫读出组合",
+          "body": "ChAdOx1 随机试验证明病毒载体平台可以诱导保护性免疫并伴随特定安全信号。病毒载体平台综述把天花疫苗到新冠载体的设计谱系放在同一比较框架。NVX-CoV2373 效力试验和重组刺突纳米颗粒早期试验证明，蛋白亚单位加上佐剂也可以达到可测量的保护终点。\n\n跨平台比较应同时报告抗原剂量、佐剂、注射途径和细胞免疫读出。一种平台的抗体数值不能当作另一种平台的保护相关物。",
+          "source_ids": [
+            "H032S007",
+            "H032S008",
+            "H032S009",
+            "H032S010"
+          ]
+        },
+        {
+          "section_id": "H032-SEC-05",
+          "title": "自扩增核糖核酸和系统疫苗学扩展了平台比较维度",
+          "body": "自扩增核糖核酸综述和埃博拉病毒小鼠保护研究证明，该平台可以在更低核酸剂量下诱导保护性免疫，但仍主要停留在临床前或早期评价。系统疫苗学方法综述则证明多组学和单细胞读出可以提出先天免疫程序假设。疫苗诱导保护的持久性综述提醒，相关物会随时间衰减。\n\n这些工作适合提出下一轮平台比较的测量清单。临床前保护不能写成人体效力；组学签名也不能单独代替预先定义的临床终点。",
+          "source_ids": [
+            "H032S011",
+            "H032S017",
+            "H032S018",
+            "H032S019",
+            "H032S020"
+          ]
+        },
+        {
+          "section_id": "H032-SEC-06",
+          "title": "保护相关物是研究分层工具，不是诊疗建议",
+          "body": "结核疫苗保护相关物综述和严重急性呼吸综合征冠状病毒 2 保护相关物综述都强调，相关物依赖疾病定义、实验室方法和随访设计。把抗体或细胞读出写成诊疗阈值，会越过这些研究所能支持的范围。\n\n本页用于比较疫苗平台和免疫读出。保护相关物可以支持研究分层、桥接设计和机制假设，不能作为诊断、治疗或个体接种决策。监管申报路径也不在本页范围。",
+          "source_ids": [
+            "H032S014",
+            "H032S016",
+            "H032S012",
+            "H032S013"
+          ]
+        },
+        {
+          "section_id": "H032-SEC-07",
+          "title": "研究技术",
+          "body": "本专题的技术卡包括疫苗平台对照、结合与中和抗体测定、细胞免疫读出、系统疫苗学签名，以及保护相关物建模。技术选择取决于需要比较的是平台差异、体液相关物还是机制假设。",
+          "source_ids": []
+        },
+        {
+          "section_id": "H032-SEC-08",
+          "title": "科研参考范围",
+          "body": "本页用于介绍新型疫苗平台与免疫保护相关物研究中的证据类型和适用边界，用于研究导航。保护相关物不是诊疗建议，本页不提供接种、诊断、治疗、商品推荐或监管申报指引。",
+          "source_ids": []
+        }
+      ],
+      "methods": [
+        {
+          "method_id": "H032-M01",
+          "display_order": 1,
+          "category": "平台比较",
+          "title": "抗原设计与疫苗平台对照",
+          "principle": "在同一评价框架中比较信使核糖核酸、病毒载体、蛋白亚单位或自扩增核糖核酸的抗原、剂量和免疫程序。",
+          "answers": "区分免疫谱差异来自抗原还是递送平台。",
+          "sample_design": "预先定义平台、抗原、剂次、间隔和对照疫苗；跨试验比较时对齐终点定义。",
+          "limitations": "不同试验的流行株和人群不可直接合并；平台标签不能代替具体处方。",
+          "source_ids": [
+            "H032S001",
+            "H032S007",
+            "H032S008",
+            "H032S011"
+          ],
+          "workflow": "设计阶段先确定：预先定义平台、抗原、剂次、间隔和对照疫苗；跨试验比较时对齐终点定义。 记录样本来源、处理条件、读出指标和正交验证；把观察结果与预先定义的研究问题放在同一分析框架中比较。 这项方法的直接测量或计算依据是：在同一评价框架中比较信使核糖核酸、病毒载体、蛋白亚单位或自扩增核糖核酸的抗原、剂量和免疫程序。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：不同试验的流行株和人群不可直接合并；平台标签不能代替具体处方。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "结果可用于区分免疫谱差异来自抗原还是递送平台。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        },
+        {
+          "method_id": "H032-M02",
+          "display_order": 2,
+          "category": "抗体读出",
+          "title": "结合抗体与中和抗体测定",
+          "principle": "用标准化结合试验和活病毒或假病毒中和试验测量体液免疫，并与临床终点配对。",
+          "answers": "判断抗体读出能否作为特定终点的保护相关物。",
+          "sample_design": "报告采样时间、实验室方法、国际标准和变异株；保留基线和突破感染样本。",
+          "limitations": "方法学差异会改变数值；抗体相关物不是个体诊疗阈值。",
+          "source_ids": [
+            "H032S005",
+            "H032S006",
+            "H032S015"
+          ],
+          "workflow": "设计阶段先确定：报告采样时间、实验室方法、国际标准和变异株；保留基线和突破感染样本。 记录样本来源、处理条件、读出指标和正交验证；把观察结果与预先定义的研究问题放在同一分析框架中比较。 这项方法的直接测量或计算依据是：用标准化结合试验和活病毒或假病毒中和试验测量体液免疫，并与临床终点配对。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：方法学差异会改变数值；抗体相关物不是个体诊疗阈值。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "结果可用于判断抗体读出能否作为特定终点的保护相关物。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        },
+        {
+          "method_id": "H032-M03",
+          "display_order": 3,
+          "category": "细胞免疫",
+          "title": "T 细胞与记忆 B 细胞读出",
+          "principle": "测量抗原特异 T 细胞和记忆 B 细胞，用于解释抗体未能完全说明的保护差异。",
+          "answers": "检查细胞免疫是否补充或修正抗体相关物。",
+          "sample_design": "统一刺激抗原、时间点和流式或酶联免疫斑点方案；报告实验室间变异。",
+          "limitations": "细胞读出难以标准化；缺少细胞数据时不能断言细胞保护。",
+          "source_ids": [
+            "H032S004",
+            "H032S009",
+            "H032S014"
+          ],
+          "workflow": "设计阶段先确定：统一刺激抗原、时间点和流式或酶联免疫斑点方案；报告实验室间变异。 记录样本来源、处理条件、读出指标和正交验证；把观察结果与预先定义的研究问题放在同一分析框架中比较。 这项方法的直接测量或计算依据是：测量抗原特异 T 细胞和记忆 B 细胞，用于解释抗体未能完全说明的保护差异。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：细胞读出难以标准化；缺少细胞数据时不能断言细胞保护。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "结果可用于检查细胞免疫是否补充或修正抗体相关物。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        },
+        {
+          "method_id": "H032-M04",
+          "display_order": 4,
+          "category": "系统疫苗学",
+          "title": "多组学免疫程序与签名",
+          "principle": "在接种前后采集转录、蛋白或单细胞数据，寻找与免疫原性或保护终点相关的程序。",
+          "answers": "提出可在独立队列中复核的先天或适应性免疫假设。",
+          "sample_design": "固定采样窗口、批次校正和预先定义的主要签名；用独立队列验证。",
+          "limitations": "组学签名是关联层证据；不能单独代替临床终点。",
+          "source_ids": [
+            "H032S004",
+            "H032S017",
+            "H032S018"
+          ],
+          "workflow": "设计阶段先确定：固定采样窗口、批次校正和预先定义的主要签名；用独立队列验证。 记录样本来源、处理条件、读出指标和正交验证；把观察结果与预先定义的研究问题放在同一分析框架中比较。 这项方法的直接测量或计算依据是：在接种前后采集转录、蛋白或单细胞数据，寻找与免疫原性或保护终点相关的程序。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：组学签名是关联层证据；不能单独代替临床终点。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "结果可用于提出可在独立队列中复核的先天或适应性免疫假设。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        },
+        {
+          "method_id": "H032-M05",
+          "display_order": 5,
+          "category": "相关物建模",
+          "title": "保护相关物估计与外推边界",
+          "principle": "把免疫读出与感染、疾病或重症终点建模，并检验阈值在不同剂次、变异株和时间点是否稳定。",
+          "answers": "评估相关物能否用于研究分层或桥接，而不能用于个体诊疗。",
+          "sample_design": "预先定义终点、模型和分析集；报告衰减、变异株和阴性结果。",
+          "limitations": "原试验阈值不能自动迁移；本方法不产生治疗或接种建议。",
+          "source_ids": [
+            "H032S006",
+            "H032S012",
+            "H032S013",
+            "H032S019"
+          ],
+          "workflow": "设计阶段先确定：预先定义终点、模型和分析集；报告衰减、变异株和阴性结果。 记录样本来源、处理条件、读出指标和正交验证；把观察结果与预先定义的研究问题放在同一分析框架中比较。 这项方法的直接测量或计算依据是：把免疫读出与感染、疾病或重症终点建模，并检验阈值在不同剂次、变异株和时间点是否稳定。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：原试验阈值不能自动迁移；本方法不产生治疗或接种建议。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "结果可用于评估相关物能否用于研究分层或桥接，而不能用于个体诊疗。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        }
+      ],
+      "shared_findings": [
+        {
+          "finding_id": "H032-C01",
+          "display_order": 1,
+          "title": "不同疫苗平台诱导的免疫谱需要分开比较",
+          "shared_result": "信使核糖核酸、病毒载体和蛋白亚单位试验证明各平台都可以达到可测量的保护终点，但抗原、佐剂和细胞免疫读出并不相同。",
+          "research_use": "跨平台比较时对齐抗原、剂次、终点和实验室方法；平台标签与具体处方分开记录。",
+          "boundary": "一种平台的效力或抗体数值不能写成另一种平台的性能。",
+          "source_ids": [
+            "H032S001",
+            "H032S002",
+            "H032S003",
+            "H032S007",
+            "H032S009"
+          ]
+        },
+        {
+          "finding_id": "H032-C02",
+          "display_order": 2,
+          "title": "中和抗体是常用但非唯一的保护相关物",
+          "shared_result": "Khoury、Gilbert 和加强针相关物研究证明，中和或结合抗体可以在特定终点上预测保护，但阈值依赖剂次、变异株和实验室方法。",
+          "research_use": "报告国际标准、变异株和采样时间；按剂次重新估计相关物。",
+          "boundary": "抗体阈值不是诊断或治疗标准，也不能用于个体接种决策。",
+          "source_ids": [
+            "H032S005",
+            "H032S006",
+            "H032S015",
+            "H032S013"
+          ]
+        },
+        {
+          "finding_id": "H032-C03",
+          "display_order": 3,
+          "title": "系统疫苗学提供机制假设，不代替临床终点",
+          "shared_result": "BNT162b2 系统疫苗学和多组学方法综述证明，接种后先天免疫程序可以被重复测量，但仍属于关联层证据。",
+          "research_use": "预先定义签名、采样窗口和独立验证队列；组学结果与临床终点分开报告。",
+          "boundary": "免疫签名不能单独写成人体效力。",
+          "source_ids": [
+            "H032S004",
+            "H032S017",
+            "H032S018"
+          ]
+        },
+        {
+          "finding_id": "H032-C04",
+          "display_order": 4,
+          "title": "保护相关物依赖终点定义和时间窗口",
+          "shared_result": "Plotkin 框架、结核相关物综述和保护持久性综述都表明，相关物随疾病定义、随访时间和病原特异读出而改变。",
+          "research_use": "写清终点是感染、疾病还是重症；报告衰减和突破感染。",
+          "boundary": "不能把一种疾病的相关物套用到另一种病原。",
+          "source_ids": [
+            "H032S012",
+            "H032S014",
+            "H032S016",
+            "H032S019"
+          ]
+        },
+        {
+          "finding_id": "H032-C05",
+          "display_order": 5,
+          "title": "本页比较平台与读出，不提供诊疗建议",
+          "shared_result": "保护相关物研究把免疫测量与研究终点联系起来，用于分层和桥接，而不是给出诊断、治疗或监管申报路径。",
+          "research_use": "在研究设计中使用相关物；涉及个体医疗决定时离开本页框架。",
+          "boundary": "不提供接种建议、商品推荐或监管申报指引。",
+          "source_ids": [
+            "H032S012",
+            "H032S014",
+            "H032S016"
+          ]
+        }
+      ],
+      "references": [
+        {
+          "source_id": "H032S001",
+          "title": "mRNA vaccines - a new era in vaccinology.",
+          "authors": "Pardi N et al.",
+          "journal": "Nat Rev Drug Discov",
+          "published_date": "2018 Apr",
+          "doi": "10.1038/nrd.2017.243",
+          "pmid": "29326426",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/29326426/",
+          "source_type": "review",
+          "study_context": "mRNA vaccinology",
+          "study_design": "platform review",
+          "usable_for": "mRNA vaccine principles",
+          "limitations": "review; pre-pandemic and early human data"
+        },
+        {
+          "source_id": "H032S002",
+          "title": "Safety and Efficacy of the BNT162b2 mRNA Covid-19 Vaccine.",
+          "authors": "Polack FP et al.",
+          "journal": "N Engl J Med",
+          "published_date": "2020 Dec 3",
+          "doi": "10.1056/NEJMoa2034577",
+          "pmid": "33301246",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/33301246/",
+          "source_type": "primary_research",
+          "study_context": "BNT162b2 trial",
+          "study_design": "randomized efficacy trial",
+          "usable_for": "symptomatic COVID-19 endpoint",
+          "limitations": "trial population and variant period specific"
+        },
+        {
+          "source_id": "H032S003",
+          "title": "Efficacy and Safety of the mRNA-1273 SARS-CoV-2 Vaccine.",
+          "authors": "Baden LR et al.",
+          "journal": "N Engl J Med",
+          "published_date": "2021 Feb 4",
+          "doi": "10.1056/NEJMoa2035389",
+          "pmid": "33378609",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/33378609/",
+          "source_type": "primary_research",
+          "study_context": "mRNA-1273 trial",
+          "study_design": "randomized efficacy trial",
+          "usable_for": "symptomatic COVID-19 endpoint",
+          "limitations": "trial population and variant period specific"
+        },
+        {
+          "source_id": "H032S004",
+          "title": "Systems vaccinology of the BNT162b2 mRNA vaccine in humans.",
+          "authors": "Arunachalam PS et al.",
+          "journal": "Nature",
+          "published_date": "2021 Aug",
+          "doi": "10.1038/s41586-021-03791-x",
+          "pmid": "34252919",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/34252919/",
+          "source_type": "primary_research",
+          "study_context": "BNT162b2 systems vaccinology",
+          "study_design": "human innate and adaptive programmes",
+          "usable_for": "mechanistic immune signatures",
+          "limitations": "associational systems immunology"
+        },
+        {
+          "source_id": "H032S005",
+          "title": "Neutralizing antibody levels are highly predictive of immune protection from symptomatic SARS-CoV-2 infection.",
+          "authors": "Khoury DS et al.",
+          "journal": "Nat Med",
+          "published_date": "2021 Jul",
+          "doi": "10.1038/s41591-021-01377-8",
+          "pmid": "34002089",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/34002089/",
+          "source_type": "primary_research",
+          "study_context": "neutralizing antibody models",
+          "study_design": "protection prediction",
+          "usable_for": "symptomatic infection correlate",
+          "limitations": "modelled across studies; method-dependent"
+        },
+        {
+          "source_id": "H032S006",
+          "title": "Immune correlates analysis of the mRNA-1273 COVID-19 vaccine efficacy clinical trial.",
+          "authors": "Gilbert PB et al.",
+          "journal": "Science",
+          "published_date": "2022 Jan 7",
+          "doi": "10.1126/science.abm3425",
+          "pmid": "34812653",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/34812653/",
+          "source_type": "primary_research",
+          "study_context": "mRNA-1273 correlates",
+          "study_design": "immune correlates analysis",
+          "usable_for": "vaccine efficacy trial correlate",
+          "limitations": "trial-specific threshold"
+        },
+        {
+          "source_id": "H032S007",
+          "title": "Safety and efficacy of the ChAdOx1 nCoV-19 vaccine (AZD1222) against SARS-CoV-2: an interim analysis of four randomised controlled trials in Brazil, South Africa, and the UK.",
+          "authors": "Voysey M et al.",
+          "journal": "Lancet",
+          "published_date": "2021 Jan 9",
+          "doi": "10.1016/S0140-6736(20)32661-1",
+          "pmid": "33306989",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/33306989/",
+          "source_type": "primary_research",
+          "study_context": "ChAdOx1 nCoV-19",
+          "study_design": "randomized viral-vector trial",
+          "usable_for": "viral vector platform efficacy",
+          "limitations": "interim pooled analysis"
+        },
+        {
+          "source_id": "H032S008",
+          "title": "Viral Vector Vaccine Development and Application during the COVID-19 Pandemic.",
+          "authors": "Deng S et al.",
+          "journal": "Microorganisms",
+          "published_date": "2022 Jul 1",
+          "doi": "10.3390/microorganisms10071450",
+          "pmid": "35889169",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/35889169/",
+          "source_type": "review",
+          "study_context": "viral vector vaccines",
+          "study_design": "platform development during COVID-19",
+          "usable_for": "vector design comparison",
+          "limitations": "review; heterogeneous vectors"
+        },
+        {
+          "source_id": "H032S009",
+          "title": "Safety and Efficacy of NVX-CoV2373 Covid-19 Vaccine.",
+          "authors": "Heath PT et al.",
+          "journal": "N Engl J Med",
+          "published_date": "2021 Sep 2",
+          "doi": "10.1056/NEJMoa2107659",
+          "pmid": "34192426",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/34192426/",
+          "source_type": "primary_research",
+          "study_context": "NVX-CoV2373",
+          "study_design": "randomized protein-subunit trial",
+          "usable_for": "adjuvanted protein platform",
+          "limitations": "trial-specific population"
+        },
+        {
+          "source_id": "H032S010",
+          "title": "Phase 1-2 Trial of a SARS-CoV-2 Recombinant Spike Protein Nanoparticle Vaccine.",
+          "authors": "Keech C et al.",
+          "journal": "N Engl J Med",
+          "published_date": "2020 Dec 1",
+          "doi": "10.1056/NEJMoa2026920",
+          "pmid": "32877576",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/32877576/",
+          "source_type": "primary_research",
+          "study_context": "spike nanoparticle vaccine",
+          "study_design": "phase 1-2 protein vaccine",
+          "usable_for": "early immunogenicity",
+          "limitations": "early-phase; not confirmatory efficacy"
+        },
+        {
+          "source_id": "H032S011",
+          "title": "Self-Amplifying RNA Vaccine Candidates: Alternative Platforms for mRNA Vaccine Development.",
+          "authors": "Schmidt C et al.",
+          "journal": "Pathogens",
+          "published_date": "2023 Jan 1",
+          "doi": "10.3390/pathogens12010138",
+          "pmid": "36678486",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/36678486/",
+          "source_type": "review",
+          "study_context": "self-amplifying RNA",
+          "study_design": "alternative RNA platforms",
+          "usable_for": "saRNA design space",
+          "limitations": "review; limited human confirmatory data"
+        },
+        {
+          "source_id": "H032S012",
+          "title": "Correlates of protection induced by vaccination.",
+          "authors": "Plotkin SA et al.",
+          "journal": "Clin Vaccine Immunol",
+          "published_date": "2010 Jul",
+          "doi": "10.1128/CVI.00131-10",
+          "pmid": "20463105",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/20463105/",
+          "source_type": "review",
+          "study_context": "vaccine immunology",
+          "study_design": "correlates of protection framework",
+          "usable_for": "general CoP logic",
+          "limitations": "conceptual review"
+        },
+        {
+          "source_id": "H032S013",
+          "title": "Updates on immunologic correlates of vaccine-induced protection.",
+          "authors": "Plotkin SA et al.",
+          "journal": "Vaccine",
+          "published_date": "2020 Feb 2",
+          "doi": "10.1016/j.vaccine.2019.10.046",
+          "pmid": "31767462",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/31767462/",
+          "source_type": "review",
+          "study_context": "immunologic correlates",
+          "study_design": "updates on vaccine-induced protection",
+          "usable_for": "CoP measurement updates",
+          "limitations": "review; disease-specific"
+        },
+        {
+          "source_id": "H032S014",
+          "title": "Correlates of protection against SARS-CoV-2 infection and COVID-19 disease.",
+          "authors": "Goldblatt D et al.",
+          "journal": "Immunol Rev",
+          "published_date": "2022 Sep",
+          "doi": "10.1111/imr.13091",
+          "pmid": "35661178",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/35661178/",
+          "source_type": "review",
+          "study_context": "SARS-CoV-2 immunology",
+          "study_design": "correlates of protection and disease",
+          "usable_for": "COVID-19 CoP synthesis",
+          "limitations": "review; methods vary"
+        },
+        {
+          "source_id": "H032S015",
+          "title": "Correlates of protection for booster doses of the SARS-CoV-2 vaccine BNT162b2.",
+          "authors": "Hertz T et al.",
+          "journal": "Nat Commun",
+          "published_date": "2023 Jul 2",
+          "doi": "10.1038/s41467-023-39816-4",
+          "pmid": "37516771",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/37516771/",
+          "source_type": "primary_research",
+          "study_context": "BNT162b2 booster",
+          "study_design": "booster correlate analysis",
+          "usable_for": "dose-specific CoP",
+          "limitations": "booster context only"
+        },
+        {
+          "source_id": "H032S016",
+          "title": "Immune correlates of protection as a game changer in tuberculosis vaccine development.",
+          "authors": "Wang J et al.",
+          "journal": "NPJ Vaccines",
+          "published_date": "2024 Oct 3",
+          "doi": "10.1038/s41541-024-01004-w",
+          "pmid": "39478007",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/39478007/",
+          "source_type": "review",
+          "study_context": "tuberculosis vaccines",
+          "study_design": "immune correlates as research tool",
+          "usable_for": "TB CoP development",
+          "limitations": "review; TB endpoints differ"
+        },
+        {
+          "source_id": "H032S017",
+          "title": "Systems vaccinology and big data in the vaccine development chain.",
+          "authors": "Raeven RHM et al.",
+          "journal": "Immunology",
+          "published_date": "2019 Jan",
+          "doi": "10.1111/imm.13012",
+          "pmid": "30317555",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/30317555/",
+          "source_type": "review",
+          "study_context": "systems vaccinology",
+          "study_design": "big-data vaccine development",
+          "usable_for": "multi-omics study design",
+          "limitations": "review; signatures need validation"
+        },
+        {
+          "source_id": "H032S018",
+          "title": "Emerging technologies for systems vaccinology - multi-omics integration and single-cell (epi)genomic profiling.",
+          "authors": "Wimmers F et al.",
+          "journal": "Curr Opin Immunol",
+          "published_date": "2020 Aug",
+          "doi": "10.1016/j.coi.2020.05.001",
+          "pmid": "32504952",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/32504952/",
+          "source_type": "review",
+          "study_context": "systems vaccinology methods",
+          "study_design": "multi-omics and single-cell profiling",
+          "usable_for": "method horizon",
+          "limitations": "review; not a single trial"
+        },
+        {
+          "source_id": "H032S019",
+          "title": "The durability of vaccine-induced protection: an overview.",
+          "authors": "Vashishtha VM et al.",
+          "journal": "Expert Rev Vaccines",
+          "published_date": "2024 Jan-D",
+          "doi": "10.1080/14760584.2024.2331065",
+          "pmid": "38488132",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/38488132/",
+          "source_type": "review",
+          "study_context": "vaccine durability",
+          "study_design": "duration of vaccine-induced protection",
+          "usable_for": "waning and endpoint choice",
+          "limitations": "review; pathogen-specific"
+        },
+        {
+          "source_id": "H032S020",
+          "title": "Self-amplifying RNA vaccine protects mice against lethal Ebola virus infection.",
+          "authors": "Krähling V et al.",
+          "journal": "Mol Ther",
+          "published_date": "2023 Feb 1",
+          "doi": "10.1016/j.ymthe.2022.10.011",
+          "pmid": "36303436",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/36303436/",
+          "source_type": "primary_research",
+          "study_context": "saRNA Ebola model",
+          "study_design": "mouse lethal challenge",
+          "usable_for": "preclinical saRNA protection",
+          "limitations": "animal model; not human efficacy"
+        }
+      ]
+    },
+    {
+      "topic_id": "H033",
+      "title": "抗微生物耐药与新型抗感染策略",
+      "topic_role": "research_deep_dive",
+      "overview": "抗微生物耐药研究同时处理两件不同的事：现有药物如何失效，以及新的抗感染策略在什么模型里显示出活性。疾病负担分析给出人群层损失；机制研究追问外膜通透、靶点修饰和酶解；发现平台则检验新骨架、铁载体头孢菌素、噬菌体和序列特异核酸酶。这些层级不能互相替代。\n\n本方向从全球耐药负担、新骨架抗生素、进入路径、噬菌体和 CRISPR 抗感染策略出发，集中处理三类问题：耐药表型由哪一层机制解释；新策略在何种模型和读出下显示活性；这些证据如何与病原传播监测分开。病原体基因组监测由 H031 专题处理，本页不把爆发谱系写成抗感染方案。\n\n比较公开研究时，需要同时交代菌种、耐药表型、靶点、模型系统和安全性读出。本页是研究导航，不是诊疗、商品推荐或监管申报指引。动物或体外活性不能写成临床用药方案。",
+      "sections": [
+        {
+          "section_id": "H033-SEC-01",
+          "title": "比较不同研究时应先看什么",
+          "body": "| 比较内容 | 应记录的信息 | 关系到什么判断 |\n| --- | --- | --- |\n| 耐药表型与基因型 | 菌种、最低抑菌浓度、耐药基因和调控背景 | 失效由酶解、靶点改变还是进入受限解释 |\n| 作用靶点 | 细胞壁、外膜组装、铁摄取或其他节点 | 新策略打击的是哪一层细菌生理 |\n| 模型系统 | 体外、动物感染、噬菌体宿主范围或宏基因组 | 活性停留在哪一证据层级 |\n| 策略类型 | 新骨架小分子、铁载体偶联、噬菌体或序列特异核酸酶 | 不同策略的失败模式是否相同 |\n| 安全与演进 | 毒性、耐药演进和转导风险 | 活性之外还有哪些必须独立测量的结果 |",
+          "source_ids": []
+        },
+        {
+          "section_id": "H033-SEC-02",
+          "title": "全球疾病负担研究把耐药写成可比较的健康损失",
+          "body": "2019 年全球细菌耐药负担系统分析证明，耐药可以按死亡和伤残调整生命年在国家和病原层面比较。世界卫生组织非洲区的后续分析进一步证明，区域负担和病原谱并不均匀。\n\n负担研究适合设定监测和发现的优先顺序。疾病负担不是某一药物失效的机制证明，也不能直接指定应使用哪一种抗感染策略。",
+          "source_ids": [
+            "H033S001",
+            "H033S020"
+          ]
+        },
+        {
+          "section_id": "H033-SEC-03",
+          "title": "新骨架抗生素针对细胞壁和外膜组装机器",
+          "body": "teixobactin 研究证明新骨架可以在检测限度内抑制病原且当时未观察到耐药。darobactin 系列研究进一步证明，选择性杀伤革兰阴性菌可以通过抑制外膜插入酶 BamA 实现，结构引导的生物合成还能提高活性。抗生素发现科学综述则把这类结果放回培养和筛选平台的长期约束中。\n\n新骨架研究适合提出靶点和耐药演进假设。体外或动物活性不是临床方案，毒性、药代和后续耐药仍需独立评估。",
+          "source_ids": [
+            "H033S002",
+            "H033S003",
+            "H033S004",
+            "H033S005",
+            "H033S006",
+            "H033S007"
+          ]
+        },
+        {
+          "section_id": "H033-SEC-04",
+          "title": "铁载体头孢菌素和外膜通透说明进入路径同样关键",
+          "body": "头孢地尔的化学与体内谱研究证明，借助铁摄取进入革兰阴性菌可以扩展头孢菌素活性范围。外膜通透综述和鲍曼不动杆菌耐药机制研究则证明，许多候选物首先败在进入和外排，而不是靶点本身。\n\n进入路径读出应与最低抑菌浓度和靶点生化分开报告。铁载体策略依赖细菌铁摄取状态，模型中的活性不能自动外推到所有感染部位。",
+          "source_ids": [
+            "H033S008",
+            "H033S009",
+            "H033S010",
+            "H033S011"
+          ]
+        },
+        {
+          "section_id": "H033-SEC-05",
+          "title": "噬菌体和序列特异核酸酶提供非传统抗感染读出",
+          "body": "2014 年两项 CRISPR 研究证明，向导核糖核酸可以引导核酸酶产生序列特异的抗菌活性。后续噬菌体衣壳递送 CRISPR-Cas13a 的工作把这一策略推进到耐甲氧西林金黄色葡萄球菌模型。噬菌体治疗综述则讨论宿主范围、耐药演进和转导风险。\n\n这些策略适合作为研究工具和概念验证。噬菌体或核酸酶活性不是常规治疗方案，转导抗性基因的风险必须单独测量。",
+          "source_ids": [
+            "H033S012",
+            "H033S013",
+            "H033S014",
+            "H033S016",
+            "H033S017",
+            "H033S018"
+          ]
+        },
+        {
+          "section_id": "H033-SEC-06",
+          "title": "专题边界：耐药机制研究不等于病原体传播监测",
+          "body": "铜绿假单胞菌耐药趋势综述和 CRISPR-Cas 用于对抗耐药的方法讨论，说明机制层证据与传播层证据回答不同问题。检出耐药基因或移动元件，可以支持机制或负担分析，却不能单独重建爆发传播链。\n\n若研究核心是谱系、采样框和污水监测，应使用 H031 专题。本页要求把耐药表型、靶点和抗感染策略放在同一叙述中，并且不把爆发谱系写成用药建议。两页可以交叉引用，结论必须分开写。",
+          "source_ids": [
+            "H033S015",
+            "H033S019",
+            "H033S001",
+            "H033S010"
+          ]
+        },
+        {
+          "section_id": "H033-SEC-07",
+          "title": "研究技术",
+          "body": "本专题的技术卡包括表型药敏与基因分型、新骨架筛选与靶点验证、外膜通透与铁摄取测定、噬菌体宿主范围与转导检测，以及 CRISPR 核酸酶递送评价。技术选择取决于需要确认的是失效机制、进入路径还是非传统策略的模型活性。",
+          "source_ids": []
+        },
+        {
+          "section_id": "H033-SEC-08",
+          "title": "科研参考范围",
+          "body": "本页用于介绍抗微生物耐药与新型抗感染策略研究中的证据类型和适用边界，用于研究导航。不提供诊疗、商品推荐、监管申报或临床用药建议。病原体传播与基因组监测见 H031。",
+          "source_ids": []
+        }
+      ],
+      "methods": [
+        {
+          "method_id": "H033-M01",
+          "display_order": 1,
+          "category": "耐药测定",
+          "title": "表型药敏与耐药基因分型",
+          "principle": "同步测量最低抑菌浓度或折点表型，并检测耐药基因、调控突变和移动元件。",
+          "answers": "判断失效由酶解、靶点改变、外排还是进入受限解释。",
+          "sample_design": "记录菌种、折点标准、基因检测面板和对照株；表型与基因型不一致时保留原始数据。",
+          "limitations": "基因型阳性不等于表型耐药；折点标准更新会使旧结论失效。",
+          "source_ids": [
+            "H033S001",
+            "H033S011",
+            "H033S019"
+          ],
+          "workflow": "设计阶段先确定：记录菌种、折点标准、基因检测面板和对照株；表型与基因型不一致时保留原始数据。 记录样本来源、处理条件、读出指标和正交验证；把观察结果与预先定义的研究问题放在同一分析框架中比较。 这项方法的直接测量或计算依据是：同步测量最低抑菌浓度或折点表型，并检测耐药基因、调控突变和移动元件。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：基因型阳性不等于表型耐药；折点标准更新会使旧结论失效。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "结果可用于判断失效由酶解、靶点改变、外排还是进入受限解释。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        },
+        {
+          "method_id": "H033-M02",
+          "display_order": 2,
+          "category": "化合物发现",
+          "title": "新骨架筛选与靶点验证",
+          "principle": "在不可培养或重新设计的筛选平台中寻找新骨架，并用遗传或结构方法确认靶点。",
+          "answers": "提出候选物打击的细菌生理节点，以及耐药演进是否被观察到。",
+          "sample_design": "报告筛选文库、宿主菌、耐药演进实验和正交靶点证据；保留阴性骨架。",
+          "limitations": "体外杀菌不等于体内疗效；未检出耐药不等于不会出现耐药。",
+          "source_ids": [
+            "H033S002",
+            "H033S003",
+            "H033S006",
+            "H033S007"
+          ],
+          "workflow": "设计阶段先确定：报告筛选文库、宿主菌、耐药演进实验和正交靶点证据；保留阴性骨架。 记录样本来源、处理条件、读出指标和正交验证；把观察结果与预先定义的研究问题放在同一分析框架中比较。 这项方法的直接测量或计算依据是：在不可培养或重新设计的筛选平台中寻找新骨架，并用遗传或结构方法确认靶点。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：体外杀菌不等于体内疗效；未检出耐药不等于不会出现耐药。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "结果可用于提出候选物打击的细菌生理节点，以及耐药演进是否被观察到。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        },
+        {
+          "method_id": "H033-M03",
+          "display_order": 3,
+          "category": "进入路径",
+          "title": "外膜通透、外排与铁摄取测定",
+          "principle": "定量外膜通透、外排泵和铁载体摄取对化合物积累的影响，并与抑菌活性配对。",
+          "answers": "区分活性不足是因为靶点无效还是因为进不去菌体。",
+          "sample_design": "使用通透缺陷株、外排抑制和铁限制条件；报告积累量和时间曲线。",
+          "limitations": "模型培养基中的铁状态与感染部位不同；通透读出不能代替体内分布。",
+          "source_ids": [
+            "H033S008",
+            "H033S009",
+            "H033S010",
+            "H033S004"
+          ],
+          "workflow": "设计阶段先确定：使用通透缺陷株、外排抑制和铁限制条件；报告积累量和时间曲线。 记录样本来源、处理条件、读出指标和正交验证；把观察结果与预先定义的研究问题放在同一分析框架中比较。 这项方法的直接测量或计算依据是：定量外膜通透、外排泵和铁载体摄取对化合物积累的影响，并与抑菌活性配对。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：模型培养基中的铁状态与感染部位不同；通透读出不能代替体内分布。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "结果可用于区分活性不足是因为靶点无效还是因为进不去菌体。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        },
+        {
+          "method_id": "H033-M04",
+          "display_order": 4,
+          "category": "噬菌体策略",
+          "title": "宿主范围、裂解活性与转导风险",
+          "principle": "测定噬菌体对目标菌群的宿主范围和裂解动力学，并检查是否转导耐药基因。",
+          "answers": "评估噬菌体策略在特定菌群中是否具有可重复的研究活性。",
+          "sample_design": "报告噬菌体鉴定、宿主谱、剂量和转导检测；保留耐药演进实验。",
+          "limitations": "窄宿主范围限制外推；转导风险使活性不能直接写成治疗方案。",
+          "source_ids": [
+            "H033S016",
+            "H033S017",
+            "H033S018"
+          ],
+          "workflow": "设计阶段先确定：报告噬菌体鉴定、宿主谱、剂量和转导检测；保留耐药演进实验。 记录样本来源、处理条件、读出指标和正交验证；把观察结果与预先定义的研究问题放在同一分析框架中比较。 这项方法的直接测量或计算依据是：测定噬菌体对目标菌群的宿主范围和裂解动力学，并检查是否转导耐药基因。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：窄宿主范围限制外推；转导风险使活性不能直接写成治疗方案。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "结果可用于评估噬菌体策略在特定菌群中是否具有可重复的研究活性。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        },
+        {
+          "method_id": "H033-M05",
+          "display_order": 5,
+          "category": "序列特异策略",
+          "title": "CRISPR 核酸酶与递送载体评价",
+          "principle": "设计针对耐药基因或必需基因的向导核糖核酸，并通过噬菌体或质粒递送检验序列特异杀伤。",
+          "answers": "检验核酸酶策略是否只作用于预定序列，以及递送是否成为限制步骤。",
+          "sample_design": "设置脱靶对照、递送空载和耐药演进实验；报告递送效率和残留宿主。",
+          "limitations": "递送效率往往低于核酸酶本身；序列特异活性不是临床抗感染方案。",
+          "source_ids": [
+            "H033S012",
+            "H033S013",
+            "H033S014",
+            "H033S015"
+          ],
+          "workflow": "设计阶段先确定：设置脱靶对照、递送空载和耐药演进实验；报告递送效率和残留宿主。 记录样本来源、处理条件、读出指标和正交验证；把观察结果与预先定义的研究问题放在同一分析框架中比较。 这项方法的直接测量或计算依据是：设计针对耐药基因或必需基因的向导核糖核酸，并通过噬菌体或质粒递送检验序列特异杀伤。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：递送效率往往低于核酸酶本身；序列特异活性不是临床抗感染方案。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "结果可用于检验核酸酶策略是否只作用于预定序列，以及递送是否成为限制步骤。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        }
+      ],
+      "shared_findings": [
+        {
+          "finding_id": "H033-C01",
+          "display_order": 1,
+          "title": "疾病负担与耐药机制是不同层级的证据",
+          "shared_result": "全球和非洲区负担分析证明耐药造成可比较的健康损失，但这些数字不指定失效机制，也不指定应采用哪一种抗感染策略。",
+          "research_use": "用负担数据设定优先病原；机制结论仍须回到表型和靶点实验。",
+          "boundary": "负担估计不是用药方案，也不能代替实验室机制证据。",
+          "source_ids": [
+            "H033S001",
+            "H033S020"
+          ]
+        },
+        {
+          "finding_id": "H033-C02",
+          "display_order": 2,
+          "title": "新骨架仍须独立评估毒性和耐药演进",
+          "shared_result": "teixobactin 和 darobactin 系列证明新骨架可以打击细胞壁或 BamA，但发现综述同时强调筛选平台和后续评估的长期约束。",
+          "research_use": "报告靶点、耐药演进实验和正交结构证据；活性与毒性分开写。",
+          "boundary": "体外或动物活性不是临床方案。",
+          "source_ids": [
+            "H033S002",
+            "H033S003",
+            "H033S004",
+            "H033S005",
+            "H033S006"
+          ]
+        },
+        {
+          "finding_id": "H033-C03",
+          "display_order": 3,
+          "title": "进入路径常常先于靶点决定候选物命运",
+          "shared_result": "头孢地尔和外膜通透研究说明，铁摄取、外膜屏障和外排会决定化合物能否到达靶点。",
+          "research_use": "配对积累量、通透缺陷株和抑菌读出；铁限制条件单独报告。",
+          "boundary": "模型中的进入优势不能自动外推到所有感染部位。",
+          "source_ids": [
+            "H033S008",
+            "H033S009",
+            "H033S010",
+            "H033S011"
+          ]
+        },
+        {
+          "finding_id": "H033-C04",
+          "display_order": 4,
+          "title": "噬菌体和 CRISPR 是研究策略，不是常规治疗方案",
+          "shared_result": "序列特异核酸酶和噬菌体综述证明非传统策略可以在模型中显示活性，同时带来宿主范围、转导和递送限制。",
+          "research_use": "预先定义宿主谱、脱靶和转导检测；递送失败作为主要结果报告。",
+          "boundary": "模型活性不是诊疗建议，也不构成监管申报指引。",
+          "source_ids": [
+            "H033S012",
+            "H033S013",
+            "H033S014",
+            "H033S016",
+            "H033S018"
+          ]
+        },
+        {
+          "finding_id": "H033-C05",
+          "display_order": 5,
+          "title": "耐药机制与病原监测必须分开写",
+          "shared_result": "铜绿假单胞菌机制综述和 CRISPR 方法讨论回答的是失效和干预策略，而不是传播链或污水谱系。传播与监测由 H031 处理。",
+          "research_use": "机制、靶点和策略用本页框架；谱系、采样框和污水监测转到 H031。",
+          "boundary": "耐药基因检出不能重建爆发传播；爆发谱系不能写成抗感染方案。",
+          "source_ids": [
+            "H033S015",
+            "H033S019",
+            "H033S001"
+          ]
+        }
+      ],
+      "references": [
+        {
+          "source_id": "H033S001",
+          "title": "Global burden of bacterial antimicrobial resistance in 2019: a systematic analysis.",
+          "authors": "Antimicrobial Resistance Collaborators et al.",
+          "journal": "Lancet",
+          "published_date": "2022 Feb 1",
+          "doi": "10.1016/S0140-6736(21)02724-0",
+          "pmid": "35065702",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/35065702/",
+          "source_type": "primary_research",
+          "study_context": "global AMR burden",
+          "study_design": "systematic analysis for 2019",
+          "usable_for": "deaths and DALYs by pathogen",
+          "limitations": "burden estimate; not a mechanism study"
+        },
+        {
+          "source_id": "H033S002",
+          "title": "A new antibiotic kills pathogens without detectable resistance.",
+          "authors": "Ling LL et al.",
+          "journal": "Nature",
+          "published_date": "2015 Jan 2",
+          "doi": "10.1038/nature14098",
+          "pmid": "25561178",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/25561178/",
+          "source_type": "primary_research",
+          "study_context": "teixobactin discovery",
+          "study_design": "new antibiotic scaffold",
+          "usable_for": "killing without detected resistance",
+          "limitations": "foundational discovery; later resistance still possible"
+        },
+        {
+          "source_id": "H033S003",
+          "title": "A new antibiotic selectively kills Gram-negative pathogens.",
+          "authors": "Imai Y et al.",
+          "journal": "Nature",
+          "published_date": "2019 Dec",
+          "doi": "10.1038/s41586-019-1791-1",
+          "pmid": "31747680",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/31747680/",
+          "source_type": "primary_research",
+          "study_context": "darobactin discovery",
+          "study_design": "Gram-negative selective antibiotic",
+          "usable_for": "BamA-targeting scaffold",
+          "limitations": "discovery paper; preclinical"
+        },
+        {
+          "source_id": "H033S004",
+          "title": "The antibiotic darobactin mimics a β-strand to inhibit outer membrane insertase.",
+          "authors": "Kaur H et al.",
+          "journal": "Nature",
+          "published_date": "2021 May",
+          "doi": "10.1038/s41586-021-03455-w",
+          "pmid": "33854236",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/33854236/",
+          "source_type": "primary_research",
+          "study_context": "darobactin mechanism",
+          "study_design": "BamA structural inhibition",
+          "usable_for": "outer-membrane insertase target",
+          "limitations": "structural mechanism"
+        },
+        {
+          "source_id": "H033S005",
+          "title": "Darobactins Exhibiting Superior Antibiotic Activity by Cryo-EM Structure Guided Biosynthetic Engineering.",
+          "authors": "Seyfert CE et al.",
+          "journal": "Angew Chem Int Ed Engl",
+          "published_date": "2023 Jan 9",
+          "doi": "10.1002/anie.202214094",
+          "pmid": "36308277",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/36308277/",
+          "source_type": "primary_research",
+          "study_context": "engineered darobactins",
+          "study_design": "cryo-EM guided biosynthesis",
+          "usable_for": "improved antibiotic activity",
+          "limitations": "analogue series; not clinical"
+        },
+        {
+          "source_id": "H033S006",
+          "title": "The Science of Antibiotic Discovery.",
+          "authors": "Lewis K et al.",
+          "journal": "Cell",
+          "published_date": "2020 Apr 2",
+          "doi": "10.1016/j.cell.2020.02.056",
+          "pmid": "32197064",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/32197064/",
+          "source_type": "review",
+          "study_context": "antibiotic discovery",
+          "study_design": "science of antibiotic discovery",
+          "usable_for": "screening platform constraints",
+          "limitations": "review"
+        },
+        {
+          "source_id": "H033S007",
+          "title": "Platforms for antibiotic discovery.",
+          "authors": "Lewis K et al.",
+          "journal": "Nat Rev Drug Discov",
+          "published_date": "2013 May",
+          "doi": "10.1038/nrd3975",
+          "pmid": "23629505",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/23629505/",
+          "source_type": "review",
+          "study_context": "antibiotic discovery platforms",
+          "study_design": "historical discovery platforms",
+          "usable_for": "why screens fail",
+          "limitations": "review; older platform survey"
+        },
+        {
+          "source_id": "H033S008",
+          "title": "Cefiderocol: Discovery, Chemistry, and In Vivo Profiles of a Novel Siderophore Cephalosporin.",
+          "authors": "Sato T et al.",
+          "journal": "Clin Infect Dis",
+          "published_date": "2019 Nov 1",
+          "doi": "10.1093/cid/ciz826",
+          "pmid": "31724047",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/31724047/",
+          "source_type": "review",
+          "study_context": "cefiderocol chemistry",
+          "study_design": "siderophore cephalosporin profiles",
+          "usable_for": "iron-uptake enabled entry",
+          "limitations": "review of discovery chemistry"
+        },
+        {
+          "source_id": "H033S009",
+          "title": "Cefiderocol: A Siderophore Cephalosporin with Activity Against Carbapenem-Resistant and Multidrug-Resistant Gram-Negative Bacilli.",
+          "authors": "Zhanel GG et al.",
+          "journal": "Drugs",
+          "published_date": "2019 Feb",
+          "doi": "10.1007/s40265-019-1055-2",
+          "pmid": "30712199",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/30712199/",
+          "source_type": "review",
+          "study_context": "cefiderocol activity",
+          "study_design": "carbapenem-resistant Gram-negatives",
+          "usable_for": "in vitro and early clinical context",
+          "limitations": "review; not a prescribing guide"
+        },
+        {
+          "source_id": "H033S010",
+          "title": "Understanding antibiotic resistance via outer membrane permeability.",
+          "authors": "Ghai I et al.",
+          "journal": "Infect Drug Resist",
+          "published_date": "2018",
+          "doi": "10.2147/IDR.S156995",
+          "pmid": "29695921",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/29695921/",
+          "source_type": "review",
+          "study_context": "outer membrane permeability",
+          "study_design": "antibiotic entry barriers",
+          "usable_for": "permeability and efflux",
+          "limitations": "review"
+        },
+        {
+          "source_id": "H033S011",
+          "title": "Biology of Acinetobacter baumannii: Pathogenesis, Antibiotic Resistance Mechanisms, and Prospective Treatment Options.",
+          "authors": "Lee CR et al.",
+          "journal": "Front Cell Infect Microbiol",
+          "published_date": "2017",
+          "doi": "10.3389/fcimb.2017.00055",
+          "pmid": "28348979",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/28348979/",
+          "source_type": "review",
+          "study_context": "Acinetobacter baumannii",
+          "study_design": "pathogenesis and resistance",
+          "usable_for": "treatment-option research landscape",
+          "limitations": "review; not clinical protocol"
+        },
+        {
+          "source_id": "H033S012",
+          "title": "Exploiting CRISPR-Cas nucleases to produce sequence-specific antimicrobials.",
+          "authors": "Bikard D et al.",
+          "journal": "Nat Biotechnol",
+          "published_date": "2014 Nov",
+          "doi": "10.1038/nbt.3043",
+          "pmid": "25282355",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/25282355/",
+          "source_type": "primary_research",
+          "study_context": "CRISPR antimicrobials",
+          "study_design": "sequence-specific nucleases",
+          "usable_for": "RNA-guided antibacterial activity",
+          "limitations": "foundational in vitro/in vivo model"
+        },
+        {
+          "source_id": "H033S013",
+          "title": "Sequence-specific antimicrobials using efficiently delivered RNA-guided nucleases.",
+          "authors": "Citorik RJ et al.",
+          "journal": "Nat Biotechnol",
+          "published_date": "2014 Nov",
+          "doi": "10.1038/nbt.3011",
+          "pmid": "25240928",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/25240928/",
+          "source_type": "primary_research",
+          "study_context": "RNA-guided nucleases",
+          "study_design": "efficiently delivered antimicrobials",
+          "usable_for": "sequence-specific killing",
+          "limitations": "foundational delivery study"
+        },
+        {
+          "source_id": "H033S014",
+          "title": "Phagemid-based capsid system for CRISPR-Cas13a antimicrobials targeting methicillin-resistant Staphylococcus aureus.",
+          "authors": "Li FY et al.",
+          "journal": "Commun Biol",
+          "published_date": "2024 Sep 1",
+          "doi": "10.1038/s42003-024-06754-w",
+          "pmid": "39271957",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/39271957/",
+          "source_type": "primary_research",
+          "study_context": "CRISPR-Cas13a phagemid",
+          "study_design": "MRSA-targeted antimicrobial",
+          "usable_for": "capsid delivery of Cas13a",
+          "limitations": "model organism study"
+        },
+        {
+          "source_id": "H033S015",
+          "title": "How CRISPR-Cas System Could Be Used to Combat Antimicrobial Resistance.",
+          "authors": "Gholizadeh P et al.",
+          "journal": "Infect Drug Resist",
+          "published_date": "2020",
+          "doi": "10.2147/IDR.S247271",
+          "pmid": "32368102",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/32368102/",
+          "source_type": "review",
+          "study_context": "CRISPR-Cas and AMR",
+          "study_design": "possible uses against resistance",
+          "usable_for": "method discussion",
+          "limitations": "review; translational gap remains"
+        },
+        {
+          "source_id": "H033S016",
+          "title": "Antimicrobial resistance: use of phage therapy in the management of resistant infections.",
+          "authors": "Ikpe F et al.",
+          "journal": "Mol Biol Rep",
+          "published_date": "2024 Aug 2",
+          "doi": "10.1007/s11033-024-09870-2",
+          "pmid": "39167154",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/39167154/",
+          "source_type": "review",
+          "study_context": "phage therapy",
+          "study_design": "management of resistant infections",
+          "usable_for": "phage as research strategy",
+          "limitations": "review; not a treatment protocol"
+        },
+        {
+          "source_id": "H033S017",
+          "title": "Phage Products for Fighting Antimicrobial Resistance.",
+          "authors": "Huang Y et al.",
+          "journal": "Microorganisms",
+          "published_date": "2022 Jun 3",
+          "doi": "10.3390/microorganisms10071324",
+          "pmid": "35889048",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/35889048/",
+          "source_type": "review",
+          "study_context": "phage products",
+          "study_design": "products for fighting AMR",
+          "usable_for": "product-class overview",
+          "limitations": "review; availability varies"
+        },
+        {
+          "source_id": "H033S018",
+          "title": "Progress in phage therapy in response to antimicrobial resistance.",
+          "authors": "Calero-Cáceres W et al.",
+          "journal": "Virology",
+          "published_date": "2025 Aug",
+          "doi": "10.1016/j.virol.2025.110578",
+          "pmid": "40410050",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/40410050/",
+          "source_type": "review",
+          "study_context": "phage therapy progress",
+          "study_design": "response to antimicrobial resistance",
+          "usable_for": "recent phage research",
+          "limitations": "review"
+        },
+        {
+          "source_id": "H033S019",
+          "title": "Antimicrobial resistance of Pseudomonas aeruginosa: navigating clinical impacts, current resistance trends, and innovations in breaking therapies.",
+          "authors": "Elfadadny A et al.",
+          "journal": "Front Microbiol",
+          "published_date": "2024",
+          "doi": "10.3389/fmicb.2024.1374466",
+          "pmid": "38646632",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/38646632/",
+          "source_type": "review",
+          "study_context": "Pseudomonas aeruginosa AMR",
+          "study_design": "clinical impact and innovations",
+          "usable_for": "mechanism and strategy landscape",
+          "limitations": "review; species-specific"
+        },
+        {
+          "source_id": "H033S020",
+          "title": "The burden of bacterial antimicrobial resistance in the WHO African region in 2019: a cross-country systematic analysis.",
+          "authors": "Antimicrobial Resistance Collaborators et al.",
+          "journal": "Lancet Glob Health",
+          "published_date": "2024 Feb",
+          "doi": "10.1016/S2214-109X(23)00539-9",
+          "pmid": "38134946",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/38134946/",
+          "source_type": "primary_research",
+          "study_context": "WHO African region AMR",
+          "study_design": "cross-country systematic analysis",
+          "usable_for": "regional burden",
+          "limitations": "burden analysis; not mechanism"
+        }
+      ]
+    },
+    {
+      "topic_id": "H041",
+      "title": "RNA、脂质纳米颗粒与靶向递送",
+      "topic_role": "research_deep_dive",
+      "overview": "核糖核酸药物能否到达预定细胞，很大程度上取决于脂质纳米颗粒的组成、电荷和给药路径。可电离脂质、辅助脂质、胆固醇和聚乙二醇脂质共同决定颗粒在血液中的稳定性、内体逃逸和器官向性。近年来的工作不再只问肝脏能否表达，而是问向性能否被改写到脾、造血干细胞、中枢或其他组织。\n\n本方向从可电离脂质处方、选择性器官靶向、肝外递送和脂质化学搜索出发，集中处理三类问题：脂质组成如何改变生物分布；选择性器官靶向把默认肝脏递送改写到何种程度；表达或沉默读出能够支持什么结论。本页讨论递送研究设计，不提供临床用药、制剂处方或监管申报指引。\n\n比较公开研究时，需要同时交代核酸载荷、脂质摩尔比、粒径、给药路径、器官读出和毒性指标。已获批制剂的脂质技术比较只用于说明处方差异，不能写成用药建议。表达上升不等于临床获益。",
+      "sections": [
+        {
+          "section_id": "H041-SEC-01",
+          "title": "比较不同研究时应先看什么",
+          "body": "| 比较内容 | 应记录的信息 | 关系到什么判断 |\n| --- | --- | --- |\n| 核酸载荷 | 信使核糖核酸、小干扰核糖核酸、质粒或编辑系统 | 读出是表达、沉默还是基因组改写 |\n| 脂质组成 | 可电离脂质、辅助脂质、胆固醇、聚乙二醇脂质和摩尔比 | 稳定性、逃逸和向性由哪一层处方决定 |\n| 器官向性 | 肝、脾、肺、造血、中枢或肿瘤局部 | 默认肝脏递送是否被改写 |\n| 读出指标 | 蛋白表达、基因沉默、编辑效率和细胞类型 | 结果停留在组织平均还是目标细胞 |\n| 毒性与免疫 | 肝酶、补体、细胞因子和重复给药 | 活性之外还有哪些必须报告的代价 |",
+          "source_ids": []
+        },
+        {
+          "section_id": "H041-SEC-02",
+          "title": "可电离脂质纳米颗粒成为核糖核酸递送的主流载体",
+          "body": "信使核糖核酸脂质纳米颗粒综述系统整理了可电离脂质、内体逃逸和体内表达之间的关系。递送技术综述和氨基脂质系列研究进一步证明，脂质头基和可电离性质会改变逃逸效率和持续表达。小干扰核糖核酸脂质纳米颗粒的临床转化综述则说明，同一载体类别已经在沉默药物中完成过处方到人体的跨越。\n\n这些工作适合作为处方比较的起点。脂质名称和摩尔比必须写清，不能把“脂质纳米颗粒”当作单一实体。已上市制剂的技术比较只说明处方差异，不构成本页的用药建议。",
+          "source_ids": [
+            "H041S001",
+            "H041S005",
+            "H041S006",
+            "H041S007",
+            "H041S008"
+          ]
+        },
+        {
+          "section_id": "H041-SEC-03",
+          "title": "选择性器官靶向把默认肝脏递送改写成可调向性",
+          "body": "选择性器官靶向纳米颗粒研究证明，通过补充带电脂质可以把信使核糖核酸和基因编辑载荷导向肺、脾或其他器官。后续方案论文和机制分析进一步证明，向性改变可以在多种制备方法中重复，并与蛋白冠和颗粒电荷有关。\n\n器官靶向结果适合提出向性假设。组织平均表达不等于目标细胞已被转染；给药路径和剂量窗口会显著改变分布。",
+          "source_ids": [
+            "H041S002",
+            "H041S003",
+            "H041S004"
+          ]
+        },
+        {
+          "section_id": "H041-SEC-04",
+          "title": "肝外递送需要同时改脂质组成和给药路径",
+          "body": "肝外核酸递送综述总结了屏障、蛋白冠和免疫清除如何把颗粒重新导向肝脏。提高鞘磷脂比例、加入胆汁酸脂质，以及用小分子改写无配体向性的研究，分别证明组成微调可以增加肝外表达。体内造血干细胞递送则把目标从实质器官推进到稀有细胞群。\n\n肝外结果必须报告细胞类型，而不是只报告器官匀浆。屏障和免疫反应会使同一处方在不同物种中表现不同。",
+          "source_ids": [
+            "H041S010",
+            "H041S011",
+            "H041S012",
+            "H041S015",
+            "H041S020"
+          ]
+        },
+        {
+          "section_id": "H041-SEC-05",
+          "title": "脂质化学和机器学习正在扩大可电离脂质的搜索空间",
+          "body": "组合化学与机器学习筛选证明，可电离脂质结构可以按转染效率被加速搜索。胺头基优化和肝脏表达处方研究提供了更传统的化学迭代对照。降低肝毒性并增强脾向性的缩酮酯脂质，以及肽可电离脂质的组织和编辑研究，进一步说明化学改写可以同时改变活性和毒性。\n\n化学搜索适合提出可重复的构效假设。高通量转染分数不能代替体内分布、重复给药和免疫读出。",
+          "source_ids": [
+            "H041S014",
+            "H041S018",
+            "H041S019",
+            "H041S017",
+            "H041S016"
+          ]
+        },
+        {
+          "section_id": "H041-SEC-06",
+          "title": "专题边界：递送研究不是临床用药建议",
+          "body": "血脑屏障穿越脂质纳米颗粒和已获批制剂的脂质技术比较，说明递送研究可以讨论人体相关处方，但讨论对象仍是载体性质，不是给药方案。嵌合抗原受体 T 细胞工程化等应用只证明该载体能把信使核糖核酸送进特定细胞。\n\n本页用于比较核糖核酸载荷、脂质处方和器官向性。表达、沉默或编辑读出不是疗效结论，也不提供制剂处方、临床用药或监管申报指引。疫苗平台中的免疫保护相关物由 H032 处理；本页不把递送效率写成接种建议。",
+          "source_ids": [
+            "H041S013",
+            "H041S006",
+            "H041S009",
+            "H041S001"
+          ]
+        },
+        {
+          "section_id": "H041-SEC-07",
+          "title": "研究技术",
+          "body": "本专题的技术卡包括脂质处方与颗粒表征、器官向性与蛋白冠、表达或编辑功能读出、肝毒性与免疫，以及可电离脂质化学搜索。技术选择取决于需要确认的是颗粒是否做成、向性是否改写，还是活性伴随何种毒性。",
+          "source_ids": []
+        },
+        {
+          "section_id": "H041-SEC-08",
+          "title": "科研参考范围",
+          "body": "本页用于介绍核糖核酸脂质纳米颗粒与靶向递送研究中的证据类型和适用边界，用于研究导航。不提供临床用药、制剂处方、商品推荐或监管申报指引。疫苗平台与保护相关物见 H032。",
+          "source_ids": []
+        }
+      ],
+      "methods": [
+        {
+          "method_id": "H041-M01",
+          "display_order": 1,
+          "category": "处方与工艺",
+          "title": "脂质组成、混合工艺与颗粒表征",
+          "principle": "按预定摩尔比混合可电离脂质、辅助脂质、胆固醇和聚乙二醇脂质，并测定粒径、电荷和包封率。",
+          "answers": "确认不同处方在物理化学层是否真的被做成不同颗粒。",
+          "sample_design": "固定混合方法、核酸脂质比和储存条件；报告批次间粒径和包封率。",
+          "limitations": "实验室规模工艺不能直接外推到放大生产；表征合格不等于体内向性相同。",
+          "source_ids": [
+            "H041S001",
+            "H041S007",
+            "H041S008",
+            "H041S003"
+          ],
+          "workflow": "设计阶段先确定：固定混合方法、核酸脂质比和储存条件；报告批次间粒径和包封率。 记录样本来源、处理条件、读出指标和正交验证；把观察结果与预先定义的研究问题放在同一分析框架中比较。 这项方法的直接测量或计算依据是：按预定摩尔比混合可电离脂质、辅助脂质、胆固醇和聚乙二醇脂质，并测定粒径、电荷和包封率。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：实验室规模工艺不能直接外推到放大生产；表征合格不等于体内向性相同。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "结果可用于确认不同处方在物理化学层是否真的被做成不同颗粒。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        },
+        {
+          "method_id": "H041-M02",
+          "display_order": 2,
+          "category": "生物分布",
+          "title": "器官向性、蛋白冠与给药路径",
+          "principle": "在给药后按时间点测量各器官的核酸、脂质或报告基因表达，并记录蛋白冠和注射途径。",
+          "answers": "判断默认肝脏递送是否被改写，以及改写发生在器官还是细胞层。",
+          "sample_design": "预先定义器官列表、剂量和取样时间；关键器官做细胞类型分选或原位验证。",
+          "limitations": "组织匀浆会掩盖细胞偏好；物种差异使小鼠分布不能直接写成人体分布。",
+          "source_ids": [
+            "H041S002",
+            "H041S004",
+            "H041S010",
+            "H041S015"
+          ],
+          "workflow": "设计阶段先确定：预先定义器官列表、剂量和取样时间；关键器官做细胞类型分选或原位验证。 记录样本来源、处理条件、读出指标和正交验证；把观察结果与预先定义的研究问题放在同一分析框架中比较。 这项方法的直接测量或计算依据是：在给药后按时间点测量各器官的核酸、脂质或报告基因表达，并记录蛋白冠和注射途径。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：组织匀浆会掩盖细胞偏好；物种差异使小鼠分布不能直接写成人体分布。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "结果可用于判断默认肝脏递送是否被改写，以及改写发生在器官还是细胞层。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        },
+        {
+          "method_id": "H041-M03",
+          "display_order": 3,
+          "category": "功能读出",
+          "title": "表达、沉默与基因组编辑测定",
+          "principle": "按载荷类型测量蛋白表达、目标基因沉默或编辑效率，并与细胞类型而不是器官平均值对齐。",
+          "answers": "确认核酸是否在目标细胞中发挥预定功能。",
+          "sample_design": "设置未处理、空载和序列对照；报告剂量反应和持续时间。",
+          "limitations": "瞬时表达不等于持久功能；编辑读出需要脱靶分析。",
+          "source_ids": [
+            "H041S012",
+            "H041S009",
+            "H041S016",
+            "H041S011"
+          ],
+          "workflow": "设计阶段先确定：设置未处理、空载和序列对照；报告剂量反应和持续时间。 记录样本来源、处理条件、读出指标和正交验证；把观察结果与预先定义的研究问题放在同一分析框架中比较。 这项方法的直接测量或计算依据是：按载荷类型测量蛋白表达、目标基因沉默或编辑效率，并与细胞类型而不是器官平均值对齐。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：瞬时表达不等于持久功能；编辑读出需要脱靶分析。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "结果可用于确认核酸是否在目标细胞中发挥预定功能。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        },
+        {
+          "method_id": "H041-M04",
+          "display_order": 4,
+          "category": "安全读出",
+          "title": "肝毒性、免疫激活与重复给药",
+          "principle": "同步测量肝酶、细胞因子、补体和体重或组织病理，并在重复给药后复查向性是否改变。",
+          "answers": "判断活性提高是否伴随不可接受的毒性或免疫代价。",
+          "sample_design": "预设毒性终点、采样窗口和重复给药间隔；报告个体变异。",
+          "limitations": "动物毒性谱不能写成人体安全性；体外细胞因子不能代替体内免疫。",
+          "source_ids": [
+            "H041S017",
+            "H041S006",
+            "H041S013",
+            "H041S001"
+          ],
+          "workflow": "设计阶段先确定：预设毒性终点、采样窗口和重复给药间隔；报告个体变异。 记录样本来源、处理条件、读出指标和正交验证；把观察结果与预先定义的研究问题放在同一分析框架中比较。 这项方法的直接测量或计算依据是：同步测量肝酶、细胞因子、补体和体重或组织病理，并在重复给药后复查向性是否改变。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：动物毒性谱不能写成人体安全性；体外细胞因子不能代替体内免疫。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "结果可用于判断活性提高是否伴随不可接受的毒性或免疫代价。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        },
+        {
+          "method_id": "H041-M05",
+          "display_order": 5,
+          "category": "化学优化",
+          "title": "可电离脂质搜索与配体或组成微调",
+          "principle": "通过组合化学、机器学习或配体添加搜索新脂质，并用同一生物分布和功能读出比较。",
+          "answers": "检验化学改写是否稳定改变向性、逃逸或毒性。",
+          "sample_design": "固定比较基准处方；新脂质至少在两个独立动物批次中复核。",
+          "limitations": "高通量转染分数容易过拟合；配体修饰可能改变稳定性。",
+          "source_ids": [
+            "H041S014",
+            "H041S019",
+            "H041S020",
+            "H041S018"
+          ],
+          "workflow": "设计阶段先确定：固定比较基准处方；新脂质至少在两个独立动物批次中复核。 记录样本来源、处理条件、读出指标和正交验证；把观察结果与预先定义的研究问题放在同一分析框架中比较。 这项方法的直接测量或计算依据是：通过组合化学、机器学习或配体添加搜索新脂质，并用同一生物分布和功能读出比较。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：高通量转染分数容易过拟合；配体修饰可能改变稳定性。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "结果可用于检验化学改写是否稳定改变向性、逃逸或毒性。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        }
+      ],
+      "shared_findings": [
+        {
+          "finding_id": "H041-C01",
+          "display_order": 1,
+          "title": "脂质组成决定稳定性和默认向性",
+          "shared_result": "可电离脂质综述、氨基脂质系列和小干扰核糖核酸转化研究证明，头基、可电离性质和摩尔比会共同改变逃逸、表达和肝脏默认分布。",
+          "research_use": "写清四种脂质的摩尔比、粒径和包封率；不同处方分开比较。",
+          "boundary": "“脂质纳米颗粒”不是单一实体；已上市制剂比较不是用药建议。",
+          "source_ids": [
+            "H041S001",
+            "H041S005",
+            "H041S006",
+            "H041S007"
+          ]
+        },
+        {
+          "finding_id": "H041-C02",
+          "display_order": 2,
+          "title": "选择性器官靶向可以改写但不是消除肝脏分布",
+          "shared_result": "选择性器官靶向的发现、方案和机制研究证明，补充带电脂质可以把载荷导向肺或脾，同时仍需报告肝脏残留和细胞类型。",
+          "research_use": "记录补充脂质、给药路径和细胞层读出；器官匀浆与分选结果分开写。",
+          "boundary": "组织平均表达不等于目标细胞转染。",
+          "source_ids": [
+            "H041S002",
+            "H041S003",
+            "H041S004"
+          ]
+        },
+        {
+          "finding_id": "H041-C03",
+          "display_order": 3,
+          "title": "肝外递送同时受组成、屏障和免疫限制",
+          "shared_result": "肝外递送综述、鞘磷脂和胆汁酸改写，以及造血干细胞体内递送，说明组成微调可以增加肝外信号，但屏障和清除仍在。",
+          "research_use": "报告细胞类型、屏障模型和免疫读出；物种差异单独讨论。",
+          "boundary": "小鼠肝外表达不能直接写成人体靶向。",
+          "source_ids": [
+            "H041S010",
+            "H041S011",
+            "H041S012",
+            "H041S015"
+          ]
+        },
+        {
+          "finding_id": "H041-C04",
+          "display_order": 4,
+          "title": "化学搜索必须配上体内分布和毒性",
+          "shared_result": "机器学习筛选、胺头基优化和低肝毒性脾向性脂质证明，化学空间可以被加速搜索，但转染分数不能代替体内重复给药。",
+          "research_use": "新脂质至少用生物分布、功能和毒性三组读出比较；保留失败结构。",
+          "boundary": "高通量分数不是递送成功的充分证据。",
+          "source_ids": [
+            "H041S014",
+            "H041S017",
+            "H041S019",
+            "H041S016"
+          ]
+        },
+        {
+          "finding_id": "H041-C05",
+          "display_order": 5,
+          "title": "递送读出不是临床用药或制剂处方",
+          "shared_result": "血脑屏障递送和已获批制剂技术比较说明，人体相关处方可以被讨论，但讨论对象是载体性质。表达、沉默或编辑不是疗效。",
+          "research_use": "把结果写成递送效率、细胞类型和毒性；涉及用药或申报时离开本页。",
+          "boundary": "本页不提供临床用药、制剂处方或监管申报指引。疫苗保护相关物见 H032。",
+          "source_ids": [
+            "H041S013",
+            "H041S006",
+            "H041S009",
+            "H041S001"
+          ]
+        }
+      ],
+      "references": [
+        {
+          "source_id": "H041S001",
+          "title": "Lipid nanoparticles for mRNA delivery.",
+          "authors": "Hou X et al.",
+          "journal": "Nat Rev Mater",
+          "published_date": "2021",
+          "doi": "10.1038/s41578-021-00358-0",
+          "pmid": "34394960",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/34394960/",
+          "source_type": "review",
+          "study_context": "mRNA LNP delivery",
+          "study_design": "lipid nanoparticle review",
+          "usable_for": "ionizable LNP principles",
+          "limitations": "review; formulation class overview"
+        },
+        {
+          "source_id": "H041S002",
+          "title": "Selective organ targeting (SORT) nanoparticles for tissue-specific mRNA delivery and CRISPR-Cas gene editing.",
+          "authors": "Cheng Q et al.",
+          "journal": "Nat Nanotechnol",
+          "published_date": "2020 Apr",
+          "doi": "10.1038/s41565-020-0669-6",
+          "pmid": "32251383",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/32251383/",
+          "source_type": "primary_research",
+          "study_context": "SORT nanoparticles",
+          "study_design": "selective organ targeting",
+          "usable_for": "tissue-specific mRNA and CRISPR delivery",
+          "limitations": "mouse and formulation-specific"
+        },
+        {
+          "source_id": "H041S003",
+          "title": "Preparation of selective organ-targeting (SORT) lipid nanoparticles (LNPs) using multiple technical methods for tissue-specific mRNA delivery.",
+          "authors": "Wang X et al.",
+          "journal": "Nat Protoc",
+          "published_date": "2023 Jan",
+          "doi": "10.1038/s41596-022-00755-x",
+          "pmid": "36316378",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/36316378/",
+          "source_type": "primary_research",
+          "study_context": "SORT preparation",
+          "study_design": "multiple technical methods",
+          "usable_for": "reproducible organ targeting",
+          "limitations": "protocol paper"
+        },
+        {
+          "source_id": "H041S004",
+          "title": "On the mechanism of tissue-specific mRNA delivery by selective organ targeting nanoparticles.",
+          "authors": "Dilliard SA et al.",
+          "journal": "Proc Natl Acad Sci U S A",
+          "published_date": "2021 Dec 2",
+          "doi": "10.1073/pnas.2109256118",
+          "pmid": "34933999",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/34933999/",
+          "source_type": "primary_research",
+          "study_context": "SORT mechanism",
+          "study_design": "tissue-specific delivery mechanism",
+          "usable_for": "protein corona and charge",
+          "limitations": "mechanistic mouse study"
+        },
+        {
+          "source_id": "H041S005",
+          "title": "Lipid Nanoparticle Technology for Clinical Translation of siRNA Therapeutics.",
+          "authors": "Kulkarni JA et al.",
+          "journal": "Acc Chem Res",
+          "published_date": "2019 Sep 1",
+          "doi": "10.1021/acs.accounts.9b00368",
+          "pmid": "31397996",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/31397996/",
+          "source_type": "review",
+          "study_context": "siRNA LNP translation",
+          "study_design": "clinical translation of siRNA LNPs",
+          "usable_for": "approved-class formulation lessons",
+          "limitations": "review of technology class; not a prescription"
+        },
+        {
+          "source_id": "H041S006",
+          "title": "Difference in the lipid nanoparticle technology employed in three approved siRNA (Patisiran) and mRNA (COVID-19 vaccine) drugs.",
+          "authors": "Suzuki Y et al.",
+          "journal": "Drug Metab Pharmacokinet",
+          "published_date": "2021 Dec",
+          "doi": "10.1016/j.dmpk.2021.100424",
+          "pmid": "34757287",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/34757287/",
+          "source_type": "review",
+          "study_context": "approved LNP comparison",
+          "study_design": "siRNA and mRNA drug lipid technologies",
+          "usable_for": "formulation differences among approved products",
+          "limitations": "comparison of technologies; not dosing advice"
+        },
+        {
+          "source_id": "H041S007",
+          "title": "A Novel Amino Lipid Series for mRNA Delivery: Improved Endosomal Escape and Sustained Pharmacology and Safety in Non-human Primates.",
+          "authors": "Sabnis S et al.",
+          "journal": "Mol Ther",
+          "published_date": "2018 Jun 6",
+          "doi": "10.1016/j.ymthe.2018.03.010",
+          "pmid": "29653760",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/29653760/",
+          "source_type": "primary_research",
+          "study_context": "amino lipid series",
+          "study_design": "improved endosomal escape",
+          "usable_for": "sustained pharmacology in NHP",
+          "limitations": "non-human primate; specific lipid series"
+        },
+        {
+          "source_id": "H041S008",
+          "title": "Delivering the Messenger: Advances in Technologies for Therapeutic mRNA Delivery.",
+          "authors": "Kowalski PS et al.",
+          "journal": "Mol Ther",
+          "published_date": "2019 Apr 1",
+          "doi": "10.1016/j.ymthe.2019.02.012",
+          "pmid": "30846391",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/30846391/",
+          "source_type": "review",
+          "study_context": "therapeutic mRNA delivery",
+          "study_design": "delivery technology advances",
+          "usable_for": "carrier landscape",
+          "limitations": "review"
+        },
+        {
+          "source_id": "H041S009",
+          "title": "Ionizable Lipid Nanoparticle-Mediated mRNA Delivery for Human CAR T Cell Engineering.",
+          "authors": "Billingsley MM et al.",
+          "journal": "Nano Lett",
+          "published_date": "2020 Mar 1",
+          "doi": "10.1021/acs.nanolett.9b04246",
+          "pmid": "31951421",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/31951421/",
+          "source_type": "primary_research",
+          "study_context": "CAR T engineering",
+          "study_design": "ionizable LNP mRNA in human T cells",
+          "usable_for": "ex vivo cell engineering",
+          "limitations": "cell-therapy context; not in-vivo dosing"
+        },
+        {
+          "source_id": "H041S010",
+          "title": "Lipid nanoparticle-based strategies for extrahepatic delivery of nucleic acid therapies - challenges and opportunities.",
+          "authors": "Simonsen JB et al.",
+          "journal": "J Control Release",
+          "published_date": "2024 Jun",
+          "doi": "10.1016/j.jconrel.2024.04.022",
+          "pmid": "38621638",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/38621638/",
+          "source_type": "review",
+          "study_context": "extrahepatic LNP delivery",
+          "study_design": "challenges and opportunities",
+          "usable_for": "barriers beyond the liver",
+          "limitations": "review"
+        },
+        {
+          "source_id": "H041S011",
+          "title": "Lipid nanoparticle mRNA systems containing high levels of sphingomyelin engender higher protein expression in hepatic and extra-hepatic tissues.",
+          "authors": "Chander N et al.",
+          "journal": "Mol Ther Methods Clin Dev",
+          "published_date": "2023 Sep 1",
+          "doi": "10.1016/j.omtm.2023.06.005",
+          "pmid": "37564393",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/37564393/",
+          "source_type": "primary_research",
+          "study_context": "sphingomyelin LNPs",
+          "study_design": "hepatic and extrahepatic expression",
+          "usable_for": "composition-tuned tropism",
+          "limitations": "formulation study"
+        },
+        {
+          "source_id": "H041S012",
+          "title": "In vivo hematopoietic stem cell modification by mRNA delivery.",
+          "authors": "Breda L et al.",
+          "journal": "Science",
+          "published_date": "2023 Jul 2",
+          "doi": "10.1126/science.ade6967",
+          "pmid": "37499029",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/37499029/",
+          "source_type": "primary_research",
+          "study_context": "in vivo HSC modification",
+          "study_design": "mRNA delivery to hematopoietic stem cells",
+          "usable_for": "rare-cell targeting",
+          "limitations": "specialized in vivo model"
+        },
+        {
+          "source_id": "H041S013",
+          "title": "Blood-brain-barrier-crossing lipid nanoparticles for mRNA delivery to the central nervous system.",
+          "authors": "Wang C et al.",
+          "journal": "Nat Mater",
+          "published_date": "2025 Oct",
+          "doi": "10.1038/s41563-024-02114-5",
+          "pmid": "39962245",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/39962245/",
+          "source_type": "primary_research",
+          "study_context": "BBB-crossing LNPs",
+          "study_design": "mRNA delivery to the central nervous system",
+          "usable_for": "barrier-crossing formulation",
+          "limitations": "preclinical CNS model"
+        },
+        {
+          "source_id": "H041S014",
+          "title": "Accelerating ionizable lipid discovery for mRNA delivery using machine learning and combinatorial chemistry.",
+          "authors": "Li B et al.",
+          "journal": "Nat Mater",
+          "published_date": "2024 Jul",
+          "doi": "10.1038/s41563-024-01867-3",
+          "pmid": "38740955",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/38740955/",
+          "source_type": "primary_research",
+          "study_context": "ionizable lipid ML",
+          "study_design": "machine learning and combinatorial chemistry",
+          "usable_for": "accelerated lipid discovery",
+          "limitations": "computational-experimental screen"
+        },
+        {
+          "source_id": "H041S015",
+          "title": "Bile acid-containing lipid nanoparticles enhance extrahepatic mRNA delivery.",
+          "authors": "Patel SK et al.",
+          "journal": "Theranostics",
+          "published_date": "2024",
+          "doi": "10.7150/thno.89913",
+          "pmid": "38164140",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/38164140/",
+          "source_type": "primary_research",
+          "study_context": "bile-acid LNPs",
+          "study_design": "enhanced extrahepatic mRNA delivery",
+          "usable_for": "composition change for extrahepatic signal",
+          "limitations": "preclinical formulation"
+        },
+        {
+          "source_id": "H041S016",
+          "title": "Tissue-specific mRNA delivery and prime editing with peptide-ionizable lipid nanoparticles.",
+          "authors": "Lin Y et al.",
+          "journal": "Nat Mater",
+          "published_date": "2026 Jan",
+          "doi": "10.1038/s41563-025-02320-9",
+          "pmid": "40890498",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/40890498/",
+          "source_type": "primary_research",
+          "study_context": "peptide-ionizable LNPs",
+          "study_design": "tissue-specific mRNA and prime editing",
+          "usable_for": "peptide-modified tropism",
+          "limitations": "preclinical; editing context"
+        },
+        {
+          "source_id": "H041S017",
+          "title": "Discovery of Ketal-Ester Ionizable Lipid Nanoparticle with Reduced Hepatotoxicity, Enhanced Spleen Tropism for mRNA Vaccine Delivery.",
+          "authors": "Lv K et al.",
+          "journal": "Adv Sci (Weinh)",
+          "published_date": "2024 Dec",
+          "doi": "10.1002/advs.202404684",
+          "pmid": "39387241",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/39387241/",
+          "source_type": "primary_research",
+          "study_context": "ketal-ester ionizable lipid",
+          "study_design": "reduced hepatotoxicity and spleen tropism",
+          "usable_for": "toxicity-tropism trade-off",
+          "limitations": "preclinical vaccine-delivery context"
+        },
+        {
+          "source_id": "H041S018",
+          "title": "Efficient hepatic delivery and protein expression enabled by optimized mRNA and ionizable lipid nanoparticle.",
+          "authors": "Yang T et al.",
+          "journal": "Bioact Mater",
+          "published_date": "2020 Dec",
+          "doi": "10.1016/j.bioactmat.2020.07.003",
+          "pmid": "32691013",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/32691013/",
+          "source_type": "primary_research",
+          "study_context": "hepatic mRNA LNP",
+          "study_design": "optimized mRNA and ionizable LNP",
+          "usable_for": "liver expression optimization",
+          "limitations": "hepatic default delivery"
+        },
+        {
+          "source_id": "H041S019",
+          "title": "Boosting ionizable lipid nanoparticle-mediated in vivo mRNA delivery through optimization of lipid amine-head groups.",
+          "authors": "Ding F et al.",
+          "journal": "Biomater Sci",
+          "published_date": "2021 Nov 9",
+          "doi": "10.1039/d1bm00866h",
+          "pmid": "34647548",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/34647548/",
+          "source_type": "primary_research",
+          "study_context": "lipid amine-head groups",
+          "study_design": "in vivo mRNA delivery optimization",
+          "usable_for": "head-group structure-activity",
+          "limitations": "chemistry iteration"
+        },
+        {
+          "source_id": "H041S020",
+          "title": "Targeting Ligand Independent Tropism of siRNA-LNP by Small Molecules for Directed Therapy of Liver or Myeloid Immune Cells.",
+          "authors": "Lin C et al.",
+          "journal": "Adv Healthc Mater",
+          "published_date": "2024 Oct",
+          "doi": "10.1002/adhm.202202670",
+          "pmid": "36617516",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/36617516/",
+          "source_type": "primary_research",
+          "study_context": "ligand-independent tropism",
+          "study_design": "small-molecule retargeting of siRNA-LNP",
+          "usable_for": "liver versus myeloid tropism",
+          "limitations": "preclinical retargeting"
+        }
+      ]
+    }
+  ]
+}

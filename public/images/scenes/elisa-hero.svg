@@ -1,0 +1,80 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 480" preserveAspectRatio="xMidYMid slice">
+  <defs>
+    <linearGradient id="elisaBg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ecfdf5"/>
+      <stop offset="45%" stop-color="#d1fae5"/>
+      <stop offset="100%" stop-color="#a7f3d0"/>
+    </linearGradient>
+    <linearGradient id="wellFill" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#34d399" stop-opacity="0"/>
+      <stop offset="40%" stop-color="#10b981" stop-opacity="0.65"/>
+      <stop offset="100%" stop-color="#059669" stop-opacity="0.45"/>
+    </linearGradient>
+    <linearGradient id="wellFillLight" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#6ee7b7" stop-opacity="0"/>
+      <stop offset="50%" stop-color="#34d399" stop-opacity="0.4"/>
+      <stop offset="100%" stop-color="#10b981" stop-opacity="0.25"/>
+    </linearGradient>
+  </defs>
+  <rect width="1200" height="480" fill="url(#elisaBg)"/>
+  <!-- microplate -->
+  <g opacity="0.22">
+    <rect x="720" y="72" width="340" height="220" rx="14" fill="#ffffff" stroke="#6ee7b7" stroke-width="1.5"/>
+  </g>
+  <!-- well grid -->
+  <g opacity="0.55">
+    <rect x="748" y="100" width="28" height="28" rx="14" fill="url(#wellFillLight)"/>
+    <rect x="788" y="100" width="28" height="28" rx="14" fill="url(#wellFill)"/>
+    <rect x="828" y="100" width="28" height="28" rx="14" fill="url(#wellFillLight)"/>
+    <rect x="868" y="100" width="28" height="28" rx="14" fill="url(#wellFill)"/>
+    <rect x="908" y="100" width="28" height="28" rx="14" fill="url(#wellFillLight)"/>
+    <rect x="948" y="100" width="28" height="28" rx="14" fill="url(#wellFill)"/>
+    <rect x="988" y="100" width="28" height="28" rx="14" fill="url(#wellFillLight)"/>
+    <rect x="1028" y="100" width="28" height="28" rx="14" fill="url(#wellFill)"/>
+
+    <rect x="748" y="148" width="28" height="28" rx="14" fill="url(#wellFill)"/>
+    <rect x="788" y="148" width="28" height="28" rx="14" fill="url(#wellFillLight)"/>
+    <rect x="828" y="148" width="28" height="28" rx="14" fill="url(#wellFill)"/>
+    <rect x="868" y="148" width="28" height="28" rx="14" fill="url(#wellFillLight)"/>
+    <rect x="908" y="148" width="28" height="28" rx="14" fill="url(#wellFill)"/>
+    <rect x="948" y="148" width="28" height="28" rx="14" fill="url(#wellFillLight)"/>
+    <rect x="988" y="148" width="28" height="28" rx="14" fill="url(#wellFill)"/>
+    <rect x="1028" y="148" width="28" height="28" rx="14" fill="url(#wellFillLight)"/>
+
+    <rect x="748" y="196" width="28" height="28" rx="14" fill="url(#wellFillLight)"/>
+    <rect x="788" y="196" width="28" height="28" rx="14" fill="url(#wellFill)"/>
+    <rect x="828" y="196" width="28" height="28" rx="14" fill="url(#wellFillLight)"/>
+    <rect x="868" y="196" width="28" height="28" rx="14" fill="url(#wellFill)"/>
+    <rect x="908" y="196" width="28" height="28" rx="14" fill="url(#wellFillLight)"/>
+    <rect x="948" y="196" width="28" height="28" rx="14" fill="url(#wellFill)"/>
+    <rect x="988" y="196" width="28" height="28" rx="14" fill="url(#wellFillLight)"/>
+    <rect x="1028" y="196" width="28" height="28" rx="14" fill="url(#wellFill)"/>
+
+    <rect x="748" y="244" width="28" height="28" rx="14" fill="url(#wellFill)"/>
+    <rect x="788" y="244" width="28" height="28" rx="14" fill="url(#wellFillLight)"/>
+    <rect x="828" y="244" width="28" height="28" rx="14" fill="url(#wellFill)"/>
+    <rect x="868" y="244" width="28" height="28" rx="14" fill="url(#wellFillLight)"/>
+    <rect x="908" y="244" width="28" height="28" rx="14" fill="url(#wellFill)"/>
+    <rect x="948" y="244" width="28" height="28" rx="14" fill="url(#wellFillLight)"/>
+    <rect x="988" y="244" width="28" height="28" rx="14" fill="url(#wellFill)"/>
+    <rect x="1028" y="244" width="28" height="28" rx="14" fill="url(#wellFillLight)"/>
+  </g>
+  <!-- antibody Y shapes -->
+  <g fill="none" stroke="#10b981" stroke-width="1.5" opacity="0.22">
+    <g transform="translate(680, 88) scale(1.05)">
+      <line x1="0" y1="0" x2="0" y2="40"/>
+      <line x1="-20" y1="40" x2="0" y2="19"/>
+      <line x1="20" y1="40" x2="0" y2="19"/>
+    </g>
+    <g transform="translate(1100, 320) scale(0.95)">
+      <line x1="0" y1="0" x2="0" y2="36"/>
+      <line x1="-18" y1="36" x2="0" y2="18"/>
+      <line x1="18" y1="36" x2="0" y2="18"/>
+    </g>
+  </g>
+  <!-- absorbance curve hint -->
+  <path d="M 680 360 Q 780 280, 880 300 T 1080 240" fill="none" stroke="#34d399" stroke-width="2" opacity="0.18"/>
+  <!-- soft circles -->
+  <circle cx="1040" cy="80" r="72" fill="#34d399" opacity="0.1"/>
+  <circle cx="860" cy="400" r="88" fill="#059669" opacity="0.07"/>
+</svg>

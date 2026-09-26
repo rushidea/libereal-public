@@ -1,0 +1,2775 @@
+{
+  "schema_version": "research-deep-dive-public-v0.1",
+  "batch_id": "B10",
+  "title": "神经技术、分子诊断与数字临床证据",
+  "publication_status": "snapshot_ready",
+  "frontend_status": "snapshot_ready",
+  "topics": [
+    {
+      "topic_id": "H030",
+      "title": "神经接口、高密度记录与神经调控",
+      "topic_role": "research_deep_dive",
+      "overview": "神经接口研究同时处理三件不同的事：如何稳定读出大量神经元的放电，如何把这些放电映射到运动、感觉或语言意图，以及如何用刺激闭环调节回路。高密度硅探针把记录通道推进到上千，脑机接口把解码指标写成可比较的字符率或抓取成功率，自适应脑深部刺激则把局部场电位当成调控输入。这三层证据不能互相替代。\n\n本方向从 Neuropixels 高密度记录、运动与感觉脑机接口、语音与文字解码，以及闭环神经调控出发，集中处理三类问题：记录密度和稳定性如何限制可见的群体动态；解码性能建立在哪一类任务和反馈上；刺激闭环回答的是回路可调性，而不是手术适应证。脑细胞图谱由相邻专题处理，本页不把细胞类型名录写成接口性能。\n\n比较公开研究时，需要同时交代电极类型、通道数、脑区、任务、解码指标和慢性稳定性。本页是研究导航，不是诊疗、植入手术指南、商品推荐或监管申报指引。某一被试的字符率或步态改善不能写成通用临床方案。",
+      "sections": [
+        {
+          "section_id": "H030-SEC-01",
+          "title": "比较不同研究时应先看什么",
+          "body": "| 比较内容 | 应记录的信息 | 关系到什么判断 |\n| --- | --- | --- |\n| 电极与通道 | 硅探针、聚合物电极、微电极阵列、通道数和间距 | 看到的是局部回路还是稀疏采样 |\n| 记录对象 | 物种、脑区、细胞层和慢性或急性植入 | 群体动态能否迁移到其他皮层 |\n| 任务与读出 | 运动、感觉、书写、语音或步态，以及成功指标 | 解码性能对应哪一类行为终点 |\n| 刺激与闭环 | 开环、自适应或感觉反馈，以及生理标记 | 调控改变的是症状评分还是回路信号 |\n| 稳定性与安全 | 单位产率、漂移、组织反应和不良事件 | 实验室演示能否支持长期记录假设 |",
+          "source_ids": []
+        },
+        {
+          "section_id": "H030-SEC-02",
+          "title": "高密度硅探针把群体放电写成可比较的通道坐标",
+          "body": "Neuropixels 研究证明，全集成硅探针可以在啮齿动物中同时记录数百个神经元。Neuropixels 2.0 进一步证明微型化探针能够支持更长期、更稳定的高密度记录。随后的全脑分布式编码、小鼠视觉系统放电调查和自发行为驱动的全脑活动研究，共同证明高通道记录可以同时描述任务相关发放与行为伴随的维度。\n\n人体皮层 Neuropixels 记录和聚合物电极的多脑区慢性记录，则把同一记录逻辑推进到人和可弯曲电极。这些工作适合比较通道密度、漂移和单位产率。通道数上升不等于目标回路已被完整采样，急性记录也不能自动外推为慢性接口性能。",
+          "source_ids": [
+            "H030S001",
+            "H030S002",
+            "H030S003",
+            "H030S004",
+            "H030S005",
+            "H030S006",
+            "H030S007"
+          ]
+        },
+        {
+          "section_id": "H030-SEC-03",
+          "title": "运动脑机接口在有限被试中达到可测量的抓取和步态读出",
+          "body": "四肢瘫痪被试的机械臂抓取研究，以及高表现神经假体控制试验，证明皮层放电可以驱动到达和抓握。体感皮层微刺激研究进一步证明，人工触觉可以在人体中被引出，并改善机械臂控制。脊髓损伤后的脑脊接口步行研究则证明，解码与刺激可以耦合成步态读出。\n\n这些试验适合比较任务定义、反馈方式和成功率。个案表现不是手术适应证，也不能写成可推广的康复方案。感觉反馈读出与运动解码必须分开报告。",
+          "source_ids": [
+            "H030S008",
+            "H030S009",
+            "H030S015",
+            "H030S016",
+            "H030S014"
+          ]
+        },
+        {
+          "section_id": "H030-SEC-04",
+          "title": "书写和语音神经假体把解码终点改写成交流速率",
+          "body": "手写脑机接口研究证明，尝试书写的皮层轨迹可以解码为文字。失语瘫痪患者的语音神经假体、高表现语音神经假体，以及语音解码与虚拟形象控制研究，进一步证明尝试说话的神经活动可以映射到词、句或面部动画。\n\n交流类接口适合用字符率、词错误率和词汇量比较。实验室词汇表和提示条件下的速率，不能写成日常交流能力；电极位置和训练时长必须一并记录。",
+          "source_ids": [
+            "H030S010",
+            "H030S011",
+            "H030S012",
+            "H030S013"
+          ]
+        },
+        {
+          "section_id": "H030-SEC-05",
+          "title": "自适应脑深部刺激把局部场电位当作闭环输入",
+          "body": "帕金森病自适应脑深部刺激研究证明，可以用β振荡等生理标记调节刺激。长期无线神经记录研究进一步证明，电路发现和自适应刺激可以在植入后持续采集。脑深部刺激技术综述和新兴调控技术综述，则把电极、算法和感知刺激放进同一比较框架。\n\n闭环研究适合比较生理标记、调节规则和症状读出。回路可调性不是手术指南，开环有效的靶点也不能自动写成自适应方案。",
+          "source_ids": [
+            "H030S017",
+            "H030S018",
+            "H030S019",
+            "H030S020"
+          ]
+        },
+        {
+          "section_id": "H030-SEC-06",
+          "title": "专题边界：接口研究不是临床植入手术指南",
+          "body": "人体 Neuropixels 和聚合物电极证明记录方法可以进入人脑或慢性植入，但这些论文回答的是信号质量和空间覆盖，而不是适应证、手术路径或术后管理。脑深部刺激技术综述讨论装置与算法，同样不是手术操作手册。\n\n本页用于比较记录密度、解码终点和闭环标记。细胞类型与疾病图谱见 H028、H029。某一被试的字符率、抓取成功或步态改善，不能写成诊疗或植入建议。",
+          "source_ids": [
+            "H030S006",
+            "H030S007",
+            "H030S019",
+            "H030S001"
+          ]
+        },
+        {
+          "section_id": "H030-SEC-07",
+          "title": "研究技术",
+          "body": "本专题的技术卡包括高密度电极覆盖评估、发放排序与群体轨迹、运动或语音解码、皮层微刺激反馈，以及自适应脑深部刺激。技术选择取决于需要确认的是记录窗口、解码终点还是回路可调性。",
+          "source_ids": []
+        },
+        {
+          "section_id": "H030-SEC-08",
+          "title": "科研参考范围",
+          "body": "本页用于介绍神经接口、高密度记录与神经调控研究中的证据类型和适用边界，用于研究导航。不提供诊疗、植入手术指南、商品推荐或监管申报指引。脑细胞图谱见 H028、H029。",
+          "source_ids": []
+        }
+      ],
+      "methods": [
+        {
+          "method_id": "H030-M01",
+          "display_order": 1,
+          "category": "高密度记录",
+          "title": "硅探针与聚合物电极的通道覆盖评估",
+          "principle": "用高密度电极同步采集多通道细胞外电位，并按单位产率、漂移和脑区覆盖描述记录窗口。",
+          "answers": "判断可见群体动态受通道密度还是采样窗限制。",
+          "sample_design": "记录电极型号、通道数、脑区、急慢性条件和单位筛选阈值；保留未分配通道。",
+          "limitations": "通道数上升不等于回路被完整采样；急性产率不能外推为慢性稳定性。",
+          "source_ids": [
+            "H030S001",
+            "H030S002",
+            "H030S006",
+            "H030S007"
+          ],
+          "workflow": "设计阶段先确定：记录电极型号、通道数、脑区、急慢性条件和单位筛选阈值；保留未分配通道。 记录样本来源、处理条件、读出指标和正交验证；把观察结果与预先定义的研究问题放在同一分析框架中比较。 这项方法的直接测量或计算依据是：用高密度电极同步采集多通道细胞外电位，并按单位产率、漂移和脑区覆盖描述记录窗口。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：通道数上升不等于回路被完整采样；急性产率不能外推为慢性稳定性。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "结果可用于判断可见群体动态受通道密度还是采样窗限制。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        },
+        {
+          "method_id": "H030-M02",
+          "display_order": 2,
+          "category": "群体动态",
+          "title": "发放排序与单次试验群体轨迹",
+          "principle": "把多通道发放对齐到行为事件，估计任务相关维度和自发行为伴随的活动。",
+          "answers": "区分任务编码与行为伴随的全脑波动。",
+          "sample_design": "固定对齐事件、行为视频或运动学和预处理；报告未解释方差。",
+          "limitations": "排序错误会扭曲轨迹；缺少行为计量时不能断言编码内容。",
+          "source_ids": [
+            "H030S003",
+            "H030S004",
+            "H030S005"
+          ],
+          "workflow": "设计阶段先确定：固定对齐事件、行为视频或运动学和预处理；报告未解释方差。 记录样本来源、处理条件、读出指标和正交验证；把观察结果与预先定义的研究问题放在同一分析框架中比较。 这项方法的直接测量或计算依据是：把多通道发放对齐到行为事件，估计任务相关维度和自发行为伴随的活动。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：排序错误会扭曲轨迹；缺少行为计量时不能断言编码内容。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "结果可用于区分任务编码与行为伴随的全脑波动。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        },
+        {
+          "method_id": "H030-M03",
+          "display_order": 3,
+          "category": "解码接口",
+          "title": "运动、书写与语音脑机接口",
+          "principle": "用皮层群体活动预测运动、文字或语音终点，并按预先定义的成功指标评估。",
+          "answers": "比较解码性能对应哪一类交流或运动终点。",
+          "sample_design": "预先定义词汇表或工作空间、训练时长和离线对照；报告错误类型。",
+          "limitations": "实验室提示条件不能写成日常功能；个案速率不能外推到未测试人群。",
+          "source_ids": [
+            "H030S008",
+            "H030S010",
+            "H030S011",
+            "H030S012"
+          ],
+          "workflow": "设计阶段先确定：预先定义词汇表或工作空间、训练时长和离线对照；报告错误类型。 记录样本来源、处理条件、读出指标和正交验证；把观察结果与预先定义的研究问题放在同一分析框架中比较。 这项方法的直接测量或计算依据是：用皮层群体活动预测运动、文字或语音终点，并按预先定义的成功指标评估。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：实验室提示条件不能写成日常功能；个案速率不能外推到未测试人群。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "结果可用于比较解码性能对应哪一类交流或运动终点。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        },
+        {
+          "method_id": "H030-M04",
+          "display_order": 4,
+          "category": "感觉反馈",
+          "title": "皮层微刺激与人工触觉",
+          "principle": "按频率、幅度和电极位点刺激体感皮层，测量主观感觉和闭环控制增益。",
+          "answers": "检验人工感觉是否改变运动接口的控制读出。",
+          "sample_design": "报告刺激参数、感觉问卷和对照位点；运动读出与感觉读出分开写。",
+          "limitations": "引出感觉不等于恢复自然触觉；刺激安全窗因人而异。",
+          "source_ids": [
+            "H030S015",
+            "H030S016",
+            "H030S014"
+          ],
+          "workflow": "设计阶段先确定：报告刺激参数、感觉问卷和对照位点；运动读出与感觉读出分开写。 记录样本来源、处理条件、读出指标和正交验证；把观察结果与预先定义的研究问题放在同一分析框架中比较。 这项方法的直接测量或计算依据是：按频率、幅度和电极位点刺激体感皮层，测量主观感觉和闭环控制增益。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：引出感觉不等于恢复自然触觉；刺激安全窗因人而异。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "结果可用于检验人工感觉是否改变运动接口的控制读出。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        },
+        {
+          "method_id": "H030-M05",
+          "display_order": 5,
+          "category": "闭环调控",
+          "title": "自适应脑深部刺激与生理标记",
+          "principle": "用局部场电位或其他标记实时调节刺激强度或时序，并与开环对照比较。",
+          "answers": "判断调控改变的是回路标记还是预先定义的症状读出。",
+          "sample_design": "固定标记定义、调节规则和临床评分窗口；保留开环日对照。",
+          "limitations": "标记可调不是手术适应证；一种疾病的β规则不能套用到其他回路。",
+          "source_ids": [
+            "H030S017",
+            "H030S018",
+            "H030S019",
+            "H030S020"
+          ],
+          "workflow": "设计阶段先确定：固定标记定义、调节规则和临床评分窗口；保留开环日对照。 记录样本来源、处理条件、读出指标和正交验证；把观察结果与预先定义的研究问题放在同一分析框架中比较。 这项方法的直接测量或计算依据是：用局部场电位或其他标记实时调节刺激强度或时序，并与开环对照比较。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：标记可调不是手术适应证；一种疾病的β规则不能套用到其他回路。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "结果可用于判断调控改变的是回路标记还是预先定义的症状读出。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        }
+      ],
+      "shared_findings": [
+        {
+          "finding_id": "H030-C01",
+          "display_order": 1,
+          "title": "记录密度决定可见的群体动态，但不等于回路已被完整采样",
+          "shared_result": "Neuropixels 系列、全脑发放调查和人体皮层记录证明，高通道可以同时描述任务发放与行为伴随波动，但覆盖仍受探针位置和急慢性条件限制。",
+          "research_use": "报告通道数、脑区、单位产率和漂移；急性与慢性结果分开比较。",
+          "boundary": "通道数上升不是完整回路图谱，也不能写成植入适应证。",
+          "source_ids": [
+            "H030S001",
+            "H030S002",
+            "H030S003",
+            "H030S004",
+            "H030S006"
+          ]
+        },
+        {
+          "finding_id": "H030-C02",
+          "display_order": 2,
+          "title": "运动接口的成功指标绑定特定任务和反馈",
+          "shared_result": "机械臂抓取、人工触觉和脑脊步行研究证明，皮层放电可以驱动可测量的运动终点，而感觉反馈会改变控制读出。",
+          "research_use": "写清任务空间、反馈方式和成功率定义；感觉与运动读出分开记录。",
+          "boundary": "个案抓取或步态改善不是康复或手术方案。",
+          "source_ids": [
+            "H030S008",
+            "H030S009",
+            "H030S014",
+            "H030S015",
+            "H030S016"
+          ]
+        },
+        {
+          "finding_id": "H030-C03",
+          "display_order": 3,
+          "title": "交流类神经假体用字符率和词错误率比较，而不是日常交流能力",
+          "shared_result": "手写和语音神经假体证明尝试书写或说话的神经活动可以映射到文字或虚拟形象，但词汇表和提示条件限制外推。",
+          "research_use": "报告词汇量、提示方式和错误类型；实验室速率与生活场景分开写。",
+          "boundary": "字符率不是语言功能恢复的证明。",
+          "source_ids": [
+            "H030S010",
+            "H030S011",
+            "H030S012",
+            "H030S013"
+          ]
+        },
+        {
+          "finding_id": "H030-C04",
+          "display_order": 4,
+          "title": "闭环调控证明回路可调，不指定手术适应证",
+          "shared_result": "自适应脑深部刺激和无线记录研究证明，生理标记可以调节刺激，技术综述则把装置与算法放进同一框架。",
+          "research_use": "固定标记、调节规则和开环对照；症状评分与回路信号分开报告。",
+          "boundary": "标记可调不是手术指南，也不能写成通用治疗方案。",
+          "source_ids": [
+            "H030S017",
+            "H030S018",
+            "H030S019",
+            "H030S020"
+          ]
+        },
+        {
+          "finding_id": "H030-C05",
+          "display_order": 5,
+          "title": "本页比较记录、解码与调控，不提供植入手术建议",
+          "shared_result": "人体记录和方法综述讨论的是信号与装置性质。细胞图谱和疾病机制由相邻专题处理。",
+          "research_use": "把结果写成通道覆盖、解码终点和闭环标记；涉及手术或用药时离开本页。",
+          "boundary": "不提供诊疗、植入手术指南、商品推荐或监管申报指引。",
+          "source_ids": [
+            "H030S006",
+            "H030S007",
+            "H030S019",
+            "H030S001"
+          ]
+        }
+      ],
+      "references": [
+        {
+          "source_id": "H030S001",
+          "title": "Fully integrated silicon probes for high-density recording of neural activity.",
+          "authors": "Jun JJ et al.",
+          "journal": "Nature",
+          "published_date": "2017 Nov 8",
+          "doi": "10.1038/nature24636",
+          "pmid": "29120427",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/29120427/",
+          "source_type": "primary_research",
+          "study_context": "mouse high-density silicon probes",
+          "study_design": "fully integrated Neuropixels recordings",
+          "usable_for": "multi-neuron extracellular coverage",
+          "limitations": "acute/chronic rodent; probe-specific"
+        },
+        {
+          "source_id": "H030S002",
+          "title": "Neuropixels 2.0: A miniaturized high-density probe for stable, long-term brain recordings.",
+          "authors": "Steinmetz NA et al.",
+          "journal": "Science",
+          "published_date": "2021 Apr 1",
+          "doi": "10.1126/science.abf4588",
+          "pmid": "33859006",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/33859006/",
+          "source_type": "primary_research",
+          "study_context": "miniaturized Neuropixels 2.0",
+          "study_design": "stable long-term high-density recordings",
+          "usable_for": "reduced drift chronic recording",
+          "limitations": "probe generation specific"
+        },
+        {
+          "source_id": "H030S003",
+          "title": "Distributed coding of choice, action and engagement across the mouse brain.",
+          "authors": "Steinmetz NA et al.",
+          "journal": "Nature",
+          "published_date": "2019 Dec",
+          "doi": "10.1038/s41586-019-1787-x",
+          "pmid": "31776518",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/31776518/",
+          "source_type": "primary_research",
+          "study_context": "mouse brain-wide coding",
+          "study_design": "distributed choice and engagement signals",
+          "usable_for": "population coding across regions",
+          "limitations": "task and species specific"
+        },
+        {
+          "source_id": "H030S004",
+          "title": "Survey of spiking in the mouse visual system reveals functional hierarchy.",
+          "authors": "Siegle JH et al.",
+          "journal": "Nature",
+          "published_date": "2021 Apr",
+          "doi": "10.1038/s41586-020-03171-x",
+          "pmid": "33473216",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/33473216/",
+          "source_type": "primary_research",
+          "study_context": "mouse visual system",
+          "study_design": "large-scale spiking survey",
+          "usable_for": "hierarchical visual responses",
+          "limitations": "visual hierarchy; not a BCI trial"
+        },
+        {
+          "source_id": "H030S005",
+          "title": "Spontaneous behaviors drive multidimensional, brainwide activity.",
+          "authors": "Stringer C et al.",
+          "journal": "Science",
+          "published_date": "2019 Apr 1",
+          "doi": "10.1126/science.aav7893",
+          "pmid": "31000656",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/31000656/",
+          "source_type": "primary_research",
+          "study_context": "brainwide activity",
+          "study_design": "spontaneous behavior coupling",
+          "usable_for": "behavior-related population dimensions",
+          "limitations": "observational population study"
+        },
+        {
+          "source_id": "H030S006",
+          "title": "Large-scale neural recordings with single neuron resolution using Neuropixels probes in human cortex.",
+          "authors": "Paulk AC et al.",
+          "journal": "Nat Neurosci",
+          "published_date": "2022 Feb",
+          "doi": "10.1038/s41593-021-00997-0",
+          "pmid": "35102333",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/35102333/",
+          "source_type": "primary_research",
+          "study_context": "human cortex Neuropixels",
+          "study_design": "single-neuron resolution in human cortex",
+          "usable_for": "human high-density recording feasibility",
+          "limitations": "intraoperative/human implant context; not a surgical guide"
+        },
+        {
+          "source_id": "H030S007",
+          "title": "High-Density, Long-Lasting, and Multi-region Electrophysiological Recordings Using Polymer Electrode Arrays.",
+          "authors": "Chung JE et al.",
+          "journal": "Neuron",
+          "published_date": "2019 Jan 2",
+          "doi": "10.1016/j.neuron.2018.11.002",
+          "pmid": "30502044",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/30502044/",
+          "source_type": "primary_research",
+          "study_context": "polymer electrodes",
+          "study_design": "chronic multi-region recordings",
+          "usable_for": "flexible probe stability",
+          "limitations": "device-specific chronic series"
+        },
+        {
+          "source_id": "H030S008",
+          "title": "Reach and grasp by people with tetraplegia using a neurally controlled robotic arm.",
+          "authors": "Hochberg LR et al.",
+          "journal": "Nature",
+          "published_date": "2012 May 1",
+          "doi": "10.1038/nature11076",
+          "pmid": "22596161",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/22596161/",
+          "source_type": "primary_research",
+          "study_context": "human motor BCI",
+          "study_design": "neurally controlled robotic arm",
+          "usable_for": "reach and grasp performance",
+          "limitations": "small-N human trial"
+        },
+        {
+          "source_id": "H030S009",
+          "title": "High-performance neuroprosthetic control by an individual with tetraplegia.",
+          "authors": "Collinger JL et al.",
+          "journal": "Lancet",
+          "published_date": "2013 Feb 1",
+          "doi": "10.1016/S0140-6736(12)61816-9",
+          "pmid": "23253623",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/23253623/",
+          "source_type": "primary_research",
+          "study_context": "human neuroprosthetic control",
+          "study_design": "high-performance tetraplegia BCI",
+          "usable_for": "reach-and-grasp endpoint",
+          "limitations": "single-participant performance"
+        },
+        {
+          "source_id": "H030S010",
+          "title": "High-performance brain-to-text communication via handwriting.",
+          "authors": "Willett FR et al.",
+          "journal": "Nature",
+          "published_date": "2021 May",
+          "doi": "10.1038/s41586-021-03506-2",
+          "pmid": "33981047",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/33981047/",
+          "source_type": "primary_research",
+          "study_context": "handwriting BCI",
+          "study_design": "attempted handwriting decoding",
+          "usable_for": "brain-to-text communication rate",
+          "limitations": "laboratory vocabulary and cues"
+        },
+        {
+          "source_id": "H030S011",
+          "title": "Neuroprosthesis for Decoding Speech in a Paralyzed Person with Anarthria.",
+          "authors": "Moses DA et al.",
+          "journal": "N Engl J Med",
+          "published_date": "2021 Jul 1",
+          "doi": "10.1056/NEJMoa2027540",
+          "pmid": "34260835",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/34260835/",
+          "source_type": "primary_research",
+          "study_context": "speech neuroprosthesis",
+          "study_design": "decoding speech in anarthria",
+          "usable_for": "word and sentence communication",
+          "limitations": "single-participant NEJM report"
+        },
+        {
+          "source_id": "H030S012",
+          "title": "A high-performance speech neuroprosthesis.",
+          "authors": "Willett FR et al.",
+          "journal": "Nature",
+          "published_date": "2023 Aug",
+          "doi": "10.1038/s41586-023-06377-x",
+          "pmid": "37612500",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/37612500/",
+          "source_type": "primary_research",
+          "study_context": "speech neuroprosthesis",
+          "study_design": "high-performance speech decoding",
+          "usable_for": "spoken-word communication rate",
+          "limitations": "laboratory prompting conditions"
+        },
+        {
+          "source_id": "H030S013",
+          "title": "A high-performance neuroprosthesis for speech decoding and avatar control.",
+          "authors": "Metzger SL et al.",
+          "journal": "Nature",
+          "published_date": "2023 Aug",
+          "doi": "10.1038/s41586-023-06443-4",
+          "pmid": "37612505",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/37612505/",
+          "source_type": "primary_research",
+          "study_context": "speech avatar BCI",
+          "study_design": "speech decoding and facial avatar",
+          "usable_for": "multimodal communication readout",
+          "limitations": "specialized vocabulary and training"
+        },
+        {
+          "source_id": "H030S014",
+          "title": "Walking naturally after spinal cord injury using a brain-spine interface.",
+          "authors": "Lorach H et al.",
+          "journal": "Nature",
+          "published_date": "2023 Jun",
+          "doi": "10.1038/s41586-023-06094-5",
+          "pmid": "37225984",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/37225984/",
+          "source_type": "primary_research",
+          "study_context": "brain-spine interface",
+          "study_design": "walking after spinal cord injury",
+          "usable_for": "gait with decoded stimulation",
+          "limitations": "single-series neuromodulation; not a rehab protocol"
+        },
+        {
+          "source_id": "H030S015",
+          "title": "Intracortical microstimulation of human somatosensory cortex.",
+          "authors": "Flesher SN et al.",
+          "journal": "Sci Transl Med",
+          "published_date": "2016 Oct 1",
+          "doi": "10.1126/scitranslmed.aaf8083",
+          "pmid": "27738096",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/27738096/",
+          "source_type": "primary_research",
+          "study_context": "human microstimulation",
+          "study_design": "somatosensory cortex ICMS",
+          "usable_for": "evoked tactile percepts",
+          "limitations": "parameter-specific percepts"
+        },
+        {
+          "source_id": "H030S016",
+          "title": "A brain-computer interface that evokes tactile sensations improves robotic arm control.",
+          "authors": "Flesher SN et al.",
+          "journal": "Science",
+          "published_date": "2021 May 2",
+          "doi": "10.1126/science.abd0380",
+          "pmid": "34016775",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/34016775/",
+          "source_type": "primary_research",
+          "study_context": "sensory BCI feedback",
+          "study_design": "tactile ICMS during robotic control",
+          "usable_for": "feedback-improved arm control",
+          "limitations": "closed-loop feedback in one task"
+        },
+        {
+          "source_id": "H030S017",
+          "title": "Adaptive deep brain stimulation in advanced Parkinson disease.",
+          "authors": "Little S et al.",
+          "journal": "Ann Neurol",
+          "published_date": "2013 Sep",
+          "doi": "10.1002/ana.23951",
+          "pmid": "23852650",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/23852650/",
+          "source_type": "primary_research",
+          "study_context": "adaptive DBS",
+          "study_design": "beta-triggered stimulation in Parkinson disease",
+          "usable_for": "closed-loop symptom comparison",
+          "limitations": "small clinical physiology series"
+        },
+        {
+          "source_id": "H030S018",
+          "title": "Long-term wireless streaming of neural recordings for circuit discovery and adaptive stimulation in individuals with Parkinson's disease.",
+          "authors": "Gilron R et al.",
+          "journal": "Nat Biotechnol",
+          "published_date": "2021 Sep",
+          "doi": "10.1038/s41587-021-00897-5",
+          "pmid": "33941932",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/33941932/",
+          "source_type": "primary_research",
+          "study_context": "chronic neural streaming",
+          "study_design": "wireless recordings for adaptive stimulation",
+          "usable_for": "circuit discovery plus closed-loop",
+          "limitations": "device and indication specific"
+        },
+        {
+          "source_id": "H030S019",
+          "title": "Technology of deep brain stimulation: current status and future directions.",
+          "authors": "Krauss JK et al.",
+          "journal": "Nat Rev Neurol",
+          "published_date": "2021 Feb",
+          "doi": "10.1038/s41582-020-00426-z",
+          "pmid": "33244188",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/33244188/",
+          "source_type": "review",
+          "study_context": "deep brain stimulation technology",
+          "study_design": "electrodes algorithms sensing",
+          "usable_for": "DBS device comparison",
+          "limitations": "review; not an operative guide"
+        },
+        {
+          "source_id": "H030S020",
+          "title": "Emerging technologies for improved deep brain stimulation.",
+          "authors": "Cagnan H et al.",
+          "journal": "Nat Biotechnol",
+          "published_date": "2019 Sep",
+          "doi": "10.1038/s41587-019-0244-6",
+          "pmid": "31477926",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/31477926/",
+          "source_type": "review",
+          "study_context": "emerging DBS technologies",
+          "study_design": "sensing and adaptive stimulation",
+          "usable_for": "closed-loop method horizon",
+          "limitations": "review; algorithm-specific"
+        }
+      ]
+    },
+    {
+      "topic_id": "H038",
+      "title": "多重与超灵敏分子诊断",
+      "topic_role": "research_deep_dive",
+      "overview": "多重与超灵敏分子诊断追问的是分析性能：低丰度核酸或蛋白如何被计数，多个靶标如何在同一反应中被分开，错误碱基如何从真变异中剥离。数字分区、纠错测序、CRISPR 检测和多重蛋白成像回答的是不同层级的灵敏度与特异性，不能互相替代。\n\n本方向从数字聚合酶链式反应、纠错测序、CRISPR 核酸检测和多重蛋白或空间成像出发，集中处理三类问题：分区计数如何把相对定量改写成绝对拷贝；分子条形码如何压低测序错误；多重读出如何在靶标之间保持正交。循环标志物的疾病用途由液体活检专题处理，本页不把分析灵敏度写成临床筛查性能。\n\n比较公开研究时，需要同时交代靶标类型、分区或条形码策略、多重规模、对照和检出限定义。本页是研究导航，不是诊断产品说明书、诊疗或监管申报指引。实验室检出限不能写成临床诊断阈值。",
+      "sections": [
+        {
+          "section_id": "H038-SEC-01",
+          "title": "比较不同研究时应先看什么",
+          "body": "| 比较内容 | 应记录的信息 | 关系到什么判断 |\n| --- | --- | --- |\n| 分析物 | 核酸、蛋白或空间表位，以及靶标数目 | 灵敏度比较是否在同一分子层级 |\n| 计数策略 | 数字分区、条形码纠错或单分子免疫 | 检出限由泊松计数还是错误率决定 |\n| 多重规模 | 单管靶标数、通道串扰和正交验证 | 多重是否以特异性为代价 |\n| 对照与标准 | 空白、野生型背景、参考物质和重复 | 阳性是否超过分析背景 |\n| 解释边界 | 样本类型、预处理和临床终点是否另测 | 分析性能能否写成疾病判断 |",
+          "source_ids": []
+        },
+        {
+          "section_id": "H038-SEC-02",
+          "title": "数字分区把相对荧光改写成可计数的分子拷贝",
+          "body": "数字聚合酶链式反应把反应分割为大量独立分区，用阳性分区比例估计拷贝数。高通量微滴数字系统和随后的绝对定量对照，证明微滴分区可以在拷贝数和稀有变异上给出可重复计数。乳液微粒上的单分子扩增进一步证明，稀有序列可以在单分子水平被富集和定量。\n\n分区方法适合比较拷贝数、等位基因分数和线性范围。分区均匀性和空滴率必须报告；绝对计数仍受提取回收率限制，不能单独写成临床诊断。",
+          "source_ids": [
+            "H038S001",
+            "H038S002",
+            "H038S003",
+            "H038S004"
+          ]
+        },
+        {
+          "section_id": "H038-SEC-03",
+          "title": "分子条形码把测序错误从稀有真变异中剥离",
+          "body": "Safe-SeqS 证明唯一标识符可以标记每个起始分子，从而识别测序过程中产生的错误。CAPP-Seq 证明捕获测序可以在较广患者覆盖下定量循环肿瘤核酸。整合数字错误抑制进一步证明，双链条形码和背景建模可以再压低错误率。\n\n纠错测序适合比较等位基因检出限和背景错误。文库复杂度和对照血浆决定能报告的最低分数；分析灵敏度不是癌症筛查性能，循环标志物的疾病用途见 H037。",
+          "source_ids": [
+            "H038S005",
+            "H038S006",
+            "H038S007"
+          ]
+        },
+        {
+          "section_id": "H038-SEC-04",
+          "title": "CRISPR 核酸酶把靶标识别改写成便携检测读出",
+          "body": "CRISPR-Cas13a 检测证明，靶标结合可以释放非特异核酸酶活性并产生荧光或侧流读出。随后的多重便携平台把 Cas13、Cas12a 和 Csm6 组合到同一检测框架。Cas12a 的单链核酸酶活性和严重急性呼吸综合征冠状病毒 2 的 Cas12 侧流检测，以及一锅 SHERLOCK 检测，进一步证明该读出可以离开实验室测序流程。\n\nCRISPR 检测适合比较靶标设计、扩增前置和读出形式。向导特异性和扩增步骤决定灵敏度；研究用检测不是获批诊断产品说明书。",
+          "source_ids": [
+            "H038S008",
+            "H038S009",
+            "H038S010",
+            "H038S011",
+            "H038S012"
+          ]
+        },
+        {
+          "section_id": "H038-SEC-05",
+          "title": "多重蛋白和空间成像把靶标从单通道扩展到面板",
+          "body": "单分子酶联免疫证明蛋白可以在亚飞摩尔浓度被计数。彩色编码探针的多重转录测量，以及邻近延伸分析及其 96 重扩展，证明蛋白或多核苷酸面板可以在同一微量样本中并行读出。质谱流式成像、多重离子束成像和 CODEX 则把多重推进到组织空间坐标。\n\n多重蛋白和成像适合比较面板规模、交叉反应和空间分辨率。通道串扰和抗体或探针验证必须单独报告；面板阳性不是疾病诊断。",
+          "source_ids": [
+            "H038S013",
+            "H038S014",
+            "H038S015",
+            "H038S016",
+            "H038S017",
+            "H038S018",
+            "H038S019"
+          ]
+        },
+        {
+          "section_id": "H038-SEC-06",
+          "title": "专题边界：分析性能不是诊断产品说明书",
+          "body": "自动化嵌套多重聚合酶链式反应系统证明多病原面板可以在同一反应中给出检测结果，但这类研究比较的是分析覆盖和操作流程，不是某一注册产品的使用说明。循环肿瘤核酸的超灵敏定量同样停留在方法层。\n\n本页用于比较灵敏度、多重规模和错误控制。液体活检的疾病分层与监测见 H037。实验室检出限不能写成临床诊断阈值，也不构成商品推荐或监管申报指引。",
+          "source_ids": [
+            "H038S020",
+            "H038S006",
+            "H038S007",
+            "H038S001"
+          ]
+        },
+        {
+          "section_id": "H038-SEC-07",
+          "title": "研究技术",
+          "body": "本专题的技术卡包括数字分区绝对定量、分子条形码纠错、CRISPR 便携检测、单分子或邻近延伸蛋白面板，以及组织多重成像。技术选择取决于需要确认的是拷贝数、低频率变异、便携读出还是空间多重。",
+          "source_ids": []
+        },
+        {
+          "section_id": "H038-SEC-08",
+          "title": "科研参考范围",
+          "body": "本页用于介绍多重与超灵敏分子诊断研究中的证据类型和适用边界，用于研究导航。不提供诊疗、诊断产品说明书、商品推荐或监管申报指引。液体活检与循环标志物见 H037。",
+          "source_ids": []
+        }
+      ],
+      "methods": [
+        {
+          "method_id": "H038-M01",
+          "display_order": 1,
+          "category": "数字计数",
+          "title": "数字分区与微滴绝对定量",
+          "principle": "把核酸反应分割为大量独立分区，用阳性比例按泊松模型估计拷贝数。",
+          "answers": "比较拷贝数或稀有等位基因分数是否高于分区背景。",
+          "sample_design": "报告分区数、空滴率、提取回收和参考物质；保留未扩增对照。",
+          "limitations": "回收率不足会低估拷贝；绝对计数不是临床诊断阈值。",
+          "source_ids": [
+            "H038S001",
+            "H038S002",
+            "H038S003",
+            "H038S004"
+          ],
+          "workflow": "设计阶段先确定：报告分区数、空滴率、提取回收和参考物质；保留未扩增对照。 记录样本来源、处理条件、读出指标和正交验证；把观察结果与预先定义的研究问题放在同一分析框架中比较。 这项方法的直接测量或计算依据是：把核酸反应分割为大量独立分区，用阳性比例按泊松模型估计拷贝数。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：回收率不足会低估拷贝；绝对计数不是临床诊断阈值。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "结果可用于比较拷贝数或稀有等位基因分数是否高于分区背景。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        },
+        {
+          "method_id": "H038-M02",
+          "display_order": 2,
+          "category": "纠错测序",
+          "title": "分子条形码与数字错误抑制",
+          "principle": "给每个起始分子加唯一标识，并在家族内核对以区分真变异与扩增或测序错误。",
+          "answers": "判断报告的低频率变异是否超过背景错误。",
+          "sample_design": "固定条形码设计、家族大小阈值和对照血浆；报告文库复杂度。",
+          "limitations": "复杂度不足会假阴性；分析灵敏度不是筛查性能。",
+          "source_ids": [
+            "H038S005",
+            "H038S006",
+            "H038S007"
+          ],
+          "workflow": "设计阶段先确定：固定条形码设计、家族大小阈值和对照血浆；报告文库复杂度。 记录样本来源、处理条件、读出指标和正交验证；把观察结果与预先定义的研究问题放在同一分析框架中比较。 这项方法的直接测量或计算依据是：给每个起始分子加唯一标识，并在家族内核对以区分真变异与扩增或测序错误。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：复杂度不足会假阴性；分析灵敏度不是筛查性能。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "结果可用于判断报告的低频率变异是否超过背景错误。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        },
+        {
+          "method_id": "H038-M03",
+          "display_order": 3,
+          "category": "CRISPR 检测",
+          "title": "核酸酶旁切活性与便携读出",
+          "principle": "用向导核糖核酸识别靶标，借助 Cas13 或 Cas12 旁切活性产生荧光或侧流信号。",
+          "answers": "检验预定序列能否在选定读出形式上被特异检出。",
+          "sample_design": "设置错配向导、无靶标和近源序列对照；报告扩增前置步骤。",
+          "limitations": "前置扩增往往决定灵敏度；研究检测不是产品说明书。",
+          "source_ids": [
+            "H038S008",
+            "H038S009",
+            "H038S010",
+            "H038S011"
+          ],
+          "workflow": "设计阶段先确定：设置错配向导、无靶标和近源序列对照；报告扩增前置步骤。 记录样本来源、处理条件、读出指标和正交验证；把观察结果与预先定义的研究问题放在同一分析框架中比较。 这项方法的直接测量或计算依据是：用向导核糖核酸识别靶标，借助 Cas13 或 Cas12 旁切活性产生荧光或侧流信号。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：前置扩增往往决定灵敏度；研究检测不是产品说明书。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "结果可用于检验预定序列能否在选定读出形式上被特异检出。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        },
+        {
+          "method_id": "H038-M04",
+          "display_order": 4,
+          "category": "多重蛋白",
+          "title": "单分子免疫与邻近延伸面板",
+          "principle": "用单分子计数或邻近连接/延伸把低丰度蛋白变成可计数信号，并在同一微量样本中并行多个靶标。",
+          "answers": "比较蛋白面板的检出限和靶标间正交性。",
+          "sample_design": "报告校准曲线、交叉反应和基质效应；关键靶标用正交免疫复核。",
+          "limitations": "抗体试剂批次会改变数值；面板阳性不是疾病判断。",
+          "source_ids": [
+            "H038S013",
+            "H038S015",
+            "H038S016",
+            "H038S014"
+          ],
+          "workflow": "设计阶段先确定：报告校准曲线、交叉反应和基质效应；关键靶标用正交免疫复核。 记录样本来源、处理条件、读出指标和正交验证；把观察结果与预先定义的研究问题放在同一分析框架中比较。 这项方法的直接测量或计算依据是：用单分子计数或邻近连接/延伸把低丰度蛋白变成可计数信号，并在同一微量样本中并行多个靶标。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：抗体试剂批次会改变数值；面板阳性不是疾病判断。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "结果可用于比较蛋白面板的检出限和靶标间正交性。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        },
+        {
+          "method_id": "H038-M05",
+          "display_order": 5,
+          "category": "空间多重",
+          "title": "组织多重成像与通道串扰控制",
+          "principle": "在同一组织切片上循环或质谱读出数十个表位，并把信号对齐到细胞坐标。",
+          "answers": "判断空间共定位是否建立在通过串扰控制的通道上。",
+          "sample_design": "固定抗体验证、循环次序和空白循环；报告细胞分割参数。",
+          "limitations": "通道串扰会造成假共定位；成像面板不是诊断产品。",
+          "source_ids": [
+            "H038S017",
+            "H038S018",
+            "H038S019"
+          ],
+          "workflow": "设计阶段先确定：固定抗体验证、循环次序和空白循环；报告细胞分割参数。 记录样本来源、处理条件、读出指标和正交验证；把观察结果与预先定义的研究问题放在同一分析框架中比较。 这项方法的直接测量或计算依据是：在同一组织切片上循环或质谱读出数十个表位，并把信号对齐到细胞坐标。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：通道串扰会造成假共定位；成像面板不是诊断产品。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "结果可用于判断空间共定位是否建立在通过串扰控制的通道上。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        }
+      ],
+      "shared_findings": [
+        {
+          "finding_id": "H038-C01",
+          "display_order": 1,
+          "title": "数字分区给出绝对拷贝估计，但仍受回收率约束",
+          "shared_result": "数字聚合酶链式反应和微滴系统证明阳性分区比例可以估计拷贝数，乳液单分子扩增则把稀有序列计数推进到单分子。",
+          "research_use": "报告分区数、空滴率和提取回收；拷贝数与临床终点分开写。",
+          "boundary": "绝对计数不是诊断阈值。",
+          "source_ids": [
+            "H038S001",
+            "H038S002",
+            "H038S003",
+            "H038S004"
+          ]
+        },
+        {
+          "finding_id": "H038-C02",
+          "display_order": 2,
+          "title": "条形码纠错决定低频率变异能否从错误中分开",
+          "shared_result": "Safe-SeqS、CAPP-Seq 和数字错误抑制证明，分子标识和双链核对可以压低测序背景，使更低等位基因分数可被报告。",
+          "research_use": "固定家族阈值、对照血浆和文库复杂度；未通过纠错的变异单独标记。",
+          "boundary": "分析灵敏度不是癌症筛查性能。循环标志物疾病用途见 H037。",
+          "source_ids": [
+            "H038S005",
+            "H038S006",
+            "H038S007"
+          ]
+        },
+        {
+          "finding_id": "H038-C03",
+          "display_order": 3,
+          "title": "CRISPR 检测提供便携读出，不替代测序纠错",
+          "shared_result": "Cas13 与 Cas12 平台证明靶标结合可以产生荧光或侧流信号，一锅法进一步缩短步骤，但向导设计和扩增前置仍决定性能。",
+          "research_use": "报告向导序列、错配对照和是否前置扩增；读出形式与定量范围分开写。",
+          "boundary": "研究用检测不是获批产品说明书。",
+          "source_ids": [
+            "H038S008",
+            "H038S009",
+            "H038S010",
+            "H038S011",
+            "H038S012"
+          ]
+        },
+        {
+          "finding_id": "H038-C04",
+          "display_order": 4,
+          "title": "多重蛋白和成像扩展面板，也放大串扰",
+          "shared_result": "单分子免疫、邻近延伸和空间多重成像证明同一微量样本或切片可以并行多个靶标，同时要求交叉反应和通道验证。",
+          "research_use": "报告面板规模、校准和空白循环；空间共定位需通过串扰控制。",
+          "boundary": "面板阳性不是疾病诊断。",
+          "source_ids": [
+            "H038S013",
+            "H038S015",
+            "H038S016",
+            "H038S017",
+            "H038S019"
+          ]
+        },
+        {
+          "finding_id": "H038-C05",
+          "display_order": 5,
+          "title": "本页比较分析性能，不提供诊断产品说明",
+          "shared_result": "多重病原面板和超灵敏循环核酸方法比较的是覆盖与错误控制。疾病分层由液体活检专题处理。",
+          "research_use": "把结果写成检出限、多重规模和错误率；涉及诊疗或申报时离开本页。",
+          "boundary": "不提供诊疗、商品推荐、产品说明书或监管申报指引。",
+          "source_ids": [
+            "H038S020",
+            "H038S006",
+            "H038S001"
+          ]
+        }
+      ],
+      "references": [
+        {
+          "source_id": "H038S001",
+          "title": "Digital PCR.",
+          "authors": "Vogelstein B et al.",
+          "journal": "Proc Natl Acad Sci U S A",
+          "published_date": "1999 Aug 3",
+          "doi": "10.1073/pnas.96.16.9236",
+          "pmid": "10430926",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/10430926/",
+          "source_type": "primary_research",
+          "study_context": "digital PCR principle",
+          "study_design": "partitioned single-molecule PCR",
+          "usable_for": "absolute copy-number logic",
+          "limitations": "foundational method; early implementation"
+        },
+        {
+          "source_id": "H038S002",
+          "title": "High-throughput droplet digital PCR system for absolute quantitation of DNA copy number.",
+          "authors": "Hindson BJ et al.",
+          "journal": "Anal Chem",
+          "published_date": "2011 Nov 1",
+          "doi": "10.1021/ac202028g",
+          "pmid": "22035192",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/22035192/",
+          "source_type": "primary_research",
+          "study_context": "droplet digital PCR",
+          "study_design": "high-throughput droplet system",
+          "usable_for": "absolute DNA copy quantitation",
+          "limitations": "platform paper; extraction still limits yield"
+        },
+        {
+          "source_id": "H038S003",
+          "title": "Absolute quantification by droplet digital PCR versus analog real-time PCR.",
+          "authors": "Hindson CM et al.",
+          "journal": "Nat Methods",
+          "published_date": "2013 Oct",
+          "doi": "10.1038/nmeth.2633",
+          "pmid": "23995387",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/23995387/",
+          "source_type": "primary_research",
+          "study_context": "ddPCR versus qPCR",
+          "study_design": "absolute versus analog quantification",
+          "usable_for": "copy-number method comparison",
+          "limitations": "method comparison; assay-specific"
+        },
+        {
+          "source_id": "H038S004",
+          "title": "BEAMing: single-molecule PCR on microparticles in water-in-oil emulsions.",
+          "authors": "Diehl F et al.",
+          "journal": "Nat Methods",
+          "published_date": "2006 Jul",
+          "doi": "10.1038/nmeth898",
+          "pmid": "16791214",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/16791214/",
+          "source_type": "primary_research",
+          "study_context": "BEAMing",
+          "study_design": "emulsion single-molecule PCR",
+          "usable_for": "rare variant counting",
+          "limitations": "foundational emulsion method"
+        },
+        {
+          "source_id": "H038S005",
+          "title": "Detection and quantification of rare mutations with massively parallel sequencing.",
+          "authors": "Kinde I et al.",
+          "journal": "Proc Natl Acad Sci U S A",
+          "published_date": "2011 Jun 7",
+          "doi": "10.1073/pnas.1105422108",
+          "pmid": "21586637",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/21586637/",
+          "source_type": "primary_research",
+          "study_context": "Safe-SeqS",
+          "study_design": "unique identifiers for sequencing",
+          "usable_for": "error-suppressed rare mutation calls",
+          "limitations": "sequencing-error control; library complexity dependent"
+        },
+        {
+          "source_id": "H038S006",
+          "title": "An ultrasensitive method for quantitating circulating tumor DNA with broad patient coverage.",
+          "authors": "Newman AM et al.",
+          "journal": "Nat Med",
+          "published_date": "2014 May",
+          "doi": "10.1038/nm.3519",
+          "pmid": "24705333",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/24705333/",
+          "source_type": "primary_research",
+          "study_context": "CAPP-Seq",
+          "study_design": "ultrasensitive circulating tumor DNA",
+          "usable_for": "broad-coverage ctDNA quantitation",
+          "limitations": "analytical method; not a screening claim"
+        },
+        {
+          "source_id": "H038S007",
+          "title": "Integrated digital error suppression for improved detection of circulating tumor DNA.",
+          "authors": "Newman AM et al.",
+          "journal": "Nat Biotechnol",
+          "published_date": "2016 May",
+          "doi": "10.1038/nbt.3520",
+          "pmid": "27018799",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/27018799/",
+          "source_type": "primary_research",
+          "study_context": "integrated digital error suppression",
+          "study_design": "duplex barcoding and background modeling",
+          "usable_for": "lower ctDNA detection limit",
+          "limitations": "method paper; plasma-control dependent"
+        },
+        {
+          "source_id": "H038S008",
+          "title": "Nucleic acid detection with CRISPR-Cas13a/C2c2.",
+          "authors": "Gootenberg JS et al.",
+          "journal": "Science",
+          "published_date": "2017 Apr 2",
+          "doi": "10.1126/science.aam9321",
+          "pmid": "28408723",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/28408723/",
+          "source_type": "primary_research",
+          "study_context": "SHERLOCK Cas13a",
+          "study_design": "CRISPR nucleic-acid detection",
+          "usable_for": "target-activated collateral cleavage",
+          "limitations": "foundational CRISPR diagnostic"
+        },
+        {
+          "source_id": "H038S009",
+          "title": "Multiplexed and portable nucleic acid detection platform with Cas13, Cas12a, and Csm6.",
+          "authors": "Gootenberg JS et al.",
+          "journal": "Science",
+          "published_date": "2018 Apr 2",
+          "doi": "10.1126/science.aaq0179",
+          "pmid": "29449508",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/29449508/",
+          "source_type": "primary_research",
+          "study_context": "SHERLOCKv2",
+          "study_design": "Cas13 Cas12a Csm6 multiplex platform",
+          "usable_for": "portable multiplex nucleic-acid readout",
+          "limitations": "platform demonstration"
+        },
+        {
+          "source_id": "H038S010",
+          "title": "CRISPR-Cas12a target binding unleashes indiscriminate single-stranded DNase activity.",
+          "authors": "Chen JS et al.",
+          "journal": "Science",
+          "published_date": "2018 Apr 2",
+          "doi": "10.1126/science.aar6245",
+          "pmid": "29449511",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/29449511/",
+          "source_type": "primary_research",
+          "study_context": "Cas12a DETECTR chemistry",
+          "study_design": "target-activated ssDNase activity",
+          "usable_for": "Cas12a collateral detection",
+          "limitations": "biochemical mechanism"
+        },
+        {
+          "source_id": "H038S011",
+          "title": "CRISPR-Cas12-based detection of SARS-CoV-2.",
+          "authors": "Broughton JP et al.",
+          "journal": "Nat Biotechnol",
+          "published_date": "2020 Jul",
+          "doi": "10.1038/s41587-020-0513-4",
+          "pmid": "32300245",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/32300245/",
+          "source_type": "primary_research",
+          "study_context": "DETECTR SARS-CoV-2",
+          "study_design": "Cas12 lateral-flow detection",
+          "usable_for": "rapid CRISPR viral readout",
+          "limitations": "research assay; not a product insert"
+        },
+        {
+          "source_id": "H038S012",
+          "title": "Detection of SARS-CoV-2 with SHERLOCK One-Pot Testing.",
+          "authors": "Joung J et al.",
+          "journal": "N Engl J Med",
+          "published_date": "2020 Oct 8",
+          "doi": "10.1056/NEJMc2026172",
+          "pmid": "32937062",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/32937062/",
+          "source_type": "primary_research",
+          "study_context": "SHERLOCK one-pot",
+          "study_design": "single-tube CRISPR SARS-CoV-2 test",
+          "usable_for": "simplified CRISPR workflow",
+          "limitations": "one-pot research protocol"
+        },
+        {
+          "source_id": "H038S013",
+          "title": "Single-molecule enzyme-linked immunosorbent assay detects serum proteins at subfemtomolar concentrations.",
+          "authors": "Rissin DM et al.",
+          "journal": "Nat Biotechnol",
+          "published_date": "2010 Jun",
+          "doi": "10.1038/nbt.1641",
+          "pmid": "20495550",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/20495550/",
+          "source_type": "primary_research",
+          "study_context": "digital ELISA",
+          "study_design": "single-molecule protein counting",
+          "usable_for": "subfemtomolar protein detection",
+          "limitations": "analytical sensitivity; matrix effects remain"
+        },
+        {
+          "source_id": "H038S014",
+          "title": "Direct multiplexed measurement of gene expression with color-coded probe pairs.",
+          "authors": "Geiss GK et al.",
+          "journal": "Nat Biotechnol",
+          "published_date": "2008 Mar",
+          "doi": "10.1038/nbt1385",
+          "pmid": "18278033",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/18278033/",
+          "source_type": "primary_research",
+          "study_context": "nCounter probes",
+          "study_design": "color-coded probe pairs",
+          "usable_for": "multiplex transcript counting",
+          "limitations": "transcript panel method"
+        },
+        {
+          "source_id": "H038S015",
+          "title": "Homogeneous antibody-based proximity extension assays provide sensitive and specific detection of low-abundant proteins in human blood.",
+          "authors": "Lundberg M et al.",
+          "journal": "Nucleic Acids Res",
+          "published_date": "2011 Aug",
+          "doi": "10.1093/nar/gkr424",
+          "pmid": "21646338",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/21646338/",
+          "source_type": "primary_research",
+          "study_context": "proximity extension assay",
+          "study_design": "homogeneous antibody PEA",
+          "usable_for": "low-abundance protein detection",
+          "limitations": "early PEA implementation"
+        },
+        {
+          "source_id": "H038S016",
+          "title": "Homogenous 96-plex PEA immunoassay exhibiting high sensitivity, specificity, and excellent scalability.",
+          "authors": "Assarsson E et al.",
+          "journal": "PLoS One",
+          "published_date": "2014",
+          "doi": "10.1371/journal.pone.0095192",
+          "pmid": "24755770",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/24755770/",
+          "source_type": "primary_research",
+          "study_context": "96-plex PEA",
+          "study_design": "homogeneous multiplex immunoassay",
+          "usable_for": "scaled protein panel",
+          "limitations": "panel-specific antibody reagents"
+        },
+        {
+          "source_id": "H038S017",
+          "title": "Highly multiplexed imaging of tumor tissues with subcellular resolution by mass cytometry.",
+          "authors": "Giesen C et al.",
+          "journal": "Nat Methods",
+          "published_date": "2014 Apr",
+          "doi": "10.1038/nmeth.2869",
+          "pmid": "24584193",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/24584193/",
+          "source_type": "primary_research",
+          "study_context": "imaging mass cytometry",
+          "study_design": "multiplexed tissue imaging",
+          "usable_for": "subcellular multiplex protein maps",
+          "limitations": "metal-tag imaging; antibody validation required"
+        },
+        {
+          "source_id": "H038S018",
+          "title": "Multiplexed ion beam imaging of human breast tumors.",
+          "authors": "Angelo M et al.",
+          "journal": "Nat Med",
+          "published_date": "2014 Apr",
+          "doi": "10.1038/nm.3488",
+          "pmid": "24584119",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/24584119/",
+          "source_type": "primary_research",
+          "study_context": "MIBI breast tumors",
+          "study_design": "multiplexed ion beam imaging",
+          "usable_for": "high-dimensional tissue protein maps",
+          "limitations": "imaging method; not a diagnostic device"
+        },
+        {
+          "source_id": "H038S019",
+          "title": "Deep Profiling of Mouse Splenic Architecture with CODEX Multiplexed Imaging.",
+          "authors": "Goltsev Y et al.",
+          "journal": "Cell",
+          "published_date": "2018 Aug 9",
+          "doi": "10.1016/j.cell.2018.07.010",
+          "pmid": "30078711",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/30078711/",
+          "source_type": "primary_research",
+          "study_context": "CODEX spleen",
+          "study_design": "DNA-barcoded multiplex imaging",
+          "usable_for": "spatial immune architecture",
+          "limitations": "mouse spleen demonstration"
+        },
+        {
+          "source_id": "H038S020",
+          "title": "FilmArray, an automated nested multiplex PCR system for multi-pathogen detection: development and application to respiratory tract infection.",
+          "authors": "Poritz MA et al.",
+          "journal": "PLoS One",
+          "published_date": "2011",
+          "doi": "10.1371/journal.pone.0026047",
+          "pmid": "22039434",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/22039434/",
+          "source_type": "primary_research",
+          "study_context": "FilmArray nested multiplex PCR",
+          "study_design": "automated multi-pathogen panel",
+          "usable_for": "syndromic multiplex detection",
+          "limitations": "analytical panel; not a product insert"
+        }
+      ]
+    },
+    {
+      "topic_id": "H043",
+      "title": "去中心化临床研究与数字终点",
+      "topic_role": "research_deep_dive",
+      "overview": "去中心化临床研究把访视、知情同意和数据采集从单一研究中心部分转移到参与者所在地。数字终点则用可穿戴设备、智能手机或传感器连续测量功能、节律或症状。这两类工作回答的是参与方式和测量方式，不是某一申办方案应当如何撰写。\n\n本方向从试验数字化理由、可穿戴与智能手机终点、远程房颤识别和留存，以及务实或去中心化运营出发，集中处理三类问题：数字测量经过了哪一层验证；远程参与改变了哪些偏倚；务实网络如何把终点写进可比较的协议。本页不提供申办方案模板。\n\n比较公开研究时，需要同时交代去中心化成分、传感器、验证层级、留存和终点定义。本页是研究导航，不是诊疗、商品推荐或监管申报指引。某一应用的探索性终点不能写成注册终点。",
+      "sections": [
+        {
+          "section_id": "H043-SEC-01",
+          "title": "比较不同研究时应先看什么",
+          "body": "| 比较内容 | 应记录的信息 | 关系到什么判断 |\n| --- | --- | --- |\n| 去中心化成分 | 远程知情、居家访视、直达参与者给药或远程随访 | 改变的是准入、依从还是终点采集 |\n| 传感器与任务 | 手表、手机、加速度计或主动测试 | 数字读出对应哪一类功能或生理 |\n| 验证层级 | 核实、分析验证和临床验证 | 读出停留在工程层还是终点层 |\n| 留存与代表 | 脱落、数字鸿沟和未完成采集 | 完成样本是否仍代表原队列 |\n| 协议与运营 | 网络、中心实验室和安全监测 | 远程流程能否被独立复用 |",
+          "source_ids": []
+        },
+        {
+          "section_id": "H043-SEC-02",
+          "title": "试验数字化先把测量和参与方式写成可检验的设计问题",
+          "body": "数字化临床试验综述证明，远程访视和连续传感器可以改变招募和终点采集，同时也带来数据完整和公平准入问题。移动健康综述和数字生物标志物框架进一步证明，传感器读出必须先经过核实与验证，才能进入终点讨论。数字医学测量入门则把计量单位、参考标准和临床有意义变化分开。\n\n这些工作适合作为设计清单。数字化不等于去中心化已经完成；未经验证的传感器输出不能写成试验终点。",
+          "source_ids": [
+            "H043S001",
+            "H043S002",
+            "H043S003",
+            "H043S004"
+          ]
+        },
+        {
+          "section_id": "H043-SEC-03",
+          "title": "可穿戴和智能手机终点需要按验证层级分开报告",
+          "body": "V3 框架证明传感器数字健康技术应依次完成核实、分析验证和临床验证。随后的扩展框架把使用者中心和可扩展性补进同一逻辑。可穿戴设备在临床试验中的讨论、帕金森病智能手机测试、远程智能手机监测，以及 III 期探索性应用终点，共同证明手机或手表读出可以生成可分析的功能测量。英国生物银行腕部加速度计则把同类传感器推进到人群规模。\n\n数字终点适合比较验证层级、采样率和缺失模式。探索性应用终点不是注册终点；人群加速度计也不是某一适应证的疗效证明。",
+          "source_ids": [
+            "H043S005",
+            "H043S006",
+            "H043S007",
+            "H043S008",
+            "H043S009",
+            "H043S010",
+            "H043S011"
+          ]
+        },
+        {
+          "section_id": "H043-SEC-04",
+          "title": "远程识别和留存决定数字队列还能代表谁",
+          "body": "智能手表大规模房颤识别研究证明，消费级可穿戴可以在未经诊所筛查的人群中提出心律异常提示，并进入后续心电图确认。远程数字健康研究的留存指标评估进一步证明，提醒、任务负担和人群特征会系统性改变谁留到终点。\n\n远程识别适合提出筛查或预警假设。应用阳性不是临床诊断；高脱落会使完成样本偏离原目标人群。",
+          "source_ids": [
+            "H043S012",
+            "H043S013"
+          ]
+        },
+        {
+          "section_id": "H043-SEC-05",
+          "title": "务实网络和去中心化运营把流程从单一中心拆开",
+          "body": "PCORnet 的启动和 ADAPTABLE 相关讨论证明，电子健康记录网络可以支持务实对照和参与者中心随访。阿司匹林剂量比较效果研究和临床医生参与分析，进一步证明大型务实试验可以在常规诊疗环境中完成终点采集。Trials@Home 的概念验证和监管互动记录，则把去中心化活动、数据完整和审评沟通写成可引用的运营经验。\n\n运营研究适合比较哪些访视被远程化、安全监测如何保持。这些论文不是申办方案模板，也不能替代具体试验的伦理和数据治理。",
+          "source_ids": [
+            "H043S014",
+            "H043S015",
+            "H043S016",
+            "H043S017",
+            "H043S018",
+            "H043S019"
+          ]
+        },
+        {
+          "section_id": "H043-SEC-06",
+          "title": "专题边界：数字终点框架不是申办方案模板",
+          "body": "传感器数字健康技术的分层参考测量框架，说明分析验证需要预先指定参考标准，而不是把应用输出直接写入方案终点。数字化综述同样把公平准入和数据完整列为独立问题。\n\n本页用于比较去中心化成分、验证层级和留存。真实世界证据与目标试验模拟见 H044。本页不提供申办方案模板、诊疗、商品推荐或监管申报指引。",
+          "source_ids": [
+            "H043S020",
+            "H043S005",
+            "H043S001",
+            "H043S004"
+          ]
+        },
+        {
+          "section_id": "H043-SEC-07",
+          "title": "研究技术",
+          "body": "本专题的技术卡包括去中心化成分映射、V3 传感器验证、智能手机与可穿戴功能测试、远程提示与确认，以及留存和安全监测。技术选择取决于需要确认的是测量是否成立、提示是否经过确认，还是完成样本是否仍有代表性。",
+          "source_ids": []
+        },
+        {
+          "section_id": "H043-SEC-08",
+          "title": "科研参考范围",
+          "body": "本页用于介绍去中心化临床研究与数字终点中的证据类型和适用边界，用于研究导航。不提供诊疗、申办方案模板、商品推荐或监管申报指引。真实世界证据见 H044。",
+          "source_ids": []
+        }
+      ],
+      "methods": [
+        {
+          "method_id": "H043-M01",
+          "display_order": 1,
+          "category": "设计拆分",
+          "title": "去中心化成分与访视映射",
+          "principle": "把知情、给药、访视和安全监测拆成可远程或必须到场的单元，并预先定义数据完整规则。",
+          "answers": "判断远程成分改变的是准入、依从还是终点采集。",
+          "sample_design": "列出每项活动的地点、责任方和补救路径；保留到场对照访视。",
+          "limitations": "数字化标签不能代替成分清单；远程流程不是方案模板。",
+          "source_ids": [
+            "H043S001",
+            "H043S014",
+            "H043S018"
+          ],
+          "workflow": "设计阶段先确定：列出每项活动的地点、责任方和补救路径；保留到场对照访视。 记录样本来源、处理条件、读出指标和正交验证；把观察结果与预先定义的研究问题放在同一分析框架中比较。 这项方法的直接测量或计算依据是：把知情、给药、访视和安全监测拆成可远程或必须到场的单元，并预先定义数据完整规则。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：数字化标签不能代替成分清单；远程流程不是方案模板。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "结果可用于判断远程成分改变的是准入、依从还是终点采集。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        },
+        {
+          "method_id": "H043-M02",
+          "display_order": 2,
+          "category": "传感器验证",
+          "title": "核实、分析验证与临床验证",
+          "principle": "按 V3 顺序检查传感器输出是否对应预定物理量，并与参考测量和临床有意义变化对齐。",
+          "answers": "确认数字读出停留在工程层、分析层还是终点层。",
+          "sample_design": "预先指定参考标准、采样率和缺失规则；探索性读出单独标记。",
+          "limitations": "未完成临床验证的读出不能写成注册终点。",
+          "source_ids": [
+            "H043S005",
+            "H043S006",
+            "H043S020",
+            "H043S004"
+          ],
+          "workflow": "设计阶段先确定：预先指定参考标准、采样率和缺失规则；探索性读出单独标记。 记录样本来源、处理条件、读出指标和正交验证；把观察结果与预先定义的研究问题放在同一分析框架中比较。 这项方法的直接测量或计算依据是：按 V3 顺序检查传感器输出是否对应预定物理量，并与参考测量和临床有意义变化对齐。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：未完成临床验证的读出不能写成注册终点。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "结果可用于确认数字读出停留在工程层、分析层还是终点层。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        },
+        {
+          "method_id": "H043-M03",
+          "display_order": 3,
+          "category": "数字功能",
+          "title": "智能手机与可穿戴功能测试",
+          "principle": "用主动任务或被动传感测量运动、节律或症状，并估计日内和日间变异。",
+          "answers": "比较数字功能读出能否追踪预先定义的临床变化。",
+          "sample_design": "固定任务脚本、佩戴依从和对照临床量表；报告缺失时段。",
+          "limitations": "应用界面和人群数字素养会改变完成率；探索性终点不是疗效。",
+          "source_ids": [
+            "H043S007",
+            "H043S008",
+            "H043S009",
+            "H043S010"
+          ],
+          "workflow": "设计阶段先确定：固定任务脚本、佩戴依从和对照临床量表；报告缺失时段。 记录样本来源、处理条件、读出指标和正交验证；把观察结果与预先定义的研究问题放在同一分析框架中比较。 这项方法的直接测量或计算依据是：用主动任务或被动传感测量运动、节律或症状，并估计日内和日间变异。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：应用界面和人群数字素养会改变完成率；探索性终点不是疗效。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "结果可用于比较数字功能读出能否追踪预先定义的临床变化。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        },
+        {
+          "method_id": "H043-M04",
+          "display_order": 4,
+          "category": "远程识别",
+          "title": "消费级预警与确认路径",
+          "principle": "用可穿戴不规则节律或其他信号提出提示，再进入心电图或临床确认。",
+          "answers": "判断远程提示的阳性预测是否建立在确认路径上。",
+          "sample_design": "报告提示规则、确认检查和未完成确认的比例；诊断与提示分开写。",
+          "limitations": "应用阳性不是临床诊断；自愿佩戴造成选择偏倚。",
+          "source_ids": [
+            "H043S012",
+            "H043S011",
+            "H043S002"
+          ],
+          "workflow": "设计阶段先确定：报告提示规则、确认检查和未完成确认的比例；诊断与提示分开写。 记录样本来源、处理条件、读出指标和正交验证；把观察结果与预先定义的研究问题放在同一分析框架中比较。 这项方法的直接测量或计算依据是：用可穿戴不规则节律或其他信号提出提示，再进入心电图或临床确认。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：应用阳性不是临床诊断；自愿佩戴造成选择偏倚。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "结果可用于判断远程提示的阳性预测是否建立在确认路径上。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        },
+        {
+          "method_id": "H043-M05",
+          "display_order": 5,
+          "category": "留存与运营",
+          "title": "远程留存、代表性和安全监测",
+          "principle": "跟踪脱落、任务负担和未完成采集，并检查完成样本是否仍覆盖原纳入人群。",
+          "answers": "评估数字队列在终点时还代表谁。",
+          "sample_design": "预先定义留存指标、提醒策略和安全升级路径；报告数字鸿沟。",
+          "limitations": "高留存不等于代表性足够；运营经验不是申办模板。",
+          "source_ids": [
+            "H043S013",
+            "H043S016",
+            "H043S017",
+            "H043S019"
+          ],
+          "workflow": "设计阶段先确定：预先定义留存指标、提醒策略和安全升级路径；报告数字鸿沟。 记录样本来源、处理条件、读出指标和正交验证；把观察结果与预先定义的研究问题放在同一分析框架中比较。 这项方法的直接测量或计算依据是：跟踪脱落、任务负担和未完成采集，并检查完成样本是否仍覆盖原纳入人群。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：高留存不等于代表性足够；运营经验不是申办模板。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "结果可用于评估数字队列在终点时还代表谁。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        }
+      ],
+      "shared_findings": [
+        {
+          "finding_id": "H043-C01",
+          "display_order": 1,
+          "title": "数字化先改变测量和参与，不自动产生合格终点",
+          "shared_result": "数字化综述和数字生物标志物框架证明，远程访视和传感器必须先经过核实与验证，才能进入终点讨论。",
+          "research_use": "先列出去中心化成分和验证层级；未验证输出单独标记。",
+          "boundary": "数字化标签不是终点已经成立。",
+          "source_ids": [
+            "H043S001",
+            "H043S002",
+            "H043S003",
+            "H043S004"
+          ]
+        },
+        {
+          "finding_id": "H043-C02",
+          "display_order": 2,
+          "title": "可穿戴读出按 V3 分层，探索性应用终点不能写成注册终点",
+          "shared_result": "V3 及扩展框架、帕金森病手机测试和人群加速度计证明，传感器可以生成可分析的功能测量，但验证层级决定能写到哪一步。",
+          "research_use": "报告参考标准、采样率和缺失；探索性读出与主要终点分开。",
+          "boundary": "III 期探索性应用终点不是注册终点。",
+          "source_ids": [
+            "H043S005",
+            "H043S006",
+            "H043S008",
+            "H043S009",
+            "H043S010"
+          ]
+        },
+        {
+          "finding_id": "H043-C03",
+          "display_order": 3,
+          "title": "远程提示必须连接确认路径，留存决定样本还代表谁",
+          "shared_result": "智能手表房颤研究和远程留存评估证明，消费级提示可以进入确认检查，而任务负担会改变谁留到终点。",
+          "research_use": "报告提示规则、确认完成率和脱落；完成样本与原队列对照。",
+          "boundary": "应用阳性不是临床诊断。",
+          "source_ids": [
+            "H043S012",
+            "H043S013",
+            "H043S011"
+          ]
+        },
+        {
+          "finding_id": "H043-C04",
+          "display_order": 4,
+          "title": "务实网络可以支持参与者中心随访，但不是方案模板",
+          "shared_result": "PCORnet、ADAPTABLE 和 Trials@Home 证明，电子健康记录网络和去中心化活动可以在常规环境中完成大型对照，同时留下监管沟通和医生参与记录。",
+          "research_use": "写清哪些访视远程化、安全如何升级；运营经验与具体方案分开。",
+          "boundary": "本页不提供申办方案模板。",
+          "source_ids": [
+            "H043S014",
+            "H043S015",
+            "H043S016",
+            "H043S018",
+            "H043S019"
+          ]
+        },
+        {
+          "finding_id": "H043-C05",
+          "display_order": 5,
+          "title": "本页比较参与方式和测量方式，不提供申报指引",
+          "shared_result": "分层参考测量框架把分析验证锚定在预先指定的参考标准上。真实世界证据方法由 H044 处理。",
+          "research_use": "把结果写成成分清单、验证层级和留存；涉及申报或诊疗时离开本页。",
+          "boundary": "不提供诊疗、商品推荐、申办方案模板或监管申报指引。",
+          "source_ids": [
+            "H043S020",
+            "H043S005",
+            "H043S001"
+          ]
+        }
+      ],
+      "references": [
+        {
+          "source_id": "H043S001",
+          "title": "Digitizing clinical trials.",
+          "authors": "Inan OT et al.",
+          "journal": "NPJ Digit Med",
+          "published_date": "2020",
+          "doi": "10.1038/s41746-020-0302-y",
+          "pmid": "32821856",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/32821856/",
+          "source_type": "review",
+          "study_context": "digitizing clinical trials",
+          "study_design": "remote visits and continuous sensors",
+          "usable_for": "trial participation and endpoint design",
+          "limitations": "review; not a protocol template"
+        },
+        {
+          "source_id": "H043S002",
+          "title": "The emerging field of mobile health.",
+          "authors": "Steinhubl SR et al.",
+          "journal": "Sci Transl Med",
+          "published_date": "2015 Apr 1",
+          "doi": "10.1126/scitranslmed.aaa3487",
+          "pmid": "25877894",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/25877894/",
+          "source_type": "review",
+          "study_context": "mobile health",
+          "study_design": "emerging mHealth measurement",
+          "usable_for": "sensor and connectivity framing",
+          "limitations": "review; early mHealth landscape"
+        },
+        {
+          "source_id": "H043S003",
+          "title": "Developing and adopting safe and effective digital biomarkers to improve patient outcomes.",
+          "authors": "Coravos A et al.",
+          "journal": "NPJ Digit Med",
+          "published_date": "2019",
+          "doi": "10.1038/s41746-019-0090-4",
+          "pmid": "30868107",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/30868107/",
+          "source_type": "review",
+          "study_context": "digital biomarkers",
+          "study_design": "safe and effective digital biomarkers",
+          "usable_for": "biomarker adoption conditions",
+          "limitations": "conceptual framework"
+        },
+        {
+          "source_id": "H043S004",
+          "title": "Digital Medicine: A Primer on Measurement.",
+          "authors": "Coravos A et al.",
+          "journal": "Digit Biomark",
+          "published_date": "2019 May-A",
+          "doi": "10.1159/000500413",
+          "pmid": "32095767",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/32095767/",
+          "source_type": "review",
+          "study_context": "digital medicine measurement",
+          "study_design": "primer on measurement",
+          "usable_for": "units references and meaningful change",
+          "limitations": "primer; not a trial protocol"
+        },
+        {
+          "source_id": "H043S005",
+          "title": "Verification, analytical validation, and clinical validation (V3): the foundation of determining fit-for-purpose for Biometric Monitoring Technologies (BioMeTs).",
+          "authors": "Goldsack JC et al.",
+          "journal": "NPJ Digit Med",
+          "published_date": "2020",
+          "doi": "10.1038/s41746-020-0260-4",
+          "pmid": "32337371",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/32337371/",
+          "source_type": "review",
+          "study_context": "V3 framework",
+          "study_design": "verification analytical and clinical validation",
+          "usable_for": "fit-for-purpose sensor evidence",
+          "limitations": "method framework"
+        },
+        {
+          "source_id": "H043S006",
+          "title": "V3+ extends the V3 framework to ensure user-centricity and scalability of sensor-based digital health technologies.",
+          "authors": "Bakker JP et al.",
+          "journal": "NPJ Digit Med",
+          "published_date": "2025 Jan 2",
+          "doi": "10.1038/s41746-024-01322-2",
+          "pmid": "39856145",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/39856145/",
+          "source_type": "review",
+          "study_context": "V3+ extension",
+          "study_design": "user-centricity and scalability",
+          "usable_for": "extended sensor validation",
+          "limitations": "framework extension"
+        },
+        {
+          "source_id": "H043S007",
+          "title": "Wearable Devices in Clinical Trials: Hype and Hypothesis.",
+          "authors": "Izmailova ES et al.",
+          "journal": "Clin Pharmacol Ther",
+          "published_date": "2018 Jul",
+          "doi": "10.1002/cpt.966",
+          "pmid": "29205294",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/29205294/",
+          "source_type": "review",
+          "study_context": "wearables in trials",
+          "study_design": "hype and hypothesis",
+          "usable_for": "wearable endpoint caution",
+          "limitations": "review; device class heterogeneous"
+        },
+        {
+          "source_id": "H043S008",
+          "title": "Evaluation of smartphone-based testing to generate exploratory outcome measures in a phase 1 Parkinson's disease clinical trial.",
+          "authors": "Lipsmeier F et al.",
+          "journal": "Mov Disord",
+          "published_date": "2018 Aug",
+          "doi": "10.1002/mds.27376",
+          "pmid": "29701258",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/29701258/",
+          "source_type": "primary_research",
+          "study_context": "Parkinson smartphone tests",
+          "study_design": "phase 1 exploratory digital outcomes",
+          "usable_for": "smartphone motor testing",
+          "limitations": "early-phase exploratory endpoints"
+        },
+        {
+          "source_id": "H043S009",
+          "title": "Remote smartphone monitoring of Parkinson's disease and individual response to therapy.",
+          "authors": "Omberg L et al.",
+          "journal": "Nat Biotechnol",
+          "published_date": "2022 Apr",
+          "doi": "10.1038/s41587-021-00974-9",
+          "pmid": "34373643",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/34373643/",
+          "source_type": "primary_research",
+          "study_context": "remote smartphone monitoring",
+          "study_design": "Parkinson disease and therapy response",
+          "usable_for": "passive and active smartphone measures",
+          "limitations": "observational digital monitoring"
+        },
+        {
+          "source_id": "H043S010",
+          "title": "A Smartphone Application as an Exploratory Endpoint in a Phase 3 Parkinson's Disease Clinical Trial: A Pilot Study.",
+          "authors": "Page A et al.",
+          "journal": "Digit Biomark",
+          "published_date": "2022",
+          "doi": "10.1159/000521232",
+          "pmid": "35224425",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/35224425/",
+          "source_type": "primary_research",
+          "study_context": "phase 3 smartphone app",
+          "study_design": "exploratory digital endpoint",
+          "usable_for": "app-based Parkinson outcome",
+          "limitations": "exploratory; not a registrational endpoint"
+        },
+        {
+          "source_id": "H043S011",
+          "title": "Large Scale Population Assessment of Physical Activity Using Wrist Worn Accelerometers: The UK Biobank Study.",
+          "authors": "Doherty A et al.",
+          "journal": "PLoS One",
+          "published_date": "2017",
+          "doi": "10.1371/journal.pone.0169649",
+          "pmid": "28146576",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/28146576/",
+          "source_type": "primary_research",
+          "study_context": "UK Biobank accelerometry",
+          "study_design": "population wrist-worn activity",
+          "usable_for": "large-scale physical-activity measurement",
+          "limitations": "population resource; not a drug trial"
+        },
+        {
+          "source_id": "H043S012",
+          "title": "Large-Scale Assessment of a Smartwatch to Identify Atrial Fibrillation.",
+          "authors": "Perez MV et al.",
+          "journal": "N Engl J Med",
+          "published_date": "2019 Nov 1",
+          "doi": "10.1056/NEJMoa1901183",
+          "pmid": "31722151",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/31722151/",
+          "source_type": "primary_research",
+          "study_context": "Apple Heart Study",
+          "study_design": "smartwatch irregular-rhythm notification",
+          "usable_for": "remote atrial-fibrillation signal",
+          "limitations": "notification plus confirmation; not a diagnosis"
+        },
+        {
+          "source_id": "H043S013",
+          "title": "Indicators of retention in remote digital health studies: a cross-study evaluation of 100,000 participants.",
+          "authors": "Pratap A et al.",
+          "journal": "NPJ Digit Med",
+          "published_date": "2020",
+          "doi": "10.1038/s41746-020-0224-8",
+          "pmid": "32128451",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/32128451/",
+          "source_type": "primary_research",
+          "study_context": "remote study retention",
+          "study_design": "cross-study 100000-participant evaluation",
+          "usable_for": "who remains in digital studies",
+          "limitations": "retention analysis; selection bias"
+        },
+        {
+          "source_id": "H043S014",
+          "title": "Launching PCORnet, a national patient-centered clinical research network.",
+          "authors": "Fleurence RL et al.",
+          "journal": "J Am Med Inform Assoc",
+          "published_date": "2014 Jul-A",
+          "doi": "10.1136/amiajnl-2014-002747",
+          "pmid": "24821743",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/24821743/",
+          "source_type": "primary_research",
+          "study_context": "PCORnet launch",
+          "study_design": "national patient-centered network",
+          "usable_for": "pragmatic multi-site infrastructure",
+          "limitations": "network paper; governance varies"
+        },
+        {
+          "source_id": "H043S015",
+          "title": "The ADAPTABLE Trial and PCORnet: Shining Light on a New Research Paradigm.",
+          "authors": "Hernandez AF et al.",
+          "journal": "Ann Intern Med",
+          "published_date": "2015 Oct 2",
+          "doi": "10.7326/M15-1460",
+          "pmid": "26301537",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/26301537/",
+          "source_type": "review",
+          "study_context": "ADAPTABLE and PCORnet",
+          "study_design": "pragmatic trial paradigm",
+          "usable_for": "EHR-enabled pragmatic follow-up",
+          "limitations": "commentary on design"
+        },
+        {
+          "source_id": "H043S016",
+          "title": "Comparative Effectiveness of Aspirin Dosing in Cardiovascular Disease.",
+          "authors": "Jones WS et al.",
+          "journal": "N Engl J Med",
+          "published_date": "2021 May 2",
+          "doi": "10.1056/NEJMoa2102137",
+          "pmid": "33999548",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/33999548/",
+          "source_type": "primary_research",
+          "study_context": "ADAPTABLE aspirin dosing",
+          "study_design": "pragmatic comparative effectiveness",
+          "usable_for": "aspirin dose clinical endpoints",
+          "limitations": "pragmatic trial; indication-specific"
+        },
+        {
+          "source_id": "H043S017",
+          "title": "Clinician engagement in the ADAPTABLE (Aspirin Dosing: A Patient-centric Trial Assessing Benefits and Long-Term Effectiveness) trial.",
+          "authors": "Kochar A et al.",
+          "journal": "Clin Trials",
+          "published_date": "2021 Aug",
+          "doi": "10.1177/1740774520988838",
+          "pmid": "33541120",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/33541120/",
+          "source_type": "primary_research",
+          "study_context": "ADAPTABLE clinician engagement",
+          "study_design": "site and clinician participation",
+          "usable_for": "operational engagement in pragmatic trials",
+          "limitations": "operations analysis"
+        },
+        {
+          "source_id": "H043S018",
+          "title": "Bringing Trial Activities to Participants-The Trials@Home RADIAL Proof-of-Concept Trial Investigating Decentralization of Trials.",
+          "authors": "Zuidgeest MGP et al.",
+          "journal": "Clin Pharmacol Ther",
+          "published_date": "2025 Nov",
+          "doi": "10.1002/cpt.70025",
+          "pmid": "40888335",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/40888335/",
+          "source_type": "primary_research",
+          "study_context": "Trials@Home RADIAL",
+          "study_design": "proof-of-concept decentralization",
+          "usable_for": "remote trial activities",
+          "limitations": "operational demonstration; not a template"
+        },
+        {
+          "source_id": "H043S019",
+          "title": "Regulatory Interactions and Learnings-RADIAL the Trials@Home Proof-of-Concept Trial on Decentralization.",
+          "authors": "Gardarsdottir H et al.",
+          "journal": "Clin Pharmacol Ther",
+          "published_date": "2025 Nov",
+          "doi": "10.1002/cpt.70078",
+          "pmid": "41044886",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/41044886/",
+          "source_type": "primary_research",
+          "study_context": "RADIAL regulatory interactions",
+          "study_design": "decentralization learnings with regulators",
+          "usable_for": "regulatory communication record",
+          "limitations": "operations; not official guidance"
+        },
+        {
+          "source_id": "H043S020",
+          "title": "A Hierarchical Framework for Selecting Reference Measures for the Analytical Validation of Sensor-Based Digital Health Technologies.",
+          "authors": "Bakker JP et al.",
+          "journal": "J Med Internet Res",
+          "published_date": "2025 Feb 7",
+          "doi": "10.2196/58956",
+          "pmid": "39918870",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/39918870/",
+          "source_type": "review",
+          "study_context": "sensor DHT reference measures",
+          "study_design": "hierarchical analytical validation",
+          "usable_for": "choosing reference standards",
+          "limitations": "method framework"
+        }
+      ]
+    },
+    {
+      "topic_id": "H044",
+      "title": "真实世界证据与目标试验模拟",
+      "topic_role": "research_deep_dive",
+      "overview": "真实世界证据把电子健康记录、理赔和登记写成可用于决策讨论的观察数据。目标试验模拟则要求先写出若随机试验存在时的方案，再按同一纳入、时零和治疗策略去组织观察数据。模拟可以减少某些自伤偏倚，但模拟成功不等于因果已经证实。\n\n本方向从目标试验方案、用真实世界数据效仿随机试验、具体模拟实例，以及报告与可复现模板出发，集中处理三类问题：时零和资格如何对齐；数据库分析与原试验在哪些设计上必然不同；报告标准让哪些选择可被复核。去中心化数字终点由 H043 处理，本页不把传感器验证写成因果估计。\n\n比较公开研究时，需要同时交代目标试验方案、数据源、时零、治疗策略、混杂调整和阴性对照。本页是研究导航，不是诊疗、商品推荐或监管申报指引。目标试验模拟不是因果已证实。",
+      "sections": [
+        {
+          "section_id": "H044-SEC-01",
+          "title": "比较不同研究时应先看什么",
+          "body": "| 比较内容 | 应记录的信息 | 关系到什么判断 |\n| --- | --- | --- |\n| 目标试验方案 | 资格、时零、治疗策略、终点和估计目标 | 观察分析效仿的是哪一场试验 |\n| 数据源 | 电子健康记录、理赔、登记或其链接 | 暴露和终点能否被同样定义 |\n| 时零与资格 | 资格评估是否与治疗赋值同时发生 | 是否引入永生时间或选择偏倚 |\n| 混杂与对照 | 调整集、工具变量、阴性对照和校准 | 残差混杂被检查到哪一步 |\n| 报告与复现 | 协议模板、代码和数据使用条件 | 他人能否按同一方案重做 |",
+          "source_ids": []
+        },
+        {
+          "section_id": "H044-SEC-02",
+          "title": "目标试验方案先把观察分析应效仿的随机试验写出来",
+          "body": "当随机试验不可得时用大数据效仿目标试验的论文，证明观察研究可以按资格、时零和治疗策略重新组织。公共卫生研究方法论文进一步把这一逻辑写成加强观察数据因果推断的框架。指定目标试验以防永生时间偏倚，以及把观察研究按随机试验方式分析的早期应用，共同证明许多偏倚来自方案没写清，而不是数据本身不可用。\n\n这些工作适合作为方案对照清单。写出目标试验是设计步骤，不是已经得到因果结论。",
+          "source_ids": [
+            "H044S001",
+            "H044S002",
+            "H044S003",
+            "H044S004"
+          ]
+        },
+        {
+          "section_id": "H044-SEC-03",
+          "title": "用非随机数据库效仿随机试验会暴露设计差异",
+          "body": "RCT-DUPLICATE 的首批结果证明，部分心血管结局试验可以在真实世界数据中被接近，另一些则因治疗策略或终点定义无法对齐。对 32 项试验的效仿以及用随机试验校准真实世界研究，进一步证明一致性依赖适应证、比较器和测量窗口。真实世界证据能告诉我们什么的讨论，则把适用范围限制在数据所能支持的问题上。\n\n效仿研究适合比较哪些试验可被数据库抓住。接近原试验估计不是普遍可替代随机试验；失败的效仿同样是主要结果。",
+          "source_ids": [
+            "H044S006",
+            "H044S007",
+            "H044S008",
+            "H044S005"
+          ]
+        },
+        {
+          "section_id": "H044-SEC-04",
+          "title": "已发表的目标试验模拟把方案选择写成可检查的分析",
+          "body": "美国退伍军人中两种信使核糖核酸疫苗的比较效果研究，证明目标试验模拟可以在同一医疗系统中估计接种策略的相对结果。倾向评分方法讨论、时零对齐说明，以及目标试验方案从何而来的方法论文，进一步证明资格与治疗赋值必须落在同一时点。肿瘤监管与临床决策中的目标试验模拟综述，则把该框架放到决策讨论中，同时保留观察限制。\n\n应用研究适合检查时零、治疗策略和终点是否写全。单一系统的疫苗比较不能写成所有观察研究都已证实因果。",
+          "source_ids": [
+            "H044S009",
+            "H044S015",
+            "H044S018",
+            "H044S017",
+            "H044S019"
+          ]
+        },
+        {
+          "section_id": "H044-SEC-05",
+          "title": "报告模板让模拟中的关键选择可以被复核",
+          "body": "TARGET 声明的期刊版本要求观察性目标试验模拟报告资格、时零和估计目标。HARPER 协议模板及其价值评估版本，以及用常规诊疗数据重做真实世界研究的可复现性评估，证明同一问题在不同团队或数据源中可能得出不同数值。联盟推进随机试验效仿的工作则把校准和协议预注册写成可引用实践。\n\n报告标准适合作为复核清单。模板完整不等于估计无偏；可复现失败应作为方法结果报告。",
+          "source_ids": [
+            "H044S010",
+            "H044S011",
+            "H044S012",
+            "H044S013",
+            "H044S014",
+            "H044S020"
+          ]
+        },
+        {
+          "section_id": "H044-SEC-06",
+          "title": "专题边界：目标试验模拟不是因果已证实",
+          "body": "新药申请中的真实世界证据审评经验说明，监管档案可以引用真实世界数据，但引用本身不是本页的申报指引，也不证明观察估计已经等同随机试验。写出目标试验、完成效仿或通过报告清单，仍然停留在设计与报告层。\n\n本页用于比较方案完整性、数据对齐和可复现。去中心化数字终点见 H043，联邦数据与实施科学见 H045。本页不把模拟成功写成因果已证实，也不提供诊疗或申报路径。",
+          "source_ids": [
+            "H044S016",
+            "H044S005",
+            "H044S001",
+            "H044S002"
+          ]
+        },
+        {
+          "section_id": "H044-SEC-07",
+          "title": "研究技术",
+          "body": "本专题的技术卡包括目标试验方案指定、时零与永生时间检查、数据库效仿已完成随机试验、混杂与阴性对照，以及 TARGET 与 HARPER 报告复现。技术选择取决于需要确认的是方案能否写出、时零是否对齐，还是估计能否被他人复核。",
+          "source_ids": []
+        },
+        {
+          "section_id": "H044-SEC-08",
+          "title": "科研参考范围",
+          "body": "本页用于介绍真实世界证据与目标试验模拟研究中的证据类型和适用边界，用于研究导航。目标试验模拟不是因果已证实。不提供诊疗、商品推荐或监管申报指引。数字终点见 H043，联邦数据见 H045。",
+          "source_ids": []
+        }
+      ],
+      "methods": [
+        {
+          "method_id": "H044-M01",
+          "display_order": 1,
+          "category": "方案指定",
+          "title": "目标试验方案与估计目标",
+          "principle": "在看数据估计之前，先写资格、时零、治疗策略、终点和估计目标。",
+          "answers": "确认观察分析效仿的是哪一场可写出的随机试验。",
+          "sample_design": "把方案要素写成表格；数据中无法操作的条目单独列出。",
+          "limitations": "方案写清不是因果已证实；无法操作的条目必须公开列出，不能悄悄改掉。",
+          "source_ids": [
+            "H044S001",
+            "H044S002",
+            "H044S017"
+          ],
+          "workflow": "设计阶段先确定：把方案要素写成表格；数据中无法操作的条目单独列出。 记录样本来源、处理条件、读出指标和正交验证；把观察结果与预先定义的研究问题放在同一分析框架中比较。 这项方法的直接测量或计算依据是：在看数据估计之前，先写资格、时零、治疗策略、终点和估计目标。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：方案写清不是因果已证实；无法操作的条目必须公开列出，不能悄悄改掉。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "结果可用于确认观察分析效仿的是哪一场可写出的随机试验。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        },
+        {
+          "method_id": "H044-M02",
+          "display_order": 2,
+          "category": "时零对齐",
+          "title": "资格、治疗赋值与永生时间检查",
+          "principle": "让资格评估与治疗策略赋值发生在同一时零，并检查随访是否在赋值之后才开始。",
+          "answers": "判断是否引入永生时间或资格后选择。",
+          "sample_design": "画出时零图；报告赋值前事件和延迟进入。",
+          "limitations": "时零对不齐会使效应方向都不可信。",
+          "source_ids": [
+            "H044S003",
+            "H044S004",
+            "H044S018"
+          ],
+          "workflow": "设计阶段先确定：画出时零图；报告赋值前事件和延迟进入。 记录样本来源、处理条件、读出指标和正交验证；把观察结果与预先定义的研究问题放在同一分析框架中比较。 这项方法的直接测量或计算依据是：让资格评估与治疗策略赋值发生在同一时零，并检查随访是否在赋值之后才开始。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：时零对不齐会使效应方向都不可信。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "结果可用于判断是否引入永生时间或资格后选择。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        },
+        {
+          "method_id": "H044-M03",
+          "display_order": 3,
+          "category": "数据库效仿",
+          "title": "用真实世界数据效仿已完成随机试验",
+          "principle": "按原试验的关键方案要素重建队列，并比较方向、区间和失败原因。",
+          "answers": "评估该试验能否被现有数据库抓住，以及差异来自设计还是混杂。",
+          "sample_design": "预先定义成功接近的标准、阴性对照和无法对齐的条目。",
+          "limitations": "接近原试验不是普遍可替代随机试验。",
+          "source_ids": [
+            "H044S006",
+            "H044S007",
+            "H044S008"
+          ],
+          "workflow": "设计阶段先确定：预先定义成功接近的标准、阴性对照和无法对齐的条目。 记录样本来源、处理条件、读出指标和正交验证；把观察结果与预先定义的研究问题放在同一分析框架中比较。 这项方法的直接测量或计算依据是：按原试验的关键方案要素重建队列，并比较方向、区间和失败原因。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：接近原试验不是普遍可替代随机试验。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "结果可用于评估该试验能否被现有数据库抓住，以及差异来自设计还是混杂。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        },
+        {
+          "method_id": "H044-M04",
+          "display_order": 4,
+          "category": "混杂检查",
+          "title": "调整集、倾向评分与阴性对照",
+          "principle": "用预先指定的混杂集或倾向评分平衡基线，并用阴性对照或校准试验检查残差偏倚。",
+          "answers": "检查残差混杂是否大到足以改写结论方向。",
+          "sample_design": "报告平衡表、截断和阴性对照结果；失败对照不得删除。",
+          "limitations": "未测量混杂无法被评分完全消除。",
+          "source_ids": [
+            "H044S015",
+            "H044S009",
+            "H044S008"
+          ],
+          "workflow": "设计阶段先确定：报告平衡表、截断和阴性对照结果；失败对照不得删除。 记录样本来源、处理条件、读出指标和正交验证；把观察结果与预先定义的研究问题放在同一分析框架中比较。 这项方法的直接测量或计算依据是：用预先指定的混杂集或倾向评分平衡基线，并用阴性对照或校准试验检查残差偏倚。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：未测量混杂无法被评分完全消除。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "结果可用于检查残差混杂是否大到足以改写结论方向。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        },
+        {
+          "method_id": "H044-M05",
+          "display_order": 5,
+          "category": "报告复现",
+          "title": "TARGET、HARPER 与独立重做",
+          "principle": "按报告声明和协议模板公开关键选择，并在可能时用独立数据或独立团队重做。",
+          "answers": "评估他人能否按同一方案复核或复现。",
+          "sample_design": "提供协议、代码条件和数据使用范围；复现差异单独成文。",
+          "limitations": "模板完整不等于无偏；本方法不产生申报结论。",
+          "source_ids": [
+            "H044S010",
+            "H044S012",
+            "H044S014",
+            "H044S020"
+          ],
+          "workflow": "设计阶段先确定：提供协议、代码条件和数据使用范围；复现差异单独成文。 记录样本来源、处理条件、读出指标和正交验证；把观察结果与预先定义的研究问题放在同一分析框架中比较。 这项方法的直接测量或计算依据是：按报告声明和协议模板公开关键选择，并在可能时用独立数据或独立团队重做。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：模板完整不等于无偏；本方法不产生申报结论。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "结果可用于评估他人能否按同一方案复核或复现。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        }
+      ],
+      "shared_findings": [
+        {
+          "finding_id": "H044-C01",
+          "display_order": 1,
+          "title": "先写目标试验，再动数据",
+          "shared_result": "目标试验框架和永生时间论文证明，资格、时零和治疗策略写不清时，偏倚可以在分析前就已形成。",
+          "research_use": "把方案要素制成对照表；无法操作的条目公开列出。",
+          "boundary": "写出方案不是因果已证实。",
+          "source_ids": [
+            "H044S001",
+            "H044S002",
+            "H044S003",
+            "H044S004"
+          ]
+        },
+        {
+          "finding_id": "H044-C02",
+          "display_order": 2,
+          "title": "数据库效仿会成功也会失败，失败同样是结果",
+          "shared_result": "RCT-DUPLICATE 和校准研究证明，部分试验可被真实世界数据接近，另一些因策略或终点无法对齐。",
+          "research_use": "预先定义接近标准；把无法对齐的设计差异写成主要发现。",
+          "boundary": "接近原试验不是随机试验的普遍替代。",
+          "source_ids": [
+            "H044S006",
+            "H044S007",
+            "H044S008",
+            "H044S005"
+          ]
+        },
+        {
+          "finding_id": "H044-C03",
+          "display_order": 3,
+          "title": "应用模拟必须把时零和治疗策略写到可检查",
+          "shared_result": "疫苗比较效果和时零对齐论文证明，资格与赋值必须落在同一时点，倾向评分可能只是混杂检查的一层。",
+          "research_use": "提供时零图、平衡表和阴性对照；单一系统结果限制外推。",
+          "boundary": "一次模拟成功不能写成所有观察研究已证实因果。",
+          "source_ids": [
+            "H044S009",
+            "H044S015",
+            "H044S018",
+            "H044S017"
+          ]
+        },
+        {
+          "finding_id": "H044-C04",
+          "display_order": 4,
+          "title": "报告模板让选择可复核，但不消除偏倚",
+          "shared_result": "TARGET、HARPER 和可复现性评估证明，同一问题在不同团队或数据中可能得出不同数值，因此协议和代码必须可核对。",
+          "research_use": "按声明报告资格、时零和估计目标；复现差异单独成文。",
+          "boundary": "模板完整不等于估计无偏。",
+          "source_ids": [
+            "H044S010",
+            "H044S012",
+            "H044S014",
+            "H044S020"
+          ]
+        },
+        {
+          "finding_id": "H044-C05",
+          "display_order": 5,
+          "title": "本页比较设计与报告，不把模拟写成已证实因果",
+          "shared_result": "真实世界证据的适用范围由数据所能支持的问题决定。审评档案引用真实世界数据，也不构成本页的申报指引。",
+          "research_use": "把结果写成方案完整性、对齐情况和可复现；涉及诊疗或申报时离开本页。",
+          "boundary": "目标试验模拟不是因果已证实。不提供诊疗、商品推荐或监管申报指引。",
+          "source_ids": [
+            "H044S016",
+            "H044S005",
+            "H044S001"
+          ]
+        }
+      ],
+      "references": [
+        {
+          "source_id": "H044S001",
+          "title": "Using Big Data to Emulate a Target Trial When a Randomized Trial Is Not Available.",
+          "authors": "Hernán MA et al.",
+          "journal": "Am J Epidemiol",
+          "published_date": "2016 Apr 1",
+          "doi": "10.1093/aje/kwv254",
+          "pmid": "26994063",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/26994063/",
+          "source_type": "review",
+          "study_context": "target trial emulation",
+          "study_design": "emulate a trial when RCT unavailable",
+          "usable_for": "protocol-first observational design",
+          "limitations": "foundational TTE paper; design not proof"
+        },
+        {
+          "source_id": "H044S002",
+          "title": "Methods of Public Health Research - Strengthening Causal Inference from Observational Data.",
+          "authors": "Hernán MA et al.",
+          "journal": "N Engl J Med",
+          "published_date": "2021 Oct 7",
+          "doi": "10.1056/NEJMp2113319",
+          "pmid": "34596980",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/34596980/",
+          "source_type": "review",
+          "study_context": "public-health causal methods",
+          "study_design": "strengthening inference from observational data",
+          "usable_for": "target-trial framing in NEJM",
+          "limitations": "method essay"
+        },
+        {
+          "source_id": "H044S003",
+          "title": "Specifying a target trial prevents immortal time bias and other self-inflicted injuries in observational analyses.",
+          "authors": "Hernán MA et al.",
+          "journal": "J Clin Epidemiol",
+          "published_date": "2016 Nov",
+          "doi": "10.1016/j.jclinepi.2016.04.014",
+          "pmid": "27237061",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/27237061/",
+          "source_type": "review",
+          "study_context": "immortal time bias",
+          "study_design": "specify the target trial first",
+          "usable_for": "prevent self-inflicted time-zero errors",
+          "limitations": "method paper"
+        },
+        {
+          "source_id": "H044S004",
+          "title": "Observational studies analyzed like randomized experiments: an application to postmenopausal hormone therapy and coronary heart disease.",
+          "authors": "Hernán MA et al.",
+          "journal": "Epidemiology",
+          "published_date": "2008 Nov",
+          "doi": "10.1097/EDE.0b013e3181875e61",
+          "pmid": "18854702",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/18854702/",
+          "source_type": "primary_research",
+          "study_context": "hormone therapy example",
+          "study_design": "analyze observational data like a trial",
+          "usable_for": "early target-trial style analysis",
+          "limitations": "single-question application"
+        },
+        {
+          "source_id": "H044S005",
+          "title": "Real-World Evidence - What Is It and What Can It Tell Us?",
+          "authors": "Sherman RE et al.",
+          "journal": "N Engl J Med",
+          "published_date": "2016 Dec 8",
+          "doi": "10.1056/NEJMsb1609216",
+          "pmid": "27959688",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/27959688/",
+          "source_type": "review",
+          "study_context": "real-world evidence",
+          "study_design": "what RWE is and can tell",
+          "usable_for": "scope of RWD questions",
+          "limitations": "conceptual NEJM essay"
+        },
+        {
+          "source_id": "H044S006",
+          "title": "Emulating Randomized Clinical Trials With Nonrandomized Real-World Evidence Studies: First Results From the RCT DUPLICATE Initiative.",
+          "authors": "Franklin JM et al.",
+          "journal": "Circulation",
+          "published_date": "2021 Mar 9",
+          "doi": "10.1161/CIRCULATIONAHA.120.051718",
+          "pmid": "33327727",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/33327727/",
+          "source_type": "primary_research",
+          "study_context": "RCT-DUPLICATE first results",
+          "study_design": "emulate cardiovascular outcome trials",
+          "usable_for": "agreement and non-agreement cases",
+          "limitations": "selected trial set"
+        },
+        {
+          "source_id": "H044S007",
+          "title": "Emulation of Randomized Clinical Trials With Nonrandomized Database Analyses: Results of 32 Clinical Trials.",
+          "authors": "Wang SV et al.",
+          "journal": "JAMA",
+          "published_date": "2023 Apr 2",
+          "doi": "10.1001/jama.2023.4221",
+          "pmid": "37097356",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/37097356/",
+          "source_type": "primary_research",
+          "study_context": "32-trial emulation",
+          "study_design": "nonrandomized database analyses",
+          "usable_for": "when emulation tracks RCTs",
+          "limitations": "heterogeneous indications"
+        },
+        {
+          "source_id": "H044S008",
+          "title": "Calibrating Real-World Evidence Studies Against Randomized Trials: Treatment Effectiveness of Infliximab in Crohn's Disease.",
+          "authors": "Kirchgesner J et al.",
+          "journal": "Clin Pharmacol Ther",
+          "published_date": "2022 Jan",
+          "doi": "10.1002/cpt.2304",
+          "pmid": "34027993",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/34027993/",
+          "source_type": "primary_research",
+          "study_context": "calibrating RWE",
+          "study_design": "infliximab effectiveness versus trials",
+          "usable_for": "calibration against RCTs",
+          "limitations": "indication-specific calibration"
+        },
+        {
+          "source_id": "H044S009",
+          "title": "Comparative Effectiveness of BNT162b2 and mRNA-1273 Vaccines in U.S. Veterans.",
+          "authors": "Dickerman BA et al.",
+          "journal": "N Engl J Med",
+          "published_date": "2022 Jan 1",
+          "doi": "10.1056/NEJMoa2115463",
+          "pmid": "34942066",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/34942066/",
+          "source_type": "primary_research",
+          "study_context": "veteran vaccine TTE",
+          "study_design": "BNT162b2 versus mRNA-1273",
+          "usable_for": "comparative effectiveness emulation",
+          "limitations": "single health-system cohort"
+        },
+        {
+          "source_id": "H044S010",
+          "title": "Transparent reporting of observational studies emulating a target trial: the TARGET Statement.",
+          "authors": "Cashin AG et al.",
+          "journal": "BMJ",
+          "published_date": "2025 Sep 3",
+          "doi": "10.1136/bmj-2025-087179",
+          "pmid": "40903028",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/40903028/",
+          "source_type": "review",
+          "study_context": "TARGET statement",
+          "study_design": "reporting observational TTE studies",
+          "usable_for": "minimum reporting items",
+          "limitations": "reporting guideline"
+        },
+        {
+          "source_id": "H044S011",
+          "title": "Transparent Reporting of Observational Studies Emulating a Target Trial-The TARGET Statement.",
+          "authors": "Cashin AG et al.",
+          "journal": "JAMA",
+          "published_date": "2025 Sep 2",
+          "doi": "10.1001/jama.2025.13350",
+          "pmid": "40899949",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/40899949/",
+          "source_type": "review",
+          "study_context": "TARGET statement JAMA",
+          "study_design": "transparent TTE reporting",
+          "usable_for": "journal reporting checklist",
+          "limitations": "companion reporting statement"
+        },
+        {
+          "source_id": "H044S012",
+          "title": "HARmonized Protocol Template to Enhance Reproducibility of hypothesis evaluating real-world evidence studies on treatment effects: A good practices report of a joint ISPE/ISPOR task force.",
+          "authors": "Wang SV et al.",
+          "journal": "Pharmacoepidemiol Drug Saf",
+          "published_date": "2023 Jan",
+          "doi": "10.1002/pds.5507",
+          "pmid": "36215113",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/36215113/",
+          "source_type": "review",
+          "study_context": "HARPER template",
+          "study_design": "harmonized RWE protocol template",
+          "usable_for": "protocol reproducibility",
+          "limitations": "template; not an estimator"
+        },
+        {
+          "source_id": "H044S013",
+          "title": "HARmonized Protocol Template to Enhance Reproducibility of Hypothesis Evaluating Real-World Evidence Studies on Treatment Effects: A Good Practices Report of a Joint ISPE/ISPOR Task Force.",
+          "authors": "Wang SV et al.",
+          "journal": "Value Health",
+          "published_date": "2022 Oct",
+          "doi": "10.1016/j.jval.2022.09.001",
+          "pmid": "36241338",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/36241338/",
+          "source_type": "review",
+          "study_context": "HARPER Value Health",
+          "study_design": "hypothesis-evaluating RWE protocols",
+          "usable_for": "structured protocol elements",
+          "limitations": "template companion"
+        },
+        {
+          "source_id": "H044S014",
+          "title": "Reproducibility of real-world evidence studies using clinical practice data to inform regulatory and coverage decisions.",
+          "authors": "Wang SV et al.",
+          "journal": "Nat Commun",
+          "published_date": "2022 Aug 3",
+          "doi": "10.1038/s41467-022-32310-3",
+          "pmid": "36045130",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/36045130/",
+          "source_type": "primary_research",
+          "study_context": "RWE reproducibility",
+          "study_design": "repeat studies in clinical practice data",
+          "usable_for": "cross-team result variation",
+          "limitations": "reproducibility audit"
+        },
+        {
+          "source_id": "H044S015",
+          "title": "Propensity Score Methods for Analyzing Observational Data Like Randomized Experiments: Challenges and Solutions for Rare Outcomes and Exposures.",
+          "authors": "Ross ME et al.",
+          "journal": "Am J Epidemiol",
+          "published_date": "2015 Jun 1",
+          "doi": "10.1093/aje/kwu469",
+          "pmid": "25995287",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/25995287/",
+          "source_type": "review",
+          "study_context": "propensity-score methods",
+          "study_design": "analyze observational data like experiments",
+          "usable_for": "balance and truncation choices",
+          "limitations": "method review"
+        },
+        {
+          "source_id": "H044S016",
+          "title": "Real-World Evidence in New Drug and Biologics License Application Approvals During Fiscal Years 2020-2022.",
+          "authors": "Innes GK et al.",
+          "journal": "Clin Pharmacol Ther",
+          "published_date": "2025 Jul",
+          "doi": "10.1002/cpt.3688",
+          "pmid": "40276902",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/40276902/",
+          "source_type": "primary_research",
+          "study_context": "FDA RWE in approvals",
+          "study_design": "RWE in NDAs and BLAs 2020-2024",
+          "usable_for": "how RWE appeared in files",
+          "limitations": "regulatory descriptive study; not guidance"
+        },
+        {
+          "source_id": "H044S017",
+          "title": "Where Do Target Trials Come From? Specifying the Protocol of a Target Trial When Repurposing Data for Causal Inference.",
+          "authors": "Hernán MA et al.",
+          "journal": "Epidemiology",
+          "published_date": "2026 May 1",
+          "doi": "10.1097/EDE.0000000000001951",
+          "pmid": "41921517",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/41921517/",
+          "source_type": "review",
+          "study_context": "where target trials come from",
+          "study_design": "specify protocols when repurposing data",
+          "usable_for": "protocol origin and constraints",
+          "limitations": "method paper"
+        },
+        {
+          "source_id": "H044S018",
+          "title": "Starting right: aligning eligibility and treatment assignment at time zero when emulating a target trial.",
+          "authors": "Fu EL et al.",
+          "journal": "BMJ",
+          "published_date": "2026 Jan 1",
+          "doi": "10.1136/bmj-2025-084909",
+          "pmid": "41526041",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/41526041/",
+          "source_type": "review",
+          "study_context": "time-zero alignment",
+          "study_design": "eligibility and assignment at time zero",
+          "usable_for": "avoid misaligned follow-up",
+          "limitations": "method paper"
+        },
+        {
+          "source_id": "H044S019",
+          "title": "Target Trial Emulation for Regulatory and Clinical Decision Making in Cancer.",
+          "authors": "Dickerman BA et al.",
+          "journal": "J Clin Oncol",
+          "published_date": "2026 Apr 2",
+          "doi": "10.1200/JCO-25-01906",
+          "pmid": "41643147",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/41643147/",
+          "source_type": "review",
+          "study_context": "TTE in oncology decisions",
+          "study_design": "regulatory and clinical uses in cancer",
+          "usable_for": "decision-context TTE",
+          "limitations": "review; not a causal proof"
+        },
+        {
+          "source_id": "H044S020",
+          "title": "The Aetion Coalition to Advance Real-World Evidence through Randomized Controlled Trial Emulation Initiative: Oncology.",
+          "authors": "Merola D et al.",
+          "journal": "Clin Pharmacol Ther",
+          "published_date": "2023 Jun",
+          "doi": "10.1002/cpt.2800",
+          "pmid": "36408668",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/36408668/",
+          "source_type": "review",
+          "study_context": "RCT emulation initiative",
+          "study_design": "advance RWE through RCT emulation",
+          "usable_for": "pre-registration and calibration practice",
+          "limitations": "initiative description"
+        }
+      ]
+    },
+    {
+      "topic_id": "H045",
+      "title": "联邦临床数据、精准队列与实施科学",
+      "topic_role": "research_deep_dive",
+      "overview": "联邦临床数据研究追问：多机构记录如何在不集中搬运可识别病历时完成分析。精准队列把基因、电子健康记录和同意条款写成可复用的研究资源。实施科学则测量有效干预在常规环境中被采用、适应和维持的条件。这三层工作共享数据治理问题，但回答的不是同一类问题。\n\n本方向从联邦学习、人群精准队列、共同数据模型与研究网络，以及实施框架出发，集中处理三类问题：模型如何在本地更新后只交换参数；队列的同意和代表性格局是什么；实施结果如何与临床效果分开测量。本页讨论研究导航，联邦数据不是可对外出售的病人清单。\n\n比较公开研究时，需要同时交代治理、去标识或联邦协议、队列纳入、共同数据模型和实施结果定义。本页不是诊疗、商品推荐或监管申报指引。网络规模不等于数据可以任意外传。",
+      "sections": [
+        {
+          "section_id": "H045-SEC-01",
+          "title": "比较不同研究时应先看什么",
+          "body": "| 比较内容 | 应记录的信息 | 关系到什么判断 |\n| --- | --- | --- |\n| 数据移动 | 联邦学习、安全聚合或去标识集中 | 分析是否要求记录离开原机构 |\n| 队列构成 | 同意、招募框、基因组和电子健康记录链接 | 精准队列代表谁、不代表谁 |\n| 共同模型 | OMOP、研究网络和表型定义 | 跨站点变量是否真的可比 |\n| 实施结果 | 采用、可行性、保真、成本和维持 | 测量的是效果还是落地条件 |\n| 治理边界 | 准入、再识别风险和禁止再识别条款 | 资源能否被二次研究使用 |",
+          "source_ids": []
+        },
+        {
+          "section_id": "H045-SEC-02",
+          "title": "联邦学习让模型参数在机构之间移动，而不是病历本身",
+          "body": "联邦学习综述证明，多机构可以在本地训练后只交换参数或梯度，从而降低集中搬运可识别记录的需要。医学中的联邦学习研究进一步证明，多中心协作可以在不共享病人级数据的条件下训练模型。针对严重急性呼吸综合征冠状病毒 2 预后的联邦预测，以及去中心化保密的群体学习，分别证明该策略可以用于临床预测和跨站点机器学习。\n\n联邦方法适合比较通信轮次、站点异质性和隐私假设。参数交换不是零风险；模型反演和站点漂移仍须单独评估。联邦数据也不是可对外出售的病人清单。",
+          "source_ids": [
+            "H045S001",
+            "H045S004",
+            "H045S003",
+            "H045S002"
+          ]
+        },
+        {
+          "section_id": "H045-SEC-03",
+          "title": "精准队列把同意、基因组和健康记录放进可引用的资源",
+          "body": "英国生物银行和 All of Us 研究规划证明，大规模同意队列可以同时提供问卷、测量、基因组和健康记录链接。电子病历与基因组网络证明，医疗机构可以在常规记录上做基因组研究。表型组关联扫描则证明，一种基因型可以对照数百种电子病历表型提出假设。\n\n队列资源适合比较同意范围、代表性和数据准入。队列规模不是人群普查；同意条款决定哪些二次分析被允许。",
+          "source_ids": [
+            "H045S005",
+            "H045S006",
+            "H045S007",
+            "H045S008"
+          ]
+        },
+        {
+          "section_id": "H045-SEC-04",
+          "title": "共同数据模型和研究网络让跨站点表型可以重复使用",
+          "body": "观察性健康数据科学与信息学网络证明，共同数据模型可以把多站点记录映射到同一分析坐标。主动安全监测的共同数据模型验证，为这一映射提供了早期方法学对照。以患者为中心的全国研究网络，以及国家冠状病毒队列协作的设计与基础设施，进一步证明网络可以在治理框架下支持多站点表型和务实研究。\n\n网络研究适合比较表型定义、映射损失和准入条件。映射成功不等于原始记录可以外传，也不等于病人身份可被重新识别后使用。",
+          "source_ids": [
+            "H045S009",
+            "H045S010",
+            "H045S011",
+            "H045S012"
+          ]
+        },
+        {
+          "section_id": "H045-SEC-05",
+          "title": "实施科学把采用、保真和维持写成与效果分开的结果",
+          "body": "统一实施研究框架把干预、内部环境和过程放进同一评估结构。RE-AIM 把到达、效果、采用、实施和维持分开计数。效果-实施混合设计证明两类问题可以在同一研究中同时提问。实施结果的概念区分、动态可持续性框架、实施策略汇编，以及组织准备理论，分别给出结果定义、长期适应、策略清单和启动条件。\n\n实施研究适合比较落地条件，而不是重复证明临床效果。实施成功不是疗效替代，框架选择必须预先说明。",
+          "source_ids": [
+            "H045S013",
+            "H045S014",
+            "H045S015",
+            "H045S016",
+            "H045S017",
+            "H045S018",
+            "H045S019"
+          ]
+        },
+        {
+          "section_id": "H045-SEC-06",
+          "title": "专题边界：联邦数据不是可对外出售的病人清单",
+          "body": "面向非专科读者的实施科学导论提醒，实施研究测量的是干预如何进入常规环境。联邦学习和精准队列讨论的是分析与同意，而不是把可识别病历编成可售名单。网络规模和模型性能都不能改变这一边界。\n\n本页用于比较治理、联邦协议、队列代表性和实施结果。数字终点见 H043，目标试验模拟见 H044。本页不提供诊疗、商品推荐或监管申报指引，也不提供可识别病人资料。",
+          "source_ids": [
+            "H045S020",
+            "H045S001",
+            "H045S006",
+            "H045S012"
+          ]
+        },
+        {
+          "section_id": "H045-SEC-07",
+          "title": "研究技术",
+          "body": "本专题的技术卡包括联邦参数聚合、同意队列链接、共同数据模型表型、实施结果测量，以及策略汇编与组织准备。技术选择取决于需要确认的是数据能否不离开原机构、队列代表谁，还是干预如何进入常规环境。",
+          "source_ids": []
+        },
+        {
+          "section_id": "H045-SEC-08",
+          "title": "科研参考范围",
+          "body": "本页用于介绍联邦临床数据、精准队列与实施科学研究中的证据类型和适用边界，用于研究导航。联邦数据不是可对外出售的病人清单。不提供诊疗、商品推荐或监管申报指引。数字终点见 H043，目标试验模拟见 H044。",
+          "source_ids": []
+        }
+      ],
+      "methods": [
+        {
+          "method_id": "H045-M01",
+          "display_order": 1,
+          "category": "联邦分析",
+          "title": "本地训练与参数聚合",
+          "principle": "各站点在本地数据上训练，只交换参数、梯度或安全聚合结果，而不集中可识别记录。",
+          "answers": "判断多中心模型是否能在不搬运病历的条件下训练。",
+          "sample_design": "报告站点数目、通信轮次、隐私假设和站点漂移；保留中心化对照。",
+          "limitations": "参数交换不是零风险；模型反演仍可能泄露信息。",
+          "source_ids": [
+            "H045S001",
+            "H045S002",
+            "H045S003",
+            "H045S004"
+          ],
+          "workflow": "设计阶段先确定：报告站点数目、通信轮次、隐私假设和站点漂移；保留中心化对照。 记录样本来源、处理条件、读出指标和正交验证；把观察结果与预先定义的研究问题放在同一分析框架中比较。 这项方法的直接测量或计算依据是：各站点在本地数据上训练，只交换参数、梯度或安全聚合结果，而不集中可识别记录。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：参数交换不是零风险；模型反演仍可能泄露信息。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "结果可用于判断多中心模型是否能在不搬运病历的条件下训练。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        },
+        {
+          "method_id": "H045-M02",
+          "display_order": 2,
+          "category": "精准队列",
+          "title": "同意、基因组与记录链接",
+          "principle": "在明确同意下链接问卷、测量、基因组和健康记录，并描述代表性和准入。",
+          "answers": "确认队列能支持哪一类二次研究，以及不覆盖谁。",
+          "sample_design": "写清招募框、同意版本、数据层级和退出规则；报告缺失模式。",
+          "limitations": "队列规模不是普查；同意范围外的分析不被本资源授权。",
+          "source_ids": [
+            "H045S005",
+            "H045S006",
+            "H045S007"
+          ],
+          "workflow": "设计阶段先确定：写清招募框、同意版本、数据层级和退出规则；报告缺失模式。 记录样本来源、处理条件、读出指标和正交验证；把观察结果与预先定义的研究问题放在同一分析框架中比较。 这项方法的直接测量或计算依据是：在明确同意下链接问卷、测量、基因组和健康记录，并描述代表性和准入。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：队列规模不是普查；同意范围外的分析不被本资源授权。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "结果可用于确认队列能支持哪一类二次研究，以及不覆盖谁。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        },
+        {
+          "method_id": "H045-M03",
+          "display_order": 3,
+          "category": "表型复用",
+          "title": "共同数据模型与跨站点表型",
+          "principle": "把本地编码映射到共同数据模型，并用可共享的表型定义在多站点重复提取。",
+          "answers": "检查跨站点变量是否真的可比，以及映射损失有多大。",
+          "sample_design": "报告映射规则、表型版本和站点间阳性率；保留无法映射的字段。",
+          "limitations": "映射成功不等于原始记录可外传。",
+          "source_ids": [
+            "H045S008",
+            "H045S009",
+            "H045S010",
+            "H045S012"
+          ],
+          "workflow": "设计阶段先确定：报告映射规则、表型版本和站点间阳性率；保留无法映射的字段。 记录样本来源、处理条件、读出指标和正交验证；把观察结果与预先定义的研究问题放在同一分析框架中比较。 这项方法的直接测量或计算依据是：把本地编码映射到共同数据模型，并用可共享的表型定义在多站点重复提取。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：映射成功不等于原始记录可外传。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "结果可用于检查跨站点变量是否真的可比，以及映射损失有多大。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        },
+        {
+          "method_id": "H045-M04",
+          "display_order": 4,
+          "category": "实施结果",
+          "title": "采用、保真、成本与维持",
+          "principle": "把实施结果与临床效果分开预先定义，并选择混合设计或单一实施研究。",
+          "answers": "区分研究回答的是疗效还是落地条件。",
+          "sample_design": "预先指定实施结果、数据来源和评估窗口；效果与实施分析分开。",
+          "limitations": "实施成功不是疗效替代。",
+          "source_ids": [
+            "H045S015",
+            "H045S016",
+            "H045S014",
+            "H045S013"
+          ],
+          "workflow": "设计阶段先确定：预先指定实施结果、数据来源和评估窗口；效果与实施分析分开。 记录样本来源、处理条件、读出指标和正交验证；把观察结果与预先定义的研究问题放在同一分析框架中比较。 这项方法的直接测量或计算依据是：把实施结果与临床效果分开预先定义，并选择混合设计或单一实施研究。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：实施成功不是疗效替代。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "结果可用于区分研究回答的是疗效还是落地条件。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        },
+        {
+          "method_id": "H045-M05",
+          "display_order": 5,
+          "category": "策略与准备",
+          "title": "实施策略汇编与组织准备",
+          "principle": "用策略清单和环境评估描述准备采取哪些行动，以及组织是否具备启动条件。",
+          "answers": "判断失败更可能来自策略选择还是准备不足。",
+          "sample_design": "记录选用的策略、适应内容和准备测量；长期维持单独随访。",
+          "limitations": "策略清单不是万能配方；准备评分不能代替现场观察。",
+          "source_ids": [
+            "H045S018",
+            "H045S019",
+            "H045S017",
+            "H045S020"
+          ],
+          "workflow": "设计阶段先确定：记录选用的策略、适应内容和准备测量；长期维持单独随访。 记录样本来源、处理条件、读出指标和正交验证；把观察结果与预先定义的研究问题放在同一分析框架中比较。 这项方法的直接测量或计算依据是：用策略清单和环境评估描述准备采取哪些行动，以及组织是否具备启动条件。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：策略清单不是万能配方；准备评分不能代替现场观察。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "结果可用于判断失败更可能来自策略选择还是准备不足。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        }
+      ],
+      "shared_findings": [
+        {
+          "finding_id": "H045-C01",
+          "display_order": 1,
+          "title": "联邦学习移动的是参数，不是可出售的病历",
+          "shared_result": "联邦学习和群体学习研究证明，多中心可以在不集中病人级记录的条件下训练模型，但参数交换仍有反演和漂移问题。",
+          "research_use": "报告站点、轮次和隐私假设；中心化对照用于检查性能损失。",
+          "boundary": "联邦数据不是可对外出售的病人清单。",
+          "source_ids": [
+            "H045S001",
+            "H045S002",
+            "H045S003",
+            "H045S004"
+          ]
+        },
+        {
+          "finding_id": "H045-C02",
+          "display_order": 2,
+          "title": "精准队列的价值由同意和代表性决定，而不是人数",
+          "shared_result": "英国生物银行、All of Us 和电子病历基因组网络证明，可复用资源依赖同意范围、链接完整性和谁被纳入。",
+          "research_use": "写清招募框、同意版本和数据层级；二次分析不得超出授权。",
+          "boundary": "队列规模不是人群普查。",
+          "source_ids": [
+            "H045S005",
+            "H045S006",
+            "H045S007",
+            "H045S008"
+          ]
+        },
+        {
+          "finding_id": "H045-C03",
+          "display_order": 3,
+          "title": "共同数据模型让表型可重复，不授权记录外传",
+          "shared_result": "观察性健康数据网络、共同数据模型验证、PCORnet 和冠状病毒队列协作证明，映射后的表型可以跨站点复用，同时受治理约束。",
+          "research_use": "固定表型版本和映射规则；报告无法映射的字段。",
+          "boundary": "网络规模不等于可识别病历可以离开原机构。",
+          "source_ids": [
+            "H045S009",
+            "H045S010",
+            "H045S011",
+            "H045S012"
+          ]
+        },
+        {
+          "finding_id": "H045-C04",
+          "display_order": 4,
+          "title": "实施结果必须与临床效果分开写",
+          "shared_result": "统一实施框架、RE-AIM、混合设计和实施结果定义证明，采用、保真和维持是独立结果，不能用疗效数字代替。",
+          "research_use": "预先指定实施结果和评估窗口；混合设计中两类分析分开报告。",
+          "boundary": "实施成功不是疗效替代。",
+          "source_ids": [
+            "H045S013",
+            "H045S014",
+            "H045S015",
+            "H045S016"
+          ]
+        },
+        {
+          "finding_id": "H045-C05",
+          "display_order": 5,
+          "title": "本页比较治理与落地条件，不提供可识别病人资料",
+          "shared_result": "策略汇编、组织准备和导论性实施科学把启动条件写成可测量对象。联邦与队列资源讨论的是分析授权，不是病人名单。",
+          "research_use": "把结果写成治理、代表性和实施结果；涉及诊疗或申报时离开本页。",
+          "boundary": "不提供诊疗、商品推荐、监管申报指引或可出售病人清单。数字终点见 H043，目标试验模拟见 H044。",
+          "source_ids": [
+            "H045S018",
+            "H045S019",
+            "H045S020",
+            "H045S001"
+          ]
+        }
+      ],
+      "references": [
+        {
+          "source_id": "H045S001",
+          "title": "The future of digital health with federated learning.",
+          "authors": "Rieke N et al.",
+          "journal": "NPJ Digit Med",
+          "published_date": "2020",
+          "doi": "10.1038/s41746-020-00323-1",
+          "pmid": "33015372",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/33015372/",
+          "source_type": "review",
+          "study_context": "federated learning in digital health",
+          "study_design": "multi-site training without pooling records",
+          "usable_for": "parameter exchange instead of record transfer",
+          "limitations": "review; inversion risk remains"
+        },
+        {
+          "source_id": "H045S002",
+          "title": "Swarm Learning for decentralized and confidential clinical machine learning.",
+          "authors": "Warnat-Herresthal S et al.",
+          "journal": "Nature",
+          "published_date": "2021 Jun",
+          "doi": "10.1038/s41586-021-03583-3",
+          "pmid": "34040261",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/34040261/",
+          "source_type": "primary_research",
+          "study_context": "Swarm Learning",
+          "study_design": "decentralized confidential clinical ML",
+          "usable_for": "blockchain-coordinated learning",
+          "limitations": "method demonstration"
+        },
+        {
+          "source_id": "H045S003",
+          "title": "Federated learning for predicting clinical outcomes in patients with COVID-19.",
+          "authors": "Dayan I et al.",
+          "journal": "Nat Med",
+          "published_date": "2021 Oct",
+          "doi": "10.1038/s41591-021-01506-3",
+          "pmid": "34526699",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/34526699/",
+          "source_type": "primary_research",
+          "study_context": "federated COVID outcomes",
+          "study_design": "predict clinical outcomes across hospitals",
+          "usable_for": "multi-national federated prediction",
+          "limitations": "COVID-era prediction; site shift"
+        },
+        {
+          "source_id": "H045S004",
+          "title": "Federated learning in medicine: facilitating multi-institutional collaborations without sharing patient data.",
+          "authors": "Sheller MJ et al.",
+          "journal": "Sci Rep",
+          "published_date": "2020 Jul 2",
+          "doi": "10.1038/s41598-020-69250-1",
+          "pmid": "32724046",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/32724046/",
+          "source_type": "primary_research",
+          "study_context": "federated learning in medicine",
+          "study_design": "multi-institutional collaboration",
+          "usable_for": "no patient-level sharing",
+          "limitations": "institutional FL case"
+        },
+        {
+          "source_id": "H045S005",
+          "title": "UK biobank: an open access resource for identifying the causes of a wide range of complex diseases of middle and old age.",
+          "authors": "Sudlow C et al.",
+          "journal": "PLoS Med",
+          "published_date": "2015 Mar",
+          "doi": "10.1371/journal.pmed.1001779",
+          "pmid": "25826379",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/25826379/",
+          "source_type": "primary_research",
+          "study_context": "UK Biobank",
+          "study_design": "open-access cohort resource",
+          "usable_for": "questionnaire measures genomes health records",
+          "limitations": "resource; consented volunteers"
+        },
+        {
+          "source_id": "H045S006",
+          "title": "The \"All of Us\" Research Program.",
+          "authors": "All of Us Research Program Investigators et al.",
+          "journal": "N Engl J Med",
+          "published_date": "2019 Aug 1",
+          "doi": "10.1056/NEJMsr1809937",
+          "pmid": "31412182",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/31412182/",
+          "source_type": "primary_research",
+          "study_context": "All of Us Research Program",
+          "study_design": "national precision-medicine cohort",
+          "usable_for": "diverse consented EHR and genomics",
+          "limitations": "program description; representation still evolving"
+        },
+        {
+          "source_id": "H045S007",
+          "title": "The Electronic Medical Records and Genomics (eMERGE) Network: past, present, and future.",
+          "authors": "Gottesman O et al.",
+          "journal": "Genet Med",
+          "published_date": "2013 Oct",
+          "doi": "10.1038/gim.2013.72",
+          "pmid": "23743551",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/23743551/",
+          "source_type": "review",
+          "study_context": "eMERGE Network",
+          "study_design": "EHR-linked genomics network",
+          "usable_for": "genomic research in routine records",
+          "limitations": "network review"
+        },
+        {
+          "source_id": "H045S008",
+          "title": "PheWAS: demonstrating the feasibility of a phenome-wide scan to discover gene-disease associations.",
+          "authors": "Denny JC et al.",
+          "journal": "Bioinformatics",
+          "published_date": "2010 May 1",
+          "doi": "10.1093/bioinformatics/btq126",
+          "pmid": "20335276",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/20335276/",
+          "source_type": "primary_research",
+          "study_context": "PheWAS",
+          "study_design": "phenome-wide association scan",
+          "usable_for": "one genotype versus many EHR phenotypes",
+          "limitations": "hypothesis-generating scan"
+        },
+        {
+          "source_id": "H045S009",
+          "title": "Observational Health Data Sciences and Informatics (OHDSI): Opportunities for Observational Researchers.",
+          "authors": "Hripcsak G et al.",
+          "journal": "Stud Health Technol Inform",
+          "published_date": "2015",
+          "doi": "",
+          "pmid": "26262116",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/26262116/",
+          "source_type": "review",
+          "study_context": "OHDSI",
+          "study_design": "observational research opportunities",
+          "usable_for": "common-data-model network",
+          "limitations": "network essay"
+        },
+        {
+          "source_id": "H045S010",
+          "title": "Validation of a common data model for active safety surveillance research.",
+          "authors": "Overhage JM et al.",
+          "journal": "J Am Med Inform Assoc",
+          "published_date": "2012 Jan-F",
+          "doi": "10.1136/amiajnl-2011-000376",
+          "pmid": "22037893",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/22037893/",
+          "source_type": "primary_research",
+          "study_context": "OMOP common data model",
+          "study_design": "validation for active safety surveillance",
+          "usable_for": "mapped multi-source EHR",
+          "limitations": "early CDM validation"
+        },
+        {
+          "source_id": "H045S011",
+          "title": "Launching PCORnet, a national patient-centered clinical research network.",
+          "authors": "Fleurence RL et al.",
+          "journal": "J Am Med Inform Assoc",
+          "published_date": "2014 Jul-A",
+          "doi": "10.1136/amiajnl-2014-002747",
+          "pmid": "24821743",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/24821743/",
+          "source_type": "primary_research",
+          "study_context": "PCORnet launch",
+          "study_design": "national patient-centered network",
+          "usable_for": "pragmatic multi-site data",
+          "limitations": "network launch paper"
+        },
+        {
+          "source_id": "H045S012",
+          "title": "The National COVID Cohort Collaborative (N3C): Rationale, design, infrastructure, and deployment.",
+          "authors": "Haendel MA et al.",
+          "journal": "J Am Med Inform Assoc",
+          "published_date": "2021 Mar 1",
+          "doi": "10.1093/jamia/ocaa196",
+          "pmid": "32805036",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/32805036/",
+          "source_type": "primary_research",
+          "study_context": "N3C",
+          "study_design": "rationale design infrastructure",
+          "usable_for": "national COVID EHR collaborative",
+          "limitations": "infrastructure paper; governance constrained"
+        },
+        {
+          "source_id": "H045S013",
+          "title": "Fostering implementation of health services research findings into practice: a consolidated framework for advancing implementation science.",
+          "authors": "Damschroder LJ et al.",
+          "journal": "Implement Sci",
+          "published_date": "2009 Aug 7",
+          "doi": "10.1186/1748-5908-4-50",
+          "pmid": "19664226",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/19664226/",
+          "source_type": "review",
+          "study_context": "CFIR",
+          "study_design": "consolidated framework for implementation",
+          "usable_for": "intervention context and process",
+          "limitations": "framework"
+        },
+        {
+          "source_id": "H045S014",
+          "title": "Evaluating the public health impact of health promotion interventions: the RE-AIM framework.",
+          "authors": "Glasgow RE et al.",
+          "journal": "Am J Public Health",
+          "published_date": "1999 Sep",
+          "doi": "10.2105/ajph.89.9.1322",
+          "pmid": "10474547",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/10474547/",
+          "source_type": "review",
+          "study_context": "RE-AIM",
+          "study_design": "reach effectiveness adoption implementation maintenance",
+          "usable_for": "public-health impact accounting",
+          "limitations": "framework"
+        },
+        {
+          "source_id": "H045S015",
+          "title": "Effectiveness-implementation hybrid designs: combining elements of clinical effectiveness and implementation research to enhance public health impact.",
+          "authors": "Curran GM et al.",
+          "journal": "Med Care",
+          "published_date": "2012 Mar",
+          "doi": "10.1097/MLR.0b013e3182408812",
+          "pmid": "22310560",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/22310560/",
+          "source_type": "review",
+          "study_context": "hybrid designs",
+          "study_design": "effectiveness plus implementation",
+          "usable_for": "dual-question study design",
+          "limitations": "design paper"
+        },
+        {
+          "source_id": "H045S016",
+          "title": "Outcomes for implementation research: conceptual distinctions, measurement challenges, and research agenda.",
+          "authors": "Proctor E et al.",
+          "journal": "Adm Policy Ment Health",
+          "published_date": "2011 Mar",
+          "doi": "10.1007/s10488-010-0319-7",
+          "pmid": "20957426",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/20957426/",
+          "source_type": "review",
+          "study_context": "implementation outcomes",
+          "study_design": "conceptual distinctions and measurement",
+          "usable_for": "adoption fidelity cost sustainment",
+          "limitations": "outcomes taxonomy"
+        },
+        {
+          "source_id": "H045S017",
+          "title": "The dynamic sustainability framework: addressing the paradox of sustainment amid ongoing change.",
+          "authors": "Chambers DA et al.",
+          "journal": "Implement Sci",
+          "published_date": "2013 Oct 2",
+          "doi": "10.1186/1748-5908-8-117",
+          "pmid": "24088228",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/24088228/",
+          "source_type": "review",
+          "study_context": "dynamic sustainability framework",
+          "study_design": "sustainment amid ongoing change",
+          "usable_for": "adaptation over time",
+          "limitations": "framework"
+        },
+        {
+          "source_id": "H045S018",
+          "title": "A refined compilation of implementation strategies: results from the Expert Recommendations for Implementing Change (ERIC) project.",
+          "authors": "Powell BJ et al.",
+          "journal": "Implement Sci",
+          "published_date": "2015 Feb 1",
+          "doi": "10.1186/s13012-015-0209-1",
+          "pmid": "25889199",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/25889199/",
+          "source_type": "primary_research",
+          "study_context": "ERIC compilation",
+          "study_design": "refined implementation strategies",
+          "usable_for": "strategy menu for change",
+          "limitations": "consensus compilation"
+        },
+        {
+          "source_id": "H045S019",
+          "title": "A theory of organizational readiness for change.",
+          "authors": "Weiner BJ et al.",
+          "journal": "Implement Sci",
+          "published_date": "2009 Oct 1",
+          "doi": "10.1186/1748-5908-4-67",
+          "pmid": "19840381",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/19840381/",
+          "source_type": "review",
+          "study_context": "organizational readiness",
+          "study_design": "theory of readiness for change",
+          "usable_for": "start-up conditions",
+          "limitations": "theory paper"
+        },
+        {
+          "source_id": "H045S020",
+          "title": "An introduction to implementation science for the non-specialist.",
+          "authors": "Bauer MS et al.",
+          "journal": "BMC Psychol",
+          "published_date": "2015 Sep 1",
+          "doi": "10.1186/s40359-015-0089-9",
+          "pmid": "26376626",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/26376626/",
+          "source_type": "review",
+          "study_context": "implementation science primer",
+          "study_design": "introduction for non-specialists",
+          "usable_for": "what implementation studies measure",
+          "limitations": "primer"
+        }
+      ]
+    }
+  ]
+}

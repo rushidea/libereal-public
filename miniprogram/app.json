@@ -1,0 +1,12 @@
+{
+  "pages": [
+    "pages/login/index"
+  ],
+  "window": {
+    "navigationBarTitleText": "LIBEREAL 微信登录",
+    "navigationBarBackgroundColor": "#07C160",
+    "navigationBarTextStyle": "white",
+    "backgroundColor": "#f6f7fb"
+  },
+  "sitemapLocation": "sitemap.json"
+}

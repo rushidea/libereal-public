@@ -1,0 +1,2 @@
+ALTER TABLE "User" ADD COLUMN "phoneVerifiedAt" DATETIME;
+ALTER TABLE "User" ADD COLUMN "phoneLastChangedAt" DATETIME;

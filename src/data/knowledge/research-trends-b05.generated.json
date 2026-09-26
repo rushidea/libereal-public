@@ -1,0 +1,2242 @@
+{
+  "schema_version": "research-deep-dive-public-v0.1",
+  "batch_id": "B05",
+  "title": "肿瘤治疗分层与动态监测",
+  "publication_status": "snapshot_ready",
+  "frontend_status": "snapshot_ready",
+  "topics": [
+    {
+      "topic_id": "H023",
+      "title": "CAR-T、TCR-T 与工程化免疫细胞",
+      "topic_role": "research_deep_dive",
+      "overview": "CAR-T、TCR-T 等工程化免疫细胞研究同时涉及受体设计、细胞制造、体内分布、持续性和安全性。受体能否识别目标只是起点，细胞是否能够扩增、进入病灶、保持功能并在不同患者和治疗阶段产生可解释的结果，需要把产品特征、病灶环境和临床样本放在同一研究框架中。\n\n本方向从受体结构与抗原识别、单细胞和受体组库、体外杀伤、患者来源模型、体内细胞动力学和临床样本出发，集中处理三类问题：受体设计如何改变识别与信号；产品质量、递送和患者环境如何影响扩增与持久性；组织位置、抗原逃逸和免疫抑制如何限制功能。受体结合、细胞状态、体内变化、肿瘤反应和安全性属于不同证据层级。\n\n比较公开研究时，需要同时交代 CAR 或 TCR 结构、抗原与 HLA 条件、细胞来源和制造过程、剂量、淋巴清除、病灶类型、取样时间、反应标准及不良事件。体外杀伤或少数受试者的早期结果不能替代长期随访和独立队列。免疫检查点专题处理组合免疫调控，分子分层专题处理候选优选；本页聚焦工程化免疫细胞产品及其证据边界。",
+      "sections": [
+        {
+          "section_id": "H023-SEC-01",
+          "title": "比较不同研究时应先看什么",
+          "body": "| 比较内容 | 应记录的信息 | 关系到什么判断 |\n| --- | --- | --- |\n| 识别方式 | CAR 或 TCR、靶抗原、抗原密度和呈递条件 | 细胞实际能识别什么，哪些肿瘤细胞可能逃逸 |\n| 产品制造 | 自体或同种异体来源、编辑与扩增流程、放行标准 | 产品是否稳定可得，批次之间是否可比较 |\n| 体内行为 | 输注后扩增、持续时间、血液和组织中的细胞状态 | 细胞是否在患者体内存活并到达目标组织 |\n| 病灶环境 | 原发或转移病灶、血管、基质和局部免疫抑制 | 实体瘤为什么常比血液肿瘤更难进入和维持功能 |\n| 人体结局 | 反应标准、复发、随访和不良事件 | 研究支持的是可行性、近期安全，还是更长期的临床结果 |",
+          "source_ids": []
+        },
+        {
+          "section_id": "H023-SEC-02",
+          "title": "受体设计会改变细胞的工作方式",
+          "body": "受体不是一个可随意替换的零件。识别结构、表达量、整合位点和共刺激模块都会影响细胞接收信号的强度和持续时间。定点把 CAR 插入 T 细胞受体α恒定区（TRAC）位点，或改变共刺激域，在一些模型中能改善表达的一致性或减轻持续信号带来的耗竭。但这类结果依赖具体构建和实验系统。\n\nTCR-T 还要面对抗原呈递和人类白细胞抗原匹配的问题。它可以识别细胞内来源的肽段，也因此更依赖患者肿瘤的抗原呈递状态。CAR-T 的靶点通常在细胞表面，面对的难题则常是靶点密度不足或肿瘤内不同区域表达不一致。",
+          "source_ids": [
+            "H023S001",
+            "H023S006",
+            "H023S007",
+            "H023S009",
+            "H023S010",
+            "H023S013",
+            "H023S019"
+          ]
+        },
+        {
+          "section_id": "H023-SEC-03",
+          "title": "制造完成，并不等于产品已经被证明有效",
+          "body": "非病毒基因编辑和同种异体细胞策略正在扩展工程化细胞的制造方式。它们可以减少部分流程限制，也可能引入新的质量控制问题，例如编辑是否准确、细胞组成是否稳定、是否保留足够活性，以及产品能否在规定时间内交付。\n\n制造研究需要同时报告起始细胞、扩增时间、编辑或转导效率、活性、效力测定和失败批次。单看细胞产量或体外杀伤，很难判断输注后能否持续发挥作用。早期人体研究能够说明某个流程可否临床交付，但通常不足以比较不同产品的疗效。",
+          "source_ids": [
+            "H023S002",
+            "H023S003",
+            "H023S005",
+            "H023S008",
+            "H023S011"
+          ]
+        },
+        {
+          "section_id": "H023-SEC-04",
+          "title": "持久性取决于细胞本身，也取决于患者和病灶",
+          "body": "输注后的细胞动力学常在血液中追踪，但血液中的扩增峰值不能代替病灶内的功能。细胞是否能长期存在，受到起始细胞状态、受体信号、患者免疫环境、肿瘤负荷和组织进入等多种因素影响。\n\n有预临床研究发现，移除内源T细胞受体可能影响CAR-T的体内持久性。为解决一种工程问题而增加的编辑，并不保证在所有产品中带来更好的体内表现。产品设计需要结合连续血液样本、病灶组织和长期结局一起评估。",
+          "source_ids": [
+            "H023S004",
+            "H023S013",
+            "H023S014",
+            "H023S020"
+          ]
+        },
+        {
+          "section_id": "H023-SEC-05",
+          "title": "抗原逃逸和组织屏障是两类不同的问题",
+          "body": "治疗失败有时来自靶点本身。肿瘤细胞可能降低或丢失靶抗原，部分细胞本来就不表达目标抗原。另一些时候，细胞产品在体外仍有活性，却难以进入实体瘤，或进入后受到基质、血管和局部免疫抑制的限制。\n\n血液肿瘤中的抗原逃逸可以通过治疗前后样本直接追踪。实体瘤的情况通常更复杂：不同病灶、同一病灶的不同区域，甚至同一时间点的细胞群都可能不同。多靶点设计和局部微环境调控是研究方向，但每种策略都需要在明确癌症和模型中验证。",
+          "source_ids": [
+            "H023S012",
+            "H023S015",
+            "H023S016",
+            "H023S017",
+            "H023S018"
+          ]
+        },
+        {
+          "section_id": "H023-SEC-06",
+          "title": "人体研究要把产品、取样和安全性放在一起看",
+          "body": "工程化细胞的早期临床研究首先回答的是：能否制造并完成输注，细胞在体内如何变化，近期不良事件怎样发生。若要进一步理解疗效，需要将输注产品的组成、治疗前后的血液和组织样本、肿瘤反应、复发和随访资料连起来。\n\n读者在阅读这类研究时，可以先问几个具体问题：产品是否按计划完成制造？采样是否覆盖输注后的关键时间点？研究观察到的是血液中的细胞变化，还是病灶内的功能？不良事件和长期随访是否报告完整？这些问题比单一反应率更能说明研究处在哪个阶段。",
+          "source_ids": []
+        },
+        {
+          "section_id": "H023-SEC-07",
+          "title": "研究技术",
+          "body": "本专题的技术卡包括 CAR/TCR 构建与定点编辑、细胞制造和效力测定、多参数细胞表型与克隆追踪、组织进入评价，以及早期人体研究和长期随访。它们分别回答产品能否做出来、细胞怎样变化、是否进入病灶，以及人体中发生了什么。",
+          "source_ids": []
+        },
+        {
+          "section_id": "H023-SEC-08",
+          "title": "科研参考范围",
+          "body": "本页仅供科研参考，不提供治疗选择、疗效承诺或个体化医疗建议。",
+          "source_ids": []
+        }
+      ],
+      "methods": [
+        {
+          "method_id": "H023-M001",
+          "display_order": 1,
+          "category": "细胞工程",
+          "title": "CAR/TCR 构建与定点基因编辑",
+          "principle": "嵌合抗原受体（CAR）让T细胞识别细胞表面抗原；T细胞受体（TCR）识别由人类白细胞抗原呈递的抗原肽。CRISPR 等编辑工具可插入受体、移除内源基因或调整信号模块。",
+          "answers": "用于比较受体结构、整合位点和共刺激模块怎样影响表达、抗原反应和细胞状态。",
+          "sample_design": "报告靶抗原、受体序列或模块、编辑位点、供体来源、编辑效率、非预期改变及体外和体内功能读出。",
+          "limitations": "一个构建在细胞系或异种移植模型中的表现不能直接代表其他受体、癌症或患者；编辑效率也不等于人体持久性。",
+          "source_ids": [
+            "H023S001",
+            "H023S006",
+            "H023S007",
+            "H023S009",
+            "H023S013"
+          ],
+          "workflow": "设计阶段先确定：报告靶抗原、受体序列或模块、编辑位点、供体来源、编辑效率、非预期改变及体外和体内功能读出。 记录起始细胞、受体构建、编辑步骤、扩增过程、放行结果和输注后随访；把产品表型、体内细胞动力学、病灶信息和安全性或反应终点放在同一病例时间线上。 这项方法的直接测量或计算依据是：嵌合抗原受体（CAR）让T细胞识别细胞表面抗原；T细胞受体（TCR）识别由人类白细胞抗原呈递的抗原肽。CRISPR 等编辑工具可插入受体、移除内源基因或调整信号模块。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：一个构建在细胞系或异种移植模型中的表现不能直接代表其他受体、癌症或患者；编辑效率也不等于人体持久性。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "结果可用于比较受体结构、整合位点和共刺激模块怎样影响表达、抗原反应和细胞状态。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        },
+        {
+          "method_id": "H023-M002",
+          "display_order": 2,
+          "category": "细胞产品",
+          "title": "制造、放行与效力测定",
+          "principle": "从起始T细胞到最终输注产品，需要完成激活、基因导入或编辑、扩增、纯化和质量控制。效力测定通常结合表型、活性、杀伤或细胞因子读出。",
+          "answers": "用于判断某一制造流程是否能稳定产出符合预设质量要求的细胞产品。",
+          "sample_design": "记录起始材料、培养时长、细胞活性和组成、转导或编辑率、扩增倍数、无菌和内毒素检测、效力测定、批次失败与放行标准。",
+          "limitations": "体外杀伤和细胞因子释放只能说明特定条件下的效力；不能替代输注后疗效、毒性或长期安全。",
+          "source_ids": [
+            "H023S002",
+            "H023S003",
+            "H023S005",
+            "H023S011"
+          ],
+          "workflow": "设计阶段先确定：记录起始材料、培养时长、细胞活性和组成、转导或编辑率、扩增倍数、无菌和内毒素检测、效力测定、批次失败与放行标准。 记录起始细胞、受体构建、编辑步骤、扩增过程、放行结果和输注后随访；把产品表型、体内细胞动力学、病灶信息和安全性或反应终点放在同一病例时间线上。 这项方法的直接测量或计算依据是：从起始T细胞到最终输注产品，需要完成激活、基因导入或编辑、扩增、纯化和质量控制。效力测定通常结合表型、活性、杀伤或细胞因子读出。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：体外杀伤和细胞因子释放只能说明特定条件下的效力；不能替代输注后疗效、毒性或长期安全。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "结果可用于判断某一制造流程是否能稳定产出符合预设质量要求的细胞产品。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        },
+        {
+          "method_id": "H023-M003",
+          "display_order": 3,
+          "category": "细胞状态",
+          "title": "多参数表型与克隆追踪",
+          "principle": "流式细胞术、质谱流式、单细胞测序和受体序列追踪可描述输注前后T细胞的分化、活化、耗竭、记忆和克隆变化。",
+          "answers": "用于观察细胞产品的组成，以及输注后哪些细胞群扩增、持续或发生状态变化。",
+          "sample_design": "将输注前产品与连续血液样本配对；说明抗体面板或测序流程、采样时间、细胞数量、批次控制和与临床结局的关联方式。",
+          "limitations": "血液中的细胞状态不能代替肿瘤组织内的功能；某个表面标志物也不能单独定义疗效或耗竭。",
+          "source_ids": [
+            "H023S004",
+            "H023S013",
+            "H023S014"
+          ],
+          "workflow": "设计阶段先确定：将输注前产品与连续血液样本配对；说明抗体面板或测序流程、采样时间、细胞数量、批次控制和与临床结局的关联方式。 记录起始细胞、受体构建、编辑步骤、扩增过程、放行结果和输注后随访；把产品表型、体内细胞动力学、病灶信息和安全性或反应终点放在同一病例时间线上。 这项方法的直接测量或计算依据是：流式细胞术、质谱流式、单细胞测序和受体序列追踪可描述输注前后T细胞的分化、活化、耗竭、记忆和克隆变化。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：血液中的细胞状态不能代替肿瘤组织内的功能；某个表面标志物也不能单独定义疗效或耗竭。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "结果可用于观察细胞产品的组成，以及输注后哪些细胞群扩增、持续或发生状态变化。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        },
+        {
+          "method_id": "H023-M004",
+          "display_order": 4,
+          "category": "组织研究",
+          "title": "肿瘤组织进入与局部功能评价",
+          "principle": "免疫组织化学、多重成像、空间转录组和组织内细胞追踪可判断工程化细胞是否到达病灶，并与肿瘤细胞、血管、基质和其他免疫细胞建立空间关系。",
+          "answers": "用于回答细胞是否进入目标组织、位于何处，以及局部是否出现可测量的免疫反应。",
+          "sample_design": "优先采集治疗前后配对病灶；记录病灶部位、取样方式、组织保存、空间检测平台、细胞身份确认和与血液样本的对应关系。",
+          "limitations": "组织活检通常只代表一个时间点和一个病灶；空间共现提示关系，不能单独证明治疗机制。",
+          "source_ids": [
+            "H023S016",
+            "H023S017",
+            "H023S020"
+          ],
+          "workflow": "设计阶段先确定：优先采集治疗前后配对病灶；记录病灶部位、取样方式、组织保存、空间检测平台、细胞身份确认和与血液样本的对应关系。 记录起始细胞、受体构建、编辑步骤、扩增过程、放行结果和输注后随访；把产品表型、体内细胞动力学、病灶信息和安全性或反应终点放在同一病例时间线上。 这项方法的直接测量或计算依据是：免疫组织化学、多重成像、空间转录组和组织内细胞追踪可判断工程化细胞是否到达病灶，并与肿瘤细胞、血管、基质和其他免疫细胞建立空间关系。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：组织活检通常只代表一个时间点和一个病灶；空间共现提示关系，不能单独证明治疗机制。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "结果主要回答细胞是否进入目标组织、位于何处，以及局部是否出现可测量的免疫反应。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        },
+        {
+          "method_id": "H023-M005",
+          "display_order": 5,
+          "category": "人体研究",
+          "title": "早期细胞治疗研究与长期随访",
+          "principle": "早期临床研究将产品制造、输注、细胞动力学、不良事件和肿瘤结局放入同一观察框架，用于评价可行性、安全性和后续研究依据。",
+          "answers": "用于判断一个细胞工程策略能否完成临床交付，并初步观察体内行为和安全风险。",
+          "sample_design": "记录入组标准、既往治疗、产品构成、输注剂量、预处理、血液和组织取样计划、反应标准、不良事件分级及随访时长。",
+          "limitations": "小样本、无对照的早期研究不能比较不同产品的疗效，也不能给出个体治疗建议。",
+          "source_ids": [
+            "H023S002",
+            "H023S008",
+            "H023S014",
+            "H023S018"
+          ],
+          "workflow": "设计阶段先确定：记录入组标准、既往治疗、产品构成、输注剂量、预处理、血液和组织取样计划、反应标准、不良事件分级及随访时长。 记录起始细胞、受体构建、编辑步骤、扩增过程、放行结果和输注后随访；把产品表型、体内细胞动力学、病灶信息和安全性或反应终点放在同一病例时间线上。 这项方法的直接测量或计算依据是：早期临床研究将产品制造、输注、细胞动力学、不良事件和肿瘤结局放入同一观察框架，用于评价可行性、安全性和后续研究依据。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：小样本、无对照的早期研究不能比较不同产品的疗效，也不能给出个体治疗建议。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "结果可用于判断一个细胞工程策略能否完成临床交付，并初步观察体内行为和安全风险。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        }
+      ],
+      "references": [
+        {
+          "source_id": "H023S001",
+          "title": "Genetic engineering of T cells for immunotherapy",
+          "journal": "Nature Reviews Genetics",
+          "published_date": "2021-02-18",
+          "doi": "10.1038/s41576-021-00329-9",
+          "pmid": "",
+          "url": "https://www.nature.com/articles/s41576-021-00329-9",
+          "source_type": "review",
+          "study_context": "CAR and transgenic-TCR platforms across cancer",
+          "study_design": "peer-reviewed review",
+          "usable_for": "platform vocabulary and design trade-offs",
+          "limitations": "review; not comparative clinical evidence",
+          "authors": "Ellis GI; Sheppard NC; Riley JL"
+        },
+        {
+          "source_id": "H023S002",
+          "title": "Non-viral precision T cell receptor replacement for personalized cell therapy",
+          "journal": "Nature",
+          "published_date": "2022-11-10",
+          "doi": "",
+          "pmid": "36356599",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/36356599/",
+          "source_type": "primary_research",
+          "study_context": "solid-tumour patients",
+          "study_design": "first-in-human phase 1 engineering study",
+          "usable_for": "clinical manufacturing feasibility and early safety",
+          "limitations": "small early-phase cohort; no comparative efficacy inference",
+          "authors": "Foy SP et al."
+        },
+        {
+          "source_id": "H023S003",
+          "title": "Genome editing of donor-derived T-cells to generate allogeneic chimeric antigen receptor-modified T cells",
+          "journal": "Molecular Therapy",
+          "published_date": "2020-04-01",
+          "doi": "",
+          "pmid": "32241852",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/32241852/",
+          "source_type": "primary_research",
+          "study_context": "donor-derived CD19 CAR-T preclinical system",
+          "study_design": "translational engineering study",
+          "usable_for": "allogeneic product design",
+          "limitations": "not a clinical efficacy study",
+          "authors": "Levy JM et al."
+        },
+        {
+          "source_id": "H023S004",
+          "title": "Endogenous TCR promotes in vivo persistence of CD19-CAR-T cells compared to a CRISPR/Cas9-mediated TCR knockout CAR",
+          "journal": "Molecular Therapy",
+          "published_date": "2020-09-17",
+          "doi": "",
+          "pmid": "32483603",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/32483603/",
+          "source_type": "primary_research",
+          "study_context": "CD19 CAR-T preclinical models",
+          "study_design": "comparative preclinical study",
+          "usable_for": "construct-specific persistence trade-off",
+          "limitations": "preclinical model; not a product-release or patient-outcome marker",
+          "authors": "Stenger D et al."
+        },
+        {
+          "source_id": "H023S005",
+          "title": "Efficient nonviral integration of large transgenes into human T cells using Cas9-CLIPT",
+          "journal": "Nature Biotechnology",
+          "published_date": "2025-02-18",
+          "doi": "",
+          "pmid": "40123742",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/40123742/",
+          "source_type": "primary_research",
+          "study_context": "human donor T cells and GD2-CAR preclinical studies",
+          "study_design": "method and preclinical validation",
+          "usable_for": "manufacturing yield and pre-infusion phenotype",
+          "limitations": "in-vitro and xenograft evidence does not establish clinical persistence",
+          "authors": "Tommasi S et al."
+        },
+        {
+          "source_id": "H023S006",
+          "title": "Reprogramming human T cell function and specificity with non-viral genome targeting",
+          "journal": "Nature",
+          "published_date": "2018-07-11",
+          "doi": "10.1038/s41586-018-0326-5",
+          "pmid": "29995861",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/29995861/",
+          "source_type": "primary_research",
+          "study_context": "primary human T cells and melanoma-cell co-culture",
+          "study_design": "method and functional study",
+          "usable_for": "precision insertion and engineered T-cell function",
+          "limitations": "preclinical; donor and cell-line systems",
+          "authors": "Roth TL et al."
+        },
+        {
+          "source_id": "H023S007",
+          "title": "Targeting a CAR to the TRAC locus with CRISPR/Cas9 enhances tumour rejection",
+          "journal": "Nature",
+          "published_date": "2017-02-22",
+          "doi": "10.1038/nature21405",
+          "pmid": "28225754",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/28225754/",
+          "source_type": "primary_research",
+          "study_context": "human CAR-T and xenograft models",
+          "study_design": "comparative preclinical study",
+          "usable_for": "locus and expression architecture can affect function",
+          "limitations": "xenograft results are not clinical validation",
+          "authors": "Eyquem J et al."
+        },
+        {
+          "source_id": "H023S008",
+          "title": "CRISPR-engineered T cells in patients with refractory cancer",
+          "journal": "Science",
+          "published_date": "2020-07-10",
+          "doi": "10.1126/science.aba7365",
+          "pmid": "32807904",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/32807904/",
+          "source_type": "primary_research",
+          "study_context": "three patients with refractory cancer",
+          "study_design": "first-in-human feasibility study",
+          "usable_for": "feasibility safety and tracking of edited cells",
+          "limitations": "very small non-randomized cohort",
+          "authors": "Stadtmauer EA et al."
+        },
+        {
+          "source_id": "H023S009",
+          "title": "Therapeutic T cell engineering",
+          "journal": "Nature",
+          "published_date": "2017-04-06",
+          "doi": "10.1038/nature22395",
+          "pmid": "28358096",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/28358096/",
+          "source_type": "review",
+          "study_context": "engineered T-cell therapies",
+          "study_design": "peer-reviewed review",
+          "usable_for": "design framework and translational constraints",
+          "limitations": "review; predates many newer platforms",
+          "authors": "Sadelain M; Rivière I; Riddell S"
+        },
+        {
+          "source_id": "H023S010",
+          "title": "CAR T cell immunotherapy for human cancer",
+          "journal": "Science",
+          "published_date": "2018-03-23",
+          "doi": "10.1126/science.aar6711",
+          "pmid": "29599167",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/29599167/",
+          "source_type": "review",
+          "study_context": "hematologic and solid-tumour CAR-T research",
+          "study_design": "peer-reviewed review",
+          "usable_for": "clinical-development landscape",
+          "limitations": "review; disease-specific results must be checked in primary trials",
+          "authors": "June CH et al."
+        },
+        {
+          "source_id": "H023S011",
+          "title": "Off-the-shelf allogeneic CAR T cells: development and challenges",
+          "journal": "Nature Reviews Drug Discovery",
+          "published_date": "2020-03-01",
+          "doi": "10.1038/s41573-019-0051-2",
+          "pmid": "32001783",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/32001783/",
+          "source_type": "review",
+          "study_context": "allogeneic CAR-T development",
+          "study_design": "peer-reviewed review",
+          "usable_for": "allogeneic manufacturing and safety constraints",
+          "limitations": "review; clinical evidence was limited at publication",
+          "authors": "Depil S et al."
+        },
+        {
+          "source_id": "H023S012",
+          "title": "CAR-T cell therapy: current limitations and potential strategies",
+          "journal": "Blood Cancer Journal",
+          "published_date": "2021-04-19",
+          "doi": "10.1038/s41408-020-00367-9",
+          "pmid": "33846369",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/33846369/",
+          "source_type": "review",
+          "study_context": "CAR-T across malignancies",
+          "study_design": "peer-reviewed review",
+          "usable_for": "failure-mode taxonomy",
+          "limitations": "review; not a comparative trial",
+          "authors": "Sterner RC; Sterner RM"
+        },
+        {
+          "source_id": "H023S013",
+          "title": "4-1BB costimulation ameliorates T cell exhaustion induced by tonic signaling of chimeric antigen receptors",
+          "journal": "Nature Medicine",
+          "published_date": "2015-06-01",
+          "doi": "10.1038/nm.3838",
+          "pmid": "25939063",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/25939063/",
+          "source_type": "primary_research",
+          "study_context": "engineered human T-cell models",
+          "study_design": "mechanistic preclinical study",
+          "usable_for": "tonic signalling and exhaustion mechanisms",
+          "limitations": "construct and model dependent",
+          "authors": "Long AH et al."
+        },
+        {
+          "source_id": "H023S014",
+          "title": "Determinants of response and resistance to CD19 chimeric antigen receptor T cell therapy of chronic lymphocytic leukemia",
+          "journal": "Nature Medicine",
+          "published_date": "2018-04-01",
+          "doi": "10.1038/s41591-018-0010-1",
+          "pmid": "29507367",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/29507367/",
+          "source_type": "primary_research",
+          "study_context": "chronic lymphocytic leukemia treated with CD19 CAR-T",
+          "study_design": "patient-correlative cohort",
+          "usable_for": "product-state and patient-context correlates",
+          "limitations": "single disease and platform; associations are not universal biomarkers",
+          "authors": "Fraietta JA et al."
+        },
+        {
+          "source_id": "H023S015",
+          "title": "Tumor antigen escape from CAR T-cell therapy",
+          "journal": "Cancer Discovery",
+          "published_date": "2019-09-01",
+          "doi": "10.1158/2159-8290.CD-19-0692",
+          "pmid": "",
+          "url": "https://doi.org/10.1158/2159-8290.CD-19-0692",
+          "source_type": "review",
+          "study_context": "CAR-T resistance across cancer settings",
+          "study_design": "peer-reviewed review",
+          "usable_for": "resistance mechanisms and multi-target rationale",
+          "limitations": "review; therapeutic solutions require disease-specific testing",
+          "authors": "Majzner RG; Mackall CL"
+        },
+        {
+          "source_id": "H023S016",
+          "title": "Supercharging adoptive T cell therapy to overcome solid tumor-induced immunosuppression",
+          "journal": "Nature Reviews Drug Discovery",
+          "published_date": "2020-10-01",
+          "doi": "10.1038/s41573-020-0098-6",
+          "pmid": "",
+          "url": "https://doi.org/10.1038/s41573-020-0098-6",
+          "source_type": "review",
+          "study_context": "solid-tumour adoptive cell therapy",
+          "study_design": "peer-reviewed review",
+          "usable_for": "tissue-entry and immunosuppression barriers",
+          "limitations": "review; does not establish a specific clinical regimen",
+          "authors": "Mardiana A et al."
+        },
+        {
+          "source_id": "H023S017",
+          "title": "CAR T cell therapy for solid tumors",
+          "journal": "Annual Review of Medicine",
+          "published_date": "2017-01-14",
+          "doi": "10.1146/annurev-med-062315-120245",
+          "pmid": "27860586",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/27860586/",
+          "source_type": "review",
+          "study_context": "solid-tumour CAR-T research",
+          "study_design": "peer-reviewed review",
+          "usable_for": "solid-tumour engineering constraints",
+          "limitations": "review; rapidly evolving field",
+          "authors": "Newick K et al."
+        },
+        {
+          "source_id": "H023S018",
+          "title": "Genetic mechanisms of target antigen loss in CAR19 therapy of acute lymphoblastic leukemia",
+          "journal": "Nature Medicine",
+          "published_date": "2018-10-01",
+          "doi": "10.1038/s41591-018-0146-z",
+          "pmid": "30275569",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/30275569/",
+          "source_type": "primary_research",
+          "study_context": "B-cell acute lymphoblastic leukemia after CAR19 therapy",
+          "study_design": "clinical translational study",
+          "usable_for": "genetic routes to CD19 antigen loss",
+          "limitations": "specific to CAR19 and B-ALL; not a complete resistance model",
+          "authors": "Orlando EJ et al."
+        },
+        {
+          "source_id": "H023S019",
+          "title": "The evolution of chimeric antigen receptor T-cell engineering and the future of synthetic biology in cancer treatment",
+          "journal": "Nature Reviews Cancer",
+          "published_date": "2022-07-01",
+          "doi": "10.1038/s41568-022-00472-5",
+          "pmid": "",
+          "url": "https://doi.org/10.1038/s41568-022-00472-5",
+          "source_type": "review",
+          "study_context": "synthetic biology and CAR-T research",
+          "study_design": "peer-reviewed review",
+          "usable_for": "next-generation design concepts",
+          "limitations": "review; many strategies remain preclinical",
+          "authors": "Arcangeli S et al."
+        },
+        {
+          "source_id": "H023S020",
+          "title": "Intratumoural administration and tumour tissue targeting of immunotherapies",
+          "journal": "Nature Reviews Clinical Oncology",
+          "published_date": "2021-05-18",
+          "doi": "10.1038/s41571-021-00507-y",
+          "pmid": "",
+          "url": "https://www.nature.com/articles/s41571-021-00507-y",
+          "source_type": "review",
+          "study_context": "tumour-targeted immunotherapy including cell therapy",
+          "study_design": "peer-reviewed review",
+          "usable_for": "tissue-access constraints",
+          "limitations": "review; route and platform context remain essential",
+          "authors": "Melero I et al."
+        }
+      ],
+      "shared_findings": [
+        {
+          "finding_id": "H023-C01",
+          "display_order": 1,
+          "title": "受体设计决定识别方式，也会改变持续信号和细胞状态",
+          "shared_result": "工程化受体不只是为T细胞增加一个靶点。受体结构、表达量、整合位点和共刺激模块共同影响抗原识别、激活强度、耗竭和杀伤功能。\n\nCAR直接识别细胞表面抗原，TCR依赖人类白细胞抗原呈递；不同靶点密度、构建和癌症环境下的结果不能直接互换。",
+          "research_use": "记录靶抗原、受体序列与结构、整合位点、表达水平、供体来源；结合体外功能、持续刺激、动物模型和患者样本。",
+          "boundary": "TRAC位点整合或某种共刺激结构在特定模型中的优势，不代表所有CAR、TCR或细胞产品都应采用同一设计。",
+          "source_ids": [
+            "H023S001",
+            "H023S006",
+            "H023S007",
+            "H023S009",
+            "H023S010",
+            "H023S013",
+            "H023S019"
+          ]
+        },
+        {
+          "finding_id": "H023-C02",
+          "display_order": 2,
+          "title": "编辑效率和制造产量不能代替产品质量与人体表现",
+          "shared_result": "非病毒编辑、多重编辑和同种异体制造扩展了工程化细胞的设计空间，但可制造性需要同时评价细胞组成、活性、脱靶风险、批次稳定和交付时间。\n\n自体与同种异体产品面对的起始材料、免疫排斥、移植物抗宿主风险和时间要求不同；早期人体可行性研究也不能与成熟产品的比较试验等同。",
+          "research_use": "记录起始材料、编辑效率、非预期改变、扩增时间、细胞亚群、效力测定、放行标准、批次失败和输注后追踪。",
+          "boundary": "体外产量高、编辑比例高或早期研究可完成输注，只能说明相应制造条件下的可行性，不能证明持续疗效或长期安全。",
+          "source_ids": [
+            "H023S002",
+            "H023S003",
+            "H023S005",
+            "H023S008",
+            "H023S011"
+          ]
+        },
+        {
+          "finding_id": "H023-C03",
+          "display_order": 3,
+          "title": "更彻底地移除内源受体不一定带来更好的体内持久性",
+          "shared_result": "输注后细胞能否扩增和持续存在，受构建设计、起始细胞状态、持续抗原刺激、患者免疫环境和组织进入共同影响。部分模型显示内源TCR移除可能降低持久性，说明工程目标之间存在权衡。\n\n血液肿瘤中可连续测量循环细胞，实体瘤还需要判断组织进入和局部功能；不同产品的细胞动力学和长期结局不能仅凭血液峰值比较。",
+          "research_use": "采用治疗前产品表型、连续血液取样、病灶组织、克隆追踪和功能读出，并与疾病负荷、复发和毒性配对。",
+          "boundary": "不能把单一细胞表型、扩增峰值或某一构建的持久性结果作为通用产品放行指标或疗效替代终点。",
+          "source_ids": [
+            "H023S004",
+            "H023S013",
+            "H023S014",
+            "H023S020"
+          ]
+        },
+        {
+          "finding_id": "H023-C04",
+          "display_order": 4,
+          "title": "治疗失败可发生在靶点、细胞产品和组织环境三个层面",
+          "shared_result": "靶抗原丢失或表达不足、细胞产品功能衰减，以及组织进入不足和局部免疫抑制，都是工程化细胞治疗失败的不同来源。研究需要说明失败发生在哪一层。\n\nCD19等血液肿瘤靶点已有治疗前后样本支持抗原逃逸；实体瘤中的抗原异质性、基质、血管和局部抑制更突出，但机制与验证成熟度不一。",
+          "research_use": "配对治疗前后肿瘤样本、抗原定量、多区域取样、细胞产品分析、组织定位和纵向随访；必要时使用多靶点和微环境扰动模型。",
+          "boundary": "一个癌症或靶点中的逃逸机制不能概括全部CAR-T和TCR-T，也不能仅因存在候选工程策略就写成已经解决。",
+          "source_ids": [
+            "H023S012",
+            "H023S015",
+            "H023S016",
+            "H023S017",
+            "H023S018"
+          ]
+        },
+        {
+          "finding_id": "H023-C05",
+          "display_order": 5,
+          "title": "机制、制造和人体结局必须连成同一条证据链",
+          "shared_result": "有解释力的人体研究需要把实际输注的细胞产品、患者和病灶背景、体内扩增与组织分布、功能反应、复发和毒性放在同一设计中分析。\n\n早期人体研究适合回答可行性和近期安全，患者相关队列可发现产品与反应的联系，随机或较长期研究才能进一步评价临床结果；这些层级不能互相替代。",
+          "research_use": "记录入组标准、既往治疗、产品构成、输注剂量、血液与组织时间点、反应标准、不良事件和长期随访。",
+          "boundary": "本专题不比较个体产品优劣，不提供治疗选择，也不以体外杀伤、少量病例或短期反应替代持续疗效与安全性。",
+          "source_ids": [
+            "H023S002",
+            "H023S008",
+            "H023S014",
+            "H023S018",
+            "H023S020"
+          ]
+        }
+      ]
+    },
+    {
+      "topic_id": "H024",
+      "title": "免疫检查点与组合免疫调控",
+      "topic_role": "research_deep_dive",
+      "overview": "免疫检查点阻断并非简单地增强所有免疫反应。PD-1、PD-L1、CTLA-4 等通路位于不同的免疫调节环节，治疗能否起效还取决于肿瘤抗原、免疫细胞状态、病灶位置、既往治疗和具体组合方案。单一标志物或单一癌种结果不能代表所有治疗情境。\n\n本方向从肿瘤组织和空间免疫图谱、免疫受体与 T 细胞状态、多重蛋白测量、前瞻性试验和组合治疗研究出发，集中处理三类问题：治疗前是否存在可被重新激活的免疫条件；标志物与检测方法如何共同解释反应；组合治疗在时间、组织位置和毒性之间如何取得可比较的证据。组织、细胞状态、治疗方案和患者结局需要分开记录。\n\n比较公开研究时，需要同时交代癌症类型、治疗线次、既往治疗、标志物面板与阈值、药物组合、对照、取样时间和不良事件。治疗相关变化不能单独证明机制，观察性标志物关联也不能直接成为普遍预测标准。工程化免疫细胞专题处理细胞产品，肿瘤空间免疫专题处理组织位置；本页聚焦检查点通路与组合免疫调控的研究证据。",
+      "sections": [
+        {
+          "section_id": "H024-SEC-01",
+          "title": "比较不同研究时应先看什么",
+          "body": "| 比较内容 | 应记录的信息 | 关系到什么判断 |\n| --- | --- | --- |\n| 检查点通路 | PD-1、PD-L1、CTLA-4 及其检测方式 | 研究针对的是哪一类免疫调节环节 |\n| 治疗语境 | 癌症、分期、治疗线次和既往治疗 | 相同药物在什么人群中被比较 |\n| 组合构成 | 单药、双免疫联合，或与化疗等其他治疗联用 | 结果应归因于完整方案，而不是某一个药物 |\n| 组织资料 | 病灶部位、治疗前后活检、免疫细胞位置 | 组织环境怎样与反应或耐药相连 |\n| 结局与伤害 | 主要终点、随访、停药和严重不良事件 | 获益是否与风险一起得到评价 |",
+          "source_ids": []
+        },
+        {
+          "section_id": "H024-SEC-02",
+          "title": "检查点阻断能否起效，取决于已有的免疫条件",
+          "body": "早期研究说明，阻断 PD-1、PD-L1 或 CTLA-4 后，部分晚期肿瘤患者可以出现反应。组织研究进一步发现，治疗前病灶中已有的免疫细胞位置和状态，与后续反应之间存在联系。\n\n这些发现不表示某一种检查点在所有肿瘤里都处于同样位置。PD-1 和 CTLA-4 的作用环节不同，肿瘤的抗原性、免疫抑制和病灶部位也不同。把通路机制和人体结果连起来，需要治疗前后配对样本和明确的临床语境。",
+          "source_ids": [
+            "H024S002",
+            "H024S003",
+            "H024S004",
+            "H024S005",
+            "H024S007"
+          ]
+        },
+        {
+          "section_id": "H024-SEC-03",
+          "title": "标志物要连同检测方法一起解释",
+          "body": "PD-L1 表达、突变负荷、克隆性新抗原和既有T细胞浸润，都是检查点研究常见的线索。它们反映的生物学层面不同，也各有测量误差和适用条件。\n\n以 PD-L1 为例，抗体克隆、评分算法、阈值、样本部位和取样时间都会影响结果。突变负荷和新抗原分析同样受到测序流程、算法和肿瘤克隆结构影响。因此，标志物研究需要说明使用了什么检测方法、在哪种癌症和治疗方案中观察到关联，以及是否有独立验证。",
+          "source_ids": [
+            "H024S001",
+            "H024S005",
+            "H024S006",
+            "H024S007",
+            "H024S017",
+            "H024S018",
+            "H024S019"
+          ]
+        },
+        {
+          "section_id": "H024-SEC-04",
+          "title": "组合治疗的结果要放回完整方案中看",
+          "body": "在晚期黑色素瘤、肾癌、非小细胞肺癌和食管癌中，若干随机研究显示特定检查点组合，或检查点治疗加化疗，可改善预设结局。它们同时也报告了不同程度的免疫相关不良事件。\n\n这些结果不能简化为“联合优于单药”。双免疫联合和免疫治疗加化疗不是同一种干预；一线晚期治疗、术后辅助治疗和既往治疗后的比较也回答不同问题。阅读试验时，药物组合、对照组和治疗阶段与结果本身同样重要。",
+          "source_ids": [
+            "H024S008",
+            "H024S009",
+            "H024S010",
+            "H024S011",
+            "H024S012",
+            "H024S016"
+          ]
+        },
+        {
+          "section_id": "H024-SEC-05",
+          "title": "联合方案并非总能增加获益",
+          "body": "组合方案并非总能增加获益。在部分术后辅助治疗黑色素瘤和既往治疗的鳞状非小细胞肺癌研究中，联合方案没有优于PD-1单药，并增加了严重不良事件。这样的结果有助于界定组合的适用范围。\n\n阴性研究不意味着组合治疗在其他癌症或阶段没有价值。它说明结果不能脱离试验条件外推。公开页面应把阳性和阴性随机研究并列呈现，避免只保留更容易传播的结论。",
+          "source_ids": [
+            "H024S013",
+            "H024S014",
+            "H024S015"
+          ]
+        },
+        {
+          "section_id": "H024-SEC-06",
+          "title": "组织位置和时间提供机制线索",
+          "body": "同一患者的不同病灶可能有不同免疫状态。肿瘤边缘、肿瘤实质、转移病灶和外周血记录的也不是同一件事。治疗前后配对活检、单细胞分析和空间成像，能够帮助研究者观察免疫细胞在哪里、治疗后哪些细胞群发生变化。\n\n空间关系和治疗前后的变化可以提供机制线索，但不足以证明某个组合方案一定因此有效。还要结合干预设计和临床结局判断。",
+          "source_ids": []
+        },
+        {
+          "section_id": "H024-SEC-07",
+          "title": "研究技术",
+          "body": "本专题的技术卡包括 PD-L1 免疫组织化学和多重成像、肿瘤基因组与新抗原分析、治疗前后配对活检、随机组合治疗研究，以及免疫相关不良事件记录。",
+          "source_ids": []
+        },
+        {
+          "section_id": "H024-SEC-08",
+          "title": "科研参考范围",
+          "body": "本页仅供科研参考，不提供用药建议，也不将任何单一标志物作为普遍治疗预测标准。",
+          "source_ids": []
+        }
+      ],
+      "methods": [
+        {
+          "method_id": "H024-M001",
+          "display_order": 1,
+          "category": "组织标志物",
+          "title": "PD-L1 免疫组织化学与多重蛋白成像",
+          "principle": "免疫组织化学可在病理切片上检测程序性死亡配体1（PD-L1）；多重成像可同时识别肿瘤细胞、免疫细胞和空间位置。",
+          "answers": "用于描述PD-L1所在的细胞类型、评分方式及其与局部免疫细胞的关系。",
+          "sample_design": "说明抗体克隆、评分算法、阈值、样本部位、固定方式、取样时间和治疗方案；配对治疗前后样本时应保留病灶一致性。",
+          "limitations": "不同抗体、评分方法和癌症类型中的结果不能默认互换；PD-L1阳性或阴性不能单独预测所有检查点治疗的结局。",
+          "source_ids": [
+            "H024S001",
+            "H024S005",
+            "H024S019"
+          ],
+          "workflow": "设计阶段先确定：说明抗体克隆、评分算法、阈值、样本部位、固定方式、取样时间和治疗方案；配对治疗前后样本时应保留病灶一致性。 在治疗前后样本中并行记录靶点表达、免疫细胞状态、组织位置和药物暴露；组合干预先在机制模型中比较，再用独立患者样本或前瞻性研究核对。 这项方法的直接测量或计算依据是：免疫组织化学可在病理切片上检测程序性死亡配体1（PD-L1）；多重成像可同时识别肿瘤细胞、免疫细胞和空间位置。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：不同抗体、评分方法和癌症类型中的结果不能默认互换；PD-L1阳性或阴性不能单独预测所有检查点治疗的结局。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "结果可用于描述PD-L1所在的细胞类型、评分方式及其与局部免疫细胞的关系。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        },
+        {
+          "method_id": "H024-M002",
+          "display_order": 2,
+          "category": "分子分层",
+          "title": "肿瘤基因组、新抗原与T细胞受体分析",
+          "principle": "外显子组或靶向测序可描述突变和克隆结构；新抗原算法提出候选抗原肽；T细胞受体测序可观察克隆扩增。",
+          "answers": "用于研究肿瘤抗原性、克隆性和既有免疫反应与检查点治疗之间的关系。",
+          "sample_design": "报告测序深度、肿瘤纯度、变异筛选规则、人类白细胞抗原分型、新抗原算法、样本时间和独立验证。",
+          "limitations": "突变负荷或候选新抗原受多项技术和生物学因素影响，不能直接作为通用的用药阈值。",
+          "source_ids": [
+            "H024S006",
+            "H024S017",
+            "H024S018"
+          ],
+          "workflow": "设计阶段先确定：报告测序深度、肿瘤纯度、变异筛选规则、人类白细胞抗原分型、新抗原算法、样本时间和独立验证。 在治疗前后样本中并行记录靶点表达、免疫细胞状态、组织位置和药物暴露；组合干预先在机制模型中比较，再用独立患者样本或前瞻性研究核对。 这项方法的直接测量或计算依据是：外显子组或靶向测序可描述突变和克隆结构；新抗原算法提出候选抗原肽；T细胞受体测序可观察克隆扩增。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：突变负荷或候选新抗原受多项技术和生物学因素影响，不能直接作为通用的用药阈值。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "结果可用于研究肿瘤抗原性、克隆性和既有免疫反应与检查点治疗之间的关系。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        },
+        {
+          "method_id": "H024-M003",
+          "display_order": 3,
+          "category": "动态组织研究",
+          "title": "治疗前后配对活检、单细胞与空间分析",
+          "principle": "配对病灶样本结合单细胞转录组、空间转录组或多重成像，可观察治疗过程中肿瘤细胞和免疫微环境的共同变化。",
+          "answers": "用于回答治疗前的组织状态、治疗后的细胞变化及其与反应或耐药之间的关联。",
+          "sample_design": "记录每次活检的病灶、时间、组织处理、细胞回收率、空间分辨率和临床影像或反应评价。",
+          "limitations": "病灶之间可存在明显差异；纵向关联提供机制线索，不能单独证明某项联合治疗的因果作用。",
+          "source_ids": [
+            "H024S005",
+            "H024S007",
+            "H024S020"
+          ],
+          "workflow": "设计阶段先确定：记录每次活检的病灶、时间、组织处理、细胞回收率、空间分辨率和临床影像或反应评价。 在治疗前后样本中并行记录靶点表达、免疫细胞状态、组织位置和药物暴露；组合干预先在机制模型中比较，再用独立患者样本或前瞻性研究核对。 这项方法的直接测量或计算依据是：配对病灶样本结合单细胞转录组、空间转录组或多重成像，可观察治疗过程中肿瘤细胞和免疫微环境的共同变化。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：病灶之间可存在明显差异；纵向关联提供机制线索，不能单独证明某项联合治疗的因果作用。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "结果主要回答治疗前的组织状态、治疗后的细胞变化及其与反应或耐药之间的关联。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        },
+        {
+          "method_id": "H024-M004",
+          "display_order": 4,
+          "category": "临床证据",
+          "title": "随机组合治疗研究",
+          "principle": "随机对照研究在明确癌症、治疗阶段和方案下比较检查点单药、双免疫联合或与化疗等其他治疗联合后的结局与毒性。",
+          "answers": "用于评价一个完整方案在特定人群中是否改善预设终点，并同时量化不良事件。",
+          "sample_design": "保留分期、治疗线次、随机化、对照组、全部联用药物、分层因素、主要终点、随访和严重不良事件。",
+          "limitations": "不同癌症、线次、剂量和对照方案的试验不能据此进行简单横向排名。",
+          "source_ids": [
+            "H024S008",
+            "H024S009",
+            "H024S010",
+            "H024S011",
+            "H024S012",
+            "H024S016"
+          ],
+          "workflow": "设计阶段先确定：保留分期、治疗线次、随机化、对照组、全部联用药物、分层因素、主要终点、随访和严重不良事件。 在治疗前后样本中并行记录靶点表达、免疫细胞状态、组织位置和药物暴露；组合干预先在机制模型中比较，再用独立患者样本或前瞻性研究核对。 这项方法的直接测量或计算依据是：随机对照研究在明确癌症、治疗阶段和方案下比较检查点单药、双免疫联合或与化疗等其他治疗联合后的结局与毒性。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：不同癌症、线次、剂量和对照方案的试验不能据此进行简单横向排名。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "结果可用于评价一个完整方案在特定人群中是否改善预设终点，并同时量化不良事件。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        },
+        {
+          "method_id": "H024-M005",
+          "display_order": 5,
+          "category": "安全性",
+          "title": "免疫相关不良事件的系统记录",
+          "principle": "检查点治疗可影响多个器官。临床研究通过预设分级、停药和治疗记录，描述免疫相关不良事件的发生、时间和处理。",
+          "answers": "用于比较完整方案的获益与伤害，并识别不同治疗阶段中需要特别留意的风险。",
+          "sample_design": "记录基线合并症、既往自身免疫史、治疗剂量、事件分级、发生时间、停药、免疫抑制处理和长期结局。",
+          "limitations": "不良事件发生率受人群、监测强度和方案影响；不能从单项研究外推到所有检查点组合。",
+          "source_ids": [
+            "H024S008",
+            "H024S013",
+            "H024S014",
+            "H024S015"
+          ],
+          "workflow": "设计阶段先确定：记录基线合并症、既往自身免疫史、治疗剂量、事件分级、发生时间、停药、免疫抑制处理和长期结局。 在治疗前后样本中并行记录靶点表达、免疫细胞状态、组织位置和药物暴露；组合干预先在机制模型中比较，再用独立患者样本或前瞻性研究核对。 这项方法的直接测量或计算依据是：检查点治疗可影响多个器官。临床研究通过预设分级、停药和治疗记录，描述免疫相关不良事件的发生、时间和处理。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：不良事件发生率受人群、监测强度和方案影响；不能从单项研究外推到所有检查点组合。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "结果可用于比较完整方案的获益与伤害，并识别不同治疗阶段中需要特别留意的风险。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        }
+      ],
+      "references": [
+        {
+          "source_id": "H024S001",
+          "title": "PD-L1 as a biomarker of response to immune-checkpoint inhibitors",
+          "journal": "Nature Reviews Clinical Oncology",
+          "published_date": "2021-02-12",
+          "doi": "10.1038/s41571-021-00473-5",
+          "pmid": "",
+          "url": "https://www.nature.com/articles/s41571-021-00473-5",
+          "source_type": "review",
+          "study_context": "multiple tumour types",
+          "study_design": "peer-reviewed review",
+          "usable_for": "assay and disease-context boundaries",
+          "limitations": "review; not an independent validation cohort",
+          "authors": "Doroshow DB et al."
+        },
+        {
+          "source_id": "H024S002",
+          "title": "Improved survival with ipilimumab in patients with metastatic melanoma",
+          "journal": "New England Journal of Medicine",
+          "published_date": "2010-08-19",
+          "doi": "10.1056/NEJMoa1003466",
+          "pmid": "20525992",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/20525992/",
+          "source_type": "primary_research",
+          "study_context": "previously treated metastatic melanoma",
+          "study_design": "randomized phase 3 trial",
+          "usable_for": "disease-setting-specific survival evidence",
+          "limitations": "older regimen and melanoma-specific population",
+          "authors": "Hodi FS et al."
+        },
+        {
+          "source_id": "H024S003",
+          "title": "Safety activity and immune correlates of anti-PD-1 antibody in cancer",
+          "journal": "New England Journal of Medicine",
+          "published_date": "2012-06-28",
+          "doi": "10.1056/NEJMoa1200690",
+          "pmid": "22658127",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/22658127/",
+          "source_type": "primary_research",
+          "study_context": "advanced solid tumours",
+          "study_design": "early-phase multi-cohort trial",
+          "usable_for": "early activity and immune-correlate framework",
+          "limitations": "non-randomized dose-escalation and expansion design",
+          "authors": "Topalian SL et al."
+        },
+        {
+          "source_id": "H024S004",
+          "title": "Safety and activity of anti-PD-L1 antibody in patients with advanced cancer",
+          "journal": "New England Journal of Medicine",
+          "published_date": "2012-06-28",
+          "doi": "10.1056/NEJMoa1200694",
+          "pmid": "22658128",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/22658128/",
+          "source_type": "primary_research",
+          "study_context": "advanced cancers",
+          "study_design": "early-phase multi-cohort trial",
+          "usable_for": "early clinical activity and immune toxicity",
+          "limitations": "not a comparative efficacy trial",
+          "authors": "Brahmer JR et al."
+        },
+        {
+          "source_id": "H024S005",
+          "title": "PD-1 blockade induces responses by inhibiting adaptive immune resistance",
+          "journal": "Nature",
+          "published_date": "2014-11-27",
+          "doi": "10.1038/nature13954",
+          "pmid": "25428505",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/25428505/",
+          "source_type": "primary_research",
+          "study_context": "metastatic melanoma biopsies",
+          "study_design": "paired tissue and clinical-correlative study",
+          "usable_for": "pre-treatment immune context and response association",
+          "limitations": "small disease-specific cohort; association is not universal prediction",
+          "authors": "Tumeh PC et al."
+        },
+        {
+          "source_id": "H024S006",
+          "title": "Genomic correlates of response to CTLA-4 blockade in metastatic melanoma",
+          "journal": "Science",
+          "published_date": "2015-10-09",
+          "doi": "10.1126/science.aad0095",
+          "pmid": "26359337",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/26359337/",
+          "source_type": "primary_research",
+          "study_context": "metastatic melanoma treated with CTLA-4 blockade",
+          "study_design": "clinical genomic cohort with validation",
+          "usable_for": "genomic-response associations",
+          "limitations": "not a single clinically sufficient biomarker",
+          "authors": "Van Allen EM et al."
+        },
+        {
+          "source_id": "H024S007",
+          "title": "Tumor and microenvironment evolution during immunotherapy with nivolumab",
+          "journal": "Cell",
+          "published_date": "2017-10-19",
+          "doi": "10.1016/j.cell.2017.09.028",
+          "pmid": "29053996",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/29053996/",
+          "source_type": "primary_research",
+          "study_context": "metastatic melanoma on nivolumab",
+          "study_design": "longitudinal patient-sample study",
+          "usable_for": "on-treatment tumour and microenvironment change",
+          "limitations": "observational longitudinal cohort",
+          "authors": "Riaz N et al."
+        },
+        {
+          "source_id": "H024S008",
+          "title": "Combined nivolumab and ipilimumab or monotherapy in untreated melanoma",
+          "journal": "New England Journal of Medicine",
+          "published_date": "2015-07-02",
+          "doi": "10.1056/NEJMoa1504030",
+          "pmid": "26027431",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/26027431/",
+          "source_type": "primary_research",
+          "study_context": "untreated advanced melanoma",
+          "study_design": "randomized phase 3 trial",
+          "usable_for": "combination activity and toxicity in melanoma",
+          "limitations": "specific dosing and melanoma setting",
+          "authors": "Larkin J et al."
+        },
+        {
+          "source_id": "H024S009",
+          "title": "Overall survival with combined nivolumab and ipilimumab in advanced melanoma",
+          "journal": "New England Journal of Medicine",
+          "published_date": "2017-09-21",
+          "doi": "10.1056/NEJMoa1709684",
+          "pmid": "28889792",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/28889792/",
+          "source_type": "primary_research",
+          "study_context": "advanced melanoma",
+          "study_design": "randomized phase 3 follow-up",
+          "usable_for": "long-term survival and toxicity context",
+          "limitations": "melanoma-specific trial",
+          "authors": "Wolchok JD et al."
+        },
+        {
+          "source_id": "H024S010",
+          "title": "Nivolumab plus ipilimumab versus sunitinib in advanced renal-cell carcinoma",
+          "journal": "New England Journal of Medicine",
+          "published_date": "2018-04-05",
+          "doi": "10.1056/NEJMoa1712126",
+          "pmid": "29562145",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/29562145/",
+          "source_type": "primary_research",
+          "study_context": "previously untreated advanced renal-cell carcinoma",
+          "study_design": "randomized phase 3 trial",
+          "usable_for": "cancer-specific first-line comparison",
+          "limitations": "risk group and comparator define interpretation",
+          "authors": "Motzer RJ et al."
+        },
+        {
+          "source_id": "H024S011",
+          "title": "Nivolumab plus ipilimumab in advanced non-small-cell lung cancer",
+          "journal": "New England Journal of Medicine",
+          "published_date": "2019-11-21",
+          "doi": "10.1056/NEJMoa1910231",
+          "pmid": "31562796",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/31562796/",
+          "source_type": "primary_research",
+          "study_context": "advanced NSCLC",
+          "study_design": "randomized phase 3 trial",
+          "usable_for": "NSCLC combination outcomes",
+          "limitations": "trial population and PD-L1 strata limit extrapolation",
+          "authors": "Hellmann MD et al."
+        },
+        {
+          "source_id": "H024S012",
+          "title": "First-line nivolumab plus ipilimumab combined with two cycles of chemotherapy in patients with non-small-cell lung cancer",
+          "journal": "Lancet Oncology",
+          "published_date": "2021-02-01",
+          "doi": "",
+          "pmid": "33476593",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/33476593/",
+          "source_type": "primary_research",
+          "study_context": "first-line advanced NSCLC",
+          "study_design": "randomized phase 3 trial",
+          "usable_for": "regimen-specific survival evidence",
+          "limitations": "co-intervention prevents an isolated ICI-combination claim",
+          "authors": "Paz-Ares L et al."
+        },
+        {
+          "source_id": "H024S013",
+          "title": "Adjuvant nivolumab plus ipilimumab or nivolumab alone in resected stage IV melanoma with no evidence of disease",
+          "journal": "Lancet",
+          "published_date": "2022-10-01",
+          "doi": "",
+          "pmid": "36099927",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/36099927/",
+          "source_type": "primary_research",
+          "study_context": "resected stage IV melanoma with no evidence of disease",
+          "study_design": "randomized phase 2 trial",
+          "usable_for": "adjuvant setting and toxicity",
+          "limitations": "placebo comparison does not establish monotherapy superiority",
+          "authors": "Livingstone E et al."
+        },
+        {
+          "source_id": "H024S014",
+          "title": "Adjuvant therapy of nivolumab combined with ipilimumab versus nivolumab alone in patients with resected stage IIIB-D or stage IV melanoma",
+          "journal": "Journal of Clinical Oncology",
+          "published_date": "2022-09-26",
+          "doi": "",
+          "pmid": "36162037",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/36162037/",
+          "source_type": "primary_research",
+          "study_context": "resected stage IIIB-D or IV melanoma",
+          "study_design": "randomized phase 3 trial",
+          "usable_for": "negative combination comparison and toxicity",
+          "limitations": "adjuvant-only setting",
+          "authors": "Weber JS et al."
+        },
+        {
+          "source_id": "H024S015",
+          "title": "Nivolumab with or without ipilimumab in patients with previously treated stage IV squamous cell lung cancer",
+          "journal": "Journal of Clinical Oncology",
+          "published_date": "2021-07-29",
+          "doi": "",
+          "pmid": "34264316",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/34264316/",
+          "source_type": "primary_research",
+          "study_context": "previously treated stage IV squamous NSCLC",
+          "study_design": "randomized cooperative-group trial",
+          "usable_for": "negative line-specific comparison",
+          "limitations": "different line and histology from first-line trials",
+          "authors": "Gettinger S et al."
+        },
+        {
+          "source_id": "H024S016",
+          "title": "Pembrolizumab plus chemotherapy versus chemotherapy alone for first-line treatment of advanced oesophageal cancer",
+          "journal": "Lancet",
+          "published_date": "2021-08-28",
+          "doi": "",
+          "pmid": "34454674",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/34454674/",
+          "source_type": "primary_research",
+          "study_context": "previously untreated advanced oesophageal cancer",
+          "study_design": "randomized phase 3 trial",
+          "usable_for": "combination and PD-L1-score context",
+          "limitations": "chemotherapy co-intervention and disease subtype matter",
+          "authors": "Sun JM et al."
+        },
+        {
+          "source_id": "H024S017",
+          "title": "Cancer immunology. Mutational landscape determines sensitivity to PD-1 blockade in non-small cell lung cancer",
+          "journal": "Science",
+          "published_date": "2015-04-03",
+          "doi": "10.1126/science.aaa1348",
+          "pmid": "25765070",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/25765070/",
+          "source_type": "primary_research",
+          "study_context": "NSCLC treated with pembrolizumab",
+          "study_design": "clinical genomic cohort",
+          "usable_for": "mutation burden and response association",
+          "limitations": "small cohort; not a universal threshold",
+          "authors": "Rizvi NA et al."
+        },
+        {
+          "source_id": "H024S018",
+          "title": "Clonal neoantigens elicit T cell immunoreactivity and sensitivity to immune checkpoint blockade",
+          "journal": "Science",
+          "published_date": "2016-03-25",
+          "doi": "10.1126/science.aaf1490",
+          "pmid": "26940869",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/26940869/",
+          "source_type": "primary_research",
+          "study_context": "NSCLC and melanoma immunotherapy cohorts",
+          "study_design": "genomic and clinical-correlative study",
+          "usable_for": "clonal neoantigen context and response associations",
+          "limitations": "heterogeneous retrospective datasets",
+          "authors": "McGranahan N et al."
+        },
+        {
+          "source_id": "H024S019",
+          "title": "PD-L1 expression in gastric cancer: interchangeability of 22C3 and 28-8 pharmDx assays for responses to immunotherapy",
+          "journal": "Modern Pathology",
+          "published_date": "2021-05-17",
+          "doi": "",
+          "pmid": "34002009",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/34002009/",
+          "source_type": "primary_research",
+          "study_context": "55 gastric-cancer samples",
+          "study_design": "retrospective assay-comparison study",
+          "usable_for": "assay agreement in a defined setting",
+          "limitations": "small single-centre retrospective cohort",
+          "authors": "Ahn S; Kim KM"
+        },
+        {
+          "source_id": "H024S020",
+          "title": "Intratumoural administration and tumour tissue targeting of immunotherapies",
+          "journal": "Nature Reviews Clinical Oncology",
+          "published_date": "2021-05-18",
+          "doi": "10.1038/s41571-021-00507-y",
+          "pmid": "",
+          "url": "https://www.nature.com/articles/s41571-021-00507-y",
+          "source_type": "review",
+          "study_context": "tumour-targeted immunotherapy",
+          "study_design": "peer-reviewed review",
+          "usable_for": "tissue-access and delivery context",
+          "limitations": "review; not proof for a given combination",
+          "authors": "Melero I et al."
+        }
+      ],
+      "shared_findings": [
+        {
+          "finding_id": "H024-C01",
+          "display_order": 1,
+          "title": "检查点阻断恢复的是特定免疫反应，不是笼统地增强免疫",
+          "shared_result": "检查点阻断能够解除部分T细胞激活或效应阶段的限制，但是否出现反应取决于抗原、免疫细胞状态、组织位置和既往治疗。\n\nCTLA-4与PD-1或PD-L1作用环节不同；不同药物、剂量、癌症和治疗阶段中的免疫反应与毒性不能合并为单一机制。",
+          "research_use": "结合治疗前后病灶活检、免疫细胞表型、组织定位、受体和配体检测、纵向血液样本及规范临床结局。",
+          "boundary": "早期多癌种队列证明通路可被干预，不等于所有癌症或患者都能获得相同结果。",
+          "source_ids": [
+            "H024S002",
+            "H024S003",
+            "H024S004",
+            "H024S005",
+            "H024S007"
+          ]
+        },
+        {
+          "finding_id": "H024-C02",
+          "display_order": 2,
+          "title": "PD-L1、突变负荷和新抗原只能在明确检测与疾病语境中解释",
+          "shared_result": "PD-L1表达、突变负荷、克隆性新抗原和既有T细胞浸润可以描述治疗前的不同免疫条件，但没有一个指标在全部癌症和检查点方案中构成普遍预测标准。\n\n抗体克隆、评分算法、阈值、样本部位和取样时间会改变PD-L1结果；突变与新抗原指标也受测序、算法、癌种和克隆结构影响。",
+          "research_use": "报告检测平台、样本来源、阈值、治疗方案、预设分析、独立验证和治疗前后变化；将伴随诊断语境与探索性关联分开。",
+          "boundary": "不得把单一研究中的关联写成通用用药门槛，也不得把不同PD-L1检测或癌种中的阈值默认互换。",
+          "source_ids": [
+            "H024S001",
+            "H024S005",
+            "H024S006",
+            "H024S007",
+            "H024S017",
+            "H024S018",
+            "H024S019"
+          ]
+        },
+        {
+          "finding_id": "H024-C03",
+          "display_order": 3,
+          "title": "联合治疗的价值由疾病阶段、对照方案和组合构成共同决定",
+          "shared_result": "随机研究显示若干明确组合在特定晚期黑色素瘤、肾癌、非小细胞肺癌和食管癌语境中改善了预设结局，同时伴随不同程度的毒性。\n\n联合两种检查点药物与检查点加化疗不是同一干预；一线晚期治疗、术后辅助治疗和既往治疗后的比较也不能混用。",
+          "research_use": "保留癌症亚型、分期、治疗线次、全部联用药物、随机对照、主要终点、随访和分级毒性。",
+          "boundary": "不能依据某一阳性随机试验得出联合治疗普遍优于单药，也不能跨方案或癌症进行简单疗效排序。",
+          "source_ids": [
+            "H024S008",
+            "H024S009",
+            "H024S010",
+            "H024S011",
+            "H024S012",
+            "H024S016"
+          ]
+        },
+        {
+          "finding_id": "H024-C04",
+          "display_order": 4,
+          "title": "阴性随机研究和增加的毒性共同限定联合方案的边界",
+          "shared_result": "在部分辅助治疗黑色素瘤和既往治疗的鳞状非小细胞肺癌研究中，联合方案没有优于PD-1单药，并增加严重不良事件，直接反驳了联合越多越好的概括。\n\n不同研究的治疗目的、无病状态、对照组、剂量和随访不同；一项阴性结果也不能否定组合在其他明确语境中的价值。",
+          "research_use": "优先呈现随机对照、绝对获益与伤害、停药、严重不良事件和长期结局，并与阳性研究按语境并列。",
+          "boundary": "不得省略不一致或阴性研究；也不能脱离试验条件把毒性或无效结论扩展到所有组合。",
+          "source_ids": [
+            "H024S013",
+            "H024S014",
+            "H024S015"
+          ]
+        },
+        {
+          "finding_id": "H024-C05",
+          "display_order": 5,
+          "title": "组织位置和治疗前后变化比单次静态检测更接近机制问题",
+          "shared_result": "检查点治疗发生在具体组织环境中。治疗前已有的免疫细胞位置、治疗中的细胞扩增和肿瘤或微环境变化，可帮助解释为何同一通路在不同病灶中表现不同。\n\n外周血、肿瘤边缘、肿瘤实质和不同转移病灶反映的免疫状态不同；局部递送与系统治疗也不能按同一暴露解释。",
+          "research_use": "使用配对治疗前后病灶、多区域或空间测量、纵向血液样本和功能读出，并记录病灶部位及治疗时间。",
+          "boundary": "空间关系和治疗相关变化可以支持机制线索，但不能单独证明某种组合的因果机制或预测患者获益。",
+          "source_ids": [
+            "H024S005",
+            "H024S007",
+            "H024S020"
+          ]
+        }
+      ]
+    },
+    {
+      "topic_id": "H027",
+      "title": "分子分层与功能精准肿瘤学",
+      "topic_role": "research_deep_dive",
+      "overview": "分子分层与功能精准肿瘤学试图回答：一份患者肿瘤样本中，哪些分子和功能信息值得继续验证，哪些候选干预可以进入比较。测序可以描述变异、通路和细胞状态，功能模型可以观察活细胞对药物或其他扰动的反应，但两者都可能受到样本代表性、建模失败和周转时间影响。\n\n本方向从基因组和转录组检测、患者来源类器官或短期培养、药物和遗传扰动、免疫共培养及配对临床样本出发，集中处理三类问题：分子信号能否提出可检验候选；功能模型是否保留与治疗反应有关的特征；分子与功能证据如何通过预设标准、独立队列和临床终点互相校验。相关性、体外反应和患者结局属于不同证据层级。\n\n比较公开研究时，需要同时交代样本来源、癌种和治疗方案、检测平台、模型成功率、传代与培养条件、药物暴露、反应阈值、病例流失和临床终点。模型命中不能直接等同于治疗建议，少量配对病例也不能证明普遍临床效用。患者来源模型专题处理建模保真，液体活检专题处理循环信号；本页聚焦分子与功能证据怎样共同支持候选分层。",
+      "sections": [
+        {
+          "section_id": "H027-SEC-01",
+          "title": "比较不同研究时应先看什么",
+          "body": "| 比较内容 | 应记录的信息 | 关系到什么判断 |\n| --- | --- | --- |\n| 分层依据 | 基因、转录、蛋白、病理或临床特征 | 研究按什么把患者或样本分组 |\n| 原始材料 | 原发或转移病灶、取样时间、肿瘤含量 | 模型和检测代表的是哪一部分肿瘤 |\n| 模型建立 | 建模成功率、培养时间、传代和细胞组成 | 哪些患者样本实际进入了后续测试 |\n| 功能读出 | 药物、剂量、暴露时间、反应阈值 | 观察到的是哪一种实验反应 |\n| 验证方式 | 独立患者、外部队列、真实决策和临床结局 | 结果停留在研究线索，还是接近临床效用 |",
+          "source_ids": []
+        },
+        {
+          "section_id": "H027-SEC-02",
+          "title": "分子信息和功能检测各自提供什么",
+          "body": "分子检测可以发现肿瘤中的变异、表达状态和通路特征，也可以帮助确定值得进一步研究的候选方案。它并不总能回答肿瘤细胞是否会对某种药物产生反应。不同变异在不同癌症、不同克隆背景和不同治疗阶段中的意义可能不同。\n\n患者来源功能检测从另一个方向补充信息：将活细胞或组织模型暴露于明确处理条件，观察存活、增殖、死亡或通路变化。功能反应同样需要解释。它受样本质量、模型组成、培养条件和药物暴露方式影响，不能脱离这些条件独立成立。",
+          "source_ids": [
+            "H027S001",
+            "H027S002",
+            "H027S014",
+            "H027S015",
+            "H027S020"
+          ]
+        },
+        {
+          "section_id": "H027-SEC-03",
+          "title": "模型建立本身会筛选样本",
+          "body": "类器官、患者来源异种移植和其他模型可以保留一部分原始肿瘤的特征，也会在建立过程中丢失或选择一部分细胞。取材部位、取样时机、培养基、基质和传代都会影响最终模型中保留下来的细胞群。\n\n因此，研究不能只报告成功建立的模型。建模成功率、失败原因、从取样到获得结果的时间，以及模型与原组织在哪些层面进行了比较，都应该进入结果。尤其在病情进展快的患者中，周转时间会决定一项检测能否进入真实的决策窗口。",
+          "source_ids": [
+            "H027S003",
+            "H027S009",
+            "H027S010",
+            "H027S012",
+            "H027S013",
+            "H027S016",
+            "H027S017",
+            "H027S018",
+            "H027S019"
+          ]
+        },
+        {
+          "section_id": "H027-SEC-04",
+          "title": "模型与患者反应的一致性，要限定到具体方案",
+          "body": "胃肠道、胰腺和直肠癌研究表明，患者来源模型可以在部分明确的化疗、放疗或组合方案中呈现与患者反应相近的差异。这些研究为功能分层提供了临床有效性线索。\n\n但不同研究使用的治疗方案、反应阈值和临床终点不相同。有的模型适合比较一种方案，却未必能预测另一种方案。即使观察到一致性，也还需要前瞻性设计和独立队列来确认它在实际工作中是否稳定可用。",
+          "source_ids": [
+            "H027S004",
+            "H027S005",
+            "H027S006",
+            "H027S007",
+            "H027S008"
+          ]
+        },
+        {
+          "section_id": "H027-SEC-05",
+          "title": "免疫共培养补上了一部分缺口",
+          "body": "纯肿瘤类器官通常缺少免疫细胞。将患者来源肿瘤类器官与自体淋巴细胞共同培养，可以观察部分抗原相关反应、细胞因子变化和T细胞克隆变化。这让研究者能够提出肿瘤—免疫相互作用的实验问题。\n\n共培养系统仍然是简化模型。它很难完整重建血管、基质、器官间作用和长期系统性免疫。离体系统中的反应不能直接替代人体免疫治疗结果。",
+          "source_ids": []
+        },
+        {
+          "section_id": "H027-SEC-06",
+          "title": "从研究性检测到临床效用，还缺哪一步",
+          "body": "分析有效性回答检测能否稳定重复，临床有效性回答结果是否与患者反应或结局相关。临床效用还要继续追问：使用检测是否改变了决策，并给患者带来总体获益。\n\n讨论一项检测的临床效用，需要确认结果能在决策前返回，解释规则已经预先设定，失败病例得到完整报告。比较研究还要显示，使用检测改变了实际决策，并带来总体获益。\n\n模型与患者反应相关，或分子特征与某种方案相匹配，仍主要属于临床有效性线索。它们很重要，但不等同于已经证明可以据此为个体选择治疗。",
+          "source_ids": []
+        },
+        {
+          "section_id": "H027-SEC-07",
+          "title": "研究技术",
+          "body": "本专题的技术卡包括肿瘤分子检测与变异解释、患者来源类器官药敏、患者来源异种移植、肿瘤—免疫共培养，以及前瞻性功能精准肿瘤学研究设计。",
+          "source_ids": []
+        },
+        {
+          "section_id": "H027-SEC-08",
+          "title": "科研参考范围",
+          "body": "本页仅供科研参考，不提供个体化治疗建议或疗效承诺。",
+          "source_ids": []
+        }
+      ],
+      "methods": [
+        {
+          "method_id": "H027-M001",
+          "display_order": 1,
+          "category": "分子分层",
+          "title": "肿瘤分子检测与变异解释",
+          "principle": "靶向测序、外显子组、转录组、蛋白组和病理资料可描述肿瘤的变异、通路状态和亚型。变异解释把检测结果与已知证据、试验条件和候选研究问题相连。",
+          "answers": "用于提出可检验的分层假设，或确定值得在功能模型中进一步比较的候选干预。",
+          "sample_design": "记录样本类型和肿瘤含量、检测面板、测序深度、变异过滤、注释规则、报告时限和未获得结果的样本。",
+          "limitations": "发现可匹配变异不等于该变异驱动疾病，也不等于患者会从相应方案获益。",
+          "source_ids": [
+            "H027S001",
+            "H027S014",
+            "H027S015"
+          ],
+          "workflow": "设计阶段先确定：记录样本类型和肿瘤含量、检测面板、测序深度、变异过滤、注释规则、报告时限和未获得结果的样本。 将分子检测结果与功能模型、药物处理和患者层结局分别整理；先用分子分层提出候选，再在匹配模型中检验功能反应，最后评估是否存在可重复的临床关联。 这项方法的直接测量或计算依据是：靶向测序、外显子组、转录组、蛋白组和病理资料可描述肿瘤的变异、通路状态和亚型。变异解释把检测结果与已知证据、试验条件和候选研究问题相连。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：发现可匹配变异不等于该变异驱动疾病，也不等于患者会从相应方案获益。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "结果可用于提出可检验的分层假设，或确定值得在功能模型中进一步比较的候选干预。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        },
+        {
+          "method_id": "H027-M002",
+          "display_order": 2,
+          "category": "患者来源模型",
+          "title": "类器官建立与药物反应检测",
+          "principle": "患者来源类器官由手术或活检材料在三维培养条件下建立，可在活细胞水平比较药物、放疗或组合处理后的存活、形态和分子变化。",
+          "answers": "用于观察同一癌症中不同患者样本对明确处理方案的反应差异。",
+          "sample_design": "记录原始病灶、取样时间、建模成功率、培养基、传代、基质、测试开始时间、药物暴露和反应阈值；应报告无法建立或无法测试的病例。",
+          "limitations": "培养会选择部分细胞群，且通常缺少完整免疫、血管和系统性暴露；模型反应不能直接写成患者获益。",
+          "source_ids": [
+            "H027S004",
+            "H027S005",
+            "H027S006",
+            "H027S007",
+            "H027S008"
+          ],
+          "workflow": "设计阶段先确定：记录原始病灶、取样时间、建模成功率、培养基、传代、基质、测试开始时间、药物暴露和反应阈值；应报告无法建立或无法测试的病例。 将分子检测结果与功能模型、药物处理和患者层结局分别整理；先用分子分层提出候选，再在匹配模型中检验功能反应，最后评估是否存在可重复的临床关联。 这项方法的直接测量或计算依据是：患者来源类器官由手术或活检材料在三维培养条件下建立，可在活细胞水平比较药物、放疗或组合处理后的存活、形态和分子变化。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：培养会选择部分细胞群，且通常缺少完整免疫、血管和系统性暴露；模型反应不能直接写成患者获益。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "结果可用于观察同一癌症中不同患者样本对明确处理方案的反应差异。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        },
+        {
+          "method_id": "H027-M003",
+          "display_order": 3,
+          "category": "患者来源模型",
+          "title": "异种移植与多模型比较",
+          "principle": "患者来源异种移植将患者肿瘤植入免疫缺陷动物，可观察肿瘤生长和药物反应；与类器官配合时可比较不同模型对原始肿瘤的保留和实验周转时间。",
+          "answers": "用于研究体内药物暴露、肿瘤生长和部分组织结构，并补充离体模型的限制。",
+          "sample_design": "记录取材部位、移植成功率、动物品系、传代、随机化、给药方案、肿瘤测量和与原组织的分子或病理比较。",
+          "limitations": "建立周期长且存在移植选择；免疫缺陷宿主不能重建完整人类免疫治疗环境。",
+          "source_ids": [
+            "H027S003",
+            "H027S013",
+            "H027S016",
+            "H027S019"
+          ],
+          "workflow": "设计阶段先确定：记录取材部位、移植成功率、动物品系、传代、随机化、给药方案、肿瘤测量和与原组织的分子或病理比较。 将分子检测结果与功能模型、药物处理和患者层结局分别整理；先用分子分层提出候选，再在匹配模型中检验功能反应，最后评估是否存在可重复的临床关联。 这项方法的直接测量或计算依据是：患者来源异种移植将患者肿瘤植入免疫缺陷动物，可观察肿瘤生长和药物反应；与类器官配合时可比较不同模型对原始肿瘤的保留和实验周转时间。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：建立周期长且存在移植选择；免疫缺陷宿主不能重建完整人类免疫治疗环境。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "结果可用于研究体内药物暴露、肿瘤生长和部分组织结构，并补充离体模型的限制。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        },
+        {
+          "method_id": "H027-M004",
+          "display_order": 4,
+          "category": "功能系统",
+          "title": "肿瘤类器官与自体免疫细胞共培养",
+          "principle": "将患者来源肿瘤类器官与外周血或组织来源的自体免疫细胞共同培养，可观察抗原相关杀伤、细胞因子和T细胞克隆变化。",
+          "answers": "用于研究肿瘤与免疫细胞在可控制条件下的相互作用，并评估候选免疫扰动。",
+          "sample_design": "明确肿瘤与免疫细胞是否来自同一患者，记录细胞比例、培养时间、抗原呈递、功能读出、对照条件和重复次数。",
+          "limitations": "共培养不能完整保留血管、基质和全身免疫环境，不能替代人体免疫治疗试验。",
+          "source_ids": [
+            "H027S001",
+            "H027S011",
+            "H027S017",
+            "H027S018"
+          ],
+          "workflow": "设计阶段先确定：明确肿瘤与免疫细胞是否来自同一患者，记录细胞比例、培养时间、抗原呈递、功能读出、对照条件和重复次数。 将分子检测结果与功能模型、药物处理和患者层结局分别整理；先用分子分层提出候选，再在匹配模型中检验功能反应，最后评估是否存在可重复的临床关联。 这项方法的直接测量或计算依据是：将患者来源肿瘤类器官与外周血或组织来源的自体免疫细胞共同培养，可观察抗原相关杀伤、细胞因子和T细胞克隆变化。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：共培养不能完整保留血管、基质和全身免疫环境，不能替代人体免疫治疗试验。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "结果可用于研究肿瘤与免疫细胞在可控制条件下的相互作用，并评估候选免疫扰动。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        },
+        {
+          "method_id": "H027-M005",
+          "display_order": 5,
+          "category": "验证研究",
+          "title": "前瞻性功能精准肿瘤学研究设计",
+          "principle": "前瞻性研究在治疗决策前完成分子或功能检测，并预设阈值和解释规则，再比较检测结果、实际决策和患者结局。",
+          "answers": "用于评价一项检测是否具有分析有效性、临床有效性，以及使用检测能否改善治疗决策或结局。",
+          "sample_design": "记录连续入组、检测失败、周转时间、预设阈值、独立验证、实际决策改变、对照策略、疗效、毒性和随访。",
+          "limitations": "单臂可行性研究和模型—患者一致性研究不能替代比较研究；本技术卡不构成诊疗流程。",
+          "source_ids": [
+            "H027S001",
+            "H027S014",
+            "H027S015",
+            "H027S020"
+          ],
+          "workflow": "设计阶段先确定：记录连续入组、检测失败、周转时间、预设阈值、独立验证、实际决策改变、对照策略、疗效、毒性和随访。 将分子检测结果与功能模型、药物处理和患者层结局分别整理；先用分子分层提出候选，再在匹配模型中检验功能反应，最后评估是否存在可重复的临床关联。 这项方法的直接测量或计算依据是：前瞻性研究在治疗决策前完成分子或功能检测，并预设阈值和解释规则，再比较检测结果、实际决策和患者结局。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：单臂可行性研究和模型—患者一致性研究不能替代比较研究；本技术卡不构成诊疗流程。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "结果可用于评价一项检测是否具有分析有效性、临床有效性，以及使用检测能否改善治疗决策或结局。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        }
+      ],
+      "references": [
+        {
+          "source_id": "H027S001",
+          "title": "Functional precision oncology using patient-derived assays",
+          "journal": "Nature Reviews Clinical Oncology",
+          "published_date": "2023-03-13",
+          "doi": "10.1038/s41571-023-00745-2",
+          "pmid": "",
+          "url": "https://www.nature.com/articles/s41571-023-00745-2",
+          "source_type": "review",
+          "study_context": "patient-derived cancer assays across tumour types",
+          "study_design": "peer-reviewed review",
+          "usable_for": "functional-precision-oncology scope and validation requirements",
+          "limitations": "review; clinical utility requires prospective validation",
+          "authors": "van Renterghem J et al."
+        },
+        {
+          "source_id": "H027S002",
+          "title": "Functional precision cancer medicine-ready for prime time?",
+          "journal": "Nature Medicine",
+          "published_date": "2017-10-01",
+          "doi": "10.1038/nm.4445",
+          "pmid": "29020004",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/29020004/",
+          "source_type": "commentary",
+          "study_context": "functional precision oncology",
+          "study_design": "expert perspective",
+          "usable_for": "conceptual distinction between genomic and functional evidence",
+          "limitations": "commentary; not a validation study",
+          "authors": "Letai A"
+        },
+        {
+          "source_id": "H027S003",
+          "title": "Personalized in vitro and in vivo cancer models to guide precision medicine",
+          "journal": "Cancer Discovery",
+          "published_date": "2017-12-01",
+          "doi": "10.1158/2159-8290.CD-17-0174",
+          "pmid": "29101279",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/29101279/",
+          "source_type": "primary_research",
+          "study_context": "diverse advanced cancers",
+          "study_design": "prospective model-generation study",
+          "usable_for": "feasibility of integrated model generation",
+          "limitations": "model establishment and treatment matching were not randomized clinical utility",
+          "authors": "Pauli C et al."
+        },
+        {
+          "source_id": "H027S004",
+          "title": "Patient-derived organoids model treatment response of metastatic gastrointestinal cancers",
+          "journal": "Science",
+          "published_date": "2018-02-23",
+          "doi": "10.1126/science.aao2774",
+          "pmid": "29472484",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/29472484/",
+          "source_type": "primary_research",
+          "study_context": "heavily pretreated metastatic gastrointestinal cancers",
+          "study_design": "patient-model and clinical-response comparison",
+          "usable_for": "concordance examples between model and patient treatment response",
+          "limitations": "selected modelled cases; not prospective clinical-utility validation",
+          "authors": "Vlachogiannis G et al."
+        },
+        {
+          "source_id": "H027S005",
+          "title": "Patient-derived organoids can predict response to chemotherapy in metastatic colorectal cancer patients",
+          "journal": "Science Translational Medicine",
+          "published_date": "2019-09-18",
+          "doi": "10.1126/scitranslmed.aay2574",
+          "pmid": "31578162",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/31578162/",
+          "source_type": "primary_research",
+          "study_context": "metastatic colorectal cancer",
+          "study_design": "prospective cohort with organoid drug testing",
+          "usable_for": "defined chemotherapy-response prediction study",
+          "limitations": "sample size and regimen-specific setting",
+          "authors": "Ooft SN et al."
+        },
+        {
+          "source_id": "H027S006",
+          "title": "Organoid profiling identifies common responders to chemotherapy in pancreatic cancer",
+          "journal": "Cancer Discovery",
+          "published_date": "2018-12-01",
+          "doi": "10.1158/2159-8290.CD-18-0349",
+          "pmid": "30385498",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/30385498/",
+          "source_type": "primary_research",
+          "study_context": "pancreatic ductal adenocarcinoma",
+          "study_design": "patient-derived organoid profiling study",
+          "usable_for": "drug-response heterogeneity and candidate phenotypes",
+          "limitations": "preclinical and limited clinical correlation",
+          "authors": "Tiriac H et al."
+        },
+        {
+          "source_id": "H027S007",
+          "title": "Patient-derived organoids predict chemoradiation responses of locally advanced rectal cancer patients",
+          "journal": "Cell Stem Cell",
+          "published_date": "2020-01-02",
+          "doi": "10.1016/j.stem.2020.01.005",
+          "pmid": "32084342",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/32084342/",
+          "source_type": "primary_research",
+          "study_context": "locally advanced rectal cancer",
+          "study_design": "patient-model response comparison",
+          "usable_for": "chemoradiation response modelling",
+          "limitations": "single treatment setting and cohort",
+          "authors": "Yao Y et al."
+        },
+        {
+          "source_id": "H027S008",
+          "title": "A rectal cancer organoid platform to study individual responses to chemoradiation",
+          "journal": "Nature Medicine",
+          "published_date": "2019-10-01",
+          "doi": "10.1038/s41591-019-0546-9",
+          "pmid": "31308544",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/31308544/",
+          "source_type": "primary_research",
+          "study_context": "rectal cancer patients and organoid models",
+          "study_design": "translational platform study",
+          "usable_for": "individual variation in chemoradiation response",
+          "limitations": "platform development; not a treatment-assignment trial",
+          "authors": "Ganesh K et al."
+        },
+        {
+          "source_id": "H027S009",
+          "title": "An organoid platform for ovarian cancer captures intra- and interpatient heterogeneity",
+          "journal": "Nature Medicine",
+          "published_date": "2019-05-01",
+          "doi": "10.1038/s41591-019-0422-6",
+          "pmid": "31061535",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/31061535/",
+          "source_type": "primary_research",
+          "study_context": "ovarian cancer samples",
+          "study_design": "patient-derived organoid biobank study",
+          "usable_for": "heterogeneity and model diversity",
+          "limitations": "does not establish patient-level treatment benefit",
+          "authors": "Kopper O et al."
+        },
+        {
+          "source_id": "H027S010",
+          "title": "A living biobank of breast cancer organoids captures disease heterogeneity",
+          "journal": "Cell",
+          "published_date": "2018-10-04",
+          "doi": "10.1016/j.cell.2018.09.011",
+          "pmid": "30245049",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/30245049/",
+          "source_type": "primary_research",
+          "study_context": "breast cancer and normal breast samples",
+          "study_design": "living-biobank study",
+          "usable_for": "model diversity and longitudinal material",
+          "limitations": "not a prospective treatment-selection study",
+          "authors": "Sachs N et al."
+        },
+        {
+          "source_id": "H027S011",
+          "title": "Generation of tumor-reactive T cells by co-culture of peripheral blood lymphocytes and tumor organoids",
+          "journal": "Cell",
+          "published_date": "2018-08-23",
+          "doi": "10.1016/j.cell.2018.07.009",
+          "pmid": "30174180",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/30174180/",
+          "source_type": "primary_research",
+          "study_context": "colorectal and non-small-cell lung cancer",
+          "study_design": "ex-vivo co-culture study",
+          "usable_for": "immune-competent functional-assay design",
+          "limitations": "ex-vivo system; not clinical-response validation",
+          "authors": "Dijkstra KK et al."
+        },
+        {
+          "source_id": "H027S012",
+          "title": "A patient-derived glioblastoma organoid model and biobank recapitulates inter- and intra-tumoral heterogeneity",
+          "journal": "Cell",
+          "published_date": "2020-05-14",
+          "doi": "10.1016/j.cell.2020.04.043",
+          "pmid": "32433929",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/32433929/",
+          "source_type": "primary_research",
+          "study_context": "glioblastoma patients",
+          "study_design": "organoid biobank and model-validation study",
+          "usable_for": "model fidelity and inter-patient variability",
+          "limitations": "model evidence; no therapeutic utility conclusion",
+          "authors": "Jacob F et al."
+        },
+        {
+          "source_id": "H027S013",
+          "title": "Patient-derived xenografts effectively capture responses to oncology therapy in a heterogeneous cohort of patients with solid tumors",
+          "journal": "Cancer Research",
+          "published_date": "2017-08-01",
+          "doi": "10.1158/0008-5472.CAN-17-0344",
+          "pmid": "",
+          "url": "https://doi.org/10.1158/0008-5472.CAN-17-0344",
+          "source_type": "primary_research",
+          "study_context": "heterogeneous solid tumours",
+          "study_design": "patient-derived xenograft response study",
+          "usable_for": "cross-tumour model-response comparisons",
+          "limitations": "engraftment selection and time constraints",
+          "authors": "Izumchenko E et al."
+        },
+        {
+          "source_id": "H027S014",
+          "title": "Molecularly matched therapy and outcomes in the I-PREDICT study",
+          "journal": "Nature Medicine",
+          "published_date": "2019-05-01",
+          "doi": "10.1038/s41591-019-0437-2",
+          "pmid": "31061537",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/31061537/",
+          "source_type": "primary_research",
+          "study_context": "advanced refractory cancers",
+          "study_design": "prospective precision-oncology navigation study",
+          "usable_for": "feasibility of molecularly matched treatment strategy",
+          "limitations": "single-arm heterogeneous study; matching score is not a universal efficacy measure",
+          "authors": "Sicklick JK et al."
+        },
+        {
+          "source_id": "H027S015",
+          "title": "NCI-COG Pediatric MATCH and precision-oncology trial frameworks",
+          "journal": "National Cancer Institute",
+          "published_date": "2021-01-01",
+          "doi": "",
+          "pmid": "",
+          "url": "https://www.cancer.gov/research/infrastructure/clinical-trials/nci-supported/nci-match",
+          "source_type": "program",
+          "study_context": "molecularly profiled cancer trials",
+          "study_design": "official trial-program documentation",
+          "usable_for": "why genomic matching requires protocol-defined populations and endpoints",
+          "limitations": "program description; not a clinical-effect estimate",
+          "authors": "National Cancer Institute"
+        },
+        {
+          "source_id": "H027S016",
+          "title": "Patient-Derived Models of Cancer Program",
+          "journal": "National Cancer Institute",
+          "published_date": "2024-06-28",
+          "doi": "",
+          "pmid": "",
+          "url": "https://www.cancer.gov/about-nci/organization/dcb/research-programs/pdmc",
+          "source_type": "government_program",
+          "study_context": "common patient samples across PDMC model types",
+          "study_design": "official research program",
+          "usable_for": "model-specific strengths and limitations",
+          "limitations": "program record; does not establish clinical benefit",
+          "authors": "National Cancer Institute"
+        },
+        {
+          "source_id": "H027S017",
+          "title": "Organoids in cancer research",
+          "journal": "Nature Reviews Cancer",
+          "published_date": "2018-07-01",
+          "doi": "10.1038/s41568-018-0007-6",
+          "pmid": "29725044",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/29725044/",
+          "source_type": "review",
+          "study_context": "cancer organoid systems",
+          "study_design": "peer-reviewed review",
+          "usable_for": "model strengths and failure modes",
+          "limitations": "review; not clinical validation",
+          "authors": "Drost J; Clevers H"
+        },
+        {
+          "source_id": "H027S018",
+          "title": "Tumor organoids as a cancer research model",
+          "journal": "Nature Reviews Cancer",
+          "published_date": "2021-05-01",
+          "doi": "10.1038/s41568-021-00367-4",
+          "pmid": "",
+          "url": "https://doi.org/10.1038/s41568-021-00367-4",
+          "source_type": "review",
+          "study_context": "cancer organoid systems",
+          "study_design": "peer-reviewed review",
+          "usable_for": "model strengths and failure modes",
+          "limitations": "review; not clinical validation",
+          "authors": "Verduin M et al."
+        },
+        {
+          "source_id": "H027S019",
+          "title": "Human primary liver cancer-derived organoid cultures for disease modeling and drug screening",
+          "journal": "Nature Medicine",
+          "published_date": "2017-12-01",
+          "doi": "10.1038/nm.4438",
+          "pmid": "29131160",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/29131160/",
+          "source_type": "primary_research",
+          "study_context": "primary liver cancers",
+          "study_design": "organoid biobank and functional-screening study",
+          "usable_for": "disease modelling and drug-screening feasibility",
+          "limitations": "preclinical model system; not clinical utility validation",
+          "authors": "Broutier L et al."
+        },
+        {
+          "source_id": "H027S020",
+          "title": "Patient-derived organoids as a predictive biomarker for treatment response in cancer patients",
+          "journal": "npj Precision Oncology",
+          "published_date": "2021-03-15",
+          "doi": "10.1038/s41698-021-00168-1",
+          "pmid": "",
+          "url": "https://www.nature.com/articles/s41698-021-00168-1",
+          "source_type": "review",
+          "study_context": "published patient-derived-organoid treatment-response studies",
+          "study_design": "peer-reviewed review and pooled evidence assessment",
+          "usable_for": "criteria for PDO response-test translation",
+          "limitations": "review; underlying studies retain regimen- and cohort-specific limits",
+          "authors": "Veninga V; Voest EE"
+        }
+      ],
+      "shared_findings": [
+        {
+          "finding_id": "H027-C01",
+          "display_order": 1,
+          "title": "分子分层提出候选方向，功能检测观察活样本是否响应",
+          "shared_result": "分子检测能够识别变异、通路和亚型，功能检测则在患者来源材料中观察对候选药物或组合的反应。两类信息互补，但都需要明确的验证和结局。\n\n分子匹配依赖变异注释和证据等级；功能检测依赖样本是否成功建立、模型保留的细胞组成和药物暴露条件。",
+          "research_use": "配对分子测序、患者来源模型、预设药物面板和临床资料；报告匹配规则、功能阈值、周转时间和未成功检测的病例。",
+          "boundary": "分子可匹配或离体敏感都不能单独证明患者会获益，也不能据此生成个体治疗建议。",
+          "source_ids": [
+            "H027S001",
+            "H027S002",
+            "H027S014",
+            "H027S015",
+            "H027S020"
+          ]
+        },
+        {
+          "finding_id": "H027-C02",
+          "display_order": 2,
+          "title": "能够成功建立的模型只代表被筛选后的部分样本",
+          "shared_result": "患者来源类器官、异种移植和细胞模型可保留部分组织学、分子和功能特征，但建模成功率、取材部位和培养选择会改变最终被研究的细胞群。\n\n不同癌症、原发与转移病灶、治疗前后样本及模型平台的成功率和建立时间不同；培养过程对基质、免疫和克隆组成的保留也不同。",
+          "research_use": "记录全部入组样本、建模成功与失败、取样部位和时间、培养时长、传代、配对原组织比较及可进入功能测试的比例。",
+          "boundary": "不能只报告成功模型，也不能把模型与原组织在少数指标上的相似写成完整保真或患者代表性。",
+          "source_ids": [
+            "H027S003",
+            "H027S009",
+            "H027S010",
+            "H027S012",
+            "H027S013",
+            "H027S016",
+            "H027S017",
+            "H027S018",
+            "H027S019"
+          ]
+        },
+        {
+          "finding_id": "H027-C03",
+          "display_order": 3,
+          "title": "模型与患者反应的一致性必须限定到具体药物、病灶和时间窗",
+          "shared_result": "胃肠道、胰腺和直肠癌研究显示，患者来源模型可以在部分明确方案中复现患者间的反应差异，为功能分层提供临床有效性线索。\n\n不同研究使用化疗、放疗或组合方案，模型建立时间、评价阈值和临床反应标准不同；同一模型对不同药物的预测表现也可能不同。",
+          "research_use": "采用前瞻性入组、预设阈值、盲法比较、具体方案和病灶配对，报告所有可评估与不可评估病例及独立验证。",
+          "boundary": "某一研究中的一致性不能外推到所有癌症或药物，回顾性一致也不等于使用该检测能改善结局。",
+          "source_ids": [
+            "H027S004",
+            "H027S005",
+            "H027S006",
+            "H027S007",
+            "H027S008"
+          ]
+        },
+        {
+          "finding_id": "H027-C04",
+          "display_order": 4,
+          "title": "免疫共培养补充了部分肿瘤—免疫作用，仍不等于完整人体环境",
+          "shared_result": "自体淋巴细胞与肿瘤类器官共培养可观察抗原相关反应，并补充纯肿瘤模型缺少免疫细胞的问题。模型仍缺少或简化了血管、基质、器官间作用和长期系统性免疫。\n\n免疫细胞来自外周血还是组织、是否与肿瘤配对、培养时长和细胞比例都会改变结果；不同共培养系统不能直接横向比较。",
+          "research_use": "报告肿瘤与免疫细胞来源、配对关系、细胞组成、培养基、时间、抗原呈递、功能读出和重复性。",
+          "boundary": "离体免疫反应不能直接代表检查点治疗或工程化细胞治疗在患者体内的效果。",
+          "source_ids": [
+            "H027S001",
+            "H027S011",
+            "H027S016",
+            "H027S017",
+            "H027S018"
+          ]
+        },
+        {
+          "finding_id": "H027-C05",
+          "display_order": 5,
+          "title": "临床效用要求检测结果及时、可行动并在比较研究中改善决策或结局",
+          "shared_result": "从研究性分层走向临床效用，需要可重复的检测、预设解释规则、在决策时间内返回结果，并证明结果改变了管理且带来净获益。\n\n分子匹配、类器官药敏和异种移植的周转时间、失败率与可行动性不同；先进癌症单臂研究和前瞻性比较研究回答的问题不同。",
+          "research_use": "采用独立验证、前瞻性决策研究或随机比较，报告周转时间、失败病例、实际决策改变、疗效、毒性和成本或资源影响。",
+          "boundary": "模型反应与患者反应相关属于临床有效性线索，不等于已经证明检测指导治疗具有临床效用。",
+          "source_ids": [
+            "H027S001",
+            "H027S003",
+            "H027S014",
+            "H027S015",
+            "H027S016",
+            "H027S020"
+          ]
+        }
+      ]
+    },
+    {
+      "topic_id": "H037",
+      "title": "液体活检与循环分子标志物",
+      "topic_role": "research_deep_dive",
+      "overview": "液体活检从血液或其他体液中寻找循环肿瘤信号，常见对象包括 ctDNA、cfDNA 的突变和甲基化、片段组、循环肿瘤细胞、RNA、蛋白及细胞外囊泡。信号通常很低，采血、血浆分离、提取、文库构建和错误抑制都会改变结果，因此样本前处理和检出边界与检测平台同样重要。\n\n本方向从数字聚合酶链式反应、纠错测序、甲基化和片段组分析、循环肿瘤细胞与蛋白测量以及纵向采样出发，集中处理三类问题：低丰度分子如何被可靠检测；治疗后分子残留和连续变化能否被追踪；晚期分型、治疗监测、术后残留和无症状筛查等不同用途需要哪些独立证据。分析性能、组织对应、纵向变化和临床结局不能互相替代。\n\n比较公开研究时，需要同时交代体液类型、癌种和疾病阶段、采样时间、前处理、靶标和错误校正、检出限、阳性定义、对照及临床终点。同一种技术换用到另一种用途时，需要重新验证；检测到循环信号也不能单独说明组织中的病灶位置或治疗获益。分子诊断专题聚焦分析性能，本页聚焦循环标志物的采样、追踪与临床关联边界。",
+      "sections": [
+        {
+          "section_id": "H037-SEC-01",
+          "title": "比较不同研究时应先看什么",
+          "body": "| 比较内容 | 应记录的信息 | 关系到什么判断 |\n| --- | --- | --- |\n| 预期用途 | 分型、治疗监测、术后残留、复发风险或早期检测 | 研究要解决什么问题 |\n| 样本流程 | 采血管、处理时间、血浆体积、提取和保存 | 低丰度信号是否可能受到前处理影响 |\n| 检测对象 | 突变、甲基化、片段组或多分析物 | 测量的是哪一类循环特征 |\n| 验证层级 | 分析性能、独立临床验证、决策改变和长期结局 | 结果可以支持到哪一步 |\n| 时间设计 | 治疗前后、术后、随访或筛查间隔 | 单次结果还是连续变化与结局相关 |",
+          "source_ids": []
+        },
+        {
+          "section_id": "H037-SEC-02",
+          "title": "样本前处理决定了许多看不见的差异",
+          "body": "cfDNA 含量低，血细胞在采血后裂解会增加背景DNA。采血管、从采血到离心的时间、血浆分离方式、冻融次数和提取流程，都可能改变最终能够检测到的信号。\n\n因此，报告检测限和测序深度还不够。研究需要同时说明样本怎样采集和处理，使用了哪些参考材料，如何控制错误，以及有多少样本因质量或信号不足未能得到结果。前处理不一致时，不宜把不同队列的低频结果直接比较。",
+          "source_ids": [
+            "H037S001",
+            "H037S002",
+            "H037S016",
+            "H037S017"
+          ]
+        },
+        {
+          "section_id": "H037-SEC-03",
+          "title": "ctDNA 可以追踪分子残留，也有检出边界",
+          "body": "肿瘤知情检测通常先在肿瘤组织中确定患者特异性变异，再在血浆中追踪这些变异。肺癌、结直肠癌和乳腺癌的纵向研究显示，治疗后持续或再次出现的ctDNA与更高的复发风险相关，有时早于影像或临床复发。\n\n这类结果说明ctDNA可用于研究分子残留和时间关系。它并不说明依据ctDNA结果调整治疗一定改善生存。ctDNA阴性也不能排除所有残留病灶；不同癌症、术后取样时间和检测策略会影响检出率。",
+          "source_ids": [
+            "H037S008",
+            "H037S009",
+            "H037S010",
+            "H037S011",
+            "H037S012",
+            "H037S018"
+          ]
+        },
+        {
+          "section_id": "H037-SEC-04",
+          "title": "治疗监测应看连续变化，而不是一次结果",
+          "body": "在系统治疗过程中，ctDNA或片段组信号的连续变化可以补充影像和临床评价。要解释这种变化，需要先有治疗前基线，再按预设时间重复取样，并将分子信号与治疗方案、影像、肿瘤负荷和临床结局配对。\n\n单次信号升高或降低很难独立说明治疗有效、耐药或需要改变方案。不同肿瘤的DNA释放量不同，靶向突变、甲基化和片段组平台的阈值也不同。研究性监测不等于已验证的临床决策工具。",
+          "source_ids": [
+            "H037S013",
+            "H037S014",
+            "H037S016",
+            "H037S017"
+          ]
+        },
+        {
+          "section_id": "H037-SEC-05",
+          "title": "多癌种早期检测仍要回到人群结局",
+          "body": "多分析物、甲基化和片段组检测在病例对照和独立验证研究中可以识别部分癌症信号。前瞻性研究也表明，阳性结果后再配合影像和诊断流程具有可行性。\n\n是否适合人群筛查，不能只看灵敏度和特异性。还需要在目标人群中评估阳性预测值、后续检查、过度诊断、间期癌症、伤害和长期结局。现有研究并未证明多癌种早期检测已经降低癌症死亡。",
+          "source_ids": [
+            "H037S004",
+            "H037S005",
+            "H037S006",
+            "H037S007"
+          ]
+        },
+        {
+          "section_id": "H037-SEC-06",
+          "title": "同一种技术换一个用途，就要重新验证",
+          "body": "分析有效性回答“能否稳定测到”；临床有效性回答“结果是否与特定临床状态相关”；临床效用回答“使用结果是否改善决策或结局”。这三个问题不能合并。\n\n一项检测即使在晚期癌症分型中表现良好，也不能自动用于术后复发监测或无症状人群筛查。每个用途都需要独立的样本、阈值、参考标准和结局研究。",
+          "source_ids": []
+        },
+        {
+          "section_id": "H037-SEC-07",
+          "title": "研究技术",
+          "body": "本专题的技术卡包括血液采集与cfDNA前处理、肿瘤知情ctDNA测序和数字定量、血浆单独的突变、甲基化和片段组分析、纵向分子残留研究，以及多癌种早期检测的独立验证设计。",
+          "source_ids": []
+        },
+        {
+          "section_id": "H037-SEC-08",
+          "title": "科研参考范围",
+          "body": "本页仅供科研参考，不提供癌症筛查、诊断、个体风险判断或治疗建议。",
+          "source_ids": []
+        }
+      ],
+      "methods": [
+        {
+          "method_id": "H037-M001",
+          "display_order": 1,
+          "category": "样本前处理",
+          "title": "血液采集、血浆分离与游离DNA提取",
+          "principle": "循环游离DNA（cfDNA）含量低且易受白细胞裂解影响。采血管、处理时间、离心、血浆体积、保存和提取方式会改变最终可测信号。",
+          "answers": "用于建立可重复的样本流程，并解释不同队列或平台之间的检测差异。",
+          "sample_design": "记录采血管、从采血到离心的时间、双离心流程、血浆体积、冻融次数、提取试剂、回收量和质控材料。",
+          "limitations": "前处理不一致可造成假阳性、背景升高或低丰度信号丢失；不能只用测序深度解释性能差异。",
+          "source_ids": [
+            "H037S001",
+            "H037S002",
+            "H037S016",
+            "H037S017"
+          ],
+          "workflow": "设计阶段先确定：记录采血管、从采血到离心的时间、双离心流程、血浆体积、冻融次数、提取试剂、回收量和质控材料。 从采血、保存、分离和建库开始记录前分析条件；将循环分子信号与匹配组织、影像或临床时间点配对，分析性能和临床用途分别评价。 这项方法的直接测量或计算依据是：循环游离DNA（cfDNA）含量低且易受白细胞裂解影响。采血管、处理时间、离心、血浆体积、保存和提取方式会改变最终可测信号。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：前处理不一致可造成假阳性、背景升高或低丰度信号丢失；不能只用测序深度解释性能差异。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "结果可用于建立可重复的样本流程，并解释不同队列或平台之间的检测差异。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        },
+        {
+          "method_id": "H037-M002",
+          "display_order": 2,
+          "category": "靶向检测",
+          "title": "肿瘤知情ctDNA测序与数字定量",
+          "principle": "肿瘤知情检测先从肿瘤组织确定患者特异性变异，再在血浆中追踪这些变异。数字PCR或靶向深度测序可用于纵向定量。",
+          "answers": "用于研究术后分子残留、复发风险和治疗过程中的分子变化。",
+          "sample_design": "保留肿瘤组织与血浆的配对关系、追踪变异数量、血浆量、检测限、采样时间、影像或临床参考标准和缺失样本。",
+          "limitations": "需要肿瘤组织或足够的先验信息；ctDNA阴性并不排除所有残留病灶，阳性也不自动决定治疗。",
+          "source_ids": [
+            "H037S008",
+            "H037S009",
+            "H037S010",
+            "H037S011",
+            "H037S012",
+            "H037S018"
+          ],
+          "workflow": "设计阶段先确定：保留肿瘤组织与血浆的配对关系、追踪变异数量、血浆量、检测限、采样时间、影像或临床参考标准和缺失样本。 从采血、保存、分离和建库开始记录前分析条件；将循环分子信号与匹配组织、影像或临床时间点配对，分析性能和临床用途分别评价。 这项方法的直接测量或计算依据是：肿瘤知情检测先从肿瘤组织确定患者特异性变异，再在血浆中追踪这些变异。数字PCR或靶向深度测序可用于纵向定量。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：需要肿瘤组织或足够的先验信息；ctDNA阴性并不排除所有残留病灶，阳性也不自动决定治疗。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "结果可用于研究术后分子残留、复发风险和治疗过程中的分子变化。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        },
+        {
+          "method_id": "H037-M003",
+          "display_order": 3,
+          "category": "无组织检测",
+          "title": "血浆单独突变、甲基化与片段组分析",
+          "principle": "血浆单独检测可从突变、甲基化或cfDNA片段长度和末端特征中识别循环信号，不必依赖配对肿瘤组织。",
+          "answers": "用于研究晚期癌症分子信号、肿瘤负荷和多癌种检测等问题。",
+          "sample_design": "说明目标人群、血浆量、测序方式、特征选择、错误模型、训练和独立验证集、阈值及癌症信号来源算法。",
+          "limitations": "不同特征的生物学来源和技术误差不同；病例对照性能不能直接换算为无症状人群中的预测价值。",
+          "source_ids": [
+            "H037S003",
+            "H037S004",
+            "H037S006",
+            "H037S014",
+            "H037S015"
+          ],
+          "workflow": "设计阶段先确定：说明目标人群、血浆量、测序方式、特征选择、错误模型、训练和独立验证集、阈值及癌症信号来源算法。 从采血、保存、分离和建库开始记录前分析条件；将循环分子信号与匹配组织、影像或临床时间点配对，分析性能和临床用途分别评价。 这项方法的直接测量或计算依据是：血浆单独检测可从突变、甲基化或cfDNA片段长度和末端特征中识别循环信号，不必依赖配对肿瘤组织。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：不同特征的生物学来源和技术误差不同；病例对照性能不能直接换算为无症状人群中的预测价值。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "结果可用于研究晚期癌症分子信号、肿瘤负荷和多癌种检测等问题。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        },
+        {
+          "method_id": "H037-M004",
+          "display_order": 4,
+          "category": "纵向研究",
+          "title": "分子残留与治疗监测的重复取样设计",
+          "principle": "在手术、辅助治疗或系统治疗前后按预设时间重复采集血浆，并将ctDNA或片段组的变化与影像、病理和临床结局比较。",
+          "answers": "用于判断循环信号是否与复发风险、肿瘤负荷或治疗过程中的变化相关。",
+          "sample_design": "建立基线并记录每次采样的治疗节点、影像时间、分析阈值、缺失样本、随访时长和盲法评估。",
+          "limitations": "提前出现分子信号只说明风险或时间关系；除非有干预比较研究，否则不能推断据此调整治疗会改善结局。",
+          "source_ids": [
+            "H037S009",
+            "H037S010",
+            "H037S011",
+            "H037S012",
+            "H037S013",
+            "H037S014"
+          ],
+          "workflow": "设计阶段先确定：建立基线并记录每次采样的治疗节点、影像时间、分析阈值、缺失样本、随访时长和盲法评估。 从采血、保存、分离和建库开始记录前分析条件；将循环分子信号与匹配组织、影像或临床时间点配对，分析性能和临床用途分别评价。 这项方法的直接测量或计算依据是：在手术、辅助治疗或系统治疗前后按预设时间重复采集血浆，并将ctDNA或片段组的变化与影像、病理和临床结局比较。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：提前出现分子信号只说明风险或时间关系；除非有干预比较研究，否则不能推断据此调整治疗会改善结局。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "结果可用于判断循环信号是否与复发风险、肿瘤负荷或治疗过程中的变化相关。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        },
+        {
+          "method_id": "H037-M005",
+          "display_order": 5,
+          "category": "临床验证",
+          "title": "多癌种早期检测的独立验证与效用研究",
+          "principle": "多癌种早期检测需要在独立样本中验证性能，并在目标筛查人群中评价后续诊断路径、伤害和长期结局。",
+          "answers": "用于区分分析表现、病例对照准确性、前瞻性流程可行性和人群筛查效用。",
+          "sample_design": "明确目标人群、对照来源、癌种和分期构成、预设阈值、诊断流程、阳性预测值、间期癌症、过度检查、伤害和死亡率终点。",
+          "limitations": "高特异性或病例对照准确率不等于降低死亡或产生净获益；本技术卡不构成筛查建议。",
+          "source_ids": [
+            "H037S004",
+            "H037S005",
+            "H037S006",
+            "H037S007",
+            "H037S019",
+            "H037S020"
+          ],
+          "workflow": "设计阶段先确定：明确目标人群、对照来源、癌种和分期构成、预设阈值、诊断流程、阳性预测值、间期癌症、过度检查、伤害和死亡率终点。 从采血、保存、分离和建库开始记录前分析条件；将循环分子信号与匹配组织、影像或临床时间点配对，分析性能和临床用途分别评价。 这项方法的直接测量或计算依据是：多癌种早期检测需要在独立样本中验证性能，并在目标筛查人群中评价后续诊断路径、伤害和长期结局。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：高特异性或病例对照准确率不等于降低死亡或产生净获益；本技术卡不构成筛查建议。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "结果可用于区分分析表现、病例对照准确性、前瞻性流程可行性和人群筛查效用。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        }
+      ],
+      "references": [
+        {
+          "source_id": "H037S001",
+          "title": "Current and future perspectives of liquid biopsies in genomics-driven oncology",
+          "journal": "Nature Reviews Genetics",
+          "published_date": "2019-02-01",
+          "doi": "10.1038/s41576-018-0071-5",
+          "pmid": "30514935",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/30514935/",
+          "source_type": "review",
+          "study_context": "liquid biopsy in oncology",
+          "study_design": "peer-reviewed review",
+          "usable_for": "assay and intended-use framework",
+          "limitations": "review; not clinical-utility proof",
+          "authors": "Heitzer E; Haque IS; Roberts CES; Speicher MR"
+        },
+        {
+          "source_id": "H037S002",
+          "title": "Circulating tumor DNA analysis in patients with cancer: American Society of Clinical Oncology and College of American Pathologists joint review",
+          "journal": "Journal of Clinical Oncology",
+          "published_date": "2018-06-01",
+          "doi": "10.1200/JCO.2018.76.8671",
+          "pmid": "29782464",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/29782464/",
+          "source_type": "consensus",
+          "study_context": "cancer ctDNA testing",
+          "study_design": "professional-society joint review",
+          "usable_for": "evidence hierarchy and limitations",
+          "limitations": "guidance review; not an efficacy trial",
+          "authors": "Merker JD et al."
+        },
+        {
+          "source_id": "H037S003",
+          "title": "Genome-wide cell-free DNA fragmentation in patients with cancer",
+          "journal": "Nature",
+          "published_date": "2019-05-30",
+          "doi": "10.1038/s41586-019-1272-6",
+          "pmid": "31142835",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/31142835/",
+          "source_type": "primary_research",
+          "study_context": "multiple cancer types and controls",
+          "study_design": "case-control assay-development study",
+          "usable_for": "fragmentation features and cancer classification",
+          "limitations": "case-control design; does not establish screening benefit",
+          "authors": "Cristiano S et al."
+        },
+        {
+          "source_id": "H037S004",
+          "title": "Detection and localization of surgically resectable cancers with a multi-analyte blood test",
+          "journal": "Science",
+          "published_date": "2018-02-23",
+          "doi": "10.1126/science.aar3247",
+          "pmid": "29348365",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/29348365/",
+          "source_type": "primary_research",
+          "study_context": "eight non-metastatic cancer types and controls",
+          "study_design": "case-control development study",
+          "usable_for": "multi-analyte detection and localization concept",
+          "limitations": "enriched case-control setting; not population-screening utility",
+          "authors": "Cohen JD et al."
+        },
+        {
+          "source_id": "H037S005",
+          "title": "Feasibility of blood testing combined with PET-CT to screen for cancer and guide intervention",
+          "journal": "Science",
+          "published_date": "2020-07-03",
+          "doi": "10.1126/science.abb9601",
+          "pmid": "32675236",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/32675236/",
+          "source_type": "primary_research",
+          "study_context": "asymptomatic women aged 65-75 years",
+          "study_design": "prospective feasibility study",
+          "usable_for": "screening workflow feasibility",
+          "limitations": "not randomized mortality or net-benefit evidence",
+          "authors": "Lennon AM et al."
+        },
+        {
+          "source_id": "H037S006",
+          "title": "Clinical validation of a targeted methylation-based multi-cancer early detection test using an independent validation set",
+          "journal": "Annals of Oncology",
+          "published_date": "2021-09-01",
+          "doi": "10.1016/j.annonc.2021.05.806",
+          "pmid": "34176681",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/34176681/",
+          "source_type": "primary_research",
+          "study_context": "independent validation case-control cohort",
+          "study_design": "independent validation study",
+          "usable_for": "test specificity and cancer-signal-origin performance",
+          "limitations": "case-control validation; clinical utility remains unproven",
+          "authors": "Klein EA et al."
+        },
+        {
+          "source_id": "H037S007",
+          "title": "Promises and pitfalls of multi-cancer early detection",
+          "journal": "Nature Reviews Clinical Oncology",
+          "published_date": "2025-06-13",
+          "doi": "10.1038/s41571-025-01033-x",
+          "pmid": "",
+          "url": "https://www.nature.com/articles/s41571-025-01033-x",
+          "source_type": "review",
+          "study_context": "multi-cancer early detection",
+          "study_design": "peer-reviewed review",
+          "usable_for": "benefit-harm and evidence-gap framing",
+          "limitations": "review; randomized evidence still needed",
+          "authors": "Wan JCM et al."
+        },
+        {
+          "source_id": "H037S008",
+          "title": "Phylogenetic ctDNA analysis depicts early-stage lung cancer evolution",
+          "journal": "Nature",
+          "published_date": "2017-04-26",
+          "doi": "10.1038/nature23364",
+          "pmid": "28445469",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/28445469/",
+          "source_type": "primary_research",
+          "study_context": "early-stage NSCLC",
+          "study_design": "longitudinal translational cohort",
+          "usable_for": "clonal evolution and residual-disease tracking",
+          "limitations": "single disease; research cohort",
+          "authors": "Abbosh C et al."
+        },
+        {
+          "source_id": "H037S009",
+          "title": "Circulating tumor DNA analysis detects minimal residual disease and predicts recurrence in patients with stage II colon cancer",
+          "journal": "Science Translational Medicine",
+          "published_date": "2016-05-11",
+          "doi": "10.1126/scitranslmed.aaf6219",
+          "pmid": "27169904",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/27169904/",
+          "source_type": "primary_research",
+          "study_context": "resected stage II colon cancer",
+          "study_design": "prospective observational cohort",
+          "usable_for": "postoperative ctDNA and recurrence-risk association",
+          "limitations": "prognostic association does not itself prove intervention benefit",
+          "authors": "Tie J et al."
+        },
+        {
+          "source_id": "H037S010",
+          "title": "Analysis of circulating tumour DNA to monitor disease burden following colorectal cancer surgery",
+          "journal": "Gut",
+          "published_date": "2016-04-01",
+          "doi": "10.1136/gutjnl-2014-308859",
+          "pmid": "25927570",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/25927570/",
+          "source_type": "primary_research",
+          "study_context": "stages I-III colorectal cancer",
+          "study_design": "longitudinal cohort",
+          "usable_for": "postoperative disease burden and recurrence monitoring",
+          "limitations": "single tumour type and observational design",
+          "authors": "Reinert T et al."
+        },
+        {
+          "source_id": "H037S011",
+          "title": "Mutation tracking in circulating tumor DNA predicts relapse in early breast cancer",
+          "journal": "Science Translational Medicine",
+          "published_date": "2015-08-26",
+          "doi": "10.1126/scitranslmed.aab0021",
+          "pmid": "26246150",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/26246150/",
+          "source_type": "primary_research",
+          "study_context": "early breast cancer",
+          "study_design": "longitudinal cohort",
+          "usable_for": "lead time before clinical relapse",
+          "limitations": "small cohort; no management intervention",
+          "authors": "Garcia-Murillas I et al."
+        },
+        {
+          "source_id": "H037S012",
+          "title": "Early detection of molecular residual disease in localized lung cancer by circulating tumor DNA profiling",
+          "journal": "Cancer Discovery",
+          "published_date": "2017-12-01",
+          "doi": "10.1158/2159-8290.CD-17-0716",
+          "pmid": "28978600",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/28978600/",
+          "source_type": "primary_research",
+          "study_context": "localized lung cancer after definitive therapy",
+          "study_design": "retrospective longitudinal cohort",
+          "usable_for": "molecular residual disease and recurrence lead time",
+          "limitations": "small cohort; assay and timing specific",
+          "authors": "Chaudhuri AA et al."
+        },
+        {
+          "source_id": "H037S013",
+          "title": "Minimal residual disease detection using a plasma-only circulating tumor DNA assay in patients with colorectal cancer",
+          "journal": "Clinical Cancer Research",
+          "published_date": "2021-10-01",
+          "doi": "10.1158/1078-0432.CCR-21-2369",
+          "pmid": "",
+          "url": "https://doi.org/10.1158/1078-0432.CCR-21-2369",
+          "source_type": "primary_research",
+          "study_context": "colorectal cancer",
+          "study_design": "clinical assay-validation cohort",
+          "usable_for": "tumour-uninformed monitoring approach",
+          "limitations": "requires indication-specific validation",
+          "authors": "Parikh AR et al."
+        },
+        {
+          "source_id": "H037S014",
+          "title": "Cancer treatment monitoring using cell-free DNA fragmentomes",
+          "journal": "Nature Communications",
+          "published_date": "2024-10-21",
+          "doi": "10.1038/s41467-024-53017-7",
+          "pmid": "",
+          "url": "https://www.nature.com/articles/s41467-024-53017-7",
+          "source_type": "primary_research",
+          "study_context": "colorectal and lung cancer cohorts",
+          "study_design": "assay development with independent evaluation",
+          "usable_for": "tumour burden and treatment-monitoring signal",
+          "limitations": "further prospective longitudinal evaluation needed",
+          "authors": "van 't Erve I et al."
+        },
+        {
+          "source_id": "H037S015",
+          "title": "Programmable Argonaute-mediated variant sequencing of cell-free DNA",
+          "journal": "Nature Communications",
+          "published_date": "2026-01-15",
+          "doi": "10.1038/s41467-025-66893-4",
+          "pmid": "",
+          "url": "https://www.nature.com/articles/s41467-025-66893-4",
+          "source_type": "primary_research",
+          "study_context": "multi-cancer cfDNA research samples",
+          "study_design": "method development study",
+          "usable_for": "low-frequency variant-detection performance",
+          "limitations": "method study; not a clinical screening standard",
+          "authors": "Guo S et al."
+        },
+        {
+          "source_id": "H037S016",
+          "title": "An ultrasensitive method for quantitating circulating tumor DNA with broad patient coverage",
+          "journal": "Nature Medicine",
+          "published_date": "2014-05-01",
+          "doi": "10.1038/nm.3519",
+          "pmid": "24658074",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/24658074/",
+          "source_type": "primary_research",
+          "study_context": "non-small-cell lung cancer and controls",
+          "study_design": "assay-development study",
+          "usable_for": "sensitivity specificity and quantitative tracking",
+          "limitations": "development cohorts; platform-specific performance",
+          "authors": "Newman AM et al."
+        },
+        {
+          "source_id": "H037S017",
+          "title": "Integrated digital error suppression for improved detection of circulating tumor DNA",
+          "journal": "Nature Biotechnology",
+          "published_date": "2016-06-01",
+          "doi": "10.1038/nbt.3520",
+          "pmid": "27294563",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/27294563/",
+          "source_type": "primary_research",
+          "study_context": "solid tumours and reference materials",
+          "study_design": "analytical method study",
+          "usable_for": "ultralow-frequency detection design",
+          "limitations": "technical performance does not establish clinical indication",
+          "authors": "Newman AM et al."
+        },
+        {
+          "source_id": "H037S018",
+          "title": "Personalized detection of circulating tumor DNA antedates breast cancer metastatic recurrence",
+          "journal": "Clinical Cancer Research",
+          "published_date": "2019-07-01",
+          "doi": "10.1158/1078-0432.CCR-18-3663",
+          "pmid": "30992300",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/30992300/",
+          "source_type": "primary_research",
+          "study_context": "early breast cancer after curative treatment",
+          "study_design": "retrospective longitudinal validation cohort",
+          "usable_for": "recurrence lead time in independent samples",
+          "limitations": "retrospective and management effect unknown",
+          "authors": "Coombes RC et al."
+        },
+        {
+          "source_id": "H037S019",
+          "title": "ESMO recommendations on the use of circulating tumour DNA assays for patients with cancer: a report from the ESMO Precision Medicine Working Group",
+          "journal": "Annals of Oncology",
+          "published_date": "2022-06-01",
+          "doi": "10.1016/j.annonc.2022.05.520",
+          "pmid": "",
+          "url": "https://doi.org/10.1016/j.annonc.2022.05.520",
+          "source_type": "consensus",
+          "study_context": "solid-tumour ctDNA testing",
+          "study_design": "professional-society recommendations",
+          "usable_for": "indication-specific evidence requirements",
+          "limitations": "guidance is not a treatment-effect estimate",
+          "authors": "Pascual J et al.; ESMO Precision Medicine Working Group"
+        },
+        {
+          "source_id": "H037S020",
+          "title": "Liquid biopsy enters the clinic-implementation issues and future challenges",
+          "journal": "Nature Reviews Clinical Oncology",
+          "published_date": "2021-05-01",
+          "doi": "10.1038/s41571-020-00457-x",
+          "pmid": "",
+          "url": "https://doi.org/10.1038/s41571-020-00457-x",
+          "source_type": "review",
+          "study_context": "clinical liquid-biopsy translation",
+          "study_design": "peer-reviewed review",
+          "usable_for": "translation barriers and clinical utility",
+          "limitations": "review; individual use cases need primary evidence",
+          "authors": "Ignatiadis M et al."
+        }
+      ],
+      "shared_findings": [
+        {
+          "finding_id": "H037-C01",
+          "display_order": 1,
+          "title": "液体活检首先是样本和测量问题",
+          "shared_result": "循环肿瘤信号通常稀少，并受到肿瘤负荷、释放方式、清除和采样流程影响。采血、处理、提取、测序与错误抑制共同决定能否稳定检出。\n\n突变、甲基化、片段组和多分析物检测测量的对象不同；血浆、血清、尿液和其他体液也不能直接按同一性能比较。",
+          "research_use": "记录样本基质、采集与处理时间、体积、提取回收、参考材料、空白限、检测限、精密度、测序深度、错误模型和失败率。",
+          "boundary": "低频信号可被检测属于分析性能，不能直接写成癌症早筛、诊断、复发判断或治疗获益。",
+          "source_ids": [
+            "H037S001",
+            "H037S002",
+            "H037S003",
+            "H037S015",
+            "H037S016",
+            "H037S017"
+          ]
+        },
+        {
+          "finding_id": "H037-C02",
+          "display_order": 2,
+          "title": "病例对照性能和前瞻性可行性尚不能证明多癌种筛查获益",
+          "shared_result": "多分析物和甲基化检测在病例对照或独立验证集中能够识别部分癌症信号，前瞻性研究也显示检测后安排影像和诊断流程具有可行性。\n\n研究中的癌症类型、分期构成、对照来源和患病率会影响灵敏度、特异性和阳性预测值；研究性可行性与人群筛查净获益不是同一终点。",
+          "research_use": "在目标筛查人群中开展预设阈值的前瞻性或随机研究，记录后续检查、过度诊断、间期癌症、伤害、死亡率和长期结局。",
+          "boundary": "不能把富集病例对照中的准确率或一次前瞻性流程研究写成已证明降低癌症死亡。",
+          "source_ids": [
+            "H037S004",
+            "H037S005",
+            "H037S006",
+            "H037S007"
+          ]
+        },
+        {
+          "finding_id": "H037-C03",
+          "display_order": 3,
+          "title": "治疗后持续或再次出现的ctDNA与复发风险相关，但还不是治疗获益证据",
+          "shared_result": "肺癌、结直肠癌和乳腺癌纵向研究反复观察到治疗后ctDNA阳性或再次出现与较高复发风险相关，并可能早于影像或临床复发。\n\n肿瘤知情和血浆单独检测、癌症分期、术后采样时间、辅助治疗和复发定义不同，影响检出率和提前时间。",
+          "research_use": "采用治疗前肿瘤资料、预设连续采样、影像或临床参考标准、盲法、完整随访和独立队列；报告阴性病例与漏检。",
+          "boundary": "提前发现复发风险不等于按ctDNA结果增加或减少治疗能够改善生存，也不构成个体治疗建议。",
+          "source_ids": [
+            "H037S008",
+            "H037S009",
+            "H037S010",
+            "H037S011",
+            "H037S012",
+            "H037S018"
+          ]
+        },
+        {
+          "finding_id": "H037-C04",
+          "display_order": 4,
+          "title": "治疗监测应解释连续变化，而不是给单次结果贴上有效或无效标签",
+          "shared_result": "循环分子信号的连续变化可以补充肿瘤负荷和治疗过程信息，但需要与基线、采样时间、治疗方案、影像和临床结局一起解释。\n\n不同癌症的DNA释放量不同；靶向突变、片段组和血浆单独模型的动态范围、阈值和失败模式也不同。",
+          "research_use": "在治疗前建立基线，按预设时间重复取样，并与影像和临床评价同步；报告生物学变异、分析误差、阈值和外部验证。",
+          "boundary": "单次升降不能直接判定治疗成功、耐药或应否更换方案；研究性监测也不等于已验证的临床决策工具。",
+          "source_ids": [
+            "H037S001",
+            "H037S013",
+            "H037S014",
+            "H037S016",
+            "H037S017"
+          ]
+        },
+        {
+          "finding_id": "H037-C05",
+          "display_order": 5,
+          "title": "同一检测用于分型、监测或筛查时需要重新建立证据",
+          "shared_result": "液体活检是否可用不能只看技术名称。每个预期用途都需要独立证明测得准、结果与相应临床状态相关，以及使用结果是否改善决策或结局。\n\n晚期癌症分子分型、术后残留监测、治疗反应监测和无症状人群筛查的患病率、阈值、比较标准、可接受伤害和临床路径均不同。",
+          "research_use": "为每个预期用途分别记录分析验证、独立患者样本、预设阈值、参考标准、决策改变、获益与伤害及监管状态。",
+          "boundary": "不能把一种用途中的验证迁移成另一用途的结论；本专题不提供诊断、个体风险判断或治疗推荐。",
+          "source_ids": [
+            "H037S002",
+            "H037S006",
+            "H037S007",
+            "H037S019",
+            "H037S020"
+          ]
+        }
+      ]
+    }
+  ]
+}

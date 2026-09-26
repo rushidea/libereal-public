@@ -1,0 +1,106 @@
+User-agent: *
+Allow: /
+Disallow: /api/
+Disallow: /admin/
+Disallow: /account/
+Disallow: /login
+Disallow: /register
+Disallow: /cart
+Disallow: /order
+Disallow: /checkout
+Disallow: /reset-password
+Disallow: /forgot-password
+
+User-agent: bingbot
+Allow: /
+Disallow: /api/
+Disallow: /admin/
+Disallow: /account/
+Disallow: /login
+Disallow: /register
+Disallow: /cart
+Disallow: /order
+Disallow: /checkout
+Disallow: /reset-password
+Disallow: /forgot-password
+
+User-agent: msnbot
+Allow: /
+Disallow: /api/
+Disallow: /admin/
+Disallow: /account/
+Disallow: /login
+Disallow: /register
+Disallow: /cart
+Disallow: /order
+Disallow: /checkout
+Disallow: /reset-password
+Disallow: /forgot-password
+
+User-agent: BingPreview
+Allow: /
+Disallow: /api/
+Disallow: /admin/
+Disallow: /account/
+Disallow: /login
+Disallow: /register
+Disallow: /cart
+Disallow: /order
+Disallow: /checkout
+Disallow: /reset-password
+Disallow: /forgot-password
+
+User-agent: Sogou web spider
+Allow: /
+Disallow: /api/
+Disallow: /admin/
+Disallow: /account/
+Disallow: /login
+Disallow: /register
+Disallow: /cart
+Disallow: /order
+Disallow: /checkout
+Disallow: /reset-password
+Disallow: /forgot-password
+
+User-agent: Sogou inst spider
+Allow: /
+Disallow: /api/
+Disallow: /admin/
+Disallow: /account/
+Disallow: /login
+Disallow: /register
+Disallow: /cart
+Disallow: /order
+Disallow: /checkout
+Disallow: /reset-password
+Disallow: /forgot-password
+
+User-agent: Sogou News Spider
+Allow: /
+Disallow: /api/
+Disallow: /admin/
+Disallow: /account/
+Disallow: /login
+Disallow: /register
+Disallow: /cart
+Disallow: /order
+Disallow: /checkout
+Disallow: /reset-password
+Disallow: /forgot-password
+
+User-agent: Sogou Orion spider
+Allow: /
+Disallow: /api/
+Disallow: /admin/
+Disallow: /account/
+Disallow: /login
+Disallow: /register
+Disallow: /cart
+Disallow: /order
+Disallow: /checkout
+Disallow: /reset-password
+Disallow: /forgot-password
+
+Sitemap: https://libereal.cn/sitemap.xml
+Host: https://libereal.cn

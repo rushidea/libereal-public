@@ -1,0 +1,72 @@
+<view class="page">
+  <view class="card">
+    <image class="brand-logo" src="/images/libereal-logo.png" mode="aspectFit" />
+    <view class="title">LIBEREAL 微信登录</view>
+    <view class="desc">{{message}}</view>
+
+    <view class="challenge" wx:if="{{challengeId}}">
+      <view class="challenge-label">安全登录请求已创建</view>
+      <view class="challenge-value">请确认微信授权以继续登录。</view>
+    </view>
+
+    <view class="manual" wx:if="{{!challengeId && reviewMode}}">
+      <view class="review-panel">
+        <view class="review-title">账号登录</view>
+        <view class="review-desc">
+          请输入 LIBEREAL 账号信息完成登录。
+        </view>
+        <input
+          class="manual-input"
+          value="{{reviewUsername}}"
+          placeholder="邮箱"
+          bindinput="handleReviewUsernameInput"
+        />
+        <input
+          class="manual-input"
+          password
+          value="{{reviewPassword}}"
+          placeholder="密码"
+          bindinput="handleReviewPasswordInput"
+        />
+        <button
+          class="login-button"
+          type="primary"
+          loading="{{reviewLoading}}"
+          disabled="{{reviewLoading || loading || success}}"
+          bindtap="handleReviewLogin"
+        >
+          {{success ? '登录成功' : '登录'}}
+        </button>
+        <view class="{{reviewSuccess ? 'review-message success' : 'review-message'}}" wx:if="{{reviewMessage}}">
+          {{reviewMessage}}
+        </view>
+      </view>
+    </view>
+
+    <view class="direct-entry" wx:if="{{!challengeId && !reviewMode}}">
+      <view class="direct-title">请从网站登录页进入</view>
+      <view class="direct-desc">
+        为保护登录安全，微信登录需要由 LIBEREAL 网站生成一次性登录请求后进入小程序。
+      </view>
+    </view>
+
+    <button
+      wx:if="{{challengeId}}"
+      class="login-button"
+      type="primary"
+      loading="{{loading}}"
+      disabled="{{loading || success}}"
+      bindtap="handleLogin"
+    >
+      {{success ? '授权成功' : '确认微信授权'}}
+    </button>
+
+    <button class="secondary-button" wx:if="{{canRetry}}" bindtap="handleLogin">
+      重新授权
+    </button>
+
+    <view class="tips" wx:if="{{success}}">
+      授权已提交到 LIBEREAL。请返回浏览器，等待页会自动完成登录。
+    </view>
+  </view>
+</view>

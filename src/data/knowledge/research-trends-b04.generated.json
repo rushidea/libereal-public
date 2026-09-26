@@ -1,0 +1,1770 @@
+{
+  "schema_version": "research-deep-dive-public-v0.1",
+  "batch_id": "B04",
+  "title": "微生物组、代谢与慢性炎症",
+  "publication_status": "snapshot_ready",
+  "frontend_status": "snapshot_ready",
+  "topics": [
+    {
+      "topic_id": "H034",
+      "title": "微生物组代谢物与宿主互作",
+      "topic_role": "research_deep_dive",
+      "overview": "微生物组代谢物与宿主互作研究关注微生物、饮食和宿主组织共同产生或转化的分子信号。物种丰度只能说明“有哪些微生物”，不能单独说明“产生了什么代谢物”以及宿主在哪个部位、以何种暴露水平接触这些分子；粪便、血液和组织样本也分别代表不同的生物学层级。\n\n本方向从宏基因组和转录组、非靶向或靶向代谢组、稳定同位素示踪、肠道或其他组织模型、动物干预和人体队列出发，集中处理三类问题：代谢物来自哪些微生物或宿主反应；它们在哪个组织和时间窗口与宿主细胞接触；观察到的关联能否通过通路、受体、剂量和干预实验得到支持。组成、功能、暴露和宿主读出需要放在同一证据框架中。\n\n比较公开研究时，需要同时交代样本部位、饮食和药物、采样时间、测序与代谢物定量方法、批次校正、代谢物来源判定和宿主终点。相关性不能单独证明代谢物驱动疾病，动物或体外干预结果也不能自动外推到人体。代谢性炎症和心代谢多组学专题处理组织与疾病表型，本页聚焦微生物代谢物的来源、暴露和互作证据。",
+      "sections": [
+        {
+          "section_id": "H034-SEC-01",
+          "title": "比较不同研究时应先看什么",
+          "body": "| 比较内容 | 应记录的信息 | 关系到什么判断 |\n| --- | --- | --- |\n| 微生物功能 | 物种或菌株、功能基因、转录活性和饮食底物 | 观察到的是组成差异，还是与代谢功能有关的变化 |\n| 分子来源 | 粪便、血液或组织中的代谢物，宿主酶和饮食背景 | 分子可能来自哪里，能否确定其来源 |\n| 宿主暴露 | 采样部位、浓度、受体或通路及取样时间 | 宿主实际接触到什么，发生在何处 |\n| 研究设计 | 横断面、随访、饮食干预或可控模型 | 结果支持关联、时间关系还是特定机制 |\n| 复现条件 | 地区、饮食、药物、年龄、疾病定义和外部队列 | 一项发现能否用于其他人群或疾病语境 |",
+          "source_ids": []
+        },
+        {
+          "section_id": "H034-SEC-02",
+          "title": "物种组成只是研究起点",
+          "body": "同一种细菌可以包含功能不同的菌株。即使检测到某种细菌丰度发生变化，也还不知道它是否表达了相关通路、是否真的产生了某种分子，以及这些分子能否到达宿主组织。\n\n宏基因组可以提示群落中有哪些基因和通路，宏转录组能补充取样时哪些基因处于转录状态。将这些资料与代谢物定量、饮食记录和宿主测量配对，才能判断功能变化是否与分子产物和宿主反应一致。粪便样本仍有局限：它不能完整代表肠道不同部位，也不能代替组织中的实际暴露。",
+          "source_ids": [
+            "H034S001",
+            "H034S005",
+            "H034S006",
+            "H034S008",
+            "H034S009",
+            "H034S010"
+          ]
+        },
+        {
+          "section_id": "H034-SEC-03",
+          "title": "代谢物的来源往往不止一种",
+          "body": "短链脂肪酸、胆汁酸和色氨酸代谢物是常见的研究对象。它们的形成通常涉及饮食底物、宿主酶和多种微生物的连续加工。以胆汁酸为例，宿主合成初级胆汁酸，肠道微生物再参与后续转化；研究者需要同时看到饮食、微生物功能和不同基质中的代谢物，才可能判断这条路径在特定人群中发生了什么。\n\n稳定同位素示踪、定义菌群和培养体系能帮助确认某个底物是否进入特定代谢路径。它们的优势是条件可控，限制也很明确：剂量、时间和模型环境都可能改变结果，不能把模型中的转化路径直接写成人体中的普遍规律。",
+          "source_ids": [
+            "H034S002",
+            "H034S003",
+            "H034S004",
+            "H034S011",
+            "H034S012",
+            "H034S015",
+            "H034S016",
+            "H034S017",
+            "H034S018",
+            "H034S019"
+          ]
+        },
+        {
+          "section_id": "H034-SEC-04",
+          "title": "宿主在什么部位接触到这些分子",
+          "body": "代谢物是否产生作用，取决于它进入了哪里、浓度多高、停留多久，以及宿主细胞是否具备相应的受体或代谢通路。肠腔、门静脉、外周血和肝脏中的暴露并不相同。粪便或血液浓度变化可以提出线索，但不能直接代表病变组织中的实际暴露。\n\n研究宿主作用时，应在同一设计中测量分子浓度和组织或细胞反应。例如，同时记录代谢物、肠道屏障功能、免疫细胞状态或肝脏代谢功能，并说明取样时间和组织部位。单个代谢物变化本身不足以说明整体生理效果。",
+          "source_ids": [
+            "H034S002",
+            "H034S003",
+            "H034S005",
+            "H034S008",
+            "H034S009",
+            "H034S010",
+            "H034S012",
+            "H034S018",
+            "H034S019"
+          ]
+        },
+        {
+          "section_id": "H034-SEC-05",
+          "title": "人体关联和机制研究怎样互相补充",
+          "body": "横断面人群研究适合发现微生物功能、代谢物与宿主表型之间的联系。纵向取样能帮助判断变化先后。定义菌群、代谢物补充或宿主受体扰动，则能在可控条件下检验某一条机制。它们解决的问题不同。\n\n方向级结论需要多个层级的资料支持：人体研究提出可重复的联系，可控模型检验其中一部分路径，随后再回到独立人群或人体相关样本中复核。动物定植和离体实验不能直接代替人体效应；人群相关网络也不能在没有扰动证据时写成因果链。",
+          "source_ids": [
+            "H034S001",
+            "H034S005",
+            "H034S006",
+            "H034S008",
+            "H034S009",
+            "H034S010",
+            "H034S019",
+            "H034S020"
+          ]
+        },
+        {
+          "section_id": "H034-SEC-06",
+          "title": "干预研究显示系统可以改变，但结局需要单独评价",
+          "body": "饮食和微生物组靶向干预能够改变部分人群的微生物功能、代谢物或免疫指标。这些研究可以观察同一个体在干预前后的变化。是否带来持续的器官功能或疾病结局改善，仍取决于干预时长、依从性、基线饮食、疾病状态和预先设定的临床终点。\n\n不同地区和疾病人群中，同一代谢物的作用方向可能不同。公开研究中的短期组学变化不应直接转化为治疗或个体化营养建议。",
+          "source_ids": [
+            "H034S006",
+            "H034S007",
+            "H034S013",
+            "H034S014",
+            "H034S015",
+            "H034S018",
+            "H034S020"
+          ]
+        },
+        {
+          "section_id": "H034-SEC-07",
+          "title": "研究技术",
+          "body": "本专题的技术卡包括宏基因组与宏转录组、靶向和非靶向代谢组、稳定同位素示踪、定义菌群与宿主模型，以及人体纵向和干预研究。技术选择取决于研究需要确认的是功能潜力、分子来源、组织暴露还是干预后的变化。",
+          "source_ids": []
+        },
+        {
+          "section_id": "H034-SEC-08",
+          "title": "科研参考范围",
+          "body": "本页用于介绍微生物相关代谢物研究中的证据类型、实验设计和适用范围，不提供诊断、治疗或个体化营养建议。",
+          "source_ids": []
+        }
+      ],
+      "methods": [
+        {
+          "method_id": "H034-M001",
+          "display_order": 1,
+          "category": "微生物功能测量",
+          "title": "宏基因组与宏转录组",
+          "principle": "宏基因组测量群落中可能存在的基因和代谢通路；宏转录组测量取样时部分基因的转录活性。两者与物种或菌株解析结合，可把群落组成推进到功能假设。",
+          "answers": "适合比较不同人群或干预前后哪些微生物通路发生变化，并为代谢物检测和后续实验提供候选路径。",
+          "sample_design": "同步记录饮食、抗生素和其他药物、取样时间及粪便保存方式；在关键问题中配对代谢组，并尽量在独立人群验证。",
+          "limitations": "基因存在不等于该通路在体内活跃，转录活性也不等于代谢通量或宿主暴露；粪便样本不能完整代表肠道不同部位的微生物功能。",
+          "source_ids": [
+            "H034S001",
+            "H034S005",
+            "H034S006",
+            "H034S008",
+            "H034S009",
+            "H034S010"
+          ],
+          "workflow": "设计阶段先确定：同步记录饮食、抗生素和其他药物、取样时间及粪便保存方式；在关键问题中配对代谢组，并尽量在独立人群验证。 同步整理饮食、药物、粪便、血液和必要的组织样本；把宏基因组或菌株信息与靶向代谢组、培养或示踪实验按同一受试者和时间点关联。 这项方法的直接测量或计算依据是：宏基因组测量群落中可能存在的基因和代谢通路；宏转录组测量取样时部分基因的转录活性。两者与物种或菌株解析结合，可把群落组成推进到功能假设。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：基因存在不等于该通路在体内活跃，转录活性也不等于代谢通量或宿主暴露；粪便样本不能完整代表肠道不同部位的微生物功能。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "结果可比较不同人群或干预前后哪些微生物通路发生变化，并为代谢物检测和后续实验提供候选路径。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        },
+        {
+          "method_id": "H034-M002",
+          "display_order": 2,
+          "category": "代谢物定量与来源追踪",
+          "title": "靶向和非靶向代谢组",
+          "principle": "靶向代谢组对预先定义的分子进行定量；非靶向代谢组用于发现更广范围的候选信号。两者可以检测短链脂肪酸、胆汁酸、色氨酸代谢物等微生物相关分子。",
+          "answers": "适合回答哪些分子在粪便、血液或组织中改变，以及这些改变是否与饮食、微生物功能和宿主表型共同出现。",
+          "sample_design": "明确采样基质、空腹或进食状态、取样和冷冻时间；采用内标、批次质控和标准品确认，并在需要时同步检测饮食底物和宿主代谢物。",
+          "limitations": "检测到的分子可能来自饮食、宿主或多种微生物；不同基质中的浓度不能直接比较，也不能仅凭相关性确定产生者或作用部位。",
+          "source_ids": [
+            "H034S002",
+            "H034S003",
+            "H034S004",
+            "H034S011",
+            "H034S013",
+            "H034S014",
+            "H034S018"
+          ],
+          "workflow": "设计阶段先确定：明确采样基质、空腹或进食状态、取样和冷冻时间；采用内标、批次质控和标准品确认，并在需要时同步检测饮食底物和宿主代谢物。 同步整理饮食、药物、粪便、血液和必要的组织样本；把宏基因组或菌株信息与靶向代谢组、培养或示踪实验按同一受试者和时间点关联。 这项方法的直接测量或计算依据是：靶向代谢组对预先定义的分子进行定量；非靶向代谢组用于发现更广范围的候选信号。两者可以检测短链脂肪酸、胆汁酸、色氨酸代谢物等微生物相关分子。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：检测到的分子可能来自饮食、宿主或多种微生物；不同基质中的浓度不能直接比较，也不能仅凭相关性确定产生者或作用部位。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "结果可回答哪些分子在粪便、血液或组织中改变，以及这些改变是否与饮食、微生物功能和宿主表型共同出现。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        },
+        {
+          "method_id": "H034-M003",
+          "display_order": 3,
+          "category": "分子来源和转化路径",
+          "title": "稳定同位素示踪",
+          "principle": "在培养体系、动物模型或经过伦理审查的人体研究中加入带同位素标记的底物，随后追踪标记进入微生物产物、宿主代谢物或组织中的路径。",
+          "answers": "适合检验一种底物是否真正进入某条代谢路径，并区分饮食、宿主和微生物对特定分子池的贡献。",
+          "sample_design": "预先设定标记底物、剂量、时间序列和采样基质；配套未标记对照、代谢物定量和必要的微生物功能测量。",
+          "limitations": "示踪结果受模型、剂量和采样窗口影响；特定模型中观察到的转化路径不能直接代表所有人群或疾病状态。当前来源用于说明研究方法，不支持将其写成人群中的标准流程。",
+          "source_ids": [
+            "H034S001",
+            "H034S005",
+            "H034S011",
+            "H034S012",
+            "H034S019"
+          ],
+          "workflow": "设计阶段先确定：预先设定标记底物、剂量、时间序列和采样基质；配套未标记对照、代谢物定量和必要的微生物功能测量。 同步整理饮食、药物、粪便、血液和必要的组织样本；把宏基因组或菌株信息与靶向代谢组、培养或示踪实验按同一受试者和时间点关联。 这项方法的直接测量或计算依据是：在培养体系、动物模型或经过伦理审查的人体研究中加入带同位素标记的底物，随后追踪标记进入微生物产物、宿主代谢物或组织中的路径。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：示踪结果受模型、剂量和采样窗口影响；特定模型中观察到的转化路径不能直接代表所有人群或疾病状态。当前来源用于说明研究方法，不支持将其写成人群中的标准流程。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "结果可检验一种底物是否真正进入某条代谢路径，并区分饮食、宿主和微生物对特定分子池的贡献。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        },
+        {
+          "method_id": "H034-M004",
+          "display_order": 4,
+          "category": "可控机制验证",
+          "title": "定义菌群、培养体系与宿主模型",
+          "principle": "通过单菌株、定义菌群、代谢物补充或受体和通路扰动，在可控制的饮食和时间条件下检验特定微生物功能与宿主反应的关系。",
+          "answers": "适合把人群中发现的微生物—代谢物关联转化为可检验的机制假设，并观察屏障、免疫细胞、肝脏或代谢功能。",
+          "sample_design": "记录菌株和定植状态、饮食底物、代谢物剂量、宿主品系或细胞来源、对照组和时间；尽可能用受试者样本或独立模型交叉验证。",
+          "limitations": "无菌、人源化或离体系统不等于人体环境；菌株剂量和生态位竞争会改变结果，不能把模型中的机制直接写成人体效应。",
+          "source_ids": [
+            "H034S001",
+            "H034S005",
+            "H034S019"
+          ],
+          "workflow": "设计阶段先确定：记录菌株和定植状态、饮食底物、代谢物剂量、宿主品系或细胞来源、对照组和时间；尽可能用受试者样本或独立模型交叉验证。 同步整理饮食、药物、粪便、血液和必要的组织样本；把宏基因组或菌株信息与靶向代谢组、培养或示踪实验按同一受试者和时间点关联。 这项方法的直接测量或计算依据是：通过单菌株、定义菌群、代谢物补充或受体和通路扰动，在可控制的饮食和时间条件下检验特定微生物功能与宿主反应的关系。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：无菌、人源化或离体系统不等于人体环境；菌株剂量和生态位竞争会改变结果，不能把模型中的机制直接写成人体效应。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "结果可把人群中发现的微生物—代谢物关联转化为可检验的机制假设，并观察屏障、免疫细胞、肝脏或代谢功能。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        },
+        {
+          "method_id": "H034-M005",
+          "display_order": 5,
+          "category": "人体纵向与干预研究",
+          "title": "重复取样、饮食记录和多层级测量",
+          "principle": "在干预前后或随访中重复采集粪便、血液及必要的组织样本，并记录饮食、药物和临床表型，从而观察微生物功能、代谢物和宿主指标的共同变化。",
+          "answers": "适合评估时间先后、个体内变化和饮食或微生物组靶向干预是否改变系统中的特定指标。",
+          "sample_design": "优先采用随机或交叉设计；记录基线饮食、依从性、抗生素和其他用药，设置预先定义的主要终点和独立复现队列。",
+          "limitations": "短期变化不等于持续的疾病获益；干预研究中的组学改变可能受依从性、基线饮食和人群特征影响，不能直接转化为个体化营养建议。",
+          "source_ids": [
+            "H034S006",
+            "H034S007",
+            "H034S013",
+            "H034S014",
+            "H034S015",
+            "H034S020"
+          ],
+          "workflow": "设计阶段先确定：优先采用随机或交叉设计；记录基线饮食、依从性、抗生素和其他用药，设置预先定义的主要终点和独立复现队列。 同步整理饮食、药物、粪便、血液和必要的组织样本；把宏基因组或菌株信息与靶向代谢组、培养或示踪实验按同一受试者和时间点关联。 这项方法的直接测量或计算依据是：在干预前后或随访中重复采集粪便、血液及必要的组织样本，并记录饮食、药物和临床表型，从而观察微生物功能、代谢物和宿主指标的共同变化。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：短期变化不等于持续的疾病获益；干预研究中的组学改变可能受依从性、基线饮食和人群特征影响，不能直接转化为个体化营养建议。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "结果可评估时间先后、个体内变化和饮食或微生物组靶向干预是否改变系统中的特定指标。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        }
+      ],
+      "references": [
+        {
+          "source_id": "H034S001",
+          "title": "A Consensus Statement on establishing causality therapeutic applications and the use of preclinical models in microbiome research",
+          "authors": "Metwaly A et al.",
+          "journal": "Nature Reviews Gastroenterology & Hepatology",
+          "published_date": "2025-03-03",
+          "doi": "10.1038/s41575-025-01041-3",
+          "pmid": "",
+          "url": "https://www.nature.com/articles/s41575-025-01041-3",
+          "source_type": "consensus",
+          "study_context": "microbiome research across human and preclinical settings",
+          "study_design": "Delphi consensus statement",
+          "usable_for": "evidence ladder reporting and model-combination requirements",
+          "limitations": "consensus not a primary mechanism study"
+        },
+        {
+          "source_id": "H034S002",
+          "title": "Microbial Metabolites and Gut Immunology",
+          "authors": "Takeuchi T et al.",
+          "journal": "Annual Review of Immunology",
+          "published_date": "2024-06-01",
+          "doi": "10.1146/annurev-immunol-090222-102035",
+          "pmid": "38941602",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/38941602/",
+          "source_type": "review",
+          "study_context": "gut microbiota and immune cells",
+          "study_design": "peer-reviewed review",
+          "usable_for": "terminology for metabolite-mediated immune effects",
+          "limitations": "review; disease and tissue effects remain context dependent"
+        },
+        {
+          "source_id": "H034S003",
+          "title": "Short-chain fatty acids: linking diet the microbiome and immunity",
+          "authors": "Mann ER et al.",
+          "journal": "Nature Reviews Immunology",
+          "published_date": "2024-04-02",
+          "doi": "10.1038/s41577-024-01014-8",
+          "pmid": "38565643",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/38565643/",
+          "source_type": "review",
+          "study_context": "diet microbiota and immune systems",
+          "study_design": "peer-reviewed review",
+          "usable_for": "SCFA source exposure and tissue-dependent interpretation",
+          "limitations": "review; not a disease-specific causal study"
+        },
+        {
+          "source_id": "H034S004",
+          "title": "Nutritional regulation of microbiota-derived metabolites: Implications for immunity and inflammation",
+          "authors": "Arifuzzaman M et al.",
+          "journal": "Immunity",
+          "published_date": "2024-01-09",
+          "doi": "10.1016/j.immuni.2023.12.009",
+          "pmid": "38198849",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/38198849/",
+          "source_type": "review",
+          "study_context": "diet-microbiota-immune interactions",
+          "study_design": "peer-reviewed review",
+          "usable_for": "diet confounding and context-dependent immune effects",
+          "limitations": "review; no single disease conclusion"
+        },
+        {
+          "source_id": "H034S005",
+          "title": "Gut microbial carbohydrate metabolism contributes to insulin resistance",
+          "authors": "Takeuchi T et al.",
+          "journal": "Nature",
+          "published_date": "2023-08-30",
+          "doi": "10.1038/s41586-023-06466-x",
+          "pmid": "37648852",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/37648852/",
+          "source_type": "primary_research",
+          "study_context": "Japanese human insulin-resistance cohort with mouse follow-up",
+          "study_design": "human multi-omics plus mouse validation",
+          "usable_for": "microbial carbohydrate function host inflammatory signals and orthogonal model testing",
+          "limitations": "human association and mouse validation do not establish a universal human mechanism"
+        },
+        {
+          "source_id": "H034S006",
+          "title": "Microbiome connections with host metabolism and habitual diet from 1,098 deeply phenotyped individuals",
+          "authors": "Asnicar F et al.",
+          "journal": "Nature Medicine",
+          "published_date": "2021-01-18",
+          "doi": "10.1038/s41591-020-01183-8",
+          "pmid": "33462402",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/33462402/",
+          "source_type": "primary_research",
+          "study_context": "deeply phenotyped UK adults",
+          "study_design": "cross-sectional human cohort",
+          "usable_for": "population-level diet microbiome and metabolic associations",
+          "limitations": "cross-sectional and cohort-specific; associations are not causal"
+        },
+        {
+          "source_id": "H034S007",
+          "title": "Gut-microbiota-targeted diets modulate human immune status",
+          "authors": "Wastyk HC et al.",
+          "journal": "Cell",
+          "published_date": "2021-07-12",
+          "doi": "10.1016/j.cell.2021.06.019",
+          "pmid": "34256014",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/34256014/",
+          "source_type": "primary_research",
+          "study_context": "healthy adults receiving high-fiber or fermented-food diets",
+          "study_design": "randomized dietary intervention",
+          "usable_for": "human intervention design and response heterogeneity",
+          "limitations": "modest sample size and short intervention; not a disease trial"
+        },
+        {
+          "source_id": "H034S008",
+          "title": "Microbiome and metabolome features of the cardiometabolic disease spectrum",
+          "authors": "Fromentin S et al.",
+          "journal": "Nature Medicine",
+          "published_date": "2022-02-17",
+          "doi": "10.1038/s41591-022-01688-4",
+          "pmid": "35177860",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/35177860/",
+          "source_type": "primary_research",
+          "study_context": "European cardiometabolic disease spectrum cohort",
+          "study_design": "cross-sectional staged clinical cohort",
+          "usable_for": "joint microbial and metabolic signatures across disease stages",
+          "limitations": "staged cross-sectional design cannot replace longitudinal causal inference"
+        },
+        {
+          "source_id": "H034S009",
+          "title": "Multi-omic analysis reveals transkingdom gut dysbiosis in metabolic dysfunction-associated steatotic liver disease",
+          "authors": "Kim H et al.",
+          "journal": "Nature Metabolism",
+          "published_date": "2025-07-02",
+          "doi": "10.1038/s42255-025-01318-6",
+          "pmid": "40604156",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/40604156/",
+          "source_type": "primary_research",
+          "study_context": "female US cohort with MASLD cases and controls",
+          "study_design": "case-control human multi-omics study",
+          "usable_for": "microbial functions metabolites and MASLD context",
+          "limitations": "observational case-control design and sex-specific cohort"
+        },
+        {
+          "source_id": "H034S010",
+          "title": "Multi-omic definition of metabolic obesity through adipose tissue-microbiome interactions",
+          "authors": "Lopez et al.",
+          "journal": "Nature Medicine",
+          "published_date": "2025-12-04",
+          "doi": "10.1038/s41591-025-04009-7",
+          "pmid": "41482560",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/41482560/",
+          "source_type": "primary_research",
+          "study_context": "Swedish deep-phenotyping cohort with external validation",
+          "study_design": "cross-sectional multi-omics model development and external cohort validation",
+          "usable_for": "adipose-linked microbial and metabolic heterogeneity",
+          "limitations": "risk stratification model requires population-specific validation and is not a causal mechanism"
+        },
+        {
+          "source_id": "H034S011",
+          "title": "Bile acids and the gut microbiota: metabolic interactions and impacts on disease",
+          "authors": "Collins SL et al.",
+          "journal": "Nature Reviews Microbiology",
+          "published_date": "2023-04-01",
+          "doi": "10.1038/s41579-022-00805-x",
+          "pmid": "36253479",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/36253479/",
+          "source_type": "review",
+          "study_context": "bile acid and gut microbiota interactions",
+          "study_design": "peer-reviewed review",
+          "usable_for": "bile-acid source and enterohepatic context",
+          "limitations": "review; does not establish disease-specific effects"
+        },
+        {
+          "source_id": "H034S012",
+          "title": "Metabolic reprogramming of the intestinal microbiome with functional bile acid changes underlie the development of NAFLD",
+          "authors": "Smirnova E et al.",
+          "journal": "Hepatology",
+          "published_date": "2022-06-23",
+          "doi": "10.1002/hep.32568",
+          "pmid": "35561146",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/35561146/",
+          "source_type": "primary_research",
+          "study_context": "NAFLD phenotypes with varying disease activity and fibrosis",
+          "study_design": "human fecal multi-omics study",
+          "usable_for": "microbial bile-acid pathway and liver disease-stage association",
+          "limitations": "observational design and NAFLD nomenclature predates MASLD"
+        },
+        {
+          "source_id": "H034S013",
+          "title": "Gut microbial metabolism of bile acids modifies the effect of Mediterranean diet interventions on cardiometabolic risk in a randomized controlled trial",
+          "authors": "authors as indexed",
+          "journal": "Gut Microbes",
+          "published_date": "2024-10-30",
+          "doi": "10.1080/19490976.2024.2426610",
+          "pmid": "39535126",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/39535126/",
+          "source_type": "primary_research",
+          "study_context": "DIRECT-PLUS randomized diet trial with 284 participants",
+          "study_design": "longitudinal randomized dietary intervention",
+          "usable_for": "diet response heterogeneity and longitudinal bile-acid measurements",
+          "limitations": "secondary analysis and interaction findings need independent replication"
+        },
+        {
+          "source_id": "H034S014",
+          "title": "The Fecal Metabolome Links Diet Composition Food Processing and the Gut Microbiota to Gastrointestinal Health in a Randomized Trial of Adults Consuming a Processed Diet",
+          "authors": "Karl JP et al.",
+          "journal": "Journal of Nutrition",
+          "published_date": "2022-07-26",
+          "doi": "10.1093/jn/nxac161",
+          "pmid": "36774101",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/36774101/",
+          "source_type": "primary_research",
+          "study_context": "healthy adults receiving a processed diet or usual diet",
+          "study_design": "randomized controlled dietary study",
+          "usable_for": "sample timing diet effects and fecal-metabolome interpretation",
+          "limitations": "short duration predominantly male sample and not cardiometabolic disease"
+        },
+        {
+          "source_id": "H034S015",
+          "title": "Dysregulation of secondary bile acid metabolism precedes islet autoimmunity and type 1 diabetes",
+          "authors": "Lamichhane S et al.",
+          "journal": "Cell Reports Medicine",
+          "published_date": "2022-01-01",
+          "doi": "",
+          "pmid": "36195095",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/36195095/",
+          "source_type": "primary_research",
+          "study_context": "longitudinal childhood samples before islet autoimmunity",
+          "study_design": "longitudinal observational cohort",
+          "usable_for": "time-ordering and age effects in host-microbial bile-acid studies",
+          "limitations": "pediatric autoimmune context cannot be generalized to adult cardiometabolic disease"
+        },
+        {
+          "source_id": "H034S016",
+          "title": "The Interaction between the Gut Microbiome and Bile Acids in Cardiometabolic Diseases",
+          "authors": "Callender C et al.",
+          "journal": "Metabolites",
+          "published_date": "2022-01-11",
+          "doi": "10.3390/metabo12010065",
+          "pmid": "35050187",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/35050187/",
+          "source_type": "review",
+          "study_context": "gut microbiota bile acids and cardiometabolic conditions",
+          "study_design": "peer-reviewed review",
+          "usable_for": "candidate pathways and confounding considerations",
+          "limitations": "review; not direct evidence for disease prediction"
+        },
+        {
+          "source_id": "H034S017",
+          "title": "Bile acids and microbes in metabolic disease",
+          "authors": "Sah DK et al.",
+          "journal": "World Journal of Gastroenterology",
+          "published_date": "2022-12-28",
+          "doi": "10.3748/wjg.v28.i48.6846",
+          "pmid": "36632317",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/36632317/",
+          "source_type": "review",
+          "study_context": "bile acids gut microbes and metabolic diseases",
+          "study_design": "peer-reviewed review",
+          "usable_for": "terminology and host-microbial co-metabolism",
+          "limitations": "review; heterogeneous underlying disease evidence"
+        },
+        {
+          "source_id": "H034S018",
+          "title": "Enterohepatic Gluco-metabolic and Gut Microbial Characterization of Individuals With Bile Acid Malabsorption",
+          "authors": "Karhus ML et al.",
+          "journal": "Gastro Hep Advances",
+          "published_date": "2022-03-30",
+          "doi": "10.1016/j.gastha.2021.12.007",
+          "pmid": "39131668",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/39131668/",
+          "source_type": "primary_research",
+          "study_context": "patients with bile acid malabsorption and matched controls",
+          "study_design": "matched clinical physiology study",
+          "usable_for": "human enterohepatic and metabolic measurement design",
+          "limitations": "small sample and disease-specific physiology"
+        },
+        {
+          "source_id": "H034S019",
+          "title": "The microbiota-dependent tryptophan metabolite alleviates high-fat diet-induced insulin resistance through the hepatic AhR/TSC2/mTORC1 axis",
+          "authors": "Qin et al.",
+          "journal": "Proceedings of the National Academy of Sciences of the United States of America",
+          "published_date": "2024-08-01",
+          "doi": "",
+          "pmid": "39167602",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/39167602/",
+          "source_type": "primary_research",
+          "study_context": "high-fat diet mice with human T2D fecal measurement",
+          "study_design": "metabolite and microbial perturbation study",
+          "usable_for": "microbial tryptophan metabolite mechanism and dose-response design",
+          "limitations": "main causal experiments are preclinical; human signal is associative"
+        },
+        {
+          "source_id": "H034S020",
+          "title": "Divergent age-associated and metabolism-associated gut microbiome signatures modulate cardiovascular disease risk",
+          "authors": "Wang T et al.",
+          "journal": "Nature Medicine",
+          "published_date": "2024-06-06",
+          "doi": "10.1038/s41591-024-03038-y",
+          "pmid": "38844795",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/38844795/",
+          "source_type": "primary_research",
+          "study_context": "Chinese discovery and replication cohorts with external microbiome cohorts",
+          "study_design": "longitudinal cohort and external validation",
+          "usable_for": "population heterogeneity external validation and risk-context requirements",
+          "limitations": "observational association and metric transferability limitations"
+        }
+      ],
+      "shared_findings": [
+        {
+          "finding_id": "H034-C01",
+          "display_order": 1,
+          "title": "微生物丰度不能直接说明代谢功能",
+          "shared_result": "物种组成提供群落背景，但宿主实际接触的是微生物产生或改造的分子。较完整的研究需要把饮食底物、菌株或功能基因、代谢通路和实际测得的代谢物连接起来。\n\n同一物种内的菌株功能可能不同；粪便中的基因丰度、转录活性和体内代谢通量也不是同一层面的证据。",
+          "research_use": "结合宏基因组或菌株解析、宏转录组、靶向或非靶向代谢组和饮食记录；需要确认功能时加入培养、定义菌群或代谢物扰动。",
+          "boundary": "只有物种丰度差异时，不能推断某种代谢物由该物种产生，也不能据此说明宿主效应。",
+          "source_ids": [
+            "H034S001",
+            "H034S002",
+            "H034S004",
+            "H034S005",
+            "H034S006",
+            "H034S009"
+          ]
+        },
+        {
+          "finding_id": "H034-C02",
+          "display_order": 2,
+          "title": "代谢物来源由饮食、宿主和微生物共同决定",
+          "shared_result": "微生物相关代谢物常由饮食底物、宿主酶和多种微生物连续加工形成。确定来源需要同时测量底物、微生物功能和宿主代谢环节，必要时使用稳定同位素或定义菌群。\n\n短链脂肪酸、初级和次级胆汁酸及色氨酸代谢物的合成部位、循环方式和受体不同；同一种分子在不同组织、剂量和疾病阶段中的作用也可能不同。",
+          "research_use": "同步采集饮食、粪便、血液和相关组织资料；使用靶向代谢组、稳定同位素示踪、培养或定义菌群，并记录抗生素和药物暴露。",
+          "boundary": "观察到微生物与代谢物相关，不能单独确定分子来源；不能建立脱离剂量、组织和疾病背景的有益或有害清单。",
+          "source_ids": [
+            "H034S002",
+            "H034S003",
+            "H034S004",
+            "H034S011",
+            "H034S012",
+            "H034S015",
+            "H034S016",
+            "H034S017",
+            "H034S018",
+            "H034S019"
+          ]
+        },
+        {
+          "finding_id": "H034-C03",
+          "display_order": 3,
+          "title": "宿主作用需要落实到暴露部位和功能读出",
+          "shared_result": "代谢物进入宿主后是否产生可测效应，取决于浓度、作用部位、受体或代谢通路和暴露时间。血液或粪便中的浓度变化应与具体组织、细胞和功能结果配对解释。\n\n肠腔、门静脉、外周血和组织中的暴露不同；免疫、肝脏和代谢终点也不能互相替代。",
+          "research_use": "在可行条件下配对粪便、血液和组织样本；测量代谢物浓度、受体或通路、屏障或细胞功能，并保留取样时间和组织位置。",
+          "boundary": "循环或粪便代谢物水平不能直接说明病变组织中的实际暴露，也不能由单个分子变化推断整体生理效应。",
+          "source_ids": [
+            "H034S002",
+            "H034S003",
+            "H034S005",
+            "H034S008",
+            "H034S009",
+            "H034S010",
+            "H034S012",
+            "H034S018",
+            "H034S019"
+          ]
+        },
+        {
+          "finding_id": "H034-C04",
+          "display_order": 4,
+          "title": "人体关联与机制实验需要分层表述",
+          "shared_result": "横断面多组学适合发现跨层级关联，纵向设计有助于判断时间先后，定义菌群、代谢物或受体扰动可以检验特定机制。较强的方向级结论通常需要多个层级相互支持。\n\n动物定植和离体模型便于控制饮食、剂量和时间，但不能完整复制人体生活方式、药物和免疫背景；统计因果方法仍依赖模型假设。",
+          "research_use": "优先结合独立人体队列、纵向取样、可控模型和正交功能实验；分别记录每个层级的样本、扰动和终点。",
+          "boundary": "动物或离体机制不能直接写成人体效应；人体相关网络也不能在没有扰动证据时写成因果链。",
+          "source_ids": [
+            "H034S001",
+            "H034S005",
+            "H034S006",
+            "H034S008",
+            "H034S009",
+            "H034S010",
+            "H034S019",
+            "H034S020"
+          ]
+        },
+        {
+          "finding_id": "H034-C05",
+          "display_order": 5,
+          "title": "短期干预证明系统可改变，不等于疾病结局改善",
+          "shared_result": "饮食和微生物组靶向干预能够在部分人群中改变菌群功能、代谢物和免疫读出，说明系统具有可塑性。是否带来持续的器官或临床获益，需要预设终点、足够随访和独立研究。\n\n干预组成、基线饮食、地理、人群代谢状态和依从性会影响结果；同一代谢物在不同疾病和年龄中的方向不一定一致。",
+          "research_use": "采用随机或交叉设计、干预前后配对样本、饮食和药物记录、依从性测量及独立复现；将组学变化与功能和临床终点分开报告。",
+          "boundary": "不能根据短期组学变化提出治疗或个体化营养建议，也不能把一个地区或疾病中的特征直接外推到其他人群。",
+          "source_ids": [
+            "H034S006",
+            "H034S007",
+            "H034S013",
+            "H034S014",
+            "H034S015",
+            "H034S018",
+            "H034S020"
+          ]
+        }
+      ]
+    },
+    {
+      "topic_id": "H035",
+      "title": "代谢性炎症与慢性疾病",
+      "topic_role": "research_deep_dive",
+      "overview": "代谢性炎症涉及脂肪组织、肝脏、胰腺、血管和免疫系统之间的长期相互作用。血液中的炎症因子或体重指标可以反映部分变化，却无法说明炎症发生在哪个组织、由哪些细胞维持，也无法替代对脂毒性、胰岛素反应和组织病理的直接观察。\n\n本方向从脂肪和肝脏的单细胞与空间图谱、代谢组学、免疫细胞状态、组织模型和纵向队列出发，集中处理三类问题：哪些细胞状态与代谢压力共同变化；局部脂质、免疫和组织损伤如何相互联系；干预后炎症、代谢指标和组织功能是否同步改善。组织位置、细胞类型、代谢物和功能终点构成不同证据层级。\n\n比较公开研究时，需要同时交代组织部位、疾病阶段、饮食与药物、性别和物种、细胞分型依据、代谢测量、病理终点及干预时间。外周标志物变化不能单独证明组织机制，体重下降也不能代替炎症或器官功能评价。微生物代谢物专题聚焦来源和宿主互作，肥胖与脂肪肝多组学专题聚焦分层和长期结局，本页聚焦代谢压力与慢性炎症的组织证据。",
+      "sections": [
+        {
+          "section_id": "H035-SEC-01",
+          "title": "比较不同研究时应先看什么",
+          "body": "| 比较内容 | 应记录的信息 | 关系到什么判断 |\n| --- | --- | --- |\n| 组织环境 | 皮下或内脏脂肪组织、肝脏部位和病理分期 | 细胞变化发生在什么样的局部环境中 |\n| 代谢状态 | 体脂分布、脂肪细胞大小、胰岛素敏感性、脂毒性和疾病阶段 | 免疫变化与哪类代谢负荷共同出现 |\n| 细胞测量 | 单细胞或空间测量、组织学和蛋白验证 | 观察到的是哪类细胞及其位置 |\n| 全身终点 | 血液指标、葡萄糖处理、脂质代谢和心代谢表型 | 局部变化是否与全身变化同步 |\n| 干预设计 | 剂量、时长、依从性、对照和重复取样 | 某项处理改变了哪些指标，哪些没有改变 |",
+          "source_ids": []
+        },
+        {
+          "section_id": "H035-SEC-02",
+          "title": "代谢性炎症需要放回组织中理解",
+          "body": "炎症因子升高不足以概括代谢性炎症。持续的营养和代谢压力会改变组织中的免疫状态、物质代谢和结构；这些变化可能参与适应、重塑，也可能与损伤和功能异常相伴。判断它们的作用，需要同时看到细胞状态、组织功能和疾病阶段。\n\n脂肪组织、肝脏和血管面对的代谢压力不同。一个组织中的发现不能直接解释另一个组织。血液检测有助于描述全身状态，但不能替代局部组织的细胞、空间和病理资料。",
+          "source_ids": [
+            "H035S001",
+            "H035S002",
+            "H035S003",
+            "H035S004",
+            "H035S009",
+            "H035S019"
+          ]
+        },
+        {
+          "section_id": "H035-SEC-03",
+          "title": "脂肪组织中的免疫细胞不是单一状态",
+          "body": "脂肪组织巨噬细胞和其他免疫细胞会随组织部位、肥胖程度、代谢状态和减重而变化。皮下脂肪组织与内脏脂肪组织的细胞组成不同。单细胞研究也显示，巨噬细胞包含多种状态；用经典活化型（M1）和替代活化型（M2）二分法或一个标志物概括全部变化，容易遗漏组织位置和疾病阶段带来的差异。\n\n研究脂肪组织时，应说明取自皮下还是内脏部位，并记录组织学、脂肪细胞大小和代谢功能。重要的细胞状态还需要用蛋白或功能实验复核。减重后的组织重塑也不会简单回到肥胖前的状态。",
+          "source_ids": [
+            "H035S001",
+            "H035S005",
+            "H035S006",
+            "H035S007",
+            "H035S008",
+            "H035S017",
+            "H035S018",
+            "H035S020"
+          ]
+        },
+        {
+          "section_id": "H035-SEC-04",
+          "title": "肝脏免疫变化与脂毒性和病理分期相连",
+          "body": "在代谢功能障碍相关脂肪性肝病（MASLD）和代谢功能障碍相关脂肪性肝炎（MASH）中，免疫细胞状态会随脂质处理、肝细胞损伤、肝小叶位置和纤维化阶段而变化。单细胞和空间组学能够区分病变区域中的细胞状态，但需要与组织学和临床分期一起阅读。\n\n脂肪变、炎症和纤维化不一定同步进展。不同的糖尿病状态、肥胖程度和药物背景也会影响肝内细胞组成。循环炎症指标不能代替肝组织中的空间和细胞信息。",
+          "source_ids": [
+            "H035S003",
+            "H035S009",
+            "H035S010",
+            "H035S019"
+          ]
+        },
+        {
+          "section_id": "H035-SEC-05",
+          "title": "局部炎症和胰岛素抵抗并不总是同步",
+          "body": "肥胖相关脂肪组织炎症常与代谢异常同时出现，但人体研究中，两者的关系会受到脂肪细胞大小、取样部位、肥胖程度和测量方法影响。在控制这些因素后，局部炎症与胰岛素抵抗的关联并不总能保持。\n\n因此，脂肪组织炎症、血液炎症指标和胰岛素敏感性应作为不同终点报告。较有说服力的设计会在同一受试者中配对组织测量、体脂分布和标准化代谢评估，并通过随访或干预观察它们是否一起变化。",
+          "source_ids": [
+            "H035S004",
+            "H035S006",
+            "H035S007",
+            "H035S008",
+            "H035S014",
+            "H035S016"
+          ]
+        },
+        {
+          "section_id": "H035-SEC-06",
+          "title": "干预后，组织炎症和代谢指标可能不同步",
+          "body": "能量限制、ω-3 多不饱和脂肪酸、减重和微生物组干预可以改变部分组织或循环指标，但研究结果并不完全一致。有的研究观察到局部炎症指标变化，却没有看到相应的代谢终点变化；也有干预未改变内脏脂肪组织炎症或细菌移位相关指标。\n\n这些结果需要按各自的终点阅读。研究设计应把组织细胞状态、循环指标和代谢功能分开测量，并报告干预剂量、时长、依从性和所有预设终点。部分炎症标志物改变不能代替临床或整体代谢获益。",
+          "source_ids": [
+            "H035S011",
+            "H035S012",
+            "H035S013",
+            "H035S014",
+            "H035S015",
+            "H035S016",
+            "H035S020"
+          ]
+        },
+        {
+          "section_id": "H035-SEC-07",
+          "title": "研究技术",
+          "body": "本专题的技术卡包括配对临床与组织取样、单细胞和空间组学、组织代谢与损伤评价、免疫与代谢功能联测，以及人体干预和重复取样。每种技术都需要保留组织部位、疾病阶段和取样时间，才能与其他研究比较。",
+          "source_ids": []
+        },
+        {
+          "section_id": "H035-SEC-08",
+          "title": "科研参考范围",
+          "body": "本页用于介绍代谢性炎症研究中的组织语境、实验设计和证据边界，不提供诊疗建议或治疗推荐。",
+          "source_ids": []
+        }
+      ],
+      "methods": [
+        {
+          "method_id": "H035-M001",
+          "display_order": 1,
+          "category": "配对临床与组织取样",
+          "title": "组织部位、代谢表型和循环指标的联合记录",
+          "principle": "在同一受试者中配对脂肪组织或肝组织、血液和标准化代谢表型，记录取样部位、疾病分期、体脂分布、用药和生活方式。",
+          "answers": "适合判断局部组织变化是否与循环炎症、胰岛素敏感性或其他全身代谢表型同时出现。",
+          "sample_design": "脂肪组织要区分皮下与内脏部位；肝组织要记录病理分期和取样位置。代谢表型应采用预先定义的测量方法，并保留独立患者样本。",
+          "limitations": "横断面配对只能说明同一时间点的联系，不能确定变化先后；血液指标不能代替组织内细胞状态。",
+          "source_ids": [
+            "H035S004",
+            "H035S005",
+            "H035S008",
+            "H035S010",
+            "H035S014"
+          ],
+          "workflow": "设计阶段先确定：脂肪组织要区分皮下与内脏部位；肝组织要记录病理分期和取样位置。代谢表型应采用预先定义的测量方法，并保留独立患者样本。 在个体层面配对代谢指标、炎症读出、组织部位和取样时间；先分析队列中的关联，再用可控扰动或独立样本检查候选通路。 这项方法的直接测量或计算依据是：在同一受试者中配对脂肪组织或肝组织、血液和标准化代谢表型，记录取样部位、疾病分期、体脂分布、用药和生活方式。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：横断面配对只能说明同一时间点的联系，不能确定变化先后；血液指标不能代替组织内细胞状态。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "结果可判断局部组织变化是否与循环炎症、胰岛素敏感性或其他全身代谢表型同时出现。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        },
+        {
+          "method_id": "H035-M002",
+          "display_order": 2,
+          "category": "细胞状态与空间位置",
+          "title": "单细胞和空间组学",
+          "principle": "单细胞测量区分组织中的细胞类型和状态；空间测量保留细胞在组织中的位置，可与病理和脂质代谢区域对应。",
+          "answers": "适合研究脂肪组织和肝脏中哪些细胞状态随疾病、取样部位或纤维化而变化，以及这些变化出现在哪些区域。",
+          "sample_design": "明确组织来源、处理时间、细胞分离步骤、空间切片位置和病理分期；用蛋白、组织学或功能实验验证重要细胞状态。",
+          "limitations": "细胞簇受取样、解离和分析方法影响；空间邻近不等于细胞间存在直接作用，也不能用单一标记物概括全部巨噬细胞状态。",
+          "source_ids": [
+            "H035S005",
+            "H035S010",
+            "H035S017",
+            "H035S020"
+          ],
+          "workflow": "设计阶段先确定：明确组织来源、处理时间、细胞分离步骤、空间切片位置和病理分期；用蛋白、组织学或功能实验验证重要细胞状态。 在个体层面配对代谢指标、炎症读出、组织部位和取样时间；先分析队列中的关联，再用可控扰动或独立样本检查候选通路。 这项方法的直接测量或计算依据是：单细胞测量区分组织中的细胞类型和状态；空间测量保留细胞在组织中的位置，可与病理和脂质代谢区域对应。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：细胞簇受取样、解离和分析方法影响；空间邻近不等于细胞间存在直接作用，也不能用单一标记物概括全部巨噬细胞状态。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "结果可研究脂肪组织和肝脏中哪些细胞状态随疾病、取样部位或纤维化而变化，以及这些变化出现在哪些区域。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        },
+        {
+          "method_id": "H035-M003",
+          "display_order": 3,
+          "category": "组织代谢和损伤评价",
+          "title": "组织学、脂质指标与器官功能测量",
+          "principle": "将组织结构、脂质积累或脂毒性、细胞损伤、纤维化和器官相关功能放在同一设计中测量，以判断免疫变化出现的组织背景。",
+          "answers": "适合解释肝脏免疫状态与 MASLD 或 MASH 分期的关系，也适合结合脂肪组织的脂肪细胞大小和局部重塑。",
+          "sample_design": "使用标准病理分期、脂质或代谢组、细胞损伤和功能指标；记录疾病定义、取样位置、饮酒和代谢合并症等背景。",
+          "limitations": "单一染色或循环代谢物不能概括组织功能；不同疾病分期和样本部位的结果不应直接合并。",
+          "source_ids": [
+            "H035S003",
+            "H035S009",
+            "H035S010",
+            "H035S019"
+          ],
+          "workflow": "设计阶段先确定：使用标准病理分期、脂质或代谢组、细胞损伤和功能指标；记录疾病定义、取样位置、饮酒和代谢合并症等背景。 在个体层面配对代谢指标、炎症读出、组织部位和取样时间；先分析队列中的关联，再用可控扰动或独立样本检查候选通路。 这项方法的直接测量或计算依据是：将组织结构、脂质积累或脂毒性、细胞损伤、纤维化和器官相关功能放在同一设计中测量，以判断免疫变化出现的组织背景。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：单一染色或循环代谢物不能概括组织功能；不同疾病分期和样本部位的结果不应直接合并。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "结果可解释肝脏免疫状态与 MASLD 或 MASH 分期的关系，也适合结合脂肪组织的脂肪细胞大小和局部重塑。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        },
+        {
+          "method_id": "H035-M004",
+          "display_order": 4,
+          "category": "免疫与代谢功能联测",
+          "title": "多参数蛋白测量和标准化代谢表型",
+          "principle": "在组织和血液中测量细胞因子、免疫细胞组成及代谢相关分子，并配合胰岛素敏感性、葡萄糖处理或脂质代谢等标准化功能测量。",
+          "answers": "适合检验局部免疫指标、循环炎症和全身代谢终点是否同步变化，并识别不同取样部位或疾病阶段中的差异。",
+          "sample_design": "预先定义主要终点；配对组织与血液样本，记录禁食状态、测量时间、药物、月经状态或其他可能影响代谢的因素。",
+          "limitations": "炎症和代谢终点可能不同步；统计调整会改变观察到的关系，不能把一个关联写成普遍的单向因果链。",
+          "source_ids": [
+            "H035S004",
+            "H035S006",
+            "H035S007",
+            "H035S008",
+            "H035S014",
+            "H035S016"
+          ],
+          "workflow": "设计阶段先确定：预先定义主要终点；配对组织与血液样本，记录禁食状态、测量时间、药物、月经状态或其他可能影响代谢的因素。 在个体层面配对代谢指标、炎症读出、组织部位和取样时间；先分析队列中的关联，再用可控扰动或独立样本检查候选通路。 这项方法的直接测量或计算依据是：在组织和血液中测量细胞因子、免疫细胞组成及代谢相关分子，并配合胰岛素敏感性、葡萄糖处理或脂质代谢等标准化功能测量。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：炎症和代谢终点可能不同步；统计调整会改变观察到的关系，不能把一个关联写成普遍的单向因果链。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "结果可检验局部免疫指标、循环炎症和全身代谢终点是否同步变化，并识别不同取样部位或疾病阶段中的差异。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        },
+        {
+          "method_id": "H035-M005",
+          "display_order": 5,
+          "category": "人体干预与重复取样",
+          "title": "饮食、脂肪酸、减重和微生物组干预",
+          "principle": "在干预前后重复评估组织细胞状态、循环炎症和代谢功能，比较同一受试者的变化，并与对照组或不同干预方案比较。",
+          "answers": "适合回答某项处理是否改变局部组织指标，以及这些变化是否与全身代谢表型一同改变。",
+          "sample_design": "优先采用随机对照设计；记录干预剂量、时长、依从性、体重变化、脂肪组织取样部位和取样窗口，报告预设终点、效应区间和阴性结果。",
+          "limitations": "局部炎症指标改变不等于临床或整体代谢获益；短期研究和小样本结果需要独立研究支持，不提供治疗建议。",
+          "source_ids": [
+            "H035S011",
+            "H035S012",
+            "H035S013",
+            "H035S015",
+            "H035S016",
+            "H035S020"
+          ],
+          "workflow": "设计阶段先确定：优先采用随机对照设计；记录干预剂量、时长、依从性、体重变化、脂肪组织取样部位和取样窗口，报告预设终点、效应区间和阴性结果。 在个体层面配对代谢指标、炎症读出、组织部位和取样时间；先分析队列中的关联，再用可控扰动或独立样本检查候选通路。 这项方法的直接测量或计算依据是：在干预前后重复评估组织细胞状态、循环炎症和代谢功能，比较同一受试者的变化，并与对照组或不同干预方案比较。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：局部炎症指标改变不等于临床或整体代谢获益；短期研究和小样本结果需要独立研究支持，不提供治疗建议。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "结果可回答某项处理是否改变局部组织指标，以及这些变化是否与全身代谢表型一同改变。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        }
+      ],
+      "references": [
+        {
+          "source_id": "H035S001",
+          "title": "Macrophage function in adipose tissue homeostasis and metabolic inflammation",
+          "authors": "Chavakis T et al.",
+          "journal": "Nature Immunology",
+          "published_date": "2023-04-03",
+          "doi": "10.1038/s41590-023-01479-0",
+          "pmid": "",
+          "url": "https://www.nature.com/articles/s41590-023-01479-0",
+          "source_type": "review",
+          "study_context": "adipose tissue macrophages in health and obesity",
+          "study_design": "peer-reviewed review",
+          "usable_for": "adaptive and maladaptive macrophage functions",
+          "limitations": "review; does not define one universal macrophage state"
+        },
+        {
+          "source_id": "H035S002",
+          "title": "Emerging mechanisms of obesity-associated immune dysfunction",
+          "authors": "Shaikh SR et al.",
+          "journal": "Nature Reviews Endocrinology",
+          "published_date": "2024-01-01",
+          "doi": "10.1038/s41574-023-00932-2",
+          "pmid": "38129700",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/38129700/",
+          "source_type": "review",
+          "study_context": "obesity and systemic immune dysfunction",
+          "study_design": "peer-reviewed review",
+          "usable_for": "cross-organ immune consequences of metabolic overload",
+          "limitations": "review; does not establish disease-specific causal order"
+        },
+        {
+          "source_id": "H035S003",
+          "title": "The bidirectional immune crosstalk in metabolic dysfunction-associated steatotic liver disease",
+          "authors": "Sawada K et al.",
+          "journal": "Cell Metabolism",
+          "published_date": "2023-11-07",
+          "doi": "10.1016/j.cmet.2023.10.009",
+          "pmid": "37939656",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/37939656/",
+          "source_type": "review",
+          "study_context": "MASLD and MASH immune biology",
+          "study_design": "peer-reviewed review",
+          "usable_for": "liver cell-state and disease-stage context",
+          "limitations": "review; human and animal evidence vary by cell type and stage"
+        },
+        {
+          "source_id": "H035S004",
+          "title": "Metabolic Inflammation and Insulin Resistance in Obesity",
+          "authors": "Wu H and Ballantyne CM",
+          "journal": "Circulation Research",
+          "published_date": "2020-05-21",
+          "doi": "10.1161/CIRCRESAHA.120.315896",
+          "pmid": "32437299",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/32437299/",
+          "source_type": "review",
+          "study_context": "obesity and insulin resistance across metabolic organs",
+          "study_design": "peer-reviewed review",
+          "usable_for": "comparison of adipose liver muscle gut islet and brain contexts",
+          "limitations": "review; therapeutic interpretations require clinical studies"
+        },
+        {
+          "source_id": "H035S005",
+          "title": "Single-cell analysis of human adipose tissue identifies depot and disease specific cell types",
+          "authors": "Vijay J et al.",
+          "journal": "Nature Metabolism",
+          "published_date": "2020-01-01",
+          "doi": "10.1038/s42255-019-0152-6",
+          "pmid": "32066997",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/32066997/",
+          "source_type": "primary_research",
+          "study_context": "human visceral and subcutaneous adipose tissue from obese individuals",
+          "study_design": "human tissue single-cell study",
+          "usable_for": "depot-specific immune and stromal states",
+          "limitations": "limited tissue donors and cross-sectional sampling"
+        },
+        {
+          "source_id": "H035S006",
+          "title": "Adipose Tissue Inflammation Is Directly Linked to Obesity-Induced Insulin Resistance while Gut Dysbiosis and Mitochondrial Dysfunction Are Not Required",
+          "authors": "Petrick HL et al.",
+          "journal": "Function",
+          "published_date": "2020-08-25",
+          "doi": "10.1093/function/zqaa013",
+          "pmid": "34278304",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/34278304/",
+          "source_type": "primary_research",
+          "study_context": "diet-induced obesity mouse model",
+          "study_design": "controlled animal perturbation study",
+          "usable_for": "causal ordering within one obesity model",
+          "limitations": "model-specific and not a human causal conclusion"
+        },
+        {
+          "source_id": "H035S007",
+          "title": "STAT1 Dissociates Adipose Tissue Inflammation From Insulin Sensitivity in Obesity",
+          "authors": "Cox AR et al.",
+          "journal": "Diabetes",
+          "published_date": "2020-09-29",
+          "doi": "10.2337/db20-0384",
+          "pmid": "32994273",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/32994273/",
+          "source_type": "primary_research",
+          "study_context": "mouse adipocyte perturbation with human adipose comparison",
+          "study_design": "genetic perturbation and human correlation",
+          "usable_for": "separation of inflammatory signals from insulin sensitivity",
+          "limitations": "mouse mechanism with limited human correlational validation"
+        },
+        {
+          "source_id": "H035S008",
+          "title": "Adipose tissue macrophage burden systemic inflammation and insulin resistance",
+          "authors": "O'Rourke RW et al.",
+          "journal": "American Journal of Physiology-Endocrinology and Metabolism",
+          "published_date": "2020-06-01",
+          "doi": "10.1152/ajpendo.00109.2020",
+          "pmid": "32484712",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/32484712/",
+          "source_type": "primary_research",
+          "study_context": "97 adult volunteers across BMI range",
+          "study_design": "cross-sectional human adipose tissue study",
+          "usable_for": "relationship between tissue macrophage measures and systemic parameters",
+          "limitations": "cross-sectional design and marker selection limit causal claims"
+        },
+        {
+          "source_id": "H035S009",
+          "title": "Pathogenesis of MASLD and MASH - role of insulin resistance and lipotoxicity",
+          "authors": "Bansal SK and Bansal MB",
+          "journal": "Alimentary Pharmacology & Therapeutics",
+          "published_date": "2024-03-07",
+          "doi": "10.1111/apt.17930",
+          "pmid": "38451123",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/38451123/",
+          "source_type": "review",
+          "study_context": "liver muscle pancreas and adipose cross-talk in MASLD",
+          "study_design": "peer-reviewed review",
+          "usable_for": "organ-level metabolic stress and inflammatory pathways",
+          "limitations": "review; not a tissue-resolved experimental dataset"
+        },
+        {
+          "source_id": "H035S010",
+          "title": "Spatially resolved multi-omics of human metabolic dysfunction-associated steatotic liver disease",
+          "authors": "Li Z et al.",
+          "journal": "Nature Genetics",
+          "published_date": "2025-11-24",
+          "doi": "10.1038/s41588-025-02407-8",
+          "pmid": "41286103",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/41286103/",
+          "source_type": "primary_research",
+          "study_context": "61 human livers across control MASL and MASH",
+          "study_design": "human tissue atlas",
+          "usable_for": "liver zonation immune and fibrotic microenvironments",
+          "limitations": "atlas association needs functional follow-up and cohort diversity"
+        },
+        {
+          "source_id": "H035S011",
+          "title": "Intermittent energy restriction ameliorates adipose tissue-associated inflammation in adults with obesity: A randomised controlled trial",
+          "authors": "Castela I et al.",
+          "journal": "Clinical Nutrition",
+          "published_date": "2022-06-18",
+          "doi": "10.1016/j.clnu.2022.06.021",
+          "pmid": "35772219",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/35772219/",
+          "source_type": "primary_research",
+          "study_context": "28 adults with obesity in a 12-week dietary trial",
+          "study_design": "randomized controlled trial",
+          "usable_for": "human intervention with systemic metabolic-inflammatory endpoints",
+          "limitations": "small sample and no tissue-resolved immune analysis"
+        },
+        {
+          "source_id": "H035S012",
+          "title": "Oral omega-3 PUFA supplementation modulates inflammation in adipose tissue depots in morbidly obese women: A randomized trial",
+          "authors": "Bakker N et al.",
+          "journal": "Nutrition",
+          "published_date": "2023-04-09",
+          "doi": "10.1016/j.nut.2023.112055",
+          "pmid": "37182400",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/37182400/",
+          "source_type": "primary_research",
+          "study_context": "women with severe obesity before bariatric surgery",
+          "study_design": "randomized dietary intervention",
+          "usable_for": "depot-specific inflammatory response to an intervention",
+          "limitations": "short preoperative intervention and sex-specific cohort"
+        },
+        {
+          "source_id": "H035S013",
+          "title": "Modification of subcutaneous white adipose tissue inflammation by omega-3 fatty acids is limited in human obesity-a double blind randomised clinical trial",
+          "authors": "Fisk HL et al.",
+          "journal": "eBioMedicine",
+          "published_date": "2022-03-02",
+          "doi": "10.1016/j.ebiom.2022.103909",
+          "pmid": "35247847",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/35247847/",
+          "source_type": "primary_research",
+          "study_context": "normal-weight and obese adults with adipose biopsies",
+          "study_design": "double-blind randomized trial",
+          "usable_for": "negative or limited intervention evidence and tissue measurement",
+          "limitations": "subcutaneous tissue does not represent every adipose depot"
+        },
+        {
+          "source_id": "H035S014",
+          "title": "Adipose Tissue Inflammation Is Not Related to Adipose Insulin Resistance in Humans",
+          "authors": "authors as indexed",
+          "journal": "Diabetes",
+          "published_date": "2022-03-01",
+          "doi": "",
+          "pmid": "34857544",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/34857544/",
+          "source_type": "primary_research",
+          "study_context": "86 volunteers and a weight-loss subgroup",
+          "study_design": "human cross-sectional and longitudinal study",
+          "usable_for": "adjusted human associations and weight-loss response",
+          "limitations": "single research group and selected inflammation measures"
+        },
+        {
+          "source_id": "H035S015",
+          "title": "Fecal microbiota transplantation does not alter bacterial translocation and visceral adipose tissue inflammation in individuals with obesity",
+          "authors": "Bakker GJ et al.",
+          "journal": "Obesity Science & Practice",
+          "published_date": "2021-08-13",
+          "doi": "10.1002/osp4.545",
+          "pmid": "35127122",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/35127122/",
+          "source_type": "primary_research",
+          "study_context": "individuals with obesity undergoing fecal microbiota transplantation study",
+          "study_design": "controlled human intervention study",
+          "usable_for": "negative translational result and endpoint selection",
+          "limitations": "intervention protocol and endpoint window constrain interpretation"
+        },
+        {
+          "source_id": "H035S016",
+          "title": "Weight Loss and Short-Chain Fatty Acids Reduce Systemic Inflammation in Monocytes and Adipose Tissue Macrophages from Obese Subjects",
+          "authors": "authors as indexed",
+          "journal": "Nutrients",
+          "published_date": "2022-02-01",
+          "doi": "10.3390/nu14040765",
+          "pmid": "35215414",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/35215414/",
+          "source_type": "primary_research",
+          "study_context": "obese participants before and after bariatric surgery with ex vivo cell assays",
+          "study_design": "human longitudinal samples and ex vivo perturbation",
+          "usable_for": "paired before-after design and cell-specific functional readouts",
+          "limitations": "surgery context and ex vivo concentrations limit generalization"
+        },
+        {
+          "source_id": "H035S017",
+          "title": "Adipose tissue macrophage heterogeneity in the single-cell genomics era",
+          "authors": "Kang H and Lee J",
+          "journal": "Molecules and Cells",
+          "published_date": "2024-02-01",
+          "doi": "10.1016/j.mocell.2024.100031",
+          "pmid": "38354858",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/38354858/",
+          "source_type": "review",
+          "study_context": "human and mouse adipose tissue macrophage research",
+          "study_design": "peer-reviewed review",
+          "usable_for": "nomenclature and cell-state comparison",
+          "limitations": "review; cell labels depend on tissue and analytic method"
+        },
+        {
+          "source_id": "H035S018",
+          "title": "FAP expression in adipose tissue macrophages promotes obesity and metabolic inflammation",
+          "authors": "Wu Y et al.",
+          "journal": "Proceedings of the National Academy of Sciences of the United States of America",
+          "published_date": "2023-12-01",
+          "doi": "",
+          "pmid": "38100414",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/38100414/",
+          "source_type": "primary_research",
+          "study_context": "mouse and human adipose tissue macrophage evidence",
+          "study_design": "mechanistic animal study with human cell observation",
+          "usable_for": "defined macrophage pathway and cross-species comparison",
+          "limitations": "primary causality is in mice and requires human confirmation"
+        },
+        {
+          "source_id": "H035S019",
+          "title": "Innate Immunity and MASLD",
+          "authors": "Meyer M et al.",
+          "journal": "Biomolecules",
+          "published_date": "2024-04-13",
+          "doi": "10.3390/biom14040476",
+          "pmid": "38672492",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/38672492/",
+          "source_type": "review",
+          "study_context": "MASLD and innate immune-cell research",
+          "study_design": "peer-reviewed review",
+          "usable_for": "liver immune terminology and evidence gaps",
+          "limitations": "review; evidence varies by disease model and stage"
+        },
+        {
+          "source_id": "H035S020",
+          "title": "Selective remodelling of the adipose niche in obesity and weight loss",
+          "authors": "Miranda AMA et al.",
+          "journal": "Nature",
+          "published_date": "2025-07-09",
+          "doi": "10.1038/s41586-025-09233-2",
+          "pmid": "40634602",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/40634602/",
+          "source_type": "primary_research",
+          "study_context": "human adipose tissue before and after weight loss with lean comparators",
+          "study_design": "paired tissue atlas",
+          "usable_for": "immune and stromal remodeling after weight loss",
+          "limitations": "resource study; tissue-level observations need functional confirmation"
+        }
+      ],
+      "shared_findings": [
+        {
+          "finding_id": "H035-C01",
+          "display_order": 1,
+          "title": "代谢性炎症是组织对长期代谢负荷的反应",
+          "shared_result": "炎症因子升高不足以概括代谢性炎症。持续的营养和代谢压力会改变组织中的免疫状态、物质代谢和结构；判断这些变化的作用，需要同时观察细胞状态、组织功能和疾病阶段。\n\n急性适应、组织重塑和持续损伤可能共享部分炎症读出；脂肪组织、肝脏和血管所承受的压力及功能后果不同。",
+          "research_use": "使用组织学、代谢功能、细胞组成和分子读出的组合；记录饮食、体脂分布、胰岛素敏感性、疾病分期和取样时间。",
+          "boundary": "单个循环炎症因子或组织标志物不能独立定义代谢性炎症的程度和方向。",
+          "source_ids": [
+            "H035S001",
+            "H035S002",
+            "H035S003",
+            "H035S004",
+            "H035S009",
+            "H035S019"
+          ]
+        },
+        {
+          "finding_id": "H035-C02",
+          "display_order": 2,
+          "title": "脂肪组织免疫细胞具有多种适应与损伤相关状态",
+          "shared_result": "人类脂肪组织中的巨噬细胞和其他免疫细胞随脂肪库、肥胖程度、代谢状态和减重而改变。单细胞研究显示这些细胞包含多种状态，不能由 M1/M2 二分法或一个标志物概括。\n\n皮下和内脏脂肪组织的细胞组成不同；动物模型中的细胞状态和人类组织并非逐一对应，减重后的组织重塑也不会简单回到肥胖前的状态。",
+          "research_use": "分别采集和标注脂肪库；结合单细胞或空间测量、组织学、蛋白验证和代谢功能，并使用独立供体复现。",
+          "boundary": "细胞簇名称、单个巨噬细胞标志物或动物表型不能直接作为人类组织炎症程度的通用指标。",
+          "source_ids": [
+            "H035S001",
+            "H035S005",
+            "H035S006",
+            "H035S007",
+            "H035S008",
+            "H035S017",
+            "H035S018",
+            "H035S020"
+          ]
+        },
+        {
+          "finding_id": "H035-C03",
+          "display_order": 3,
+          "title": "肝脏免疫变化需要与脂毒性和组织位置一起解释",
+          "shared_result": "代谢功能障碍相关脂肪性肝病中的免疫变化与脂质处理、细胞损伤、肝小叶位置和纤维化阶段相互关联。空间和单细胞资料能够分辨病变区域及细胞状态，但仍需组织学和临床分期配合。\n\n脂肪变、炎症和纤维化并非同步进展；不同分期、合并糖尿病和药物背景会改变肝内细胞组成与代谢状态。",
+          "research_use": "采用规范疾病定义和组织分期；结合空间多组学、单细胞测量、病理、脂质或代谢组及功能验证。",
+          "boundary": "循环炎症指标不能替代肝组织内的细胞和空间信息，局部相关网络也不能单独证明细胞间因果关系。",
+          "source_ids": [
+            "H035S003",
+            "H035S009",
+            "H035S010",
+            "H035S019"
+          ]
+        },
+        {
+          "finding_id": "H035-C04",
+          "display_order": 4,
+          "title": "局部炎症与胰岛素抵抗并不总是同步",
+          "shared_result": "人体研究支持肥胖相关脂肪组织炎症与代谢异常相伴，但在控制脂肪细胞大小、脂肪库和其他因素后，两者的关系并不总是保持。局部炎症、循环指标和胰岛素敏感性应作为不同终点报告。\n\n研究的取样部位、胰岛素敏感性测量、肥胖程度和统计调整不同；动物实验中的强因果效应不一定在人类横断面研究中出现。",
+          "research_use": "在同一受试者中配对组织炎症、脂肪细胞大小、体脂分布和标准化胰岛素敏感性测量；使用纵向或干预设计判断变化是否同步。",
+          "boundary": "不能把组织炎症与胰岛素抵抗写成普遍、单向且线性的因果关系，也不能用血液指标代替组织测量。",
+          "source_ids": [
+            "H035S004",
+            "H035S006",
+            "H035S007",
+            "H035S008",
+            "H035S014",
+            "H035S016"
+          ]
+        },
+        {
+          "finding_id": "H035-C05",
+          "display_order": 5,
+          "title": "干预后的炎症读出和代谢获益需要分别验证",
+          "shared_result": "能量限制、ω-3 脂肪酸、减重和其他干预可以改变部分组织或循环读出，但不同研究的结果并不一致。局部免疫变化、全身炎症和代谢终点是否同步，需要由预设终点和配对样本判断。\n\n干预剂量、时长、依从性、脂肪库和基线代谢状态不同；粪菌移植等干预未必改变细菌移位或内脏脂肪组织炎症。",
+          "research_use": "采用随机对照或纵向配对设计；分别测量组织细胞状态、循环指标和代谢功能，并报告阴性结果、效应区间及随访。",
+          "boundary": "部分炎症标志物改变不能代替临床或整体代谢获益，本专题不据此提出治疗建议。",
+          "source_ids": [
+            "H035S011",
+            "H035S012",
+            "H035S013",
+            "H035S014",
+            "H035S015",
+            "H035S016",
+            "H035S020"
+          ]
+        }
+      ]
+    },
+    {
+      "topic_id": "H036",
+      "title": "肥胖、脂肪肝与心代谢多组学",
+      "topic_role": "research_deep_dive",
+      "overview": "肥胖、脂肪肝和心代谢疾病具有明显的个体异质性，同一体重指数或同一临床标签下，脂肪分布、肝脏病理、胰岛素反应、免疫状态和心血管结局可能不同。单一体重或单一血液指标难以描述这些差异，因此需要把多组学信号放回具体组织和长期结局中解释。\n\n本方向从脂肪、肝脏和血液的转录组、蛋白组、代谢组、空间测量、影像、临床队列和功能模型出发，集中处理三类问题：哪些分子与细胞组合区分不同代谢状态；局部组织变化如何与全身代谢和心血管指标联系；横断面关联能否在纵向队列、机制实验或干预反应中得到复核。分子分层、组织病理和功能终点需要分别保留。\n\n比较公开研究时，需要同时交代肥胖和脂肪肝定义、组织与血液来源、分期、药物和饮食、样本时间、组学平台、缺失数据处理、随访长度和临床终点。多组学相关不能单独证明因果，模型中的通路变化也不能直接转化为个体治疗建议。微生物代谢物和代谢性炎症专题提供相邻机制层，本页聚焦心代谢异质性与多组学分层。",
+      "sections": [
+        {
+          "section_id": "H036-SEC-01",
+          "title": "比较不同研究时应先看什么",
+          "body": "| 比较内容 | 应记录的信息 | 关系到什么判断 |\n| --- | --- | --- |\n| 疾病和表型定义 | 体重指数、体脂分布、糖尿病状态、MASLD 分期和结局定义 | 研究中的人群是否可以比较 |\n| 样本层级 | 粪便、血液、脂肪组织、肝组织和影像资料 | 每种数据实际反映的生物学层级 |\n| 组学平台 | 代谢组、脂质组、蛋白组、转录组、微生物组和空间测量 | 发现来自哪一种测量，是否有正交验证 |\n| 模型验证 | 发现队列、训练和验证划分、外部队列及随访时间 | 特征能否离开原始队列后仍然成立 |\n| 解释层级 | 人群描述、风险关联、实验支持和干预反应 | 一项结果能够支持到什么程度 |",
+          "source_ids": []
+        },
+        {
+          "section_id": "H036-SEC-02",
+          "title": "同一体重指数下存在不同的代谢状态",
+          "body": "体重指数提供的是体重与身高的比值，不能说明脂肪分布、胰岛素敏感性或代谢负荷。多组学队列研究发现，在相同体重指数范围内，人群可以呈现不同的代谢和微生物组特征。生活方式干预中的重复测量也能显示，部分分子指标会随个体内体成分和代谢状态改变。\n\n这些发现适合描述人群异质性。它们不构成新的疾病诊断，也不能直接用于个人风险判断。年龄、性别、饮食、药物和体脂分布都会影响结果，不同研究对“代谢健康”的定义也并不完全相同。",
+          "source_ids": [
+            "H036S001",
+            "H036S004",
+            "H036S008",
+            "H036S014",
+            "H036S015",
+            "H036S017"
+          ]
+        },
+        {
+          "section_id": "H036-SEC-03",
+          "title": "不同样本提供的是不同层级的信息",
+          "body": "粪便微生物组主要描述肠道群落和功能；血液组学记录循环中的分子状态；脂肪和肝组织则更接近局部细胞、空间位置和病理变化。每种样本各有用途，不能相互替代。\n\n例如，粪便中的微生物特征可能与 MASLD 或心代谢表型相关，但不能直接说明肝脏内哪类细胞发生了什么变化。肝组织的空间资料能够看到病变区域和细胞状态，也不能替代人群队列中的长期风险信息。较完整的研究会说明各类样本的取样时间、疾病分期和处理方式。",
+          "source_ids": [
+            "H036S003",
+            "H036S006",
+            "H036S007",
+            "H036S008",
+            "H036S010",
+            "H036S018",
+            "H036S019"
+          ]
+        },
+        {
+          "section_id": "H036-SEC-04",
+          "title": "MASLD 分型需要同时保留定义和组织异质性",
+          "body": "多组学可以从粪便、血液或其他临床样本中识别 MASLD 人群之间的分子差异。人肝组织的单细胞和空间图谱，则能说明不同病变区域中的细胞与代谢状态。两类资料面对的是不同层级，结合时应保留各自的证据范围。\n\nMASLD 与既往非酒精性脂肪性肝病（NAFLD）研究在命名和纳入条件上并不完全相同；糖尿病、肥胖程度、纤维化分期和用药都会影响分型结果。单一队列的亚型不能当作普适临床分类，粪便多组学也不能直接替代肝内病理分期。",
+          "source_ids": [
+            "H036S006",
+            "H036S007",
+            "H036S010",
+            "H036S011",
+            "H036S018",
+            "H036S019"
+          ]
+        },
+        {
+          "section_id": "H036-SEC-05",
+          "title": "从横断面发现走向长期风险",
+          "body": "横断面研究能发现候选分子组合，长期随访可以检验它们与后续心血管或代谢结局的关系。外部队列用于判断模型能否在训练队列以外的人群中复现。模型表现还需要与常规风险因素、结局定义和人群背景一同报告。\n\n风险关联不能回答某个分子特征是否直接导致疾病。不同地区、年龄、饮食和药物背景，也可能改变模型的表现。报告内容应包括模型校准、效应区间和外部复现，不能只给出训练队列中的准确率。",
+          "source_ids": [
+            "H036S002",
+            "H036S003",
+            "H036S004",
+            "H036S008"
+          ]
+        },
+        {
+          "section_id": "H036-SEC-06",
+          "title": "多组学关联、机制支持和干预反应要分开评价",
+          "body": "网络分析和机器学习能够发现多个组学层之间的联系。实验扰动用于检验某一条具体路径，生活方式干预则可以观察个体内的变化。结合这些资料时，仍要保留各自的研究目的和证据范围。\n\n研究中的分子网络或模型权重不等于机制。干预前后出现组学变化，也不等于疾病结局已经改善。公开页面需要把发现、外部验证、实验支持和干预反应分开写，避免形成脱离人群和样本条件的通用标志物清单。",
+          "source_ids": [
+            "H036S001",
+            "H036S005",
+            "H036S009",
+            "H036S012",
+            "H036S013",
+            "H036S014",
+            "H036S015",
+            "H036S016",
+            "H036S020"
+          ]
+        },
+        {
+          "section_id": "H036-SEC-07",
+          "title": "研究技术",
+          "body": "本专题的技术卡包括多组学队列设计、跨样本层级测量、多组学整合与外部验证、纵向随访和事件建模，以及干预前后配对分析。技术选择应与研究目的对应：描述差异、预测风险和检验机制需要不同的样本、设计和验证方式。",
+          "source_ids": []
+        },
+        {
+          "section_id": "H036-SEC-08",
+          "title": "科研参考范围",
+          "body": "本页用于介绍肥胖、脂肪肝和心代谢多组学研究的证据类型、研究设计和适用范围，不提供诊断、治疗或个体风险判断。",
+          "source_ids": []
+        }
+      ],
+      "methods": [
+        {
+          "method_id": "H036-M001",
+          "display_order": 1,
+          "category": "多组学队列设计",
+          "title": "在同一人群中连接临床表型与多个分子层级",
+          "principle": "在定义明确的人群中同步收集体成分、临床指标、生活方式资料，以及基因组、转录组、蛋白组、代谢组、脂质组或微生物组等数据。",
+          "answers": "适合描述同一临床标签之下的分子差异，并生成需要进一步验证的分型或风险候选特征。",
+          "sample_design": "预先写明疾病定义、纳入排除标准和主要表型；记录样本处理、平台批次、饮食、药物、年龄、性别和人群来源，并保留训练与验证样本。",
+          "limitations": "样本量较大也不能消除定义和测量偏差；多组学相关网络不能直接说明因果关系。",
+          "source_ids": [
+            "H036S001",
+            "H036S003",
+            "H036S004",
+            "H036S006",
+            "H036S008"
+          ],
+          "workflow": "设计阶段先确定：预先写明疾病定义、纳入排除标准和主要表型；记录样本处理、平台批次、饮食、药物、年龄、性别和人群来源，并保留训练与验证样本。 将肥胖、肝脏和心代谢表型与多组学测量按受试者、器官部位和时间点配对；分析中先处理混杂因素，再将候选分子放入独立队列或功能模型复核。 这项方法的直接测量或计算依据是：在定义明确的人群中同步收集体成分、临床指标、生活方式资料，以及基因组、转录组、蛋白组、代谢组、脂质组或微生物组等数据。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：样本量较大也不能消除定义和测量偏差；多组学相关网络不能直接说明因果关系。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "结果可描述同一临床标签之下的分子差异，并生成需要进一步验证的分型或风险候选特征。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        },
+        {
+          "method_id": "H036-M002",
+          "display_order": 2,
+          "category": "跨样本层级测量",
+          "title": "粪便、血液、脂肪组织和肝组织的配对分析",
+          "principle": "在同一受试者或可比较队列中采集不同层级的样本，分别测量肠道群落、循环分子、局部组织细胞状态和病理特征。",
+          "answers": "适合区分各类样本提供的信息，并检验人群中的分子特征是否与病变组织中的状态相关。",
+          "sample_design": "记录每种样本的取样时间、空腹或进食状态、保存方法和组织位置；肝组织应保留病理分期，必要时配合空间或单细胞测量。",
+          "limitations": "样本之间不能互相替代。粪便和血液较易获得，却不能直接代替肝脏或脂肪组织中的空间和细胞信息。",
+          "source_ids": [
+            "H036S003",
+            "H036S006",
+            "H036S007",
+            "H036S008",
+            "H036S010",
+            "H036S018"
+          ],
+          "workflow": "设计阶段先确定：记录每种样本的取样时间、空腹或进食状态、保存方法和组织位置；肝组织应保留病理分期，必要时配合空间或单细胞测量。 将肥胖、肝脏和心代谢表型与多组学测量按受试者、器官部位和时间点配对；分析中先处理混杂因素，再将候选分子放入独立队列或功能模型复核。 这项方法的直接测量或计算依据是：在同一受试者或可比较队列中采集不同层级的样本，分别测量肠道群落、循环分子、局部组织细胞状态和病理特征。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：样本之间不能互相替代。粪便和血液较易获得，却不能直接代替肝脏或脂肪组织中的空间和细胞信息。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "结果可区分各类样本提供的信息，并检验人群中的分子特征是否与病变组织中的状态相关。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        },
+        {
+          "method_id": "H036-M003",
+          "display_order": 3,
+          "category": "多组学整合与外部验证",
+          "title": "发现队列、模型训练和独立复现",
+          "principle": "在发现队列中建立分型、关联或预测模型，再用独立队列评估模型在不同人群中的稳定性、校准和增量信息。",
+          "answers": "适合区分只能描述训练人群的特征，与在外部人群中仍有可重复信号的模型。",
+          "sample_design": "明确训练、内部验证和外部验证的划分；报告缺失数据处理、批次校正、模型性能区间、校准和与常规临床变量的比较。",
+          "limitations": "外部验证失败常来自人群、定义、样本或平台差异；模型权重不等于生物学机制，也不构成个体诊断。",
+          "source_ids": [
+            "H036S001",
+            "H036S002",
+            "H036S004",
+            "H036S008",
+            "H036S016"
+          ],
+          "workflow": "设计阶段先确定：明确训练、内部验证和外部验证的划分；报告缺失数据处理、批次校正、模型性能区间、校准和与常规临床变量的比较。 将肥胖、肝脏和心代谢表型与多组学测量按受试者、器官部位和时间点配对；分析中先处理混杂因素，再将候选分子放入独立队列或功能模型复核。 这项方法的直接测量或计算依据是：在发现队列中建立分型、关联或预测模型，再用独立队列评估模型在不同人群中的稳定性、校准和增量信息。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：外部验证失败常来自人群、定义、样本或平台差异；模型权重不等于生物学机制，也不构成个体诊断。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "结果可区分只能描述训练人群的特征，与在外部人群中仍有可重复信号的模型。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        },
+        {
+          "method_id": "H036-M004",
+          "display_order": 4,
+          "category": "纵向随访和事件建模",
+          "title": "重复取样、时间关系与后续结局",
+          "principle": "在基线和随访中重复采集临床及组学资料，并按照预设的心血管或代谢结局分析分子特征与疾病进展之间的关系。",
+          "answers": "适合检验候选分型或分子特征是否与后续风险相关，并区分横断面差异和随时间出现的变化。",
+          "sample_design": "记录随访长度、失访、结局定义、竞争风险、药物和生活方式变化；采用独立复制队列，并报告效应量和不确定性区间。",
+          "limitations": "随访关联仍可能受未测量混杂影响；风险模型不能回答某个特征是否直接导致疾病。",
+          "source_ids": [
+            "H036S002",
+            "H036S003",
+            "H036S014",
+            "H036S017",
+            "H036S019"
+          ],
+          "workflow": "设计阶段先确定：记录随访长度、失访、结局定义、竞争风险、药物和生活方式变化；采用独立复制队列，并报告效应量和不确定性区间。 将肥胖、肝脏和心代谢表型与多组学测量按受试者、器官部位和时间点配对；分析中先处理混杂因素，再将候选分子放入独立队列或功能模型复核。 这项方法的直接测量或计算依据是：在基线和随访中重复采集临床及组学资料，并按照预设的心血管或代谢结局分析分子特征与疾病进展之间的关系。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：随访关联仍可能受未测量混杂影响；风险模型不能回答某个特征是否直接导致疾病。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "结果可检验候选分型或分子特征是否与后续风险相关，并区分横断面差异和随时间出现的变化。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        },
+        {
+          "method_id": "H036-M005",
+          "display_order": 5,
+          "category": "干预前后配对分析",
+          "title": "生活方式干预与个体内多组学变化",
+          "principle": "在饮食、限时进食、减重或其他生活方式干预前后，对同一参与者进行重复取样，观察体成分、代谢表型及组学指标的共同变化。",
+          "answers": "适合评估个体内变化，判断候选分型或分子特征是否随可控生活方式改变而变化。",
+          "sample_design": "设置预先定义的主要终点和对照；记录依从性、体重变化、取样时点、药物及基线代谢状态，必要时结合独立人群复现。",
+          "limitations": "个体内变化不能自动推广到所有人群；组学变化也不等于疾病结局改善或机制已经得到证实。",
+          "source_ids": [
+            "H036S001",
+            "H036S012",
+            "H036S013",
+            "H036S014",
+            "H036S015",
+            "H036S020"
+          ],
+          "workflow": "设计阶段先确定：设置预先定义的主要终点和对照；记录依从性、体重变化、取样时点、药物及基线代谢状态，必要时结合独立人群复现。 将肥胖、肝脏和心代谢表型与多组学测量按受试者、器官部位和时间点配对；分析中先处理混杂因素，再将候选分子放入独立队列或功能模型复核。 这项方法的直接测量或计算依据是：在饮食、限时进食、减重或其他生活方式干预前后，对同一参与者进行重复取样，观察体成分、代谢表型及组学指标的共同变化。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：个体内变化不能自动推广到所有人群；组学变化也不等于疾病结局改善或机制已经得到证实。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "结果可评估个体内变化，判断候选分型或分子特征是否随可控生活方式改变而变化。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        }
+      ],
+      "references": [
+        {
+          "source_id": "H036S001",
+          "title": "Multiomic signatures of body mass index identify heterogeneous health phenotypes and responses to a lifestyle intervention",
+          "authors": "Gibbons H et al.",
+          "journal": "Nature Medicine",
+          "published_date": "2023-03-20",
+          "doi": "10.1038/s41591-023-02248-0",
+          "pmid": "36941332",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/36941332/",
+          "source_type": "primary_research",
+          "study_context": "Arivale wellness cohort with TwinsUK external validation",
+          "study_design": "cross-sectional longitudinal and external-validation study",
+          "usable_for": "obesity heterogeneity model development and external validation",
+          "limitations": "volunteer cohorts and model-derived BMI do not establish disease mechanisms"
+        },
+        {
+          "source_id": "H036S002",
+          "title": "Divergent age-associated and metabolism-associated gut microbiome signatures modulate cardiovascular disease risk",
+          "authors": "Wang T et al.",
+          "journal": "Nature Medicine",
+          "published_date": "2024-06-06",
+          "doi": "10.1038/s41591-024-03038-y",
+          "pmid": "38844795",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/38844795/",
+          "source_type": "primary_research",
+          "study_context": "Chinese discovery and replication cohorts with microbiome validation cohorts",
+          "study_design": "longitudinal cohort and external validation",
+          "usable_for": "metabolic subphenotypes long-term CVD risk and microbiome associations",
+          "limitations": "observational design and geographic specificity; microbiome metric is not a clinical test"
+        },
+        {
+          "source_id": "H036S003",
+          "title": "Microbiome and metabolome features of the cardiometabolic disease spectrum",
+          "authors": "Fromentin S et al.",
+          "journal": "Nature Medicine",
+          "published_date": "2022-02-17",
+          "doi": "10.1038/s41591-022-01688-4",
+          "pmid": "35177860",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/35177860/",
+          "source_type": "primary_research",
+          "study_context": "1,241 middle-aged European participants across cardiometabolic states",
+          "study_design": "staged cross-sectional clinical cohort",
+          "usable_for": "comparison of obesity diabetes and ischemic heart disease contexts",
+          "limitations": "not a prospective natural-history cohort"
+        },
+        {
+          "source_id": "H036S004",
+          "title": "Microbiome connections with host metabolism and habitual diet from 1,098 deeply phenotyped individuals",
+          "authors": "Asnicar F et al.",
+          "journal": "Nature Medicine",
+          "published_date": "2021-01-18",
+          "doi": "10.1038/s41591-020-01183-8",
+          "pmid": "33462402",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/33462402/",
+          "source_type": "primary_research",
+          "study_context": "deeply phenotyped UK adults",
+          "study_design": "cross-sectional human cohort",
+          "usable_for": "habitual diet host metabolism and microbiome variation",
+          "limitations": "cross-sectional and not disease-specific"
+        },
+        {
+          "source_id": "H036S005",
+          "title": "Gut microbial carbohydrate metabolism contributes to insulin resistance",
+          "authors": "Takeuchi T et al.",
+          "journal": "Nature",
+          "published_date": "2023-08-30",
+          "doi": "10.1038/s41586-023-06466-x",
+          "pmid": "37648852",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/37648852/",
+          "source_type": "primary_research",
+          "study_context": "Japanese insulin-resistance cohort with mouse validation",
+          "study_design": "human multi-omics plus animal follow-up",
+          "usable_for": "linking metabolic phenotype with microbial functional data",
+          "limitations": "human association cannot by itself establish clinical stratification"
+        },
+        {
+          "source_id": "H036S006",
+          "title": "Multi-omic analysis reveals transkingdom gut dysbiosis in metabolic dysfunction-associated steatotic liver disease",
+          "authors": "Kim H et al.",
+          "journal": "Nature Metabolism",
+          "published_date": "2025-07-02",
+          "doi": "10.1038/s42255-025-01318-6",
+          "pmid": "40604156",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/40604156/",
+          "source_type": "primary_research",
+          "study_context": "female US cohort with MASLD cases and controls",
+          "study_design": "case-control human multi-omics study",
+          "usable_for": "MASLD subtype and microbial multi-omics comparison",
+          "limitations": "case-control design and cohort composition limit external generalization"
+        },
+        {
+          "source_id": "H036S007",
+          "title": "Spatially resolved multi-omics of human metabolic dysfunction-associated steatotic liver disease",
+          "authors": "Li Z et al.",
+          "journal": "Nature Genetics",
+          "published_date": "2025-11-24",
+          "doi": "10.1038/s41588-025-02407-8",
+          "pmid": "41286103",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/41286103/",
+          "source_type": "primary_research",
+          "study_context": "61 human liver samples spanning control MASL and MASH",
+          "study_design": "human tissue atlas",
+          "usable_for": "tissue-level heterogeneity and disease-stage comparison",
+          "limitations": "atlas needs independent functional and population validation"
+        },
+        {
+          "source_id": "H036S008",
+          "title": "Multi-omic definition of metabolic obesity through adipose tissue-microbiome interactions",
+          "authors": "Lopez et al.",
+          "journal": "Nature Medicine",
+          "published_date": "2025-12-04",
+          "doi": "10.1038/s41591-025-04009-7",
+          "pmid": "41482560",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/41482560/",
+          "source_type": "primary_research",
+          "study_context": "Swedish deep-phenotyping cohort with an external cohort",
+          "study_design": "multi-omics model development and external validation",
+          "usable_for": "metabolic obesity heterogeneity and independent validation",
+          "limitations": "model performance and causal explanation remain separate questions"
+        },
+        {
+          "source_id": "H036S009",
+          "title": "A Consensus Statement on establishing causality therapeutic applications and the use of preclinical models in microbiome research",
+          "authors": "Metwaly A et al.",
+          "journal": "Nature Reviews Gastroenterology & Hepatology",
+          "published_date": "2025-03-03",
+          "doi": "10.1038/s41575-025-01041-3",
+          "pmid": "",
+          "url": "https://www.nature.com/articles/s41575-025-01041-3",
+          "source_type": "consensus",
+          "study_context": "microbiome research across human and preclinical settings",
+          "study_design": "Delphi consensus statement",
+          "usable_for": "validation requirements for microbiome translation",
+          "limitations": "not a cohort or biomarker-validation study"
+        },
+        {
+          "source_id": "H036S010",
+          "title": "Pathogenesis of MASLD and MASH - role of insulin resistance and lipotoxicity",
+          "authors": "Bansal SK and Bansal MB",
+          "journal": "Alimentary Pharmacology & Therapeutics",
+          "published_date": "2024-03-07",
+          "doi": "10.1111/apt.17930",
+          "pmid": "38451123",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/38451123/",
+          "source_type": "review",
+          "study_context": "MASLD and MASH organ cross-talk",
+          "study_design": "peer-reviewed review",
+          "usable_for": "disease definition and cross-organ phenotyping context",
+          "limitations": "review; not a validation dataset"
+        },
+        {
+          "source_id": "H036S011",
+          "title": "Metabolic reprogramming of the intestinal microbiome with functional bile acid changes underlie the development of NAFLD",
+          "authors": "Smirnova E et al.",
+          "journal": "Hepatology",
+          "published_date": "2022-06-23",
+          "doi": "10.1002/hep.32568",
+          "pmid": "35561146",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/35561146/",
+          "source_type": "primary_research",
+          "study_context": "NAFLD phenotypes with varying disease activity and fibrosis",
+          "study_design": "human fecal multi-omics study",
+          "usable_for": "disease-stage stratification and functional-pathway comparison",
+          "limitations": "observational design and nomenclature predates MASLD"
+        },
+        {
+          "source_id": "H036S012",
+          "title": "Gut microbial metabolism of bile acids modifies the effect of Mediterranean diet interventions on cardiometabolic risk in a randomized controlled trial",
+          "authors": "authors as indexed",
+          "journal": "Gut Microbes",
+          "published_date": "2024-10-30",
+          "doi": "10.1080/19490976.2024.2426610",
+          "pmid": "39535126",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/39535126/",
+          "source_type": "primary_research",
+          "study_context": "DIRECT-PLUS trial participants",
+          "study_design": "longitudinal randomized dietary intervention",
+          "usable_for": "longitudinal response heterogeneity",
+          "limitations": "secondary analysis requires replication and does not define clinical response thresholds"
+        },
+        {
+          "source_id": "H036S013",
+          "title": "Gut-microbiota-targeted diets modulate human immune status",
+          "authors": "Wastyk HC et al.",
+          "journal": "Cell",
+          "published_date": "2021-07-12",
+          "doi": "10.1016/j.cell.2021.06.019",
+          "pmid": "34256014",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/34256014/",
+          "source_type": "primary_research",
+          "study_context": "healthy adults receiving high-fiber or fermented-food diets",
+          "study_design": "randomized dietary intervention",
+          "usable_for": "within-person longitudinal response and intervention heterogeneity",
+          "limitations": "short intervention and healthy volunteer population"
+        },
+        {
+          "source_id": "H036S014",
+          "title": "Loss of Visceral Fat is Associated with a Reduction in Inflammatory Status in Patients with Metabolic Syndrome",
+          "authors": "Castro-Barquero S et al.",
+          "journal": "Molecular Nutrition & Food Research",
+          "published_date": "2022-01-01",
+          "doi": "10.1002/mnfr.202200264",
+          "pmid": "36416291",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/36416291/",
+          "source_type": "primary_research",
+          "study_context": "117 older adults with overweight or obesity in PREDIMED-Plus",
+          "study_design": "prospective cohort analysis within lifestyle trial",
+          "usable_for": "longitudinal visceral-fat and inflammatory-marker relationship",
+          "limitations": "observational subgroup analysis and circulating markers only"
+        },
+        {
+          "source_id": "H036S015",
+          "title": "Time-restricted eating improves glycemic control and dampens energy-consuming pathways in human adipose tissue",
+          "authors": "Zhao L et al.",
+          "journal": "Nutrition",
+          "published_date": "2022-01-01",
+          "doi": "10.1016/j.nut.2021.111583",
+          "pmid": "35150947",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/35150947/",
+          "source_type": "primary_research",
+          "study_context": "men with obesity in an eight-week intervention",
+          "study_design": "single-arm pre-post clinical trial",
+          "usable_for": "within-person tissue response and temporal design",
+          "limitations": "small sex-specific cohort and limited duration"
+        },
+        {
+          "source_id": "H036S016",
+          "title": "Endocrinology in the multi-omics era",
+          "authors": "Shilo S and Segal E",
+          "journal": "Nature Reviews Endocrinology",
+          "published_date": "2024-01-01",
+          "doi": "10.1038/s41574-023-00931-3",
+          "pmid": "",
+          "url": "https://www.nature.com/articles/s41574-023-00931-3",
+          "source_type": "review",
+          "study_context": "endocrinology and metabolic multi-omics research",
+          "study_design": "peer-reviewed review",
+          "usable_for": "technology choices and analytical limitations",
+          "limitations": "review; not disease-specific validation evidence"
+        },
+        {
+          "source_id": "H036S017",
+          "title": "Metabolically healthy obesity: from epidemiology and mechanisms to clinical implications",
+          "authors": "Schulze MB and Stefan N",
+          "journal": "Nature Reviews Endocrinology",
+          "published_date": "2024-06-27",
+          "doi": "10.1038/s41574-024-01008-5",
+          "pmid": "",
+          "url": "https://www.nature.com/articles/s41574-024-01008-5",
+          "source_type": "review",
+          "study_context": "metabolically healthy obesity definitions and outcomes",
+          "study_design": "peer-reviewed review",
+          "usable_for": "heterogeneity of metabolic health criteria",
+          "limitations": "review; no single agreed phenotype definition"
+        },
+        {
+          "source_id": "H036S018",
+          "title": "Viewing MASLD through an integrative gut microbiome lens",
+          "authors": "Wen W et al.",
+          "journal": "Nature Metabolism",
+          "published_date": "2025-07-02",
+          "doi": "10.1038/s42255-025-01300-2",
+          "pmid": "",
+          "url": "https://www.nature.com/articles/s42255-025-01300-2",
+          "source_type": "review",
+          "study_context": "commentary on MASLD gut multi-omics",
+          "study_design": "expert commentary",
+          "usable_for": "context for microbiome-linked MASLD heterogeneity",
+          "limitations": "commentary not an independent source of evidence"
+        },
+        {
+          "source_id": "H036S019",
+          "title": "Metabolic dysfunction-associated steatotic liver disease in adults",
+          "authors": "authors as indexed",
+          "journal": "Nature Reviews Disease Primers",
+          "published_date": "2025-01-01",
+          "doi": "10.1038/s41572-025-00599-1",
+          "pmid": "",
+          "url": "https://www.nature.com/articles/s41572-025-00599-1",
+          "source_type": "review",
+          "study_context": "MASLD clinical and biological overview",
+          "study_design": "peer-reviewed primer",
+          "usable_for": "cohort phenotyping and nomenclature requirements",
+          "limitations": "review; not a biomarker-validation dataset"
+        },
+        {
+          "source_id": "H036S020",
+          "title": "Modification of subcutaneous white adipose tissue inflammation by omega-3 fatty acids is limited in human obesity-a double blind randomised clinical trial",
+          "authors": "Fisk HL et al.",
+          "journal": "eBioMedicine",
+          "published_date": "2022-03-02",
+          "doi": "10.1016/j.ebiom.2022.103909",
+          "pmid": "35247847",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/35247847/",
+          "source_type": "primary_research",
+          "study_context": "normal-weight and obese adults in a double-blind intervention",
+          "study_design": "randomized clinical trial",
+          "usable_for": "multi-layer tissue response and negative effect interpretation",
+          "limitations": "subcutaneous tissue and limited sample size"
+        }
+      ],
+      "shared_findings": [
+        {
+          "finding_id": "H036-C01",
+          "display_order": 1,
+          "title": "相同体重指数之下存在不同的生物学状态",
+          "shared_result": "体重指数相近的人群可以具有不同的体脂分布、代谢状态、微生物组和分子特征。多组学有助于描述这种异质性，并观察生活方式干预中的个体内变化。\n\n年龄、性别、族群、饮食、药物和体脂分布都会影响组学特征；所谓代谢健康肥胖的定义和随访结局也不完全一致。",
+          "research_use": "结合体成分、临床代谢指标、多个组学层和纵向取样；预先说明表型定义，并在独立人群复现。",
+          "boundary": "组学推导的体重指数、健康评分或亚型不是疾病诊断，也不能用于本页的个体风险判断。",
+          "source_ids": [
+            "H036S001",
+            "H036S004",
+            "H036S008",
+            "H036S014",
+            "H036S015",
+            "H036S017"
+          ]
+        },
+        {
+          "finding_id": "H036-C02",
+          "display_order": 2,
+          "title": "不同样本反映不同层级的疾病信息",
+          "shared_result": "粪便微生物组适合描述肠道群落和功能，血液组学反映循环状态，脂肪和肝组织则提供局部细胞、空间和病理信息。跨样本整合应说明每个层级实际测量了什么。\n\n样本可及性、取样时间和病变部位不同；粪便或血液特征可能与疾病相关，但不一定对应病变组织中的细胞机制。",
+          "research_use": "尽可能在同一受试者中配对样本，记录取样时间和疾病分期；结合组织学、空间或单细胞技术及正交验证。",
+          "boundary": "不能用粪便特征代替肝脏或脂肪组织机制，也不能把循环分子浓度直接解释为组织内暴露。",
+          "source_ids": [
+            "H036S003",
+            "H036S006",
+            "H036S007",
+            "H036S008",
+            "H036S010",
+            "H036S018",
+            "H036S019"
+          ]
+        },
+        {
+          "finding_id": "H036-C03",
+          "display_order": 3,
+          "title": "MASLD 分型需要同时保留疾病定义和组织异质性",
+          "shared_result": "微生物组、代谢组和宿主组学能够识别 MASLD 患者之间的差异，肝组织空间图谱则显示病变区域和细胞状态。两类资料互为补充，但不能相互替代。\n\n既往 NAFLD 与当前 MASLD 的命名和纳入条件不完全相同；糖尿病、肥胖程度、纤维化分期和药物背景会改变分型结果。",
+          "research_use": "明确诊断标准和病理分期；分别报告粪便、血液和肝组织发现，并使用外部队列或独立组织进行验证。",
+          "boundary": "单一队列中的亚型不能视为普适临床分类，粪便多组学不能直接确定肝内病变机制或分期。",
+          "source_ids": [
+            "H036S006",
+            "H036S007",
+            "H036S010",
+            "H036S011",
+            "H036S018",
+            "H036S019"
+          ]
+        },
+        {
+          "finding_id": "H036-C04",
+          "display_order": 4,
+          "title": "预测需要纵向资料和外部验证",
+          "shared_result": "横断面研究可以发现候选分子组合，长期随访可以检验其与后续结局的关系，外部队列用于判断模型能否离开训练人群。模型性能应与传统风险因素和明确结局定义一同报告。\n\n地理、年龄、饮食、药物和终点定义会影响模型表现；同一组学特征在年龄相关和代谢相关风险中可能方向不同。",
+          "research_use": "预设训练与验证队列、随访时间和临床结局；报告效应区间、校准、增量价值和数据缺失，并进行跨地区复现。",
+          "boundary": "风险关联和模型预测不等于致病机制，也不构成本页面向个人的临床风险评估。",
+          "source_ids": [
+            "H036S002",
+            "H036S003",
+            "H036S004",
+            "H036S008"
+          ]
+        },
+        {
+          "finding_id": "H036-C05",
+          "display_order": 5,
+          "title": "组学关联、机制支持和干预反应应分开评价",
+          "shared_result": "网络分析和机器学习可以连接多个组学层，实验扰动用于检验特定关系，干预研究观察系统是否随处理改变。三类证据共同提高解释力，但不能由一种设计替代另一种。\n\n生活方式干预常以个体内变化为主，样本量和随访有限；微生物或代谢物机制研究的剂量和模型条件也限制人体外推。",
+          "research_use": "在分析计划中区分发现、验证和机制；采用独立队列、预设终点、正交测量和必要的可控扰动，并保留阴性干预结果。",
+          "boundary": "不把相关网络或模型权重称为机制，不形成脱离人群和样本条件的通用标志物清单。",
+          "source_ids": [
+            "H036S001",
+            "H036S005",
+            "H036S009",
+            "H036S012",
+            "H036S013",
+            "H036S014",
+            "H036S015",
+            "H036S016",
+            "H036S020"
+          ]
+        }
+      ]
+    }
+  ]
+}

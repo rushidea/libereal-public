@@ -1,0 +1,2312 @@
+{
+  "schema_version": "research-deep-dive-public-v0.1",
+  "batch_id": "B03",
+  "title": "人体相关模型与转化评价",
+  "publication_status": "snapshot_ready",
+  "frontend_status": "snapshot_ready",
+  "topics": [
+    {
+      "topic_id": "H019",
+      "title": "患者来源类器官与疾病模型",
+      "topic_role": "research_deep_dive",
+      "overview": "患者来源类器官、球体和短期组织培养把部分患者组织带入可控制的体外环境，使研究者能够比较遗传、转录、形态和功能特征。不同模型保留的内容并不相同，传统培养还可能丢失免疫、基质、血管和微生物等局部环境，因此“模型像不像原组织”必须拆分到具体证据层级判断。\n\n本方向从手术或活检样本、患者来源类器官、短期组织培养、共培养体系和疾病模型出发，集中处理三类问题：哪些样本能够进入模型以及模型代表哪些患者；原组织特征在培养、传代和冻存后保留到哪一层；体外药物反应能否与配对组织、独立模型或患者结局建立限定范围内的联系。病理、基因组、转录组、微环境和功能读出共同构成保真评价。\n\n比较公开研究时，需要同时交代取样来源、连续入组人数、建模成功与失败原因、培养条件、传代数、冻存复苏、微环境组成、给药方式和临床终点。模型中的敏感或耐受信号可以提出后续验证线索，不能单独证明患者治疗获益。器官芯片专题处理动态流动和组织界面，人体相关模型专题处理药代药效和安全性，本页聚焦患者来源模型的代表性与验证边界。",
+      "sections": [
+        {
+          "section_id": "H019-SEC-01",
+          "title": "比较不同研究时应先看什么",
+          "body": "| 比较内容 | 应记录的信息 | 关系到什么判断 |\n| --- | --- | --- |\n| 取样与建模 | 组织来源、取样时间、连续入组人数、成功率、失败原因和建模耗时 | 成功模型代表了哪些患者和病灶 |\n| 原组织保真 | 配对原组织、培养条件、传代、冻存，以及形态、分子和功能比较 | 模型在哪些层面保留原组织特征 |\n| 微环境组成 | 实际保留或加入的免疫、基质、血管和微生物成分及其来源 | 模型能够研究哪些细胞或组织关系 |\n| 药物实验 | 药物、浓度、给药时间、功能终点和反应阈值 | 不同模型和研究之间能否比较药物反应 |\n| 患者结局比较 | 研究设计、可评价病例、盲法、临床终点和病例流失 | 结果支持实验可行性、预测信号还是临床效用 |",
+          "source_ids": []
+        },
+        {
+          "section_id": "H019-SEC-02",
+          "title": "哪些样本进入了模型",
+          "body": "患者来源模型并不是从所有样本中以同样概率建立。手术组织与穿刺活检的细胞量和完整性不同；原发灶、转移灶、既往治疗和取样后的处理时间也会影响培养结果。建模失败、培养时间过长或无法进入药物测试的样本，都应被纳入病例流说明。\n\n因此，报告建模成功率时，需要同时看到取样来源、连续入组人数、失败原因和最终可评价病例数。只看成功模型，容易高估系统对患者群体的代表性。",
+          "source_ids": [
+            "H019S002",
+            "H019S003",
+            "H019S009",
+            "H019S010",
+            "H019S012",
+            "H019S013",
+            "H019S019"
+          ]
+        },
+        {
+          "section_id": "H019-SEC-03",
+          "title": "模型保留了原组织的哪些特征",
+          "body": "保真不是单一指标。病理形态、细胞组成、基因组变异、转录状态和功能读出可以分别与原组织比较，但这些结果未必同步。一个模型保留了部分肿瘤克隆特征，并不意味着其中的免疫状态或药物反应也与原病灶一致。\n\n较有说服力的比较会使用配对原组织，并说明培养基、基质、传代数和冻存复苏后的变化。研究者还需要根据问题选择相应的功能测量：研究肠道上皮时看屏障或分化功能，研究肿瘤时则可能加入增殖、损伤或特定治疗反应。",
+          "source_ids": [
+            "H019S001",
+            "H019S004",
+            "H019S006",
+            "H019S008",
+            "H019S013",
+            "H019S014",
+            "H019S020"
+          ]
+        },
+        {
+          "section_id": "H019-SEC-04",
+          "title": "微环境通常没有被完整带入培养体系",
+          "body": "常规类器官多以患者来源的上皮细胞或肿瘤细胞为主。病灶中的免疫细胞、成纤维细胞、血管、神经和微生物成分，往往在建模时缺失，或在长期培养中逐渐减少。自体免疫细胞共培养、加入基质或微生物输入，可以用于研究其中一部分关系；短期组织培养则可能保留更多原有结构。\n\n这些方法回答的问题不同。共培养体系需要说明加入了哪些细胞、它们是否来自同一患者，以及如何设置对照；短期组织培养则需要面对培养窗口较短和样本可得性有限的问题。",
+          "source_ids": [
+            "H019S006",
+            "H019S007",
+            "H019S008",
+            "H019S015"
+          ]
+        },
+        {
+          "section_id": "H019-SEC-05",
+          "title": "体外药物反应怎样阅读",
+          "body": "药物实验的结果取决于药物种类、体外暴露、给药时间和反应终点。类器官大小、细胞活性、DNA 损伤、组织形态和器官功能都可用作读出，但它们回答的不是同一个问题。若要比较不同患者模型或与临床结局对应，剂量、给药节奏、阈值和临床终点应在实验开始前明确。\n\n体外反应可用于提出值得进一步验证的线索。筛选命中或模型中的分子变化，并不等于患者层面的治疗获益。",
+          "source_ids": [
+            "H019S002",
+            "H019S004",
+            "H019S016",
+            "H019S017",
+            "H019S018",
+            "H019S019"
+          ]
+        },
+        {
+          "section_id": "H019-SEC-06",
+          "title": "与患者结局的一致性仍需分情境判断",
+          "body": "已有研究显示，在部分疾病和工作流程中，患者来源模型能够完成建模、测试并与临床结局进行比较。但目前资料同时包括观察性一致、较小的配对队列、非比较性前瞻性研究，以及未显示客观缓解的研究结果。它们共同支持的是特定场景下的可行性和预测信号，而不是对所有患者和治疗方案都有效的结论。\n\n判断一项研究时，重点应放在病例是否连续入组、模型结果是否在治疗前获得、阈值是否预先设定，以及有多少患者因取样、建模或时间限制而未进入比较。",
+          "source_ids": [
+            "H019S001",
+            "H019S003",
+            "H019S005",
+            "H019S011",
+            "H019S012",
+            "H019S015",
+            "H019S019"
+          ]
+        },
+        {
+          "section_id": "H019-SEC-07",
+          "title": "研究技术",
+          "body": "本专题的技术卡包括患者来源类器官建模、配对原组织保真评价、患者匹配的共培养与短期组织培养、体外药物反应测试，以及患者结局匹配研究。技术选择取决于研究想保留的组织特征和要回答的问题。",
+          "source_ids": []
+        },
+        {
+          "section_id": "H019-SEC-08",
+          "title": "科研参考范围",
+          "body": "本页用于说明患者来源疾病模型的证据类型、实验设计和适用范围，不提供诊疗建议或治疗推荐。",
+          "source_ids": []
+        }
+      ],
+      "methods": [
+        {
+          "method_id": "H019-M001",
+          "display_order": 1,
+          "category": "患者来源类器官建模",
+          "title": "由患者组织建立可扩增的三维培养物",
+          "principle": "从手术组织、穿刺活检或其他患者来源材料中分离细胞或组织片段，在适配的基质和培养条件下建立类器官或球体。",
+          "answers": "适合研究哪些样本可以建立模型、建模需要多久，以及模型能否进入后续机制或药物实验。",
+          "sample_design": "连续记录入组患者、取样部位和时间、既往处理、组织质量、培养条件、建模成功或失败的原因，以及从取样到获得可用模型的时间。",
+          "limitations": "成功建立的模型只代表通过取样和培养筛选的样本；不同疾病、取材方式和培养体系的成功率不能直接比较。",
+          "source_ids": [
+            "H019S002",
+            "H019S003",
+            "H019S009",
+            "H019S010",
+            "H019S012",
+            "H019S013",
+            "H019S019"
+          ],
+          "workflow": "设计阶段先确定：连续记录入组患者、取样部位和时间、既往处理、组织质量、培养条件、建模成功或失败的原因，以及从取样到获得可用模型的时间。 从连续入组、取样和模型建立开始记录病例流；培养、药物处理、病理或分子比对和功能读出使用配对的原组织与模型样本，结果按患者而不是只按培养孔汇总。 这项方法的直接测量或计算依据是：从手术组织、穿刺活检或其他患者来源材料中分离细胞或组织片段，在适配的基质和培养条件下建立类器官或球体。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：成功建立的模型只代表通过取样和培养筛选的样本；不同疾病、取材方式和培养体系的成功率不能直接比较。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "结果可研究哪些样本可以建立模型、建模需要多久，以及模型能否进入后续机制或药物实验。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        },
+        {
+          "method_id": "H019-M002",
+          "display_order": 2,
+          "category": "配对原组织的保真评价",
+          "title": "从多个层面比较模型与来源组织",
+          "principle": "将类器官与配对原组织的病理形态、细胞组成、基因组或转录特征及相关功能读出进行比较。",
+          "answers": "适合判断模型在哪些层面保留原组织特征，以及传代或冻存后哪些特征发生变化。",
+          "sample_design": "保留配对材料；记录培养基、基质、传代数、冻存复苏和独立批次。根据研究问题选择组织学、组学和功能测量，避免只用单一标志物。",
+          "limitations": "形态相似或部分突变保留不能单独说明模型完整重现原组织；不同层面的保真可能并不同步。",
+          "source_ids": [
+            "H019S001",
+            "H019S004",
+            "H019S006",
+            "H019S008",
+            "H019S013",
+            "H019S014",
+            "H019S020"
+          ],
+          "workflow": "设计阶段先确定：保留配对材料；记录培养基、基质、传代数、冻存复苏和独立批次。根据研究问题选择组织学、组学和功能测量，避免只用单一标志物。 从连续入组、取样和模型建立开始记录病例流；培养、药物处理、病理或分子比对和功能读出使用配对的原组织与模型样本，结果按患者而不是只按培养孔汇总。 这项方法的直接测量或计算依据是：将类器官与配对原组织的病理形态、细胞组成、基因组或转录特征及相关功能读出进行比较。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：形态相似或部分突变保留不能单独说明模型完整重现原组织；不同层面的保真可能并不同步。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "结果可判断模型在哪些层面保留原组织特征，以及传代或冻存后哪些特征发生变化。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        },
+        {
+          "method_id": "H019-M003",
+          "display_order": 3,
+          "category": "患者匹配的共培养与短期组织培养",
+          "title": "补入或保留局部微环境中的部分成分",
+          "principle": "在类器官中加入患者匹配的免疫细胞、基质或微生物输入，或使用短期组织切片培养保留较多原有组织结构。",
+          "answers": "适合研究上皮细胞与免疫、基质或微生物之间的特定关系。",
+          "sample_design": "说明每种细胞和基质的来源、比例、共培养时长及是否患者匹配；结合组织学、细胞迁移、屏障、细胞因子和成像读出，并设置单培养或缺失组分对照。",
+          "limitations": "有限共培养不等于完整疾病微环境；短期组织培养保留更多局部组成，但可观察的时间窗口较短。",
+          "source_ids": [
+            "H019S006",
+            "H019S007",
+            "H019S008",
+            "H019S015"
+          ],
+          "workflow": "设计阶段先确定：说明每种细胞和基质的来源、比例、共培养时长及是否患者匹配；结合组织学、细胞迁移、屏障、细胞因子和成像读出，并设置单培养或缺失组分对照。 从连续入组、取样和模型建立开始记录病例流；培养、药物处理、病理或分子比对和功能读出使用配对的原组织与模型样本，结果按患者而不是只按培养孔汇总。 这项方法的直接测量或计算依据是：在类器官中加入患者匹配的免疫细胞、基质或微生物输入，或使用短期组织切片培养保留较多原有组织结构。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：有限共培养不等于完整疾病微环境；短期组织培养保留更多局部组成，但可观察的时间窗口较短。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "结果可研究上皮细胞与免疫、基质或微生物之间的特定关系。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        },
+        {
+          "method_id": "H019-M004",
+          "display_order": 4,
+          "category": "体外药物反应测试",
+          "title": "在预设暴露条件下测量模型的功能变化",
+          "principle": "向类器官、球体或组织切片给予特定药物或联合方案，测量生长、细胞活性、组织形态、分子损伤或器官相关功能。",
+          "answers": "适合比较同一模型对不同药物、剂量和给药时程的反应，也可为患者结局比较提供实验读出。",
+          "sample_design": "预先确定药物浓度、给药次数和时间；记录基线生长、反应终点、阈值来源和独立重复。若与患者结局比较，还要说明临床方案和可评价病例。",
+          "limitations": "筛选命中、分子变化或某个队列中的相关性不能直接说明患者会获益；不同药物和疾病的阈值不能互用。",
+          "source_ids": [
+            "H019S002",
+            "H019S004",
+            "H019S016",
+            "H019S017",
+            "H019S018",
+            "H019S019"
+          ],
+          "workflow": "设计阶段先确定：预先确定药物浓度、给药次数和时间；记录基线生长、反应终点、阈值来源和独立重复。若与患者结局比较，还要说明临床方案和可评价病例。 从连续入组、取样和模型建立开始记录病例流；培养、药物处理、病理或分子比对和功能读出使用配对的原组织与模型样本，结果按患者而不是只按培养孔汇总。 这项方法的直接测量或计算依据是：向类器官、球体或组织切片给予特定药物或联合方案，测量生长、细胞活性、组织形态、分子损伤或器官相关功能。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：筛选命中、分子变化或某个队列中的相关性不能直接说明患者会获益；不同药物和疾病的阈值不能互用。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "结果可比较同一模型对不同药物、剂量和给药时程的反应，也可为患者结局比较提供实验读出。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        },
+        {
+          "method_id": "H019-M005",
+          "display_order": 5,
+          "category": "患者结局匹配研究",
+          "title": "将模型结果与预先定义的患者层终点比较",
+          "principle": "在明确病例流、模型读出和临床终点的前提下，比较体外反应与实际治疗结局或其他外部资料的一致性。",
+          "answers": "适合评估患者来源模型在某一疾病、治疗方案和时间窗口内的可行性与预测信号。",
+          "sample_design": "采用连续入组、预设判定阈值和患者层终点；完整报告从取样、建模、获得结果到实际接受治疗的病例流失，尽可能设置盲法、比较组或独立队列。",
+          "limitations": "回顾性一致性和单臂流程研究不能确定临床获益；不同研究的阳性比例受患者选择、治疗线次和出结果时间影响。",
+          "source_ids": [
+            "H019S001",
+            "H019S003",
+            "H019S005",
+            "H019S011",
+            "H019S012",
+            "H019S015",
+            "H019S019"
+          ],
+          "workflow": "设计阶段先确定：采用连续入组、预设判定阈值和患者层终点；完整报告从取样、建模、获得结果到实际接受治疗的病例流失，尽可能设置盲法、比较组或独立队列。 从连续入组、取样和模型建立开始记录病例流；培养、药物处理、病理或分子比对和功能读出使用配对的原组织与模型样本，结果按患者而不是只按培养孔汇总。 这项方法的直接测量或计算依据是：在明确病例流、模型读出和临床终点的前提下，比较体外反应与实际治疗结局或其他外部资料的一致性。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：回顾性一致性和单臂流程研究不能确定临床获益；不同研究的阳性比例受患者选择、治疗线次和出结果时间影响。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "结果可评估患者来源模型在某一疾病、治疗方案和时间窗口内的可行性与预测信号。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        }
+      ],
+      "references": [
+        {
+          "source_id": "H019S001",
+          "title": "Functional precision oncology using patient-derived assays",
+          "authors": "van Renterghem L et al.",
+          "journal": "Nature Reviews Clinical Oncology",
+          "published_date": "2023-03-13",
+          "doi": "10.1038/s41571-023-00745-2",
+          "pmid": "",
+          "url": "https://www.nature.com/articles/s41571-023-00745-2",
+          "source_type": "review",
+          "study_context": "patient-derived organoids spheroids and explants",
+          "study_design": "peer-reviewed review",
+          "usable_for": "terminology, validation layers and translational limitations",
+          "limitations": "review; not independent proof of clinical utility"
+        },
+        {
+          "source_id": "H019S002",
+          "title": "Lung cancer organoids analyzed on microwell arrays predict drug responses of patients within a week",
+          "authors": "Wang J et al.",
+          "journal": "Nature Communications",
+          "published_date": "2021-04-20",
+          "doi": "10.1038/s41467-021-22676-1",
+          "pmid": "",
+          "url": "https://www.nature.com/articles/s41467-021-22676-1",
+          "source_type": "primary_research",
+          "study_context": "lung cancer organoids from surgical and biopsy samples",
+          "study_design": "paired organoid characterization and treatment-response comparison",
+          "usable_for": "model establishment time, tissue matching and response-comparison design",
+          "limitations": "small clinically evaluable subset; disease and treatment context limit generalization"
+        },
+        {
+          "source_id": "H019S003",
+          "title": "Prospective experimental treatment of colorectal cancer patients based on organoid drug responses",
+          "authors": "Vlachogiannis G et al.",
+          "journal": "ESMO Open",
+          "published_date": "2021-04-17",
+          "doi": "",
+          "pmid": "33887686",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/33887686/",
+          "source_type": "primary_research",
+          "study_context": "61 colorectal cancer patients in a prospective intervention trial",
+          "study_design": "single-arm prospective feasibility trial",
+          "usable_for": "clinical feasibility, culture success and negative predictive-utility evidence",
+          "limitations": "few patients received recommended treatment and no objective responses; does not validate organoid-guided treatment"
+        },
+        {
+          "source_id": "H019S004",
+          "title": "Unified framework for patient-derived tumor-organoid-based predictive testing of standard-of-care therapies in metastatic colorectal cancer",
+          "authors": "Steele NG et al.",
+          "journal": "Nature Medicine",
+          "published_date": "2023-12-18",
+          "doi": "",
+          "pmid": "38118423",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/38118423/",
+          "source_type": "primary_research",
+          "study_context": "metastatic colorectal cancer organoid cohorts and treatment data",
+          "study_design": "framework development with cohort validation",
+          "usable_for": "predefined response metrics, culture progression and external clinical comparison",
+          "limitations": "cohort and regimen specific; prospective patient-level utility remains limited"
+        },
+        {
+          "source_id": "H019S005",
+          "title": "Patient-derived organoids predict responses to chemotherapy and PARP inhibitors in advanced ovarian cancer",
+          "authors": "authors as indexed",
+          "journal": "",
+          "published_date": "2026-01-06",
+          "doi": "",
+          "pmid": "41491716",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/41491716/",
+          "source_type": "primary_research",
+          "study_context": "30 treatment-naive epithelial ovarian cancer specimens",
+          "study_design": "prospective comparison of organoid and patient outcomes",
+          "usable_for": "paired histopathology, sequencing and first-line response-comparison design",
+          "limitations": "small cohort and wide confidence intervals; requires external validation"
+        },
+        {
+          "source_id": "H019S006",
+          "title": "A living organoid biobank of patients with Crohn's disease reveals molecular subtypes for personalized therapeutics",
+          "authors": "authors as indexed",
+          "journal": "",
+          "published_date": "2024-09-30",
+          "doi": "",
+          "pmid": "39332415",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/39332415/",
+          "source_type": "primary_research",
+          "study_context": "53 Crohn's disease and healthy-subject colonic biopsy organoid cultures",
+          "study_design": "prospective biobank and multi-layer subtype study",
+          "usable_for": "non-tumour patient-derived biobank, tissue identity and disease-subtype comparison",
+          "limitations": "biobank associations require functional and independent validation"
+        },
+        {
+          "source_id": "H019S007",
+          "title": "An autologous colonic organoid-derived monolayer model to study immune: bacterial interactions in Crohn's disease patients",
+          "authors": "Angus HCK et al.",
+          "journal": "Clinical & Translational Immunology",
+          "published_date": "2022-08-01",
+          "doi": "10.1002/cti2.1407",
+          "pmid": "35924188",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/35924188/",
+          "source_type": "primary_research",
+          "study_context": "Crohn's disease and non-IBD donor colonic biopsy-derived organoids with matched peripheral blood mononuclear cells",
+          "study_design": "patient-matched co-culture study",
+          "usable_for": "patient-matched epithelial, immune and microbial-input reconstruction",
+          "limitations": "small donor cohorts and a simplified two-dimensional barrier model"
+        },
+        {
+          "source_id": "H019S008",
+          "title": "Epithelial Regeneration Ability of Crohn's Disease Assessed Using Patient-Derived Intestinal Organoids",
+          "authors": "Lee C et al.",
+          "journal": "International Journal of Molecular Sciences",
+          "published_date": "2021-06-02",
+          "doi": "10.3390/ijms22116013",
+          "pmid": "34199463",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/34199463/",
+          "source_type": "primary_research",
+          "study_context": "intestinal organoids derived from Crohn's disease and control tissue",
+          "study_design": "patient-derived comparative organoid study",
+          "usable_for": "disease-linked epithelial repair phenotype and the boundary of epithelial-only models",
+          "limitations": "does not reconstruct immune, microbial or vascular compartments"
+        },
+        {
+          "source_id": "H019S009",
+          "title": "Multicenter study correlating molecular characteristics and clinical outcomes of cancer cases with patient-derived organoids",
+          "authors": "Navarro P et al.",
+          "journal": "",
+          "published_date": "2025-07-02",
+          "doi": "",
+          "pmid": "40605011",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/40605011/",
+          "source_type": "primary_research",
+          "study_context": "three prospective multicenter studies spanning 184 patients and 17 tumour types",
+          "study_design": "multicenter prospective cohort study",
+          "usable_for": "success rates by sample type, molecular fidelity and sequential sample comparison",
+          "limitations": "small clinically matched treatment subset; reported correspondence is not interventional utility evidence"
+        },
+        {
+          "source_id": "H019S010",
+          "title": "Identifying Factors of Organoid Establishment in Pancreatic Cancer: A Prospective Observational Study",
+          "authors": "authors as indexed",
+          "journal": "Cancer Medicine",
+          "published_date": "2025",
+          "doi": "",
+          "pmid": "41469727",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/41469727/",
+          "source_type": "primary_research",
+          "study_context": "75 prospectively enrolled patients with suspected pancreatic ductal adenocarcinoma",
+          "study_design": "prospective observational study",
+          "usable_for": "sample-site effects, establishment rate and time-to-model as design variables",
+          "limitations": "observational study; organoid establishment was not an overall-survival prognostic marker"
+        },
+        {
+          "source_id": "H019S011",
+          "title": "Clinical efficacy of tumor organoid-guided cancer therapy for locally advanced unresectable or metastatic breast cancer",
+          "authors": "Lin YY et al.",
+          "journal": "",
+          "published_date": "",
+          "doi": "",
+          "pmid": "38577882",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/38577882/",
+          "source_type": "primary_research",
+          "study_context": "metastatic breast-cancer patient-derived organoids and matched treatment cohort",
+          "study_design": "retrospective propensity-score-matched cohort study",
+          "usable_for": "clinical comparison design, treatment timing and prespecified patient-level endpoints",
+          "limitations": "non-randomized retrospective comparison; residual confounding remains possible"
+        },
+        {
+          "source_id": "H019S012",
+          "title": "Precision medicine applied to metastatic colorectal cancer using tumor-derived organoids and in-vitro sensitivity testing: a phase 2, single-center, open-label, and non-comparative study",
+          "authors": "Jensen LH et al.",
+          "journal": "",
+          "published_date": "",
+          "doi": "",
+          "pmid": "37143108",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/37143108/",
+          "source_type": "primary_research",
+          "study_context": "metastatic colorectal cancer patients without satisfactory treatment options",
+          "study_design": "phase 2 single-center open-label non-comparative study",
+          "usable_for": "feasibility, attrition from biopsy to treatment and predefined progression endpoint",
+          "limitations": "single-center non-comparative design; does not establish comparative clinical benefit"
+        },
+        {
+          "source_id": "H019S013",
+          "title": "Patient-derived organoids of pancreatic ductal adenocarcinoma for subtype determination and clinical outcome prediction",
+          "authors": "Matsumoto K et al.",
+          "journal": "Journal of Gastroenterology",
+          "published_date": "2024-07-01",
+          "doi": "10.1007/s00535-024-02103-0",
+          "pmid": "38684511",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/38684511/",
+          "source_type": "primary_research",
+          "study_context": "pancreatic ductal adenocarcinoma specimens acquired by endoscopic ultrasound-guided fine-needle biopsy",
+          "study_design": "PDO library with prospective clinical component",
+          "usable_for": "biopsy-derived model yield, subtype assignment and prospective clinical-linkage design",
+          "limitations": "single disease context; clinical predictive value remains to be evaluated in broader cohorts"
+        },
+        {
+          "source_id": "H019S014",
+          "title": "Novel Uveal Melanoma Patient-Derived Organoid Models Recapitulate Human Disease to Support Translational Research",
+          "authors": "Dalvin LA et al.",
+          "journal": "Investigative Ophthalmology & Visual Science",
+          "published_date": "2024",
+          "doi": "",
+          "pmid": "39601636",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/39601636/",
+          "source_type": "primary_research",
+          "study_context": "multicenter uveal-melanoma patient-derived organoid biobank",
+          "study_design": "multicenter model-development and characterization study",
+          "usable_for": "fidelity assessment across complementary molecular and phenotypic layers",
+          "limitations": "rare-tumour setting and subset drug testing; not a patient-outcome validation study"
+        },
+        {
+          "source_id": "H019S015",
+          "title": "A clinical evaluation of an ex vivo organ culture system to predict patient response to cancer therapy",
+          "authors": "Golan T et al.",
+          "journal": "",
+          "published_date": "2023",
+          "doi": "",
+          "pmid": "37840996",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/37840996/",
+          "source_type": "primary_research",
+          "study_context": "fresh cancer-tissue slices from bladder and other solid tumours",
+          "study_design": "multicenter prospective single-arm observational trial",
+          "usable_for": "preserving short-term tumour microenvironment while relating a predefined score to clinical response",
+          "limitations": "short culture duration, small cohort and non-comparative design"
+        },
+        {
+          "source_id": "H019S016",
+          "title": "Cutoff value of IC50 for drug sensitivity in patient-derived tumor organoids in colorectal cancer",
+          "authors": "Tang Y et al.",
+          "journal": "iScience",
+          "published_date": "2023-06-13",
+          "doi": "10.1016/j.isci.2023.107116",
+          "pmid": "37426352",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/37426352/",
+          "source_type": "primary_research",
+          "study_context": "277 samples from 242 colorectal-cancer patients receiving FOLFOX or XELOX",
+          "study_design": "clinical-cohort comparison study",
+          "usable_for": "how a drug-specific threshold, cohort definition and clinical endpoint are required for interpretable response classification",
+          "limitations": "one chemotherapy context and a cohort-derived cutoff; requires external validation"
+        },
+        {
+          "source_id": "H019S017",
+          "title": "Patient-derived tumor organoids predict responses to irinotecan-based neoadjuvant chemoradiotherapy in patients with locally advanced rectal cancer",
+          "authors": "Lv T et al.",
+          "journal": "International Journal of Cancer",
+          "published_date": "2023-02-01",
+          "doi": "10.1002/ijc.34302",
+          "pmid": "36161653",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/36161653/",
+          "source_type": "primary_research",
+          "study_context": "locally advanced rectal cancer patients receiving irinotecan-based neoadjuvant chemoradiotherapy",
+          "study_design": "training and validation cohort study",
+          "usable_for": "treatment-specific response endpoint, independent validation cohort and predefined predictive threshold",
+          "limitations": "single treatment context; prediction is not automatically transferable to other regimens or cancer types"
+        },
+        {
+          "source_id": "H019S018",
+          "title": "Patient-derived tumor organoids mimic treatment-induced DNA damage response in glioblastoma",
+          "authors": "Majc B et al.",
+          "journal": "iScience",
+          "published_date": "2024-07-31",
+          "doi": "",
+          "pmid": "39252971",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/39252971/",
+          "source_type": "primary_research",
+          "study_context": "patient-derived glioblastoma organoids exposed to standard therapy",
+          "study_design": "mechanistic treatment-response study",
+          "usable_for": "separating molecular treatment response from viability or invasion endpoints",
+          "limitations": "glioblastoma mechanistic context; no clinical response validation"
+        },
+        {
+          "source_id": "H019S019",
+          "title": "Patient-Derived Organoids Predict Treatment Response in Metastatic Colorectal Cancer",
+          "authors": "Smabers LP et al.",
+          "journal": "Clinical Cancer Research",
+          "published_date": "2025-12-01",
+          "doi": "10.1158/1078-0432.CCR-25-1564",
+          "pmid": "40982295",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/40982295/",
+          "source_type": "primary_research",
+          "study_context": "metastatic colorectal-cancer biopsies before new systemic treatment",
+          "study_design": "prospective observational cohort with interim analysis",
+          "usable_for": "establishment predictors, drug-specific performance measures and biopsy-versus-all-lesion endpoint definition",
+          "limitations": "interim analysis and chemotherapy-specific results; larger prospective confirmation remains needed"
+        },
+        {
+          "source_id": "H019S020",
+          "title": "Long-term patient-derived ovarian cancer organoids closely recapitulate tumor of origin and clinical response",
+          "authors": "Thorel L et al.",
+          "journal": "Journal of Experimental & Clinical Cancer Research",
+          "published_date": "2025-10-07",
+          "doi": "10.1186/s13046-025-03537-x",
+          "pmid": "41057919",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/41057919/",
+          "source_type": "primary_research",
+          "study_context": "37 long-term tumour-organoid models from 31 ovarian-cancer patients",
+          "study_design": "paired molecular, histological and clinical-response study",
+          "usable_for": "long-term stability and multi-layer comparison with source tumour and clinical response",
+          "limitations": "ovarian-cancer cohort and limited model count; generalization requires independent validation"
+        }
+      ],
+      "shared_findings": [
+        {
+          "finding_id": "H019-C01",
+          "display_order": 1,
+          "title": "建模成功率决定哪些患者进入后续研究",
+          "shared_result": "患者来源模型不是从所有样本中等概率建立。取样部位、组织量、既往处理、样本质量和培养时间会影响建模成功，也会决定哪些病例最终进入药物测试或机制研究。建模失败和未进入分析的样本属于研究结果的一部分。\n\n手术组织、穿刺活检、原发灶和转移灶的建模条件不同；不同癌症和非肿瘤疾病的培养要求也不同。短时间内获得结果的研究与长期建库研究不能使用同一可行性标准。",
+          "research_use": "记录连续入组患者、样本来源、取样时间、建模成功率、失败原因、培养耗时和最终可评价病例数；比较成功与失败样本的临床及分子特征。",
+          "boundary": "成功建立的模型只能代表进入培养和分析的样本，不能视为全部患者、全部病灶或全部亚克隆的缩影。",
+          "source_ids": [
+            "H019S002",
+            "H019S003",
+            "H019S009",
+            "H019S010",
+            "H019S012",
+            "H019S013",
+            "H019S019"
+          ]
+        },
+        {
+          "finding_id": "H019-C02",
+          "display_order": 2,
+          "title": "模型保真需要分层评估",
+          "shared_result": "患者来源模型可以在形态、基因组、转录状态和部分疾病功能上保留原组织特征，但这些层面并不总是同步。保真评价需要使用配对原组织，并说明培养时间、传代和冻存后的变化。\n\n肿瘤类器官常以肿瘤上皮和克隆特征为主，炎症性疾病类器官更适合观察上皮内在表型；不同取材方式、培养基和长期扩增会改变保留的细胞状态。",
+          "research_use": "使用配对病理、基因组或转录组及功能读出；记录培养基、基质、传代数、冻存复苏和独立批次，必要时与异种移植或患者组织再次比较。",
+          "boundary": "形态相似、单个标志物一致或部分变异保留都不能单独证明模型完整再现原组织。",
+          "source_ids": [
+            "H019S001",
+            "H019S004",
+            "H019S006",
+            "H019S008",
+            "H019S013",
+            "H019S014",
+            "H019S020"
+          ]
+        },
+        {
+          "finding_id": "H019-C03",
+          "display_order": 3,
+          "title": "患者来源不等于完整保留患者微环境",
+          "shared_result": "常规类器官通常保留上皮或肿瘤细胞的部分患者特征，免疫、基质、血管、神经和微生物环境往往缺失或随培养减弱。自体免疫共培养、微生物输入和短期组织培养可以补回部分关系，但每种系统只包含实际加入或保留下来的组分。\n\n长期扩增类器官便于重复实验，却更容易丢失原有生态；短期组织切片保留较多局部成分，但培养窗口短、操作和取样限制更明显。不同重建方式回答的问题不同。",
+          "research_use": "明确每类细胞和基质的来源，优先采用患者匹配组分；结合屏障、细胞迁移、细胞因子、成像和组织学读出，并设置缺失组分或单培养对照。",
+          "boundary": "有限共培养不能代表完整疾病微环境，外周血免疫细胞也不能自动代替病灶内免疫组成。",
+          "source_ids": [
+            "H019S006",
+            "H019S007",
+            "H019S008",
+            "H019S015"
+          ]
+        },
+        {
+          "finding_id": "H019-C04",
+          "display_order": 4,
+          "title": "体外药物反应取决于药物、暴露和终点",
+          "shared_result": "患者来源模型可以比较特定药物或联合方案下的活性、形态、分子损伤和其他功能变化。只有在药物、体外暴露、反应阈值和临床终点预先对应时，体外结果才适合与患者结局比较。\n\n不同研究使用活性、类器官大小、半数抑制浓度、DNA损伤或组织增殖等终点；化疗、放疗和靶向药的暴露方式也不同。一个队列建立的阈值不能直接用于另一癌症或治疗方案。",
+          "research_use": "记录药物浓度和时间、重复给药、基线生长、反应指标、阈值来源、盲法和独立验证队列；把机制读出与患者结局预测分开。",
+          "boundary": "筛选命中、分子反应或某个队列中的相关性不等于已经证明患者层面的治疗获益。",
+          "source_ids": [
+            "H019S002",
+            "H019S004",
+            "H019S016",
+            "H019S017",
+            "H019S018",
+            "H019S019"
+          ]
+        },
+        {
+          "finding_id": "H019-C05",
+          "display_order": 5,
+          "title": "临床匹配结果并不一致",
+          "shared_result": "现有研究已证明患者来源模型能够在部分流程中完成建模、药物测试和结局比较，但临床证据同时包含积极的观察性结果、较小的配对队列、非比较性试验和未显示客观缓解的前瞻性研究。当前更稳妥的结论是可行性和特定场景中的预测信号，而不是普遍的临床效用。\n\n回顾性匹配容易受到治疗选择和病例筛选影响；单臂研究可评估流程，却不能确定比较获益。疾病、治疗线次、可用组织和出结果时间都会改变实际用途。",
+          "research_use": "优先采用前瞻性连续入组、预设阈值、盲法、比较组和患者层终点；完整报告从取样、建模、推荐到实际接受治疗的病例流失。",
+          "boundary": "模型与结局一致不能直接转化为个体治疗建议；不同研究设计的阳性比例不能横向合并。",
+          "source_ids": [
+            "H019S001",
+            "H019S003",
+            "H019S005",
+            "H019S011",
+            "H019S012",
+            "H019S015",
+            "H019S019"
+          ]
+        }
+      ]
+    },
+    {
+      "topic_id": "H020",
+      "title": "器官芯片与微生理系统",
+      "topic_role": "research_deep_dive",
+      "overview": "器官芯片和微生理系统把细胞或组织放入可控制的流动、剪切力、拉伸、氧和组织界面环境中，试图补充静态培养难以呈现的动态过程。工程条件本身并不等于生理环境，只有把设定参数、实测条件和对应功能读出放在一起，才能判断模型回答了什么问题。\n\n本方向从屏障芯片、动态培养、血管与组织界面、器官间连接和微生理系统出发，集中处理三类问题：流动和力学输入如何改变组织功能；材料、泵、氧和暴露条件怎样影响细胞状态；多器官连接是否能在明确用途下补充代谢、转运或炎症过程。细胞结构、工程参数、分子或功能读出和外部比较构成递进证据。\n\n比较公开研究时，需要同时交代细胞来源、通道和膜结构、流量与剪切力、压力和氧的实测方式、材料、循环体积、气泡与蒸发控制、采样损失、功能终点和批次复现。芯片中的屏障完整性、代谢变化或药物反应不能直接等同于人体器官表现。类器官专题聚焦患者来源和组织保真，人体相关模型专题聚焦药代药效与安全性，本页聚焦动态工程环境的研究证据。",
+      "sections": [
+        {
+          "section_id": "H020-SEC-01",
+          "title": "比较不同研究时应先看什么",
+          "body": "| 比较内容 | 应记录的信息 | 关系到什么判断 |\n| --- | --- | --- |\n| 细胞与组织结构 | 细胞来源、供体、通道、膜、组织界面和培养时间 | 芯片实际重建了哪些组织组成 |\n| 动态输入 | 流量、剪切力、压力、拉伸、氧和实测方式 | 生理条件是否得到控制和确认 |\n| 材料与运行 | 材料、循环体积、泵或无泵运行、气泡、蒸发和采样损失 | 实际暴露和组织状态是否偏离设定值 |\n| 功能读出 | 组织形态、屏障、迁移、代谢、炎症和细胞活性 | 动态条件改变了哪一项具体功能 |\n| 用途验证 | 预期用途、批次、供体、参考化合物、盲法和外部比较 | 结果是功能演示、稳定平台还是经过验证的预测工具 |",
+          "source_ids": []
+        },
+        {
+          "section_id": "H020-SEC-02",
+          "title": "动态培养条件要有对应的功能读出",
+          "body": "流动、剪切力、周期性拉伸、压力和氧梯度分别模拟不同组织中的部分生理条件。肺、肠、肾、肝和血脑屏障对这些输入的反应并不相同。研究者需要同时测量组织形态和器官相关功能，才能判断某项输入带来的变化。\n\n同一项工程条件可能改善组织形态或屏障，却削弱另一项功能。例如，肝芯片中的机械刺激和氧条件可使药物代谢能力下降。静态培养和缺少相应输入的对照，是判断变化来自何处的基础。",
+          "source_ids": [
+            "H020S001",
+            "H020S006",
+            "H020S007",
+            "H020S013",
+            "H020S014",
+            "H020S017"
+          ]
+        },
+        {
+          "section_id": "H020-SEC-03",
+          "title": "芯片材料和运行过程会改变实验环境",
+          "body": "膜厚、材料吸附、循环体积、气泡、蒸发和氧供都会影响细胞状态，也会改变细胞实际接触到的化合物浓度。尤其在药物研究中，加入培养液的名义浓度与芯片内可测浓度可能不同。\n\n因此，材料和运行条件应与生物学结果一起报告。无细胞装置中的化合物回收、实际流量和采样损失，有助于区分化合物效应与工程条件造成的偏差。",
+          "source_ids": [
+            "H020S005",
+            "H020S011",
+            "H020S013",
+            "H020S017",
+            "H020S018",
+            "H020S019"
+          ]
+        },
+        {
+          "section_id": "H020-SEC-04",
+          "title": "屏障功能需要多种读出共同判断",
+          "body": "血脑屏障、肾小球、肺血管和肠道屏障的研究，常结合通透性、跨上皮或内皮电阻、连接蛋白、组织形态、细胞活性和免疫细胞迁移。它们从不同角度反映屏障状态，不能互相替代。\n\n例如，通透性升高可能提示屏障受损，也可能只是细胞死亡增加。把结构、功能和细胞反应放在同一实验中观察，才能判断变化更接近哪一种情况。",
+          "source_ids": [
+            "H020S006",
+            "H020S013",
+            "H020S014",
+            "H020S020"
+          ]
+        },
+        {
+          "section_id": "H020-SEC-05",
+          "title": "多器官连接适合研究特定的组织间过程",
+          "body": "肠—肝、肝—心—肺或其他多器官系统，可以在同一实验中追踪母药、代谢物和下游组织反应。它们适合研究首过代谢、前药转化或某一明确的器官间作用。\n\n解释这类结果时，要看实际连接了哪些组织、使用何种循环方式和培养基，以及采样时间是否覆盖关键变化。一个装置中的结果不能直接代替全身药代，也不能推及未连接的组织。",
+          "source_ids": [
+            "H020S002",
+            "H020S004",
+            "H020S010",
+            "H020S012",
+            "H020S015",
+            "H020S019"
+          ]
+        },
+        {
+          "section_id": "H020-SEC-06",
+          "title": "验证要围绕具体用途",
+          "body": "研究型疾病模型、药物筛选平台和预测毒理工具需要不同的验证。前者可能侧重组织功能和机制读出，后者还需要明确的参考化合物、性能阈值、供体差异、盲法测试和外部比较。\n\n部分肝芯片研究已采用盲法基准和质量管理框架，但一个平台的结果不能代表所有芯片系统。判断模型时，应先问它要用于什么，再看相应证据是否充分。",
+          "source_ids": [
+            "H020S001",
+            "H020S003",
+            "H020S005",
+            "H020S009",
+            "H020S016",
+            "H020S018"
+          ]
+        },
+        {
+          "section_id": "H020-SEC-07",
+          "title": "研究技术",
+          "body": "本专题的技术卡包括灌流与生理刺激控制、屏障与免疫迁移联合测量、材料和实际暴露表征、多器官连接与时间序列采样，以及按用途验证芯片性能。",
+          "source_ids": []
+        },
+        {
+          "section_id": "H020-SEC-08",
+          "title": "科研参考范围",
+          "body": "本页用于说明器官芯片和微生理系统的研究证据、实验设计及适用范围，不提供诊疗建议或治疗推荐。",
+          "source_ids": []
+        }
+      ],
+      "methods": [
+        {
+          "method_id": "H020-M001",
+          "display_order": 1,
+          "category": "灌流与生理刺激控制",
+          "title": "在芯片中施加并测量动态培养条件",
+          "principle": "通过泵、重力或其他驱动方式形成流动，并按研究问题加入剪切力、拉伸、压力、氧梯度或组织界面。",
+          "answers": "适合检验特定动态条件是否改变屏障、迁移、代谢或器官相关功能。",
+          "sample_design": "设置静态培养和缺少相应输入的对照；实测流速、压力、氧和培养时间，记录细胞来源、组织结构和独立芯片重复。",
+          "limitations": "同一种刺激对不同组织的影响可能相反；加入灌流或机械力本身不能说明模型更接近人体。",
+          "source_ids": [
+            "H020S001",
+            "H020S006",
+            "H020S007",
+            "H020S013",
+            "H020S014",
+            "H020S017"
+          ],
+          "workflow": "设计阶段先确定：设置静态培养和缺少相应输入的对照；实测流速、压力、氧和培养时间，记录细胞来源、组织结构和独立芯片重复。 把细胞、基质、流体条件和芯片结构作为一个系统记录；运行后同时检查流量、屏障完整性、细胞存活和目标功能读出，再与静态培养或独立模型比较。 这项方法的直接测量或计算依据是：通过泵、重力或其他驱动方式形成流动，并按研究问题加入剪切力、拉伸、压力、氧梯度或组织界面。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：同一种刺激对不同组织的影响可能相反；加入灌流或机械力本身不能说明模型更接近人体。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "结果可检验特定动态条件是否改变屏障、迁移、代谢或器官相关功能。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        },
+        {
+          "method_id": "H020-M002",
+          "display_order": 2,
+          "category": "屏障与免疫迁移联合测量",
+          "title": "同时读取结构、通透性和细胞反应",
+          "principle": "在上皮或内皮屏障芯片中，结合示踪分子通透性、跨上皮或内皮电阻、连接蛋白成像、细胞活性和免疫细胞迁移等读出。",
+          "answers": "适合研究屏障形成、炎症后通透性变化，以及免疫细胞穿越组织界面的过程。",
+          "sample_design": "根据器官选择合适大小的示踪物；记录膜结构、细胞来源、培养时间和炎症输入，并保留供体和独立芯片信息。",
+          "limitations": "单一通透性或形态指标不能代表完整屏障功能；通透性升高可能来自特异性调控，也可能来自细胞死亡。",
+          "source_ids": [
+            "H020S006",
+            "H020S013",
+            "H020S014",
+            "H020S020"
+          ],
+          "workflow": "设计阶段先确定：根据器官选择合适大小的示踪物；记录膜结构、细胞来源、培养时间和炎症输入，并保留供体和独立芯片信息。 把细胞、基质、流体条件和芯片结构作为一个系统记录；运行后同时检查流量、屏障完整性、细胞存活和目标功能读出，再与静态培养或独立模型比较。 这项方法的直接测量或计算依据是：在上皮或内皮屏障芯片中，结合示踪分子通透性、跨上皮或内皮电阻、连接蛋白成像、细胞活性和免疫细胞迁移等读出。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：单一通透性或形态指标不能代表完整屏障功能；通透性升高可能来自特异性调控，也可能来自细胞死亡。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "结果可研究屏障形成、炎症后通透性变化，以及免疫细胞穿越组织界面的过程。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        },
+        {
+          "method_id": "H020-M003",
+          "display_order": 3,
+          "category": "材料和实际暴露表征",
+          "title": "测量芯片材料与运行过程带来的偏差",
+          "principle": "在无细胞装置和有细胞芯片中，测量化合物回收、吸附、流量稳定性、气泡、蒸发和采样损失。",
+          "answers": "适合判断设定给药浓度和流体参数与细胞实际接触环境之间的差异。",
+          "sample_design": "报告材料、膜厚、表面积、循环体积、培养基、氧供和采样方案；按时间点测量母药、代谢物或示踪物。",
+          "limitations": "设定浓度和设定流速不是实际暴露；一种材料或装置的表现不能概括为整个器官芯片领域的性能。",
+          "source_ids": [
+            "H020S005",
+            "H020S011",
+            "H020S013",
+            "H020S017",
+            "H020S018",
+            "H020S019"
+          ],
+          "workflow": "设计阶段先确定：报告材料、膜厚、表面积、循环体积、培养基、氧供和采样方案；按时间点测量母药、代谢物或示踪物。 把细胞、基质、流体条件和芯片结构作为一个系统记录；运行后同时检查流量、屏障完整性、细胞存活和目标功能读出，再与静态培养或独立模型比较。 这项方法的直接测量或计算依据是：在无细胞装置和有细胞芯片中，测量化合物回收、吸附、流量稳定性、气泡、蒸发和采样损失。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：设定浓度和设定流速不是实际暴露；一种材料或装置的表现不能概括为整个器官芯片领域的性能。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "结果可判断设定给药浓度和流体参数与细胞实际接触环境之间的差异。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        },
+        {
+          "method_id": "H020-M004",
+          "display_order": 4,
+          "category": "多器官连接与时间序列采样",
+          "title": "在指定组织组合中跟踪转运和下游反应",
+          "principle": "将两个或多个组织模块通过共同循环、单向流动或膜界面连接，按时间序列测量母药、代谢物和下游组织功能。",
+          "answers": "适合研究首过代谢、前药转化或明确的器官间作用。",
+          "sample_design": "保留单器官对照；记录组织组合、连接方式、循环体积、培养基、流量、采样时间和质量平衡，使用机制明确的参考化合物。",
+          "limitations": "单一组织组合不能代表人体全身循环；共同培养基也未必同时满足所有组织的需要。",
+          "source_ids": [
+            "H020S002",
+            "H020S004",
+            "H020S010",
+            "H020S012",
+            "H020S015",
+            "H020S019"
+          ],
+          "workflow": "设计阶段先确定：保留单器官对照；记录组织组合、连接方式、循环体积、培养基、流量、采样时间和质量平衡，使用机制明确的参考化合物。 把细胞、基质、流体条件和芯片结构作为一个系统记录；运行后同时检查流量、屏障完整性、细胞存活和目标功能读出，再与静态培养或独立模型比较。 这项方法的直接测量或计算依据是：将两个或多个组织模块通过共同循环、单向流动或膜界面连接，按时间序列测量母药、代谢物和下游组织功能。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：单一组织组合不能代表人体全身循环；共同培养基也未必同时满足所有组织的需要。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "结果可研究首过代谢、前药转化或明确的器官间作用。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        },
+        {
+          "method_id": "H020-M005",
+          "display_order": 5,
+          "category": "按用途验证芯片性能",
+          "title": "用预设标准评价装置、组织和输出",
+          "principle": "围绕预期用途，分别评价装置运行、组织功能、批内批间重复、供体差异、参考化合物和外部数据一致性。",
+          "answers": "适合区分研究型模型、筛选平台和预测工具各自需要的证据。",
+          "sample_design": "预先写明用途、判定规则和关键质量属性；采用阳性阴性对照、独立供体、盲法测试及跨实验室或独立平台复核。",
+          "limitations": "单次功能演示、较高通量或商业平台标签不能证明跨场景重复性或人体预测能力。",
+          "source_ids": [
+            "H020S001",
+            "H020S003",
+            "H020S005",
+            "H020S009",
+            "H020S016",
+            "H020S018"
+          ],
+          "workflow": "设计阶段先确定：预先写明用途、判定规则和关键质量属性；采用阳性阴性对照、独立供体、盲法测试及跨实验室或独立平台复核。 把细胞、基质、流体条件和芯片结构作为一个系统记录；运行后同时检查流量、屏障完整性、细胞存活和目标功能读出，再与静态培养或独立模型比较。 这项方法的直接测量或计算依据是：围绕预期用途，分别评价装置运行、组织功能、批内批间重复、供体差异、参考化合物和外部数据一致性。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：单次功能演示、较高通量或商业平台标签不能证明跨场景重复性或人体预测能力。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "结果可区分研究型模型、筛选平台和预测工具各自需要的证据。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        }
+      ],
+      "references": [
+        {
+          "source_id": "H020S001",
+          "title": "Human organs-on-chips for disease modelling",
+          "authors": "Ingber DE",
+          "journal": "Nature Reviews Genetics",
+          "published_date": "2022-03-25",
+          "doi": "10.1038/s41576-022-00466-9",
+          "pmid": "",
+          "url": "https://www.nature.com/articles/s41576-022-00466-9",
+          "source_type": "review",
+          "study_context": "human organ-chip field",
+          "study_design": "peer-reviewed review",
+          "usable_for": "platform taxonomy, disease-modelling uses and validation limitations",
+          "limitations": "review; does not replace model-specific validation"
+        },
+        {
+          "source_id": "H020S002",
+          "title": "A multi-organ chip with matured tissue niches linked by vascular flow",
+          "authors": "Novak R et al.",
+          "journal": "Nature Biomedical Engineering",
+          "published_date": "2022-05-16",
+          "doi": "10.1038/s41551-022-00882-6",
+          "pmid": "",
+          "url": "https://www.nature.com/articles/s41551-022-00882-6",
+          "source_type": "primary_research",
+          "study_context": "human vascularly linked multi-tissue chip",
+          "study_design": "long-term multi-organ culture with doxorubicin exposure",
+          "usable_for": "multi-organ architecture, barrier inclusion and long-term functional stability",
+          "limitations": "specific tissue combination and drug; model does not establish universal prediction"
+        },
+        {
+          "source_id": "H020S003",
+          "title": "Performance assessment and economic analysis of a human Liver-Chip for predictive toxicology",
+          "authors": "Ewart L et al.",
+          "journal": "Communications Medicine",
+          "published_date": "2022-12-05",
+          "doi": "10.1038/s43856-022-00209-1",
+          "pmid": "36473994",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/36473994/",
+          "source_type": "primary_research",
+          "study_context": "870 Liver-Chips across three human donors",
+          "study_design": "blinded benchmark study",
+          "usable_for": "benchmark design, donor replication and independent toxicology assessment",
+          "limitations": "one organ and defined drug benchmark; economic analysis is not biological validation"
+        },
+        {
+          "source_id": "H020S004",
+          "title": "Probing prodrug metabolism and reciprocal toxicity with an integrated and humanized multi-tissue organ-on-a-chip platform",
+          "authors": "Maschmeyer I et al.",
+          "journal": "Biofabrication",
+          "published_date": "2020-02-12",
+          "doi": "",
+          "pmid": "32068138",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/32068138/",
+          "source_type": "primary_research",
+          "study_context": "liver, cardiac and lung organoids in common circulation",
+          "study_design": "integrated multi-tissue drug-metabolism study",
+          "usable_for": "prodrug metabolism, shared circulation and downstream tissue injury design",
+          "limitations": "specific capecitabine system; scale and tissue set limit transferability"
+        },
+        {
+          "source_id": "H020S005",
+          "title": "Analysis of reproducibility and robustness of OrganoPlate 2-lane 96, a liver microphysiological system for studies of pharmacokinetics and toxicological assessment of drugs",
+          "authors": "authors as indexed",
+          "journal": "",
+          "published_date": "2022-08-29",
+          "doi": "",
+          "pmid": "36057418",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/36057418/",
+          "source_type": "primary_research",
+          "study_context": "96-device liver microphysiological system",
+          "study_design": "platform robustness study",
+          "usable_for": "reproducibility, utility and condition sensitivity in higher-throughput liver MPS",
+          "limitations": "specific commercial format and cell combination; not cross-platform qualification"
+        },
+        {
+          "source_id": "H020S006",
+          "title": "Immune cell extravasation in an organ-on-chip to model lung inflammation",
+          "authors": "authors as indexed",
+          "journal": "",
+          "published_date": "2023-06-05",
+          "doi": "",
+          "pmid": "37270149",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/37270149/",
+          "source_type": "primary_research",
+          "study_context": "lung inflammation chip with endothelial and immune-cell channel",
+          "study_design": "barrier and immune-cell migration study",
+          "usable_for": "immune-cell movement, barrier measurement and inflammatory-chip controls",
+          "limitations": "defined cell types and inflammation model; not whole-lung physiology"
+        },
+        {
+          "source_id": "H020S007",
+          "title": "Faecalibacterium prausnitzii A2-165 metabolizes host- and media-derived chemicals and induces transcriptional changes in colonic epithelium in GuMI human gut microphysiological system",
+          "authors": "authors as indexed",
+          "journal": "",
+          "published_date": "",
+          "doi": "",
+          "pmid": "39421254",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/39421254/",
+          "source_type": "primary_research",
+          "study_context": "patient-derived colonic monolayers from diverticulitis, ulcerative colitis and Crohn's disease donors",
+          "study_design": "microphysiological-system co-culture study",
+          "usable_for": "how flow and microbe-compatible culture conditions define an interpretable gut microphysiology experiment",
+          "limitations": "limited disease contexts and short co-culture duration"
+        },
+        {
+          "source_id": "H020S008",
+          "title": "Advanced Liver-on-a-Chip Model for Evaluating Drug Metabolism and Hepatotoxicity",
+          "authors": "authors as indexed",
+          "journal": "",
+          "published_date": "",
+          "doi": "",
+          "pmid": "39329810",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/39329810/",
+          "source_type": "primary_research",
+          "study_context": "human liver-on-a-chip model for drug metabolism and hepatotoxicity",
+          "study_design": "platform-method study",
+          "usable_for": "paired metabolism and injury readouts in a defined single-organ microphysiological system",
+          "limitations": "platform-specific design; requires independent performance comparison"
+        },
+        {
+          "source_id": "H020S009",
+          "title": "Recommendations on fit-for-purpose criteria to establish quality management for microphysiological systems and for monitoring their reproducibility",
+          "authors": "Pamies D et al.",
+          "journal": "",
+          "published_date": "2024",
+          "doi": "",
+          "pmid": "38670111",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/38670111/",
+          "source_type": "recommendation",
+          "study_context": "microphysiological systems field",
+          "study_design": "expert recommendation",
+          "usable_for": "shared terminology for defining intended use, critical quality attributes and repeatability",
+          "limitations": "recommendation rather than a platform-performance study"
+        },
+        {
+          "source_id": "H020S010",
+          "title": "A hollow fiber membrane-based liver organoid-on-a-chip model for examining drug metabolism and transport",
+          "authors": "Myszczyszyn A et al.",
+          "journal": "",
+          "published_date": "2025-04-01",
+          "doi": "",
+          "pmid": "40117762",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/40117762/",
+          "source_type": "primary_research",
+          "study_context": "human liver organoid-on-a-chip linked to intestinal-like system",
+          "study_design": "proof-of-concept metabolism and transport study",
+          "usable_for": "compartment-specific metabolism, transport and bioavailability measurements",
+          "limitations": "proof-of-concept platform; prediction of human ADME needs independent qualification"
+        },
+        {
+          "source_id": "H020S011",
+          "title": "Development of a novel gut microphysiological system that facilitates assessment of drug absorption kinetics in gut",
+          "authors": "Imaoka T et al.",
+          "journal": "Scientific Reports",
+          "published_date": "2024",
+          "doi": "",
+          "pmid": "39622870",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/39622870/",
+          "source_type": "primary_research",
+          "study_context": "human induced pluripotent stem-cell-derived small-intestinal epithelium",
+          "study_design": "drug absorption and transporter-function study",
+          "usable_for": "transport directionality, metabolic inhibition and absorption-kinetics design",
+          "limitations": "single gut platform; human absorption prediction requires independent qualification"
+        },
+        {
+          "source_id": "H020S012",
+          "title": "An Organ-on-Chip Platform for Simulating Drug Metabolism Along the Gut-Liver Axis",
+          "authors": "Lucchetti M et al.",
+          "journal": "Advanced Healthcare Materials",
+          "published_date": "2024-08-01",
+          "doi": "10.1002/adhm.202303943",
+          "pmid": "38452399",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/38452399/",
+          "source_type": "primary_research",
+          "study_context": "microbial-crosstalk gut chip linked to liver chip",
+          "study_design": "gut-liver multiorgan proof-of-concept study",
+          "usable_for": "shared circulation, microbial transformation and metabolite time-course measurement",
+          "limitations": "one gut-liver configuration and irinotecan demonstration; not a general human-PK benchmark"
+        },
+        {
+          "source_id": "H020S013",
+          "title": "An ultrathin membrane mediates tissue-specific morphogenesis and barrier function in a human kidney chip",
+          "authors": "Mou X et al.",
+          "journal": "Science Advances",
+          "published_date": "2024-06-07",
+          "doi": "10.1126/sciadv.adn2689",
+          "pmid": "38838141",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/38838141/",
+          "source_type": "primary_research",
+          "study_context": "human induced pluripotent stem-cell-derived glomerulus chip",
+          "study_design": "tissue-engineering and barrier-function study",
+          "usable_for": "linking membrane design, tissue morphology and barrier-function interpretation",
+          "limitations": "kidney-glomerulus context; not a cross-organ validation study"
+        },
+        {
+          "source_id": "H020S014",
+          "title": "Human BBB-on-a-chip reveals barrier disruption, endothelial inflammation, and T cell migration under neuroinflammatory conditions",
+          "authors": "Nair M et al.",
+          "journal": "",
+          "published_date": "2023",
+          "doi": "",
+          "pmid": "37818458",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/37818458/",
+          "source_type": "primary_research",
+          "study_context": "human blood-brain-barrier chip with perfused primary T cells",
+          "study_design": "neuroinflammation model study",
+          "usable_for": "coordinating barrier, inflammatory and immune-cell readouts in a human chip",
+          "limitations": "brain-barrier disease model; no generalization to other barrier organs"
+        },
+        {
+          "source_id": "H020S015",
+          "title": "An Easy-to-Use Arrayed Brain-Heart Chip",
+          "authors": "authors as indexed",
+          "journal": "",
+          "published_date": "",
+          "doi": "",
+          "pmid": "39589976",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/39589976/",
+          "source_type": "primary_research",
+          "study_context": "cerebral organoid, cardiac organoid and endothelial barrier co-culture",
+          "study_design": "multi-organ chip platform study",
+          "usable_for": "tissue pairing, barrier permeability and device geometry as multi-organ design inputs",
+          "limitations": "specific paired-organ system; proof of connection is not systemic physiology validation"
+        },
+        {
+          "source_id": "H020S016",
+          "title": "Standard: human liver-on-a-chip",
+          "authors": "authors as indexed",
+          "journal": "",
+          "published_date": "",
+          "doi": "",
+          "pmid": "40123019",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/40123019/",
+          "source_type": "standard",
+          "study_context": "human liver-on-a-chip standardization",
+          "study_design": "technical standard commentary",
+          "usable_for": "formalizing cell-source, structural, functional and quality-control documentation",
+          "limitations": "standard-specific commentary; not performance validation"
+        },
+        {
+          "source_id": "H020S017",
+          "title": "Mechanobiological stimulation in organ-on-a-chip systems reduces hepatic drug metabolic capacity in favor of regenerative specialization",
+          "authors": "Scheidecker B et al.",
+          "journal": "Biotechnology and Bioengineering",
+          "published_date": "2024-04-01",
+          "doi": "10.1002/bit.28653",
+          "pmid": "38184801",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/38184801/",
+          "source_type": "primary_research",
+          "study_context": "liver microphysiological system under controlled mechanical and oxygen conditions",
+          "study_design": "comparative mechanobiology study",
+          "usable_for": "mechanical stimulation and oxygen supply as variables affecting hepatic metabolic capacity",
+          "limitations": "liver model context; links to in-vivo prediction require separate validation"
+        },
+        {
+          "source_id": "H020S018",
+          "title": "A generic pump-free organ-on-a-chip platform for assessment of intestinal drug absorption",
+          "authors": "Guo Y et al.",
+          "journal": "Biotechnology Journal",
+          "published_date": "2024-01-01",
+          "doi": "10.1002/biot.202300390",
+          "pmid": "38375564",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/38375564/",
+          "source_type": "primary_research",
+          "study_context": "32-unit gut-on-a-chip platform with seven reference drugs",
+          "study_design": "drug-absorption comparison study",
+          "usable_for": "throughput, dynamic culture and reference-compound comparison as joint platform characteristics",
+          "limitations": "gut-only platform and a limited reference-drug set"
+        },
+        {
+          "source_id": "H020S019",
+          "title": "Perfluoropolyether-Based Gut-Liver-on-a-Chip for the Evaluation of First-Pass Metabolism and Oral Bioavailability of Drugs",
+          "authors": "Wang M et al.",
+          "journal": "ACS Biomaterials Science & Engineering",
+          "published_date": "2024-07-08",
+          "doi": "10.1021/acsbiomaterials.4c00605",
+          "pmid": "38822812",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/38822812/",
+          "source_type": "primary_research",
+          "study_context": "gut-liver single-passage chip for oral-drug first-pass metabolism",
+          "study_design": "drug absorption and metabolism study",
+          "usable_for": "material selection, first-pass metabolism and intestinal/hepatic availability measurements",
+          "limitations": "one engineered intestinal-cell system; estimates require human reference comparison"
+        },
+        {
+          "source_id": "H020S020",
+          "title": "The microbial metabolite p-cresol compromises the vascular barrier and induces endothelial cytotoxicity and inflammation in a 3D human vessel-on-a-chip",
+          "authors": "authors as indexed",
+          "journal": "",
+          "published_date": "",
+          "doi": "",
+          "pmid": "39122790",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/39122790/",
+          "source_type": "primary_research",
+          "study_context": "three-dimensional human vessel-on-a-chip exposed to protein-bound uremic toxins",
+          "study_design": "comparative vascular-toxicity study",
+          "usable_for": "integrating structural, permeability and cytotoxicity measures in a vascular chip",
+          "limitations": "specific toxin and endothelial model; not a general vascular-risk prediction"
+        }
+      ],
+      "shared_findings": [
+        {
+          "finding_id": "H020-C01",
+          "display_order": 1,
+          "title": "芯片加入的生理条件必须有对应读出",
+          "shared_result": "器官芯片的价值来自明确加入的流动、剪切、拉伸、氧环境、组织界面或微生物条件，以及这些条件对屏障、迁移、代谢和组织功能造成的可测变化。设备名称或灌流本身不能说明模型更接近人体。\n\n肺、肠、肾、肝和血脑屏障需要的力学输入及功能读出不同；同一种刺激可能促进某项组织功能，也可能削弱另一项代谢能力。",
+          "research_use": "设置静态培养和输入缺失对照，实测流速、压力、氧和培养时间；同时记录组织形态、分子状态与器官相关功能。",
+          "boundary": "某一器官中的动态培养结果不能外推到其他组织，也不能把增加工程复杂度写成人体预测能力。",
+          "source_ids": [
+            "H020S001",
+            "H020S006",
+            "H020S007",
+            "H020S013",
+            "H020S014",
+            "H020S017"
+          ]
+        },
+        {
+          "finding_id": "H020-C02",
+          "display_order": 2,
+          "title": "材料和运行条件会改变实际实验环境",
+          "shared_result": "膜厚、材料吸附、流动方式、气泡、蒸发和氧供会改变细胞接触到的化合物浓度及组织状态。工程条件既是模型输入，也是结果解释的一部分，不能只在方法部分略过。\n\n聚二甲基硅氧烷与低吸附材料的化合物损失不同；泵驱动和无泵系统的流量稳定性、通量与操作风险不同；膜结构会影响组织形态和屏障测量。",
+          "research_use": "在无细胞装置和有细胞芯片中测量化合物回收、流量和屏障背景；报告材料、表面积、循环体积、氧供、采样损失和运行失败率。",
+          "boundary": "名义给药浓度和设定流速不能替代实际测量；一种材料或装置中的结果不构成平台通用性能。",
+          "source_ids": [
+            "H020S005",
+            "H020S011",
+            "H020S013",
+            "H020S017",
+            "H020S018",
+            "H020S019"
+          ]
+        },
+        {
+          "finding_id": "H020-C03",
+          "display_order": 3,
+          "title": "屏障功能需要结构、通透性和细胞反应共同解释",
+          "shared_result": "肾小球、血脑屏障、肺血管和其他屏障芯片可以同时测量组织结构、通透性、电阻、连接蛋白和免疫细胞迁移。多种读出共同变化时，才能较完整地说明屏障受损或恢复。\n\n不同屏障允许通过的分子大小、细胞组成和生理压力不同；炎症和毒性研究中的通透性升高也可能伴随细胞死亡，不能自动解释为特异性屏障调控。",
+          "research_use": "使用器官适配的示踪分子、跨内皮或上皮电阻、连接蛋白成像、细胞活性和迁移测量；保留供体、细胞来源与独立芯片重复。",
+          "boundary": "单一通透性或形态指标不能代表完整屏障功能，芯片内的免疫迁移也不能等同于完整器官炎症。",
+          "source_ids": [
+            "H020S006",
+            "H020S013",
+            "H020S014",
+            "H020S020"
+          ]
+        },
+        {
+          "finding_id": "H020-C04",
+          "display_order": 4,
+          "title": "多器官连接适合研究特定的组织间过程",
+          "shared_result": "多器官芯片能够在同一实验中跟踪母药、代谢物和下游组织反应，适合研究首过代谢、前药转化或特定器官间作用。结论取决于实际连接的组织、循环体积、培养介质和采样时间。\n\n肠—肝、肝—心—肺和脑—心系统的尺度与用途不同；共同培养基可能不能同时维持所有组织的最佳状态，单通道连接也不等于人体全身循环。",
+          "research_use": "保留单器官对照，测量母药和代谢物时间序列；说明组织比例、循环方式、介质、屏障、流量和质量平衡，并用机制明确的参考化合物验证。",
+          "boundary": "一个组织组合或一种药物中的结果不能外推到其他器官间作用，更不能直接视为全身药代。",
+          "source_ids": [
+            "H020S002",
+            "H020S004",
+            "H020S010",
+            "H020S012",
+            "H020S015",
+            "H020S019"
+          ]
+        },
+        {
+          "finding_id": "H020-C05",
+          "display_order": 5,
+          "title": "验证应围绕预期用途逐层完成",
+          "shared_result": "芯片验证至少包括装置运行、组织功能、批内与批间重复、供体差异、参考化合物和外部数据比较。盲法基准和质量管理框架已经在部分肝芯片研究中出现，但不能由一个平台代表整个器官芯片领域。\n\n研究型疾病模型、筛选平台和预测毒理工具需要不同的质量属性和判定阈值；跨实验室转移比单一实验室内的高通量更严格。",
+          "research_use": "预先写明用途和判定规则，记录关键质量属性、供体和批次；采用阳性阴性对照、盲法测试、跨实验室或独立平台复核。",
+          "boundary": "单次功能演示、较高通量或一种商业平台的结果不能证明跨场景重复性和人体预测。",
+          "source_ids": [
+            "H020S001",
+            "H020S003",
+            "H020S005",
+            "H020S009",
+            "H020S016",
+            "H020S018"
+          ]
+        }
+      ]
+    },
+    {
+      "topic_id": "H021",
+      "title": "类器官与干细胞规模化制造",
+      "topic_role": "research_deep_dive",
+      "overview": "类器官与干细胞规模化制造关注在扩大产量的同时，保持细胞身份、组织结构、功能和批次间可比性。小规模培养中观察到的形态或标志物，到了更高密度、自动化和长期传代条件下可能发生变化，因此规模扩大本身需要作为实验变量评价。\n\n本方向从悬浮培养、生物反应器、自动化加样、过程监测、冻存复苏和多层质量评价出发，集中处理三类问题：规模扩大后产物是否仍然具有相同的身份和功能；哪些过程参数决定批次差异；外观、分子标志物、组织结构和功能读出如何共同支持质量判断。过程数据与终点质控相结合，才能区分产量提升和产品一致性。\n\n比较公开研究时，需要同时交代起始细胞状态、供体、培养基、密度、传代、反应器和自动化条件、收获时间、冻存流程、批次数量及预设质量标准。形态正常或某一标志物阳性不能独立代表功能合格；研究级制造结果也不能直接替代临床生产和监管评价。患者来源模型专题处理模型保真，本页聚焦规模化过程与批次质量。",
+      "sections": [
+        {
+          "section_id": "H021-SEC-01",
+          "title": "比较不同研究时应先看什么",
+          "body": "| 比较内容 | 应记录的信息 | 关系到什么判断 |\n| --- | --- | --- |\n| 预期用途与起始材料 | 研究、筛选或临床级用途，以及细胞系、患者组织或干细胞来源 | 需要怎样的质量要求和比较范围 |\n| 过程参数 | 接种密度、基质、培养基、聚集体大小、混合、剪切、氧和培养时间 | 哪些培养输入可能改变最终产物 |\n| 规模与批次 | 工作体积、设备、批次数、产量、失败率和人工干预 | 规模扩大后过程是否仍稳定 |\n| 质量属性 | 身份、细胞组成、形态、分子特征、器官功能和遗传稳定性 | 不同批次和规模下的培养产物是否可比 |\n| 贮存与复苏 | 冻存阶段、保护剂、保存时间、恢复期和复苏后功能 | 冻存前后的质量是否保持一致 |",
+          "source_ids": []
+        },
+        {
+          "section_id": "H021-SEC-02",
+          "title": "规模扩大后，产物是否仍可比",
+          "body": "工作体积变大、培养面积增加或产量上升，说明流程发生了规模变化。要判断是否真正适合放大，还需要比较规模前后的起始材料、细胞组成、遗传稳定性和器官相关功能，并报告失败批次和产出波动。\n\n悬浮培养和生物反应器为一些体系提供了更高通量，但搅拌、聚集体大小和氧供也可能改变成熟状态。不同组织不能共用一套放大参数。",
+          "source_ids": [
+            "H021S001",
+            "H021S003",
+            "H021S009",
+            "H021S011",
+            "H021S020"
+          ]
+        },
+        {
+          "section_id": "H021-SEC-03",
+          "title": "过程参数要与质量读出一起看",
+          "body": "起始细胞数、接种密度、基质、培养基、混合、剪切、氧和培养时间，都会影响类器官的大小、组成和功能。单独记录参数并不足以解释差异；更有用的设计是有控制地改变一个或一组输入，再观察质量属性怎样变化。\n\n同一参数在不同基质、设备或组织中可能有不同结果。例如，改善氧供或缩小聚集体在一种类器官中有利，在另一种体系中却可能改变分化或成熟过程。",
+          "source_ids": [
+            "H021S004",
+            "H021S015",
+            "H021S016",
+            "H021S018",
+            "H021S019"
+          ]
+        },
+        {
+          "section_id": "H021-SEC-04",
+          "title": "质量评价不能只看外观",
+          "body": "形态和尺寸均一有助于早期筛查，但不能独立代表批次质量。不同用途需要不同的质量组合：研究模型可能更关心细胞组成和特定功能；大规模筛选还要看批次稳定性；临床级材料则需加入更严格的身份、纯度、安全和稳定性要求。\n\n较完整的评价会将非侵入成像和生长轨迹，与细胞组成、分子特征、功能读出和遗传稳定性结合。比较时应分开看技术重复、独立细胞系和生产批次。",
+          "source_ids": [
+            "H021S001",
+            "H021S002",
+            "H021S010",
+            "H021S011",
+            "H021S017",
+            "H021S020"
+          ]
+        },
+        {
+          "section_id": "H021-SEC-05",
+          "title": "自动化能减少哪些差异",
+          "body": "机器人加液、转移和聚集体选择可以固定操作节奏，高内涵成像和在线记录则有助于发现异常。它们首先改善的是操作一致性和处理能力。\n\n自动化并不会自动保证生物学质量。仍需要用细胞组成、功能和稳定性来比较自动化流程与手工流程，记录人工干预、设备差异和异常批次。",
+          "source_ids": [
+            "H021S002",
+            "H021S003",
+            "H021S005",
+            "H021S012",
+            "H021S013",
+            "H021S014",
+            "H021S016"
+          ]
+        },
+        {
+          "section_id": "H021-SEC-06",
+          "title": "冻存和复苏属于制造流程",
+          "body": "冻存让生产和使用可以分开安排，也有助于建立类器官库。但细胞在什么阶段冻存、使用何种冷冻保护剂、如何降温和复苏，都会影响后续培养。复苏后短期存活只是起点，恢复期后的细胞组成、分子状态和器官功能同样需要比较。\n\n不同组织的适宜冻存窗口和恢复时间不同。一个体系中的冻存方案不能直接用在所有类器官上。",
+          "source_ids": [
+            "H021S006",
+            "H021S007",
+            "H021S008",
+            "H021S020"
+          ]
+        },
+        {
+          "section_id": "H021-SEC-07",
+          "title": "研究技术",
+          "body": "本专题的技术卡包括悬浮培养与生物反应器放大、过程参数的受控比较、多属性质量评价、自动化培养与在线监测，以及冻存、复苏与恢复期评价。",
+          "source_ids": []
+        },
+        {
+          "section_id": "H021-SEC-08",
+          "title": "科研参考范围",
+          "body": "本页用于说明类器官和干细胞规模化制造的研究证据、实验设计及适用范围，不提供诊疗建议或治疗推荐。",
+          "source_ids": []
+        }
+      ],
+      "methods": [
+        {
+          "method_id": "H021-M001",
+          "display_order": 1,
+          "category": "悬浮培养与生物反应器放大",
+          "title": "在受控混合和供氧条件下扩大培养规模",
+          "principle": "将细胞聚集体或类器官放入摇瓶、搅拌式或其他悬浮培养系统，通过工作体积、混合和氧供扩大产量。",
+          "answers": "适合比较规模扩大前后细胞组成、成熟度、功能和批次波动。",
+          "sample_design": "平行记录小规模与放大流程的起始材料、工作体积、接种密度、混合、氧供、批次数、失败率、遗传稳定性和器官相关功能。",
+          "limitations": "产量增加或设备容量变大不能单独说明流程已实现稳定制造；不同组织对剪切和氧的耐受不同。",
+          "source_ids": [
+            "H021S001",
+            "H021S003",
+            "H021S009",
+            "H021S011",
+            "H021S020"
+          ],
+          "workflow": "设计阶段先确定：平行记录小规模与放大流程的起始材料、工作体积、接种密度、混合、氧供、批次数、失败率、遗传稳定性和器官相关功能。 将起始细胞、培养基、基质、传代和扩增条件写入工艺记录；过程控制、细胞身份、遗传稳定性和功能质量分别检测，不能只以产量作为放行依据。 这项方法的直接测量或计算依据是：将细胞聚集体或类器官放入摇瓶、搅拌式或其他悬浮培养系统，通过工作体积、混合和氧供扩大产量。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：产量增加或设备容量变大不能单独说明流程已实现稳定制造；不同组织对剪切和氧的耐受不同。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "结果可比较规模扩大前后细胞组成、成熟度、功能和批次波动。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        },
+        {
+          "method_id": "H021-M002",
+          "display_order": 2,
+          "category": "过程参数的受控比较",
+          "title": "把培养输入与质量读出配对",
+          "principle": "通过设计实验或其他受控比较，改变起始细胞数、聚集体大小、基质、培养基、混合、剪切、氧和培养时间，并测量产物状态。",
+          "answers": "适合找出某个组织和工艺中的关键过程参数，以及这些参数改变后哪些质量属性随之变化。",
+          "sample_design": "记录材料批次、起始细胞、接种密度和所有运行参数；在多个细胞系和独立批次中测量形态、细胞组成、分子特征和功能。",
+          "limitations": "一种系统中的最佳尺寸、氧水平或培养时间不能直接用于其他组织、基质或设备。",
+          "source_ids": [
+            "H021S004",
+            "H021S015",
+            "H021S016",
+            "H021S018",
+            "H021S019"
+          ],
+          "workflow": "设计阶段先确定：记录材料批次、起始细胞、接种密度和所有运行参数；在多个细胞系和独立批次中测量形态、细胞组成、分子特征和功能。 将起始细胞、培养基、基质、传代和扩增条件写入工艺记录；过程控制、细胞身份、遗传稳定性和功能质量分别检测，不能只以产量作为放行依据。 这项方法的直接测量或计算依据是：通过设计实验或其他受控比较，改变起始细胞数、聚集体大小、基质、培养基、混合、剪切、氧和培养时间，并测量产物状态。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：一种系统中的最佳尺寸、氧水平或培养时间不能直接用于其他组织、基质或设备。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "结果可找出某个组织和工艺中的关键过程参数，以及这些参数改变后哪些质量属性随之变化。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        },
+        {
+          "method_id": "H021-M003",
+          "display_order": 3,
+          "category": "多属性质量评价",
+          "title": "从身份到功能检查培养产物可比性",
+          "principle": "结合非侵入成像、生长轨迹、细胞组成、分子特征、器官功能、遗传稳定性和污染控制，评价类器官或干细胞培养产物。",
+          "answers": "适合比较批内、批间、细胞系间或规模变化后的产品质量。",
+          "sample_design": "先明确预期用途，再设置相应的质量属性和判定阈值；区分技术重复与独立细胞系、供体或生产批次。",
+          "limitations": "形态整齐、单个标志物阳性或短期存活率只能提供局部信息，不能代替整体质量判断。",
+          "source_ids": [
+            "H021S001",
+            "H021S002",
+            "H021S010",
+            "H021S011",
+            "H021S017",
+            "H021S020"
+          ],
+          "workflow": "设计阶段先确定：先明确预期用途，再设置相应的质量属性和判定阈值；区分技术重复与独立细胞系、供体或生产批次。 将起始细胞、培养基、基质、传代和扩增条件写入工艺记录；过程控制、细胞身份、遗传稳定性和功能质量分别检测，不能只以产量作为放行依据。 这项方法的直接测量或计算依据是：结合非侵入成像、生长轨迹、细胞组成、分子特征、器官功能、遗传稳定性和污染控制，评价类器官或干细胞培养产物。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：形态整齐、单个标志物阳性或短期存活率只能提供局部信息，不能代替整体质量判断。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "结果可比较批内、批间、细胞系间或规模变化后的产品质量。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        },
+        {
+          "method_id": "H021-M004",
+          "display_order": 4,
+          "category": "自动化培养与在线监测",
+          "title": "用固定操作和数据记录减少人为差异",
+          "principle": "机器人加液、转移、聚集体选择和高内涵成像可固定部分培养步骤，并记录生长过程中的异常。",
+          "answers": "适合提高并行处理能力，发现操作偏差，并与手工流程比较可重复性。",
+          "sample_design": "分别测量设备精度、处理成功率和生物学结果；记录人工干预、异常处理、设备间差异和多批次对照。",
+          "limitations": "自动化首先改善操作一致性，仍需用细胞组成、功能和稳定性判断产物是否可比。",
+          "source_ids": [
+            "H021S002",
+            "H021S003",
+            "H021S005",
+            "H021S012",
+            "H021S013",
+            "H021S014",
+            "H021S016"
+          ],
+          "workflow": "设计阶段先确定：分别测量设备精度、处理成功率和生物学结果；记录人工干预、异常处理、设备间差异和多批次对照。 将起始细胞、培养基、基质、传代和扩增条件写入工艺记录；过程控制、细胞身份、遗传稳定性和功能质量分别检测，不能只以产量作为放行依据。 这项方法的直接测量或计算依据是：机器人加液、转移、聚集体选择和高内涵成像可固定部分培养步骤，并记录生长过程中的异常。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：自动化首先改善操作一致性，仍需用细胞组成、功能和稳定性判断产物是否可比。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "结果可提高并行处理能力，发现操作偏差，并与手工流程比较可重复性。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        },
+        {
+          "method_id": "H021-M005",
+          "display_order": 5,
+          "category": "冻存、复苏与恢复期评价",
+          "title": "把贮存后状态纳入制造流程",
+          "principle": "在预定阶段冻存细胞、类器官或组织，记录冷冻保护剂、降温、保存和复苏条件，并在恢复期后评价功能。",
+          "answers": "适合判断贮存是否改变后续培养、分化、细胞组成和器官功能。",
+          "sample_design": "记录冻存阶段、尺寸、冷冻保护剂、降温曲线、保存时间和复苏流程；在预设恢复时间后比较存活、形态、分子状态、组成和功能。",
+          "limitations": "复苏后存活或继续生长不等于冻存前后质量相同；不同组织的适宜冻存窗口和恢复时间不同。",
+          "source_ids": [
+            "H021S006",
+            "H021S007",
+            "H021S008",
+            "H021S020"
+          ],
+          "workflow": "设计阶段先确定：记录冻存阶段、尺寸、冷冻保护剂、降温曲线、保存时间和复苏流程；在预设恢复时间后比较存活、形态、分子状态、组成和功能。 将起始细胞、培养基、基质、传代和扩增条件写入工艺记录；过程控制、细胞身份、遗传稳定性和功能质量分别检测，不能只以产量作为放行依据。 这项方法的直接测量或计算依据是：在预定阶段冻存细胞、类器官或组织，记录冷冻保护剂、降温、保存和复苏条件，并在恢复期后评价功能。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：复苏后存活或继续生长不等于冻存前后质量相同；不同组织的适宜冻存窗口和恢复时间不同。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "结果可判断贮存是否改变后续培养、分化、细胞组成和器官功能。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        }
+      ],
+      "references": [
+        {
+          "source_id": "H021S001",
+          "title": "From organoid culture to manufacturing: technologies for reproducible and scalable organoid production",
+          "authors": "Kim D et al.",
+          "journal": "npj Biomedical Innovations",
+          "published_date": "2026-02-02",
+          "doi": "10.1038/s44385-025-00054-6",
+          "pmid": "",
+          "url": "https://www.nature.com/articles/s44385-025-00054-6",
+          "source_type": "review",
+          "study_context": "organoid engineering and manufacturing field",
+          "study_design": "peer-reviewed review",
+          "usable_for": "manufacturing taxonomy, critical quality attributes and scale-up limitations",
+          "limitations": "review; platform claims need system-specific validation"
+        },
+        {
+          "source_id": "H021S002",
+          "title": "Non-Invasive Quality Control of Organoid Cultures Using Mesofluidic CSTR Bioreactors and High-Content Imaging",
+          "authors": "Charles S et al.",
+          "journal": "Advanced Materials Technologies",
+          "published_date": "2025-02-05",
+          "doi": "10.1002/admt.202400473",
+          "pmid": "39091761",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/39091761/",
+          "source_type": "primary_research",
+          "study_context": "human brain organoid culture",
+          "study_design": "bioreactor and longitudinal imaging method study",
+          "usable_for": "non-invasive monitoring and process-linked quality-control design",
+          "limitations": "brain-organoid context; machine-learning classification needs external validation"
+        },
+        {
+          "source_id": "H021S003",
+          "title": "Automated and scalable expansion of human liver organoids for translational applications",
+          "authors": "authors as indexed",
+          "journal": "",
+          "published_date": "2026-04-01",
+          "doi": "",
+          "pmid": "42032747",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/42032747/",
+          "source_type": "primary_research",
+          "study_context": "human liver organoid expansion",
+          "study_design": "closed monitored automated expansion study",
+          "usable_for": "upstream process control, scale and phenotypic stability",
+          "limitations": "reported platform and tissue context need independent replication"
+        },
+        {
+          "source_id": "H021S004",
+          "title": "Animal-origin-free method for generating blood vessel organoids",
+          "authors": "Hoffmann A et al.",
+          "journal": "Scientific Reports",
+          "published_date": "2026-03-05",
+          "doi": "10.1038/s41598-026-42977-z",
+          "pmid": "",
+          "url": "https://www.nature.com/articles/s41598-026-42977-z",
+          "source_type": "primary_research",
+          "study_context": "blood-vessel organoid generation",
+          "study_design": "method-development study",
+          "usable_for": "matrix definition and reproducibility constraints in organoid production",
+          "limitations": "one organoid type; clinical applicability not established"
+        },
+        {
+          "source_id": "H021S005",
+          "title": "Robotic micromanipulation for patterned and complex organoid biofabrication",
+          "authors": "authors as indexed",
+          "journal": "",
+          "published_date": "2025-08-18",
+          "doi": "",
+          "pmid": "40911681",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/40911681/",
+          "source_type": "primary_research",
+          "study_context": "patterned organoid biofabrication",
+          "study_design": "automated cell-placement method study",
+          "usable_for": "operator-independent seeding and spatially defined organoid construction",
+          "limitations": "biofabrication study; production-scale consistency needs separate validation"
+        },
+        {
+          "source_id": "H021S006",
+          "title": "Cryopreservation of brain organoids - a tool for on-demand organoid banking",
+          "authors": "authors as indexed",
+          "journal": "",
+          "published_date": "2026-05-01",
+          "doi": "",
+          "pmid": "42239104",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/42239104/",
+          "source_type": "primary_research",
+          "study_context": "brain organoids at two freezing time points",
+          "study_design": "comparative cryopreservation workflow study",
+          "usable_for": "banking design, post-thaw recovery time and multi-endpoint quality assessment",
+          "limitations": "brain-organoid context and media comparison; no universal cryopreservation ranking"
+        },
+        {
+          "source_id": "H021S007",
+          "title": "Cryopreservation of Neuroectoderm on a Pillar Plate and In Situ Differentiation into Human Brain Organoids",
+          "authors": "Zolfaghar M et al.",
+          "journal": "ACS Biomaterials Science & Engineering",
+          "published_date": "2024-11-11",
+          "doi": "10.1021/acsbiomaterials.4c01383",
+          "pmid": "39454131",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/39454131/",
+          "source_type": "primary_research",
+          "study_context": "early-stage human brain organoids differentiated from induced pluripotent stem cells",
+          "study_design": "cryopreservation and post-thaw differentiation study",
+          "usable_for": "cryopreservation inputs, organoid-size considerations and post-thaw comparability",
+          "limitations": "early-stage brain-organoid system; conditions do not define a universal storage workflow"
+        },
+        {
+          "source_id": "H021S008",
+          "title": "Effective cryopreservation of human brain tissue and neural organoids",
+          "authors": "authors as indexed",
+          "journal": "",
+          "published_date": "2024-05-20",
+          "doi": "",
+          "pmid": "38744289",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/38744289/",
+          "source_type": "primary_research",
+          "study_context": "human brain tissue and neural organoids",
+          "study_design": "comparative cryopreservation study",
+          "usable_for": "storage as a process step requiring recovery and lineage-quality readouts",
+          "limitations": "brain-tissue and neural-organoid context; conditions require product-specific qualification"
+        },
+        {
+          "source_id": "H021S009",
+          "title": "Upscaling: efficient generation of human lung organoids from induced pluripotent stem cells using a stirring bioreactor",
+          "authors": "authors as indexed",
+          "journal": "Frontiers in Bioengineering and Biotechnology",
+          "published_date": "2025",
+          "doi": "",
+          "pmid": "41404197",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/41404197/",
+          "source_type": "primary_research",
+          "study_context": "induced pluripotent stem-cell-derived human lung organoids",
+          "study_design": "manual versus stirred-bioreactor comparative production study",
+          "usable_for": "scale-up comparability across morphology and cellular composition",
+          "limitations": "one lung-organoid protocol and bioreactor design"
+        },
+        {
+          "source_id": "H021S010",
+          "title": "Towards a quality control framework for cerebral cortical organoids",
+          "authors": "Castiglione H et al.",
+          "journal": "Scientific Reports",
+          "published_date": "2025",
+          "doi": "",
+          "pmid": "40790335",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/40790335/",
+          "source_type": "primary_research",
+          "study_context": "60-day cerebral cortical organoids",
+          "study_design": "quality-control framework study",
+          "usable_for": "hierarchical non-invasive screening followed by deeper quality characterization",
+          "limitations": "cortical-organoid context and study-specific scoring thresholds"
+        },
+        {
+          "source_id": "H021S011",
+          "title": "Essential Guidelines for Manufacturing and Application of Organoids",
+          "authors": "Organoid Standards Initiative",
+          "journal": "",
+          "published_date": "",
+          "doi": "",
+          "pmid": "38764240",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/38764240/",
+          "source_type": "guideline",
+          "study_context": "human-cell-derived organoid manufacturing and application across organ systems",
+          "study_design": "evidence analysis and expert consensus guideline",
+          "usable_for": "minimum manufacturing and endpoint-quality considerations across liver, intestinal, cardiac, renal, brain, lung and skin organoids",
+          "limitations": "general guidance; not a product-specific release specification"
+        },
+        {
+          "source_id": "H021S012",
+          "title": "Reproducible, Scale-Up Production of Human Brain Organoids (HBOs) on a Pillar Plate Platform via Spheroid Transfer",
+          "authors": "Joshi P et al.",
+          "journal": "Methods in Molecular Biology",
+          "published_date": "2025-01-17",
+          "doi": "10.1007/7651_2024_604",
+          "pmid": "39821810",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/39821810/",
+          "source_type": "protocol",
+          "study_context": "human brain organoid production for developmental neurotoxicity and screening settings",
+          "study_design": "methods protocol",
+          "usable_for": "documenting the operational inputs needed for a reproducible scale-up workflow",
+          "limitations": "protocol rather than comparative independent validation"
+        },
+        {
+          "source_id": "H021S013",
+          "title": "Towards Automation in 3D Cell Culture: Selective and Gentle High-Throughput Handling of Spheroids and Organoids via Novel Pick-Flow-Drop Principle",
+          "authors": "Zieger V et al.",
+          "journal": "Advanced Healthcare Materials",
+          "published_date": "2024-04-01",
+          "doi": "10.1002/adhm.202303350",
+          "pmid": "38265410",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/38265410/",
+          "source_type": "primary_research",
+          "study_context": "spheroids and colon organoids in automated microfluidic handling",
+          "study_design": "platform-performance study",
+          "usable_for": "standardized aggregate selection and handling efficiency as process variables",
+          "limitations": "handling platform; does not establish tissue-specific product quality"
+        },
+        {
+          "source_id": "H021S014",
+          "title": "Uniform cerebral organoid culture on a pillar plate by simple and reproducible spheroid transfer from an ultralow attachment well plate",
+          "authors": "Acharya P et al.",
+          "journal": "Biofabrication",
+          "published_date": "2024-01-16",
+          "doi": "10.1088/1758-5090/ad1b1e",
+          "pmid": "38176079",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/38176079/",
+          "source_type": "primary_research",
+          "study_context": "induced pluripotent stem-cell-derived cerebral organoids",
+          "study_design": "comparative culture-method study",
+          "usable_for": "minimizing organoid-size and workflow variation in miniaturized culture",
+          "limitations": "cerebral-organoid-specific method; external cross-laboratory reproducibility remains needed"
+        },
+        {
+          "source_id": "H021S015",
+          "title": "Organoid in droplet: Production of uniform pancreatic cancer organoids from single cells",
+          "authors": "authors as indexed",
+          "journal": "",
+          "published_date": "",
+          "doi": "",
+          "pmid": "40270893",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/40270893/",
+          "source_type": "primary_research",
+          "study_context": "pancreatic cancer organoids grown from single cells in defined microgels",
+          "study_design": "process-development and drug-testing study",
+          "usable_for": "controlled initiating-cell number, size uniformity and reproducible drug-testing workflow",
+          "limitations": "one cancer-organoid workflow; clinical material and external process validation remain limited"
+        },
+        {
+          "source_id": "H021S016",
+          "title": "Integrated Microfluidic Platform for High-Throughput Generation of Intestinal Organoids in Hydrogel Droplets",
+          "authors": "authors as indexed",
+          "journal": "",
+          "published_date": "",
+          "doi": "",
+          "pmid": "41491998",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/41491998/",
+          "source_type": "primary_research",
+          "study_context": "primary human adult intestinal stem-cell-derived healthy and tumour organoids",
+          "study_design": "microfluidic production and differentiation study",
+          "usable_for": "homogeneous cell encapsulation, organoid-size distribution and matrix-condition reporting",
+          "limitations": "platform-specific hydrogel and intestinal-organoid context"
+        },
+        {
+          "source_id": "H021S017",
+          "title": "Parsing Glomerular and Tubular Structure Variability in High-Throughput Kidney Organoid Culture",
+          "authors": "Uusi-Rauva K et al.",
+          "journal": "",
+          "published_date": "2025",
+          "doi": "",
+          "pmid": "41149808",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/41149808/",
+          "source_type": "primary_research",
+          "study_context": "human induced pluripotent stem-cell kidney organoids across multiple culture approaches",
+          "study_design": "comparative high-throughput culture study",
+          "usable_for": "distinguishing technical culture variation from induced pluripotent stem-cell-line effects",
+          "limitations": "kidney-organoid protocols and assessed structures are context specific"
+        },
+        {
+          "source_id": "H021S018",
+          "title": "Increased reproducibility of brain organoids through controlled fluid dynamics",
+          "authors": "Aiello G et al.",
+          "journal": "",
+          "published_date": "2025-12-01",
+          "doi": "10.1038/s44319-025-00619-x",
+          "pmid": "41261286",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/41261286/",
+          "source_type": "primary_research",
+          "study_context": "brain organoid differentiation across batches and induced pluripotent stem-cell lines",
+          "study_design": "controlled fluid-dynamics comparative study",
+          "usable_for": "fluid shear and aggregation as process parameters linked to morphology and transcriptional fidelity",
+          "limitations": "brain-organoid context; requires independent replication across platforms"
+        },
+        {
+          "source_id": "H021S019",
+          "title": "Simple 3D-Printed Stirred Bioreactor Enhances Retinal Organoid Production Via Improved Oxygenation",
+          "authors": "authors as indexed",
+          "journal": "",
+          "published_date": "",
+          "doi": "",
+          "pmid": "40667379",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/40667379/",
+          "source_type": "primary_research",
+          "study_context": "human induced pluripotent stem-cell retinal organoid production",
+          "study_design": "bioreactor oxygenation comparative study",
+          "usable_for": "oxygenation as a batch-quality and yield variable",
+          "limitations": "retinal-organoid system and platform-specific engineering"
+        },
+        {
+          "source_id": "H021S020",
+          "title": "Efficient and reproducible generation of human iPSC-derived cardiomyocytes and cardiac organoids in stirred suspension systems",
+          "authors": "Prondzynski M et al.",
+          "journal": "Nature Communications",
+          "published_date": "2024-07-15",
+          "doi": "10.1038/s41467-024-50224-0",
+          "pmid": "39009604",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/39009604/",
+          "source_type": "primary_research",
+          "study_context": "human induced pluripotent stem-cell cardiac differentiation across multiple lines",
+          "study_design": "stirred-suspension protocol and characterization study",
+          "usable_for": "suspension-process parameters, purity, yield and post-thaw recovery",
+          "limitations": "cardiac context and specific protocol; not a universal organoid-release specification"
+        }
+      ],
+      "shared_findings": [
+        {
+          "finding_id": "H021-C01",
+          "display_order": 1,
+          "title": "规模放大要证明过程和产物仍可比较",
+          "shared_result": "增加培养体积或产量只是规模变化。制造意义上的放大还要证明起始材料、培养过程和最终细胞组成及功能在规模前后保持可比，并报告失败批次和产出波动。\n\n肝、肺、心脏和脑类器官采用的扩增或分化路线不同；悬浮培养适合某些体系，但搅拌、聚集和氧供也会改变组织成熟与组成。",
+          "research_use": "进行静态与放大流程的并行比较，记录工作体积、批次数、产量、失败率、细胞组成、遗传稳定和器官相关功能。",
+          "boundary": "单次高产、培养面积增加或设备容量不能单独证明流程可规模化制造。",
+          "source_ids": [
+            "H021S001",
+            "H021S003",
+            "H021S009",
+            "H021S011",
+            "H021S020"
+          ]
+        },
+        {
+          "finding_id": "H021-C02",
+          "display_order": 2,
+          "title": "关键过程参数随组织和工艺而变",
+          "shared_result": "起始细胞数、聚集体大小、基质、流体运动、剪切、氧供和培养时点会影响类器官大小、细胞组成和功能。这些输入需要与质量读出配对，才能区分工艺变化和生物学差异。\n\n定义基质、液滴微流控、柱板和搅拌反应器控制的是不同环节；改善氧供或均一化尺寸在一种组织中有效，不代表其他类器官可直接采用同一参数。",
+          "research_use": "采用过程设计或受控比较，记录起始细胞、接种密度、材料批次、混合和氧参数；在多个细胞系和批次中测量形态、组成与功能。",
+          "boundary": "不能脱离组织类型和预期用途给出通用的最佳剪切、尺寸、氧或培养时间。",
+          "source_ids": [
+            "H021S004",
+            "H021S015",
+            "H021S016",
+            "H021S018",
+            "H021S019"
+          ]
+        },
+        {
+          "finding_id": "H021-C03",
+          "display_order": 3,
+          "title": "质量评价不能只看形态整齐",
+          "shared_result": "类器官质量需要结合身份、细胞组成、形态、分子特征、功能、遗传稳定和污染控制。外观均一有助于早期筛查，但不能替代深层质量评价；不同用途也需要不同的放行标准。\n\n脑、肾、血管和心脏类器官的功能读出不同；研究级模型可接受的变异，不一定满足大规模筛选或临床级材料的要求。细胞系差异和技术批次也需分开。",
+          "research_use": "先用非侵入成像和生长轨迹监测批次，再按用途加入细胞组成、组学、功能和安全相关检测；建立批内、批间、细胞系与设备间比较。",
+          "boundary": "单一形态分数、单个标志物或短期存活率不能代表整体质量，也不能直接作为跨产品放行阈值。",
+          "source_ids": [
+            "H021S001",
+            "H021S002",
+            "H021S010",
+            "H021S011",
+            "H021S017",
+            "H021S020"
+          ]
+        },
+        {
+          "finding_id": "H021-C04",
+          "display_order": 4,
+          "title": "自动化减少操作差异，但不会自动保证生物学质量",
+          "shared_result": "自动化可以固定加液、转移、聚集体选择和培养节奏，也能提高并行处理能力。它首先改善的是操作一致性；最终产物是否可比较，仍需通过细胞组成、功能和稳定性检验。\n\n机器人微操作、自动扩增、柱板转移和微流控封装针对不同工序。高处理效率、均一尺寸和低损伤各自是局部性能，不能互相代替。",
+          "research_use": "分别验证设备精度、处理成功率和生物学结果；记录人工干预、异常处理、设备间差异，并与手工流程进行多批次对照。",
+          "boundary": "使用自动化设备、标准操作程序或机器学习分类本身不等于流程已经受控，更不等于产品可以放行。",
+          "source_ids": [
+            "H021S002",
+            "H021S003",
+            "H021S005",
+            "H021S012",
+            "H021S013",
+            "H021S014",
+            "H021S016"
+          ]
+        },
+        {
+          "finding_id": "H021-C05",
+          "display_order": 5,
+          "title": "冻存和复苏是制造流程的一部分",
+          "shared_result": "冻存能够把生产与使用时间分开，也支持类器官库和批次调度，但冷冻阶段、保护剂和复苏过程会影响后续分化、组成和功能。复苏后的短期存活只是第一项检查。\n\n早期神经外胚层、成熟脑类器官、人脑组织和心脏类器官的冻存窗口不同；一种培养体系中的冷冻保护剂和恢复时间不能作为通用方案。",
+          "research_use": "记录冻存阶段、尺寸、保护剂、降温、保存时间和复苏流程；在预设恢复时间后比较存活、形态、细胞组成、分子状态和器官相关功能。",
+          "boundary": "复苏后细胞存活或继续生长不能单独证明冻存前后质量等同，也不能替代长期稳定性。",
+          "source_ids": [
+            "H021S006",
+            "H021S007",
+            "H021S008",
+            "H021S020"
+          ]
+        }
+      ]
+    },
+    {
+      "topic_id": "H042",
+      "title": "人体相关药代、药效与安全性模型",
+      "topic_role": "research_deep_dive",
+      "overview": "人体相关药代、药效与安全性模型试图在人体研究前，较好地估计药物暴露、组织反应、代谢转化和潜在损伤。动物模型、静态细胞培养或单一终点可能遗漏人特异性代谢、器官间转运和长期暴露差异，因此模型的价值必须限定到具体用途和终点。\n\n本方向从原代细胞、患者来源模型、器官芯片、多器官微生理系统、代谢物测量和损伤读出出发，集中处理三类问题：名义剂量如何转化为实际组织暴露；多个组织之间的代谢和转运如何改变药效或毒性；体外模型结果能否在已知参考化合物、动物资料或人体数据中得到限定验证。暴露、药效、生物标志物和损伤终点需要分层解释。\n\n比较公开研究时，需要同时交代物种或细胞来源、给药和暴露方式、流动与代谢条件、采样时间、功能终点、参考化合物、模型批次和外部验证标准。更接近生理的系统也会引入材料、通量和复杂度取舍；模型中的预测信号不能直接写成临床安全性或批准依据。类器官和器官芯片专题提供相关模型基础，本页聚焦药代、药效和安全性评价的证据范围。",
+      "sections": [
+        {
+          "section_id": "H042-SEC-01",
+          "title": "比较不同研究时应先看什么",
+          "body": "| 比较内容 | 应记录的信息 | 关系到什么判断 |\n| --- | --- | --- |\n| 预期用途 | 吸收、代谢、清除、药效、器官毒性或人体外推 | 模型需要哪些终点和验证标准 |\n| 实际暴露 | 名义剂量、实测母药和代谢物、蛋白结合、材料损失及采样时间 | 组织真正接触了多少化合物 |\n| 模型结构 | 细胞来源、组织组合、介质、循环方式、流量和组织比例 | 结果适用于哪一种转运或器官间过程 |\n| 功能与损伤 | 器官功能、形态、损伤标志、判定阈值和恢复情况 | 观察到的是代谢变化还是组织损伤 |\n| 外部验证 | 人体参照、训练与测试分离、盲法、跨实验室复核和不确定性 | 模型输出是否支持预先规定的用途 |",
+          "source_ids": []
+        },
+        {
+          "section_id": "H042-SEC-02",
+          "title": "名义剂量不等于实际暴露",
+          "body": "加入培养液的药物浓度，可能因材料吸附、蛋白结合、被动损失、流动和采样而改变。芯片中的母药和代谢物浓度还会随时间和组织间转运发生变化。若不测量这些过程，就很难判断观察到的药效或毒性来自何种实际暴露。\n\n液相色谱—质谱等分析方法可用于测量浓度—时间曲线。无细胞装置对照有助于识别材料或运行造成的化合物损失。体外实测浓度仍不能直接等同人体血药浓度或组织暴露。",
+          "source_ids": [
+            "H042S005",
+            "H042S006",
+            "H042S009",
+            "H042S011",
+            "H042S012",
+            "H042S019"
+          ]
+        },
+        {
+          "section_id": "H042-SEC-03",
+          "title": "多组织模型能观察特定的转运和代谢过程",
+          "body": "肠—肝等多组织系统可以在同一实验中跟踪母药进入、代谢物形成和下游组织反应，适合研究首过代谢、前药转化或明确的器官间作用。它们的价值在于连续测量的时间过程，而不在于连接了多少器官。\n\n不同系统使用的细胞来源、介质、组织比例和循环方式差异很大。解读时需要保留单组织对照，并说明质量平衡和人体参照。一个多组织装置不能代替完整的全身 ADME。",
+          "source_ids": [
+            "H042S004",
+            "H042S008",
+            "H042S010",
+            "H042S018"
+          ]
+        },
+        {
+          "section_id": "H042-SEC-04",
+          "title": "代谢和损伤终点需要放在同一框架中",
+          "body": "在肝类器官或肝芯片中，代谢酶、母药与代谢物、组织形态、器官功能和损伤标志可以同时测量。把它们放入同一浓度—时间框架，才能区分化合物被系统吸附、代谢能力发生变化，还是组织确实受到损伤。\n\n药物性肝损伤的验证资料相对集中，但不同平台的供体、参考药物、剂量和判定规则并不相同。其他器官的损伤终点也不能直接沿用肝脏研究的阈值。",
+          "source_ids": [
+            "H042S002",
+            "H042S003",
+            "H042S007",
+            "H042S017",
+            "H042S020"
+          ]
+        },
+        {
+          "section_id": "H042-SEC-05",
+          "title": "预测能力要与用途相对应",
+          "body": "机制研究、早期筛选、药物性肝损伤风险分类和人体药代外推，需要不同的参照标准和性能指标。判断模型时，应先明确化合物范围、器官、终点和允许的误差，再看是否使用了独立测试、盲法、外部资料或跨实验室复核。\n\n采用人体来源细胞、三维培养或器官芯片，并不能单独证明模型具有临床预测能力。模型性能仍需在具体用途下检验。",
+          "source_ids": [
+            "H042S001",
+            "H042S002",
+            "H042S013",
+            "H042S014",
+            "H042S015",
+            "H042S016"
+          ]
+        },
+        {
+          "section_id": "H042-SEC-06",
+          "title": "更接近生理的条件也会带来取舍",
+          "body": "流动、机械力、氧条件和低吸附材料可能改善屏障、吸收或组织形态，但不同功能未必同时改善。一项肝芯片研究显示，机械刺激和氧条件可降低药物代谢能力。\n\n因此，模型配置应围绕目标功能选择，同时观察可能受影响的其他功能。不能只按装置复杂度或动态程度评价模型优劣。",
+          "source_ids": [
+            "H042S005",
+            "H042S011",
+            "H042S017",
+            "H042S019"
+          ]
+        },
+        {
+          "section_id": "H042-SEC-07",
+          "title": "研究技术",
+          "body": "本专题的技术卡包括实际暴露的浓度—时间测量、多组织转运与代谢链测量、代谢与损伤的同步读出、体外—体内外推与区室建模，以及按用途的盲法与外部验证。",
+          "source_ids": []
+        },
+        {
+          "section_id": "H042-SEC-08",
+          "title": "科研参考范围",
+          "body": "本页用于说明人体相关转化模型在 PK/PD、ADME/Tox 研究中的证据类型、实验设计和适用范围，不提供诊疗建议或治疗推荐。",
+          "source_ids": []
+        }
+      ],
+      "methods": [
+        {
+          "method_id": "H042-M001",
+          "display_order": 1,
+          "category": "实际暴露的浓度—时间测量",
+          "title": "用分析化学测量母药和代谢物",
+          "principle": "在培养液、芯片循环液和必要时组织中，以液相色谱-质谱联用等方法按预定时间点测量母药和代谢物浓度。",
+          "answers": "适合判断细胞或组织实际接触到多少药物，以及材料、蛋白结合、流动和采样如何改变暴露。",
+          "sample_design": "设置无细胞装置对照；记录给药方式、材料、循环体积、流量、蛋白结合、采样损失和每个采样时间点。",
+          "limitations": "名义剂量不能代替实际浓度；体外浓度曲线也不能直接等同人体血药浓度或组织暴露。",
+          "source_ids": [
+            "H042S005",
+            "H042S006",
+            "H042S009",
+            "H042S011",
+            "H042S012",
+            "H042S019"
+          ],
+          "workflow": "设计阶段先确定：设置无细胞装置对照；记录给药方式、材料、循环体积、流量、蛋白结合、采样损失和每个采样时间点。 先把研究问题拆成暴露、转运、代谢、药效或毒性终点，再选择合适的人体相关模型；采集时间序列和化学分析、功能读出配对，最后与已有临床或体内数据比较。 这项方法的直接测量或计算依据是：在培养液、芯片循环液和必要时组织中，以液相色谱-质谱联用等方法按预定时间点测量母药和代谢物浓度。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：名义剂量不能代替实际浓度；体外浓度曲线也不能直接等同人体血药浓度或组织暴露。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "结果可判断细胞或组织实际接触到多少药物，以及材料、蛋白结合、流动和采样如何改变暴露。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        },
+        {
+          "method_id": "H042-M002",
+          "display_order": 2,
+          "category": "多组织转运与代谢链测量",
+          "title": "在连接的组织中跟踪母药、代谢物和下游反应",
+          "principle": "将肠、肝或其他组织模块连接，按时间序列测量化合物转运、代谢物形成和下游组织的功能变化。",
+          "answers": "适合研究首过代谢、前药转化或特定器官间作用。",
+          "sample_design": "保留单组织对照，报告组织组合、循环方式、介质、组织比例、流量和质量平衡；用人体药代或已知机制作为参照。",
+          "limitations": "一个多组织装置中的代谢链不能代表全身 ADME，也不能外推到未连接的组织或其他化合物。",
+          "source_ids": [
+            "H042S004",
+            "H042S008",
+            "H042S010",
+            "H042S018"
+          ],
+          "workflow": "设计阶段先确定：保留单组织对照，报告组织组合、循环方式、介质、组织比例、流量和质量平衡；用人体药代或已知机制作为参照。 先把研究问题拆成暴露、转运、代谢、药效或毒性终点，再选择合适的人体相关模型；采集时间序列和化学分析、功能读出配对，最后与已有临床或体内数据比较。 这项方法的直接测量或计算依据是：将肠、肝或其他组织模块连接，按时间序列测量化合物转运、代谢物形成和下游组织的功能变化。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：一个多组织装置中的代谢链不能代表全身 ADME，也不能外推到未连接的组织或其他化合物。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "结果可研究首过代谢、前药转化或特定器官间作用。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        },
+        {
+          "method_id": "H042-M003",
+          "display_order": 3,
+          "category": "代谢与损伤的同步读出",
+          "title": "将浓度过程与器官功能和毒性终点配对",
+          "principle": "在肝类器官、肝芯片或其他人体相关模型中，同时测量代谢酶、母药和代谢物、组织形态、器官功能及损伤标志。",
+          "answers": "适合区分化合物损失、代谢变化和真正的组织损伤。",
+          "sample_design": "采用阳性和阴性参考化合物、多个供体和重复暴露；预设损伤阈值，记录恢复期，并按时间点采集暴露和功能读出。",
+          "limitations": "同一模型内的相关变化不能直接说明人体风险；不同器官和不同毒性机制不能沿用同一阈值。",
+          "source_ids": [
+            "H042S002",
+            "H042S003",
+            "H042S007",
+            "H042S017",
+            "H042S020"
+          ],
+          "workflow": "设计阶段先确定：采用阳性和阴性参考化合物、多个供体和重复暴露；预设损伤阈值，记录恢复期，并按时间点采集暴露和功能读出。 先把研究问题拆成暴露、转运、代谢、药效或毒性终点，再选择合适的人体相关模型；采集时间序列和化学分析、功能读出配对，最后与已有临床或体内数据比较。 这项方法的直接测量或计算依据是：在肝类器官、肝芯片或其他人体相关模型中，同时测量代谢酶、母药和代谢物、组织形态、器官功能及损伤标志。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：同一模型内的相关变化不能直接说明人体风险；不同器官和不同毒性机制不能沿用同一阈值。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "结果可区分化合物损失、代谢变化和真正的组织损伤。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        },
+        {
+          "method_id": "H042-M004",
+          "display_order": 4,
+          "category": "体外—体内外推与区室建模",
+          "title": "用模型连接体外测量和人体参照",
+          "principle": "基于体外清除、转运、代谢或组织反应数据，结合质量平衡、区室模型或其他预先说明的假设，估计特定用途下的暴露或效应。",
+          "answers": "适合把体外测量放入明确的药代或药效问题中，并检验估计值与人体参照的一致性。",
+          "sample_design": "预先定义用途、化合物范围、模型结构、参数来源和不确定性；区分用于建模的数据与独立测试数据。",
+          "limitations": "模型输出依赖输入质量和假设，不能因使用人体相关细胞就视为临床预测。",
+          "source_ids": [
+            "H042S001",
+            "H042S004",
+            "H042S009",
+            "H042S013",
+            "H042S014",
+            "H042S015"
+          ],
+          "workflow": "设计阶段先确定：预先定义用途、化合物范围、模型结构、参数来源和不确定性；区分用于建模的数据与独立测试数据。 先把研究问题拆成暴露、转运、代谢、药效或毒性终点，再选择合适的人体相关模型；采集时间序列和化学分析、功能读出配对，最后与已有临床或体内数据比较。 这项方法的直接测量或计算依据是：基于体外清除、转运、代谢或组织反应数据，结合质量平衡、区室模型或其他预先说明的假设，估计特定用途下的暴露或效应。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：模型输出依赖输入质量和假设，不能因使用人体相关细胞就视为临床预测。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "结果可把体外测量放入明确的药代或药效问题中，并检验估计值与人体参照的一致性。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        },
+        {
+          "method_id": "H042-M005",
+          "display_order": 5,
+          "category": "按用途的盲法与外部验证",
+          "title": "在独立资料中评价模型性能",
+          "principle": "围绕明确的预测任务，使用预设终点、参考标准、独立测试集、盲法或跨实验室比较评价模型。",
+          "answers": "适合区分机制演示、早期筛选、药物性肝损伤风险分类和人体药代外推所需的证据。",
+          "sample_design": "记录适用域、供体、质量属性、参考化合物、判定规则和性能指标；报告不适用情形及不确定性。",
+          "limitations": "人体来源、三维培养或芯片标签不是验证；一个平台在特定药物集合上的结果不能代表所有毒性机制。",
+          "source_ids": [
+            "H042S001",
+            "H042S002",
+            "H042S013",
+            "H042S014",
+            "H042S015",
+            "H042S016"
+          ],
+          "workflow": "设计阶段先确定：记录适用域、供体、质量属性、参考化合物、判定规则和性能指标；报告不适用情形及不确定性。 先把研究问题拆成暴露、转运、代谢、药效或毒性终点，再选择合适的人体相关模型；采集时间序列和化学分析、功能读出配对，最后与已有临床或体内数据比较。 这项方法的直接测量或计算依据是：围绕明确的预测任务，使用预设终点、参考标准、独立测试集、盲法或跨实验室比较评价模型。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：人体来源、三维培养或芯片标签不是验证；一个平台在特定药物集合上的结果不能代表所有毒性机制。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "结果可区分机制演示、早期筛选、药物性肝损伤风险分类和人体药代外推所需的证据。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        }
+      ],
+      "references": [
+        {
+          "source_id": "H042S001",
+          "title": "Human organs-on-chips for disease modelling",
+          "authors": "Ingber DE",
+          "journal": "Nature Reviews Genetics",
+          "published_date": "2022-03-25",
+          "doi": "10.1038/s41576-022-00466-9",
+          "pmid": "",
+          "url": "https://www.nature.com/articles/s41576-022-00466-9",
+          "source_type": "review",
+          "study_context": "human organ-chip field",
+          "study_design": "peer-reviewed review",
+          "usable_for": "translation terminology and validation boundary",
+          "limitations": "review; not predictive-performance evidence"
+        },
+        {
+          "source_id": "H042S002",
+          "title": "Performance assessment and economic analysis of a human Liver-Chip for predictive toxicology",
+          "authors": "Ewart L et al.",
+          "journal": "Communications Medicine",
+          "published_date": "2022-12-05",
+          "doi": "10.1038/s43856-022-00209-1",
+          "pmid": "36473994",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/36473994/",
+          "source_type": "primary_research",
+          "study_context": "blinded 27-drug human Liver-Chip benchmark",
+          "study_design": "predictive toxicology performance study",
+          "usable_for": "blinded benchmark, donor replication and clinical DILI reference comparison",
+          "limitations": "defined DILI benchmark and one platform; not all toxicities or compounds"
+        },
+        {
+          "source_id": "H042S003",
+          "title": "A human liver organoid screening platform for DILI risk prediction",
+          "authors": "Shinozawa T et al.",
+          "journal": "Hepatology",
+          "published_date": "2023-05-01",
+          "doi": "",
+          "pmid": "36738840",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/36738840/",
+          "source_type": "primary_research",
+          "study_context": "three iPSC-derived human liver organoid lines",
+          "study_design": "high-throughput and organ-on-chip DILI study",
+          "usable_for": "exposure design, high-throughput screening and orthogonal functional readouts",
+          "limitations": "three donor lines and selected compounds; future external benchmarks needed"
+        },
+        {
+          "source_id": "H042S004",
+          "title": "A multi-organ chip with matured tissue niches linked by vascular flow",
+          "authors": "Novak R et al.",
+          "journal": "Nature Biomedical Engineering",
+          "published_date": "2022-05-16",
+          "doi": "10.1038/s41551-022-00882-6",
+          "pmid": "",
+          "url": "https://www.nature.com/articles/s41551-022-00882-6",
+          "source_type": "primary_research",
+          "study_context": "vascularly linked multi-tissue chip with doxorubicin",
+          "study_design": "multi-organ PK/PD study",
+          "usable_for": "measured exposure, pharmacokinetic and pharmacodynamic linkage",
+          "limitations": "specific tissues and drug; does not establish general human PK/PD prediction"
+        },
+        {
+          "source_id": "H042S005",
+          "title": "Addressing the ADME Challenges of Compound Loss in a PDMS-Based Gut-on-Chip Microphysiological System",
+          "authors": "authors as indexed",
+          "journal": "",
+          "published_date": "2024-03-25",
+          "doi": "",
+          "pmid": "38543190",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/38543190/",
+          "source_type": "primary_research",
+          "study_context": "PDMS gut-on-chip with 17-drug compound-loss assessment",
+          "study_design": "method and exposure-characterization study",
+          "usable_for": "material adsorption, measured concentration and first-pass clearance design",
+          "limitations": "one device material and selected model compound; not a whole-body ADME result"
+        },
+        {
+          "source_id": "H042S006",
+          "title": "DigiLoCS: A leap forward in predictive organ-on-chip simulations",
+          "authors": "authors as indexed",
+          "journal": "PLoS One",
+          "published_date": "2025-01-08",
+          "doi": "10.1371/journal.pone.0314083",
+          "pmid": "39787162",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/39787162/",
+          "source_type": "primary_research",
+          "study_context": "liver-on-chip clearance data for 32 drugs",
+          "study_design": "quantitative IVIVE and digital-twin study",
+          "usable_for": "drug depletion, passive loss versus metabolism and human-clearance extrapolation",
+          "limitations": "model assumptions and one liver-chip context constrain applicability"
+        },
+        {
+          "source_id": "H042S007",
+          "title": "Advanced Liver-on-a-Chip Model for Evaluating Drug Metabolism and Hepatotoxicity",
+          "authors": "authors as indexed",
+          "journal": "",
+          "published_date": "",
+          "doi": "",
+          "pmid": "39329810",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/39329810/",
+          "source_type": "primary_research",
+          "study_context": "human liver-on-a-chip model for drug metabolism and hepatotoxicity",
+          "study_design": "platform-method study",
+          "usable_for": "relationship between metabolic competence and injury endpoints in a defined human-relevant model",
+          "limitations": "platform-specific design; external benchmark scope needs definition"
+        },
+        {
+          "source_id": "H042S008",
+          "title": "Faecalibacterium prausnitzii A2-165 metabolizes host- and media-derived chemicals and induces transcriptional changes in colonic epithelium in GuMI human gut microphysiological system",
+          "authors": "authors as indexed",
+          "journal": "",
+          "published_date": "",
+          "doi": "",
+          "pmid": "39421254",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/39421254/",
+          "source_type": "primary_research",
+          "study_context": "patient-derived colonic monolayers co-cultured with live bacteria",
+          "study_design": "microphysiological-system metabolism study",
+          "usable_for": "measured chemical transformation and epithelial response under a controlled microphysiological environment",
+          "limitations": "short co-culture duration and a specific gut-microbe system"
+        },
+        {
+          "source_id": "H042S009",
+          "title": "In silico modeling and simulation of organ-on-a-chip systems to support data analysis and a priori experimental design",
+          "authors": "Milani N et al.",
+          "journal": "CPT: Pharmacometrics & Systems Pharmacology",
+          "published_date": "2024-04-01",
+          "doi": "10.1002/psp4.13110",
+          "pmid": "38356302",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/38356302/",
+          "source_type": "methodology",
+          "study_context": "gut-liver organ-on-a-chip pharmacokinetic setting",
+          "study_design": "methodological tutorial and modelling framework",
+          "usable_for": "designing concentration-time sampling and interpreting multi-tissue ADME data",
+          "limitations": "methodological framework rather than an independent predictive benchmark"
+        },
+        {
+          "source_id": "H042S010",
+          "title": "A hollow fiber membrane-based liver organoid-on-a-chip model for examining drug metabolism and transport",
+          "authors": "Myszczyszyn A et al.",
+          "journal": "",
+          "published_date": "2025-04-01",
+          "doi": "",
+          "pmid": "40117762",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/40117762/",
+          "source_type": "primary_research",
+          "study_context": "human liver organoid-on-a-chip linked to intestinal-like system",
+          "study_design": "proof-of-concept metabolism and transport study",
+          "usable_for": "compartment-specific metabolism and transport measurements for ADME experiments",
+          "limitations": "proof-of-concept platform; human PK prediction remains to be independently qualified"
+        },
+        {
+          "source_id": "H042S011",
+          "title": "Perfluoropolyether-Based Gut-Liver-on-a-Chip for the Evaluation of First-Pass Metabolism and Oral Bioavailability of Drugs",
+          "authors": "Wang M et al.",
+          "journal": "ACS Biomaterials Science & Engineering",
+          "published_date": "2024-07-08",
+          "doi": "10.1021/acsbiomaterials.4c00605",
+          "pmid": "38822812",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/38822812/",
+          "source_type": "primary_research",
+          "study_context": "gut-liver single-passage chip for oral-drug first-pass metabolism",
+          "study_design": "drug absorption and metabolism study",
+          "usable_for": "material sorption, first-pass metabolism and intestinal/hepatic availability measurements",
+          "limitations": "model estimates differed from known human values; one engineered intestinal-cell system"
+        },
+        {
+          "source_id": "H042S012",
+          "title": "A generic pump-free organ-on-a-chip platform for assessment of intestinal drug absorption",
+          "authors": "Guo Y et al.",
+          "journal": "Biotechnology Journal",
+          "published_date": "2024-01-01",
+          "doi": "10.1002/biot.202300390",
+          "pmid": "38375564",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/38375564/",
+          "source_type": "primary_research",
+          "study_context": "32-unit gut-on-a-chip platform with seven reference drugs",
+          "study_design": "drug-absorption comparison study",
+          "usable_for": "higher-throughput barrier readout and comparison with human fraction absorbed",
+          "limitations": "gut-only platform and a limited reference-drug set"
+        },
+        {
+          "source_id": "H042S013",
+          "title": "Microphysiological systems as an emerging in vitro approach for the evaluation of drug absorption, distribution, metabolism, and excretion and toxicity",
+          "authors": "Shrimali S et al.",
+          "journal": "Drug Metabolism and Disposition",
+          "published_date": "2025-12-01",
+          "doi": "10.1016/j.dmd.2025.100187",
+          "pmid": "41297178",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/41297178/",
+          "source_type": "review",
+          "study_context": "microphysiological-system use in drug development and safety assessment",
+          "study_design": "peer-reviewed review",
+          "usable_for": "regulatory-relevant endpoint, reproducibility and applicability considerations",
+          "limitations": "review; platform-specific performance must rely on primary validation studies"
+        },
+        {
+          "source_id": "H042S014",
+          "title": "Standard: human liver-on-a-chip",
+          "authors": "authors as indexed",
+          "journal": "",
+          "published_date": "",
+          "doi": "",
+          "pmid": "40123019",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/40123019/",
+          "source_type": "standard",
+          "study_context": "human liver-on-a-chip standardization",
+          "study_design": "technical standard commentary",
+          "usable_for": "documenting the need to define cells, structure, function and quality controls before translation",
+          "limitations": "standard-specific commentary; not predictive-performance evidence"
+        },
+        {
+          "source_id": "H042S015",
+          "title": "Opportunities and challenges for human microphysiological systems in drug development",
+          "authors": "Rahman SM et al.",
+          "journal": "ALTEX",
+          "published_date": "2025",
+          "doi": "10.14573/altex.2409221",
+          "pmid": "39746124",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/39746124/",
+          "source_type": "review",
+          "study_context": "human microphysiological systems in drug-development settings",
+          "study_design": "FDA-affiliated peer-reviewed review",
+          "usable_for": "regulatory-relevant framework for defining intended use and limitations",
+          "limitations": "review; not a substitute for model-specific qualification data"
+        },
+        {
+          "source_id": "H042S016",
+          "title": "The application of organ-on-chip models for the prediction of human pharmacokinetic profiles during drug development",
+          "authors": "Keuper-Navis M et al.",
+          "journal": "Pharmacological Research",
+          "published_date": "2023-09-01",
+          "doi": "10.1016/j.phrs.2023.106853",
+          "pmid": "37473876",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/37473876/",
+          "source_type": "review",
+          "study_context": "organ-on-chip pharmacokinetic applications in drug development",
+          "study_design": "peer-reviewed review",
+          "usable_for": "selecting physiological parameters, PK readouts and reference compounds before attempting in-vivo translation",
+          "limitations": "review; proposed validation requirements require platform-specific execution"
+        },
+        {
+          "source_id": "H042S017",
+          "title": "Mechanobiological stimulation in organ-on-a-chip systems reduces hepatic drug metabolic capacity in favor of regenerative specialization",
+          "authors": "Scheidecker B et al.",
+          "journal": "Biotechnology and Bioengineering",
+          "published_date": "2024-04-01",
+          "doi": "10.1002/bit.28653",
+          "pmid": "38184801",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/38184801/",
+          "source_type": "primary_research",
+          "study_context": "liver microphysiological system under controlled mechanical and oxygen conditions",
+          "study_design": "comparative mechanobiology study",
+          "usable_for": "culture-condition effects on metabolic capacity before PK or toxicity extrapolation",
+          "limitations": "liver model context; no direct clinical-PK validation"
+        },
+        {
+          "source_id": "H042S018",
+          "title": "An Organ-on-Chip Platform for Simulating Drug Metabolism Along the Gut-Liver Axis",
+          "authors": "Lucchetti M et al.",
+          "journal": "Advanced Healthcare Materials",
+          "published_date": "2024-08-01",
+          "doi": "10.1002/adhm.202303943",
+          "pmid": "38452399",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/38452399/",
+          "source_type": "primary_research",
+          "study_context": "microbial-crosstalk gut chip linked to liver chip",
+          "study_design": "gut-liver multiorgan proof-of-concept study",
+          "usable_for": "measuring microbial transformation and metabolite time course across a linked gut-liver system",
+          "limitations": "one drug, microbial context and platform configuration; not a general ADME prediction claim"
+        },
+        {
+          "source_id": "H042S019",
+          "title": "Development of a novel gut microphysiological system that facilitates assessment of drug absorption kinetics in gut",
+          "authors": "Imaoka T et al.",
+          "journal": "Scientific Reports",
+          "published_date": "2024",
+          "doi": "",
+          "pmid": "39622870",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/39622870/",
+          "source_type": "primary_research",
+          "study_context": "human induced pluripotent stem-cell-derived small-intestinal epithelium",
+          "study_design": "drug absorption and transporter-function study",
+          "usable_for": "transport directionality, metabolic inhibition and absorption-kinetics design",
+          "limitations": "single gut platform; human absorption prediction requires independent qualification"
+        },
+        {
+          "source_id": "H042S020",
+          "title": "The microbial metabolite p-cresol compromises the vascular barrier and induces endothelial cytotoxicity and inflammation in a 3D human vessel-on-a-chip",
+          "authors": "authors as indexed",
+          "journal": "",
+          "published_date": "",
+          "doi": "",
+          "pmid": "39122790",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/39122790/",
+          "source_type": "primary_research",
+          "study_context": "three-dimensional human vessel-on-a-chip exposed to protein-bound uremic toxins",
+          "study_design": "comparative vascular-toxicity study",
+          "usable_for": "linking concentration, barrier function and endothelial toxicity in a defined human model",
+          "limitations": "specific toxin and endothelial model; no general clinical-risk prediction"
+        }
+      ],
+      "shared_findings": [
+        {
+          "finding_id": "H042-C01",
+          "display_order": 1,
+          "title": "名义剂量不能代替实际暴露",
+          "shared_result": "人体相关体外模型要用于药代、药效或毒性解释，首先需要知道细胞和组织实际接触了多少母药及代谢物。材料吸附、蛋白结合、被动损失、取样和流动都会使实际暴露偏离加入培养液的名义浓度。\n\n肠道吸收、肝清除和血管毒性关注的浓度指标不同；聚二甲基硅氧烷和低吸附材料的损失不同，无泵与循环系统的采样和质量平衡也不同。",
+          "research_use": "用液相色谱—质谱测量母药和代谢物的浓度—时间曲线；设置无细胞装置对照，记录蛋白结合、材料、循环体积、流量和采样损失。",
+          "boundary": "单个培养液浓度、给药总量或设定流速不能直接等同人体血药浓度和组织暴露。",
+          "source_ids": [
+            "H042S005",
+            "H042S006",
+            "H042S009",
+            "H042S011",
+            "H042S012",
+            "H042S019"
+          ]
+        },
+        {
+          "finding_id": "H042-C02",
+          "display_order": 2,
+          "title": "多组织模型可以连接吸收、代谢和下游反应",
+          "shared_result": "肠—肝和其他多组织系统能够跟踪母药转运、微生物或肝脏代谢以及下游组织反应，为特定的首过代谢和器官间作用提供实验路径。价值来自可测的时间过程，而不是连接器官的数量。\n\n不同系统采用的细胞、介质、组织比例和循环方式差异很大；单向流动、共同循环和膜分隔会产生不同的暴露关系。现有研究多集中于少数化合物和组织组合。",
+          "research_use": "保留单组织对照，连续测量母药、代谢物和组织功能；建立质量平衡或区室模型，并使用人体药代或已知机制作为参照。",
+          "boundary": "一个多器官装置中的代谢链不能代表全身 ADME，也不能外推到未连接的器官和其他化合物。",
+          "source_ids": [
+            "H042S004",
+            "H042S008",
+            "H042S010",
+            "H042S018"
+          ]
+        },
+        {
+          "finding_id": "H042-C03",
+          "display_order": 3,
+          "title": "代谢能力和损伤终点必须在同一暴露框架中解释",
+          "shared_result": "肝类器官和肝芯片可以同时测量代谢酶、母药与代谢物、组织形态、功能和损伤标志。只有把这些读出放在同一浓度—时间框架中，才能区分化合物损失、代谢变化和真正的组织损伤。\n\n药物性肝损伤是当前验证较集中的场景，但不同平台使用的供体、参考药物、剂量和判定规则不同。血管或其他器官的损伤终点也不能沿用肝脏阈值。",
+          "research_use": "采用阳性阴性参考化合物、多个供体和重复暴露；预设损伤阈值，测量器官功能及恢复，并用盲法或外部数据评估性能。",
+          "boundary": "同一模型内的相关变化不等于人体风险预测；一个平台在特定药物集合中的性能不能代表所有毒性机制。",
+          "source_ids": [
+            "H042S002",
+            "H042S003",
+            "H042S007",
+            "H042S017",
+            "H042S020"
+          ]
+        },
+        {
+          "finding_id": "H042-C04",
+          "display_order": 4,
+          "title": "预测能力需要围绕明确用途验证",
+          "shared_result": "人体相关模型是否有预测价值，取决于预期用途、参照标准、训练与测试分离、盲法、质量控制和外部验证。标准和专家建议正在明确这些要求，但平台性能仍需由具体研究证明。\n\n早期筛选、机制研究、药物性肝损伤风险分类和人体药代外推是不同用途；一种用途下合格的终点与误差范围不能直接用于另一用途。",
+          "research_use": "预先定义化合物范围、器官、终点和性能指标；使用独立测试集、临床或人体组织参照、跨实验室复核，并报告不确定性和不适用情形。",
+          "boundary": "人体来源、三维培养或器官芯片标签都不能自动证明临床预测，更不能替代临床试验和患者证据。",
+          "source_ids": [
+            "H042S001",
+            "H042S002",
+            "H042S013",
+            "H042S014",
+            "H042S015",
+            "H042S016"
+          ]
+        },
+        {
+          "finding_id": "H042-C05",
+          "display_order": 5,
+          "title": "增加生理条件可能改善一种功能，也可能削弱另一种功能",
+          "shared_result": "更接近生理的流动、力学或材料条件可以改善屏障、吸收或组织形态，却不保证所有功能同时增强。肝芯片研究显示，机械和氧条件也可能使代谢能力发生方向不同的变化；模型需要按目标功能优化。\n\n低吸附材料可减少化合物损失，但系统估计仍可能偏离人体数据；动态培养可提高某些组织功能，却增加采样、控制和参数估计难度。",
+          "research_use": "同时测量目标功能和可能受损的其他功能，设置静态及不同工程条件对照；用参考药物和人体数据判断哪种配置适合预定用途。",
+          "boundary": "不能按设备复杂度、动态程度或所谓生理相似度对模型作统一排序。",
+          "source_ids": [
+            "H042S005",
+            "H042S011",
+            "H042S017",
+            "H042S019"
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,2231 @@
+{
+  "schema_version": "research-deep-dive-public-v0.1",
+  "batch_id": "B08",
+  "title": "衰老、细胞应激与神经图谱",
+  "publication_status": "snapshot_ready",
+  "frontend_status": "snapshot_ready",
+  "topics": [
+    {
+      "topic_id": "H017",
+      "title": "多器官生物衰老与健康寿命机制",
+      "topic_role": "research_deep_dive",
+      "overview": "衰老在不同器官和组织中并不以同一速度或同一分子程序发生。血液、粪便或单一组织样本可以反映部分变化，却难以回答：哪些改变是全身性的，哪些是器官特异的，哪些与功能下降或疾病风险共同出现。多器官衰老研究因此需要把取样部位、细胞类型、功能读出和随访时间放在同一设计里，而不是把全身指标当作所有器官的代理。\n\n本方向从多组织单细胞图谱、器官特异性衰老时钟、系统循环因子和表观遗传读出出发，集中处理三类问题：不同器官共享与特异的衰老特征如何分层；局部细胞状态变化与器官功能、健康寿命终点如何配对；观察到的关联能否在独立队列、扰动实验或纵向取样中被复核。由此可以把分子变化放回具体器官和细胞语境，而不是把单一生物标志物写成全身衰老的完整解释。\n\n比较公开研究时，需要同时交代物种、年龄范围、取样器官、细胞分型依据、功能测量和随访设计。跨器官重复出现的程序仍须回到具体组织解释。抗衰老产品宣传、个体化延寿建议不在本页范围；细胞器应激与死亡读出由细胞器互作专题处理，分子记录与谱系追踪由谱系追踪专题处理。",
+      "sections": [
+        {
+          "section_id": "H017-SEC-01",
+          "title": "比较不同研究时应先看什么",
+          "body": "| 比较内容 | 应记录的信息 | 关系到什么判断 |\n| --- | --- | --- |\n| 器官与细胞层级 | 取样器官、细胞类型、区域或层位、单细胞或 bulk | 观察到的是器官平均信号还是特定细胞状态 |\n| 衰老读出 | 转录、表观、蛋白、代谢、功能或形态指标 | 多种读出是否指向同一过程还是不同层面 |\n| 时间设计 | 横断面、纵向取样、干预前后、寿命或健康寿命终点 | 结果支持关联、时间关系还是特定扰动效应 |\n| 系统性因素 | 免疫、代谢、微生物组、循环因子和共病 | 器官变化是否伴随可测量的全身背景 |\n| 验证层级 | 独立队列、扰动、正交测量和功能实验 | 关联能否推进到可检验的机制假设 |",
+          "source_ids": []
+        },
+        {
+          "section_id": "H017-SEC-02",
+          "title": "多器官衰老图谱需要保留器官与细胞语境",
+          "body": "小鼠多组织衰老单细胞图谱显示，不同器官在细胞组成、应激反应和免疫相关程序上既有共享特征，也有明显器官特异性。配套研究进一步指出，经典衰老标志在不同器官呈现不同时间轨迹，不能把某一器官的细胞比例变化直接外推到全身。\n\n图谱结果适合提出器官间可比较的候选程序，仍需配对功能测量、病理注释和独立队列验证。同一细胞类型名称在不同器官中可能对应不同状态空间，比较时应保留器官标签和分型依据。",
+          "source_ids": [
+            "H017S001",
+            "H017S002",
+            "H017S010",
+            "H017S011"
+          ]
+        },
+        {
+          "section_id": "H017-SEC-03",
+          "title": "衰老标志物研究正在从清单走向器官特异时间结构",
+          "body": "2023 年更新的衰老特征综述强调，不同组织中的分子、细胞和系统变化需要分别测量，并区分原因、代偿和后果。器官特异性衰老时钟和多组学签名研究提示，全身衰老评分可能掩盖局部器官轨迹。\n\n把某一表观时钟或蛋白组评分写成所有器官的共同衰老速度，会忽略取样器官和细胞构成。时钟结果适合作为分层变量或关联分析，不能单独替代器官功能或健康寿命终点。",
+          "source_ids": [
+            "H017S003",
+            "H017S012",
+            "H017S013",
+            "H017S014"
+          ]
+        },
+        {
+          "section_id": "H017-SEC-04",
+          "title": "系统循环环境与神经、免疫和代谢器官共同变化",
+          "body": "衰老系统循环环境研究指出，血液来源因子可以影响神经发生和认知相关过程；这类证据来自特定模型和读出，不能外推为所有器官的共同驱动因子。炎症衰老概念把慢性低度炎症与年龄相关疾病风险联系起来，近期综述进一步讨论如何为炎症衰老测量建立更精确的指标。\n\n循环因子、免疫细胞组成和器官局部细胞状态应分开记录。血液测量有助于描述全身背景，却不能代替脑、肝、脂肪或肌肉等组织中的细胞与空间信息。",
+          "source_ids": [
+            "H017S004",
+            "H017S005",
+            "H017S006",
+            "H017S015"
+          ]
+        },
+        {
+          "section_id": "H017-SEC-05",
+          "title": "表观遗传与部分重编程研究提供机制线索，不是临床方案",
+          "body": "表观遗传时钟比较研究说明，不同时钟在组织、细胞类型和异常长寿人群中的表现并不一致。部分重编程和表观遗传重置研究在动物模型中显示，某些细胞状态可以被改写，但剂量、持续时间、靶向细胞类型和安全性边界仍需独立评估。\n\n这些工作属于机制与概念验证层级，不提供个体化干预建议，也不能把体外或动物中的年轻化读出直接写成人体疗效。与全身循环因子研究一样，需要报告具体细胞类型和器官范围。",
+          "source_ids": [
+            "H017S007",
+            "H017S008",
+            "H017S009",
+            "H017S016"
+          ]
+        },
+        {
+          "section_id": "H017-SEC-06",
+          "title": "健康寿命终点、微生物组与免疫重组需要分层报告",
+          "body": "自然产物与饮食干预综述显示，部分分子或行为干预可以在动物中改善健康寿命相关终点，但物种、剂量、起点年龄和测量终点差异很大。多组学衰老研究综述强调，要把分子层变化与功能、病理和生存结局放在同一框架中评价。\n\n微生物组年龄轨迹和免疫亚群动态研究提示，肠—免疫—代谢轴可以与多个器官衰老表型相关，但这些变化通常与饮食、感染史和共病共同出现。研究若只报告分子或菌群指标而未说明功能或寿命终点，应被视为关联层证据；微生物组或免疫指标也不能单独写成某一器官衰老的充分解释，更不能延伸为抗衰老产品结论。",
+          "source_ids": [
+            "H017S013",
+            "H017S014",
+            "H017S015",
+            "H017S016",
+            "H017S017",
+            "H017S018",
+            "H017S019",
+            "H017S020"
+          ]
+        },
+        {
+          "section_id": "H017-SEC-07",
+          "title": "研究技术",
+          "body": "本专题的技术卡包括多器官配对取样与功能读出、多组织单细胞图谱、器官或细胞类型特异的衰老时钟、循环因子与血浆组学，以及遗传或表观扰动与健康寿命终点随访。技术选择取决于需要确认的是器官特异变化、系统循环背景还是干预后的功能结局。",
+          "source_ids": []
+        },
+        {
+          "section_id": "H017-SEC-08",
+          "title": "科研参考范围",
+          "body": "本页用于介绍多器官生物衰老与健康寿命研究中的证据类型、实验设计和适用范围，不提供抗衰老产品宣传、个体化延寿建议或临床干预推荐。",
+          "source_ids": []
+        }
+      ],
+      "methods": [
+        {
+          "method_id": "H017-M01",
+          "display_order": 1,
+          "category": "样本设计",
+          "title": "多器官配对取样与功能读出",
+          "principle": "在同一动物或队列中按预定器官列表取样，并同步记录器官功能、病理、代谢或行为读出。",
+          "answers": "判断分子变化对应哪一器官，以及是否与功能下降或健康寿命终点共同出现。",
+          "sample_design": "预先规定器官列表、年龄点、性别、品系、禁食状态和保存方式；每个器官保留病理或功能对照。",
+          "limitations": "不是所有器官都能在人体中配对取样；动物模型中的器官对应关系不能直接外推到人体。",
+          "source_ids": [
+            "H017S001",
+            "H017S002",
+            "H017S010"
+          ],
+          "workflow": "设计阶段先确定：预先规定器官列表、年龄点、性别、品系、禁食状态和保存方式；每个器官保留病理或功能对照。 记录样本来源、处理条件、读出指标和正交验证；把观察结果与预先定义的研究问题放在同一分析框架中比较。 这项方法的直接测量或计算依据是：在同一动物或队列中按预定器官列表取样，并同步记录器官功能、病理、代谢或行为读出。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：不是所有器官都能在人体中配对取样；动物模型中的器官对应关系不能直接外推到人体。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "结果可用于判断分子变化对应哪一器官，以及是否与功能下降或健康寿命终点共同出现。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        },
+        {
+          "method_id": "H017-M02",
+          "display_order": 2,
+          "category": "单细胞与空间组学",
+          "title": "多组织单细胞图谱与细胞状态注释",
+          "principle": "在多个器官分别进行单细胞或单核转录组测量，再用一致的分型流程比较细胞组成和状态程序。",
+          "answers": "区分器官共享与特异的细胞状态变化，并识别需要原位或蛋白验证的候选群体。",
+          "sample_design": "统一解离方案、批次设计和参考注释；关键细胞状态用原位 RNA、蛋白或谱系标记复核。",
+          "limitations": "解离会损失空间关系并可能偏向耐受细胞；聚类标签不能代替功能或因果验证。",
+          "source_ids": [
+            "H017S001",
+            "H017S010",
+            "H017S011",
+            "H017S019"
+          ],
+          "workflow": "设计阶段先确定：统一解离方案、批次设计和参考注释；关键细胞状态用原位 RNA、蛋白或谱系标记复核。 记录样本来源、处理条件、读出指标和正交验证；把观察结果与预先定义的研究问题放在同一分析框架中比较。 这项方法的直接测量或计算依据是：在多个器官分别进行单细胞或单核转录组测量，再用一致的分型流程比较细胞组成和状态程序。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：解离会损失空间关系并可能偏向耐受细胞；聚类标签不能代替功能或因果验证。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "结果可用于区分器官共享与特异的细胞状态变化，并识别需要原位或蛋白验证的候选群体。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        },
+        {
+          "method_id": "H017-M03",
+          "display_order": 3,
+          "category": "衰老时钟与多组学",
+          "title": "器官或细胞类型特异的衰老时钟",
+          "principle": "利用 DNA 甲基化、转录组、蛋白组或其他组学层构建年龄预测模型，并分别在组织或细胞类型范围内评估。",
+          "answers": "比较不同器官或细胞类型的衰老轨迹是否一致，以及时钟偏离是否与疾病或功能相关。",
+          "sample_design": "报告训练队列、组织来源、批次校正和外部验证；不要把全身时钟直接套用到未验证器官。",
+          "limitations": "时钟反映的是统计年龄关联，不是单一衰老机制；不同算法和特征集结果可能不一致。",
+          "source_ids": [
+            "H017S007",
+            "H017S012",
+            "H017S013",
+            "H017S014"
+          ],
+          "workflow": "设计阶段先确定：报告训练队列、组织来源、批次校正和外部验证；不要把全身时钟直接套用到未验证器官。 记录样本来源、处理条件、读出指标和正交验证；把观察结果与预先定义的研究问题放在同一分析框架中比较。 这项方法的直接测量或计算依据是：利用 DNA 甲基化、转录组、蛋白组或其他组学层构建年龄预测模型，并分别在组织或细胞类型范围内评估。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：时钟反映的是统计年龄关联，不是单一衰老机制；不同算法和特征集结果可能不一致。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "结果可用于比较不同器官或细胞类型的衰老轨迹是否一致，以及时钟偏离是否与疾病或功能相关。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        },
+        {
+          "method_id": "H017-M04",
+          "display_order": 4,
+          "category": "系统循环因子",
+          "title": "血浆、血清交换与循环组学",
+          "principle": "通过血浆组学、血清交换或循环因子扰动，检验血液来源信号与特定器官功能或细胞状态的关系。",
+          "answers": "提出系统环境是否影响神经、免疫或代谢器官状态的机制假设。",
+          "sample_design": "记录供体年龄、处理时间、交换体积和读出窗口；配对器官组织和行为或功能测量。",
+          "limitations": "交换实验高度依赖模型和操作条件；循环关联不能单独证明某一因子因果驱动器官衰老。",
+          "source_ids": [
+            "H017S004",
+            "H017S005",
+            "H017S006",
+            "H017S015"
+          ],
+          "workflow": "设计阶段先确定：记录供体年龄、处理时间、交换体积和读出窗口；配对器官组织和行为或功能测量。 记录样本来源、处理条件、读出指标和正交验证；把观察结果与预先定义的研究问题放在同一分析框架中比较。 这项方法的直接测量或计算依据是：通过血浆组学、血清交换或循环因子扰动，检验血液来源信号与特定器官功能或细胞状态的关系。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：交换实验高度依赖模型和操作条件；循环关联不能单独证明某一因子因果驱动器官衰老。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "结果可用于提出系统环境是否影响神经、免疫或代谢器官状态的机制假设。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        },
+        {
+          "method_id": "H017-M05",
+          "display_order": 5,
+          "category": "扰动与纵向随访",
+          "title": "遗传、饮食或表观扰动及健康寿命终点",
+          "principle": "在可控条件下改变候选通路、饮食或表观状态，并追踪器官分子读出、功能变化和健康寿命相关终点。",
+          "answers": "检验图谱提出的器官或系统层关联能否在扰动后重现，并与功能结局配对。",
+          "sample_design": "预先定义主要终点、样本量和取样时间；报告阴性结果和器官特异性效应。",
+          "limitations": "动物健康寿命终点不能直接写成人体干预效果；短期分子变化不等于长期功能获益。",
+          "source_ids": [
+            "H017S008",
+            "H017S009",
+            "H017S016",
+            "H017S018"
+          ],
+          "workflow": "设计阶段先确定：预先定义主要终点、样本量和取样时间；报告阴性结果和器官特异性效应。 记录样本来源、处理条件、读出指标和正交验证；把观察结果与预先定义的研究问题放在同一分析框架中比较。 这项方法的直接测量或计算依据是：在可控条件下改变候选通路、饮食或表观状态，并追踪器官分子读出、功能变化和健康寿命相关终点。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：动物健康寿命终点不能直接写成人体干预效果；短期分子变化不等于长期功能获益。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "结果可用于检验图谱提出的器官或系统层关联能否在扰动后重现，并与功能结局配对。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        }
+      ],
+      "shared_findings": [
+        {
+          "finding_id": "H017-C01",
+          "display_order": 1,
+          "title": "多器官衰老同时包含共享程序与器官特异轨迹",
+          "shared_result": "多组织单细胞图谱和器官特异性衰老时钟研究表明，不同器官可以同时出现若干共享应激或免疫相关程序，但细胞组成、时间轨迹和功能关联并不一致。跨器官重复信号需要保留器官和细胞类型标签。",
+          "research_use": "记录取样器官、细胞分型依据、年龄点和功能读出；共享程序与器官特异程序分开报告。",
+          "boundary": "不能把某一器官的图谱结果直接外推为全身衰老机制；抗衰老产品或个体化干预不在本页范围。",
+          "source_ids": [
+            "H017S001",
+            "H017S002",
+            "H017S012",
+            "H017S013"
+          ]
+        },
+        {
+          "finding_id": "H017-C02",
+          "display_order": 2,
+          "title": "系统循环因子与局部器官变化是不同层级的证据",
+          "shared_result": "衰老系统循环环境和炎症衰老研究提示，血液来源信号可以与神经、免疫和代谢器官状态共同变化，但不同研究中的因子、模型和读出并不相同。",
+          "research_use": "配对血浆或血清组学、器官组织取样和功能测量；循环指标与组织细胞状态分开分析。",
+          "boundary": "关联不等于某一循环因子因果驱动器官衰老；血液测量不能代替组织原位信息。",
+          "source_ids": [
+            "H017S004",
+            "H017S005",
+            "H017S006",
+            "H017S015"
+          ]
+        },
+        {
+          "finding_id": "H017-C03",
+          "display_order": 3,
+          "title": "表观时钟与部分重编程是机制线索，不是疗效结论",
+          "shared_result": "表观遗传时钟比较和部分重编程研究显示，某些细胞或组织层面的表观状态可以被改写，但不同时钟在组织与细胞类型中的表现存在差异，动物模型中的恢复也不等于人体疗效。",
+          "research_use": "报告时钟训练范围、靶向细胞类型、处理剂量和安全性读出；与功能或寿命终点配对。",
+          "boundary": "不能把动物或体外年轻化写成临床抗衰老方案；机制验证仍需要独立队列和正交测量。",
+          "source_ids": [
+            "H017S007",
+            "H017S008",
+            "H017S009",
+            "H017S016"
+          ]
+        },
+        {
+          "finding_id": "H017-C04",
+          "display_order": 4,
+          "title": "微生物组与免疫重组需要回到器官语境解释",
+          "shared_result": "微生物组年龄轨迹和免疫亚群动态研究表明，肠—免疫—代谢轴可以与多个器官衰老表型相关，但这些变化通常与饮食、感染史和共病共同出现。",
+          "research_use": "同步记录菌群组成、免疫表型和目标器官取样；干预研究保留对照和预设终点。",
+          "boundary": "微生物组或免疫指标变化不能单独写成器官衰老的充分解释；与代谢性炎症等专题的通用细胞应激需分开表述。",
+          "source_ids": [
+            "H017S017",
+            "H017S018",
+            "H017S019",
+            "H017S020"
+          ]
+        },
+        {
+          "finding_id": "H017-C05",
+          "display_order": 5,
+          "title": "健康寿命终点必须与分子关联分开评价",
+          "shared_result": "多组学衰老研究和动物干预综述都强调，分子层变化、器官功能和生存或健康寿命终点可能不同步；只报告组学指标而未说明功能结局的研究应被视为关联层证据。",
+          "research_use": "预先定义健康寿命、虚弱或疾病发病终点，并与分子读出在同一设计中配对。",
+          "boundary": "不能把不同研究的终点改善写成同一种机制；本页不提供治疗或延寿建议。",
+          "source_ids": [
+            "H017S013",
+            "H017S014",
+            "H017S015",
+            "H017S016"
+          ]
+        }
+      ],
+      "references": [
+        {
+          "source_id": "H017S001",
+          "title": "A single-cell transcriptomic atlas characterizes ageing tissues in the mouse.",
+          "authors": "Tabula Muris Consortium et al.",
+          "journal": "Nature",
+          "published_date": "2020 Jul",
+          "doi": "10.1038/s41586-020-2496-1",
+          "pmid": "32669714",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/32669714/",
+          "source_type": "primary_research",
+          "study_context": "mouse multi-tissue ageing",
+          "study_design": "multi-tissue scRNA-seq atlas",
+          "usable_for": "organ-specific ageing signatures",
+          "limitations": "mouse atlas; cross-sectional design"
+        },
+        {
+          "source_id": "H017S002",
+          "title": "Ageing hallmarks exhibit organ-specific temporal signatures.",
+          "authors": "Schaum N et al.",
+          "journal": "Nature",
+          "published_date": "2020 Jul",
+          "doi": "10.1038/s41586-020-2499-y",
+          "pmid": "32669715",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/32669715/",
+          "source_type": "primary_research",
+          "study_context": "mouse ageing hallmarks",
+          "study_design": "organ-specific hallmark timing",
+          "usable_for": "temporal organ signatures",
+          "limitations": "companion analysis; not human direct evidence"
+        },
+        {
+          "source_id": "H017S003",
+          "title": "Hallmarks of aging: An expanding universe.",
+          "authors": "López-Otín C et al.",
+          "journal": "Cell",
+          "published_date": "2023 Jan 1",
+          "doi": "10.1016/j.cell.2022.11.001",
+          "pmid": "36599349",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/36599349/",
+          "source_type": "review",
+          "study_context": "ageing biology",
+          "study_design": "updated hallmarks framework",
+          "usable_for": "shared and distinct ageing layers",
+          "limitations": "review; not experimental proof"
+        },
+        {
+          "source_id": "H017S004",
+          "title": "Chronic inflammation (inflammaging) and its potential contribution to age-associated diseases.",
+          "authors": "Franceschi C et al.",
+          "journal": "J Gerontol A Biol Sci Med Sci",
+          "published_date": "2014 Jun",
+          "doi": "10.1093/gerona/glu057",
+          "pmid": "24833586",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/24833586/",
+          "source_type": "review",
+          "study_context": "human ageing",
+          "study_design": "inflammaging concept",
+          "usable_for": "chronic inflammation and age-related disease",
+          "limitations": "review; heterogeneous human data"
+        },
+        {
+          "source_id": "H017S005",
+          "title": "Toward precision interventions and metrics of inflammaging.",
+          "authors": "Franceschi C et al.",
+          "journal": "Nat Aging",
+          "published_date": "2025 Aug",
+          "doi": "10.1038/s43587-025-00938-7",
+          "pmid": "40813813",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/40813813/",
+          "source_type": "review",
+          "study_context": "human ageing",
+          "study_design": "inflammaging metrics",
+          "usable_for": "precision measurement boundaries",
+          "limitations": "review; metrics still evolving"
+        },
+        {
+          "source_id": "H017S006",
+          "title": "The ageing systemic milieu negatively regulates neurogenesis and cognitive function.",
+          "authors": "Villeda SA et al.",
+          "journal": "Nature",
+          "published_date": "2011 Aug 3",
+          "doi": "10.1038/nature10357",
+          "pmid": "21886162",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/21886162/",
+          "source_type": "primary_research",
+          "study_context": "mouse parabiosis model",
+          "study_design": "ageing systemic milieu",
+          "usable_for": "circulating factors and neurogenesis",
+          "limitations": "model-specific; limited organs sampled"
+        },
+        {
+          "source_id": "H017S007",
+          "title": "Aging, exceptional longevity and comparisons of the Hannum and Horvath epigenetic clocks.",
+          "authors": "Armstrong NJ et al.",
+          "journal": "Epigenomics",
+          "published_date": "2017 May",
+          "doi": "10.2217/epi-2016-0179",
+          "pmid": "28470125",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/28470125/",
+          "source_type": "review",
+          "study_context": "human epigenetic clocks",
+          "study_design": "clock comparison",
+          "usable_for": "tissue and population differences",
+          "limitations": "review; clocks are statistical estimators"
+        },
+        {
+          "source_id": "H017S008",
+          "title": "Reprogramming to recover youthful epigenetic information and restore vision.",
+          "authors": "Lu Y et al.",
+          "journal": "Nature",
+          "published_date": "2020 Dec",
+          "doi": "10.1038/s41586-020-2975-4",
+          "pmid": "33268865",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/33268865/",
+          "source_type": "primary_research",
+          "study_context": "mouse eye reprogramming",
+          "study_design": "partial epigenetic reprogramming",
+          "usable_for": "restoration of youthful epigenetic information",
+          "limitations": "single organ model; not clinical intervention"
+        },
+        {
+          "source_id": "H017S009",
+          "title": "In vivo partial reprogramming of myofibers promotes muscle regeneration by remodeling the stem cell niche.",
+          "authors": "Wang C et al.",
+          "journal": "Nat Commun",
+          "published_date": "2021 May 2",
+          "doi": "10.1038/s41467-021-23353-z",
+          "pmid": "34035273",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/34035273/",
+          "source_type": "primary_research",
+          "study_context": "mouse muscle",
+          "study_design": "in vivo partial reprogramming",
+          "usable_for": "regeneration-associated epigenetic changes",
+          "limitations": "muscle-specific; safety not established in humans"
+        },
+        {
+          "source_id": "H017S010",
+          "title": "Mouse aging cell atlas analysis reveals global and cell type-specific aging signatures.",
+          "authors": "Zhang MJ et al.",
+          "journal": "Elife",
+          "published_date": "2021 Apr 1",
+          "doi": "10.7554/eLife.62293",
+          "pmid": "33847263",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/33847263/",
+          "source_type": "primary_research",
+          "study_context": "mouse ageing atlas reanalysis",
+          "study_design": "global ageing signatures",
+          "usable_for": "cross-organ comparison",
+          "limitations": "computational reanalysis; depends on source atlas"
+        },
+        {
+          "source_id": "H017S011",
+          "title": "Hallmarks of Aging: Causes and Consequences.",
+          "authors": "Skowronska-Krawczyk D et al.",
+          "journal": "Aging Biol",
+          "published_date": "2023",
+          "doi": "10.59368/agingbio.20230011",
+          "pmid": "38274125",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/38274125/",
+          "source_type": "review",
+          "study_context": "ageing biology",
+          "study_design": "hallmark causes and consequences",
+          "usable_for": "framework for mechanism hypotheses",
+          "limitations": "review; causal order not established"
+        },
+        {
+          "source_id": "H017S012",
+          "title": "The emerging role of multiomics in aging research.",
+          "authors": "Ruden DM et al.",
+          "journal": "Epigenomics",
+          "published_date": "2025 Sep",
+          "doi": "10.1080/17501911.2025.2533111",
+          "pmid": "40684321",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/40684321/",
+          "source_type": "review",
+          "study_context": "ageing multi-omics",
+          "study_design": "multi-omics integration",
+          "usable_for": "study design for ageing research",
+          "limitations": "review; methods vary by tissue"
+        },
+        {
+          "source_id": "H017S013",
+          "title": "Multi-Omics Signatures of Organ Clocks in Biological Aging and Disease: A Conceptual Framework for Organ-Specific Aging Clocks.",
+          "authors": "Vasileiou M et al.",
+          "journal": "Aging Cell",
+          "published_date": "2026 May",
+          "doi": "10.1111/acel.70518",
+          "pmid": "42015851",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/42015851/",
+          "source_type": "primary_research",
+          "study_context": "human multi-omics ageing",
+          "study_design": "organ clock signatures",
+          "usable_for": "organ-specific ageing patterns",
+          "limitations": "conceptual and cohort-dependent"
+        },
+        {
+          "source_id": "H017S014",
+          "title": "Systemic recalibration and epigenetic resetting as complementary strategies in ageing biology.",
+          "authors": "Li YY et al.",
+          "journal": "Ageing Res Rev",
+          "published_date": "2026 Oct",
+          "doi": "10.1016/j.arr.2026.103227",
+          "pmid": "42398771",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/42398771/",
+          "source_type": "review",
+          "study_context": "ageing interventions",
+          "study_design": "systemic recalibration and epigenetic resetting",
+          "usable_for": "complementary intervention hypotheses",
+          "limitations": "review; human evidence limited"
+        },
+        {
+          "source_id": "H017S015",
+          "title": "Natural products improve healthspan in aged mice and rats: A systematic review and meta-analysis.",
+          "authors": "Musillo C et al.",
+          "journal": "Neurosci Biobehav Rev",
+          "published_date": "2021 Feb",
+          "doi": "10.1016/j.neubiorev.2020.12.001",
+          "pmid": "33309907",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/33309907/",
+          "source_type": "review",
+          "study_context": "animal healthspan studies",
+          "study_design": "dietary and natural product interventions",
+          "usable_for": "healthspan endpoint variability",
+          "limitations": "review; animal models predominate"
+        },
+        {
+          "source_id": "H017S016",
+          "title": "Determining the age of single cells using scMLEAge.",
+          "authors": "Hu C et al.",
+          "journal": "bioRxiv",
+          "published_date": "2026 Apr 1",
+          "doi": "10.64898/2025.12.04.692166",
+          "pmid": "41959494",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/41959494/",
+          "source_type": "primary_research",
+          "study_context": "single-cell age estimation",
+          "study_design": "scMLEAge method",
+          "usable_for": "cell-level age inference",
+          "limitations": "preprint-indexed; requires validation"
+        },
+        {
+          "source_id": "H017S017",
+          "title": "Aging as the degradation of conjunctive coupling: A triadic framework S = F × E × N for biological senescence.",
+          "authors": "Farreny H et al.",
+          "journal": "Ageing Res Rev",
+          "published_date": "2026 Jul",
+          "doi": "10.1016/j.arr.2026.103184",
+          "pmid": "42176809",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/42176809/",
+          "source_type": "review",
+          "study_context": "ageing theory",
+          "study_design": "triadic ageing framework",
+          "usable_for": "conceptual synthesis",
+          "limitations": "theoretical; not direct measurement"
+        },
+        {
+          "source_id": "H017S018",
+          "title": "Microbiome and aging: Trajectories of microbiome age across human ecosystems and their systemic effects.",
+          "authors": "Ni Z et al.",
+          "journal": "Imeta",
+          "published_date": "2026 Aug",
+          "doi": "10.1002/imt2.70148",
+          "pmid": "42662153",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/42662153/",
+          "source_type": "primary_research",
+          "study_context": "human microbiome ageing",
+          "study_design": "microbiome age trajectories",
+          "usable_for": "ecosystem-level associations",
+          "limitations": "associational; causality not established"
+        },
+        {
+          "source_id": "H017S019",
+          "title": "MicroRNA gene dynamics in immune cell subpopulations during aging and atherosclerosis disease development at single-cell resolution.",
+          "authors": "de Sande AH et al.",
+          "journal": "Genome Med",
+          "published_date": "2025 Oct 6",
+          "doi": "10.1186/s13073-025-01530-9",
+          "pmid": "41053866",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/41053866/",
+          "source_type": "primary_research",
+          "study_context": "human immune ageing",
+          "study_design": "microRNA dynamics in immune subsets",
+          "usable_for": "immune ageing and atherosclerosis context",
+          "limitations": "specific disease context"
+        },
+        {
+          "source_id": "H017S020",
+          "title": "Aging regulation by gut microbiota: molecular insights from Caenorhabditis elegans.",
+          "authors": "Liu Q et al.",
+          "journal": "Biogerontology",
+          "published_date": "2026 Aug 2",
+          "doi": "10.1007/s10522-026-10496-z",
+          "pmid": "42642496",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/42642496/",
+          "source_type": "primary_research",
+          "study_context": "C. elegans microbiome",
+          "study_design": "gut microbiota and ageing regulation",
+          "usable_for": "conserved pathway hypotheses",
+          "limitations": "model organism; limited direct human translation"
+        }
+      ]
+    },
+    {
+      "topic_id": "H018",
+      "title": "细胞器互作与铁死亡",
+      "topic_role": "research_deep_dive",
+      "overview": "铁死亡是一种依赖铁和脂质过氧化的调节性细胞死亡方式，与凋亡、坏死和焦亡在形态学、生化特征和调控节点上不同。近年研究不再只关注单一分子，而是追问：线粒体、内质网、溶酶体和相关膜接触位点如何通过脂质代谢、抗氧化系统和离子稳态共同决定铁死亡敏感性。细胞器定位改变和膜接触重塑，因此成为连接代谢应激与死亡读出的关键层面。\n\n本方向从铁死亡核心通路、细胞器间脂质与钙信号交换、内质网应激和线粒体功能障碍出发，集中处理三类问题：哪些细胞器扰动会改变脂质过氧化阈值；不同死亡方式如何在同一细胞中竞争或串联；组织特异性模型中的死亡读出能否与人体样本观察对应。由此可以把铁死亡放回具体细胞器和亚细胞位置，而不是把单一标志物当作所有应激反应的终点。\n\n比较公开研究时，需要同时交代细胞类型、死亡诱导条件、抑制剂和正交死亡标志物。通用代谢应激和炎症性细胞器应激与代谢性炎症专题存在交叉，但本页聚焦细胞器定位扰动与铁死亡等死亡读出。治疗性清除衰老细胞或抗肿瘤策略不在本页展开为临床建议。",
+      "sections": [
+        {
+          "section_id": "H018-SEC-01",
+          "title": "比较不同研究时应先看什么",
+          "body": "| 比较内容 | 应记录的信息 | 关系到什么判断 |\n| --- | --- | --- |\n| 死亡方式 | 铁死亡、凋亡、坏死、焦亡和自噬相关读出 | 观察到的是特异死亡还是混合死亡 |\n| 细胞器层面 | 线粒体、内质网、溶酶体、脂滴和膜接触位点 | 扰动发生在哪一亚细胞位置 |\n| 代谢与氧化 | 铁稳态、脂质组成、GPX4 通路和 ROS 来源 | 死亡阈值由哪类代谢失衡推动 |\n| 诱导与抑制 | 药物、基因扰动、缺氧、ER 应激或脂质过载 | 结果是否依赖特定诱导背景 |\n| 模型系统 | 细胞系、原代细胞、类器官或动物组织 | 机制能否回到目标组织的死亡读出 |",
+          "source_ids": []
+        },
+        {
+          "section_id": "H018-SEC-02",
+          "title": "铁死亡是脂质过氧化与抗氧化系统失衡的调节性死亡",
+          "body": "铁死亡由铁依赖的脂质过氧化驱动，GPX4 等抗氧化系统是关键抑制节点。综述和机制研究指出，铁死亡与代谢、氧化还原和疾病状态紧密相连，但不同组织中的敏感性差异很大。\n\n在比较研究时，应同时报告铁死亡抑制剂和并行死亡标志物，避免把一般细胞毒性误判为铁死亡。脂质过氧化本身也不等于铁死亡，需要与形态学和生化读出共同判断。",
+          "source_ids": [
+            "H018S001",
+            "H018S002",
+            "H018S013",
+            "H018S014"
+          ]
+        },
+        {
+          "section_id": "H018-SEC-03",
+          "title": "线粒体是脂质 ROS 放大和铁死亡执行的重要平台",
+          "body": "线粒体相关研究提示，线粒体 ROS、VDAC 寡聚化和线粒体—内质网膜接触位点变化，都可以改变铁死亡阈值。OPA1 等线粒体塑形蛋白研究进一步显示，线粒体功能状态与铁死亡和整合应激反应之间存在交叉调控。\n\n线粒体读出适合提出亚细胞定位假设，仍需用靶向抑制、成像和独立死亡标志物验证。线粒体损伤也见于其他死亡方式，不能单凭 ROS 上升写成铁死亡。",
+          "source_ids": [
+            "H018S004",
+            "H018S005",
+            "H018S006",
+            "H018S016",
+            "H018S017"
+          ]
+        },
+        {
+          "section_id": "H018-SEC-04",
+          "title": "内质网应激和膜接触位点参与设定铁死亡敏感性",
+          "body": "内质网应激传感器 PERK 与膜接触位点相关研究提出，内质网—线粒体接触重塑可以影响铁死亡进程。脂质代谢酶 ACSL4 等研究说明，特定磷脂种类在脂质过氧化放大中具有关键作用。\n\n这些结果把铁死亡与内质网脂质合成、钙稳态和应激信号联系起来，但仍依赖具体细胞类型和诱导条件。ER 应激本身可以触发多种下游命运，需要并行检测铁死亡、凋亡和坏死读出。",
+          "source_ids": [
+            "H018S003",
+            "H018S007",
+            "H018S008",
+            "H018S011",
+            "H018S012"
+          ]
+        },
+        {
+          "section_id": "H018-SEC-05",
+          "title": "铁稳态和膜转运决定铁死亡是否达到阈值",
+          "body": "铁代谢综述指出，铁输入、储存和输出通路共同塑造铁死亡敏感性；SLC40A1 等转运蛋白研究把铁稳态与疾病语境联系起来。铁死亡与衰老相关应激的综述进一步提示，氧化还原失衡和脂质重塑可以共同提高死亡易感性。\n\n铁染色或铁蛋白水平变化只能说明铁稳态改变，不能单独证明铁死亡已经发生。不同细胞对铁载量和脂质组成的基线差异，会显著影响抑制剂和保护剂效果。",
+          "source_ids": [
+            "H018S009",
+            "H018S010",
+            "H018S013",
+            "H018S014"
+          ]
+        },
+        {
+          "section_id": "H018-SEC-06",
+          "title": "组织损伤模型中的死亡串联与专题边界",
+          "body": "肾脏疾病和肺高压等模型研究显示，铁死亡可与凋亡、焦亡和其他应激反应共同出现，提示细胞器应激结果具有情境依赖性。在组织损伤模型中，应报告多种死亡标志物和时序取样。\n\n代谢过载和慢性炎症也可以诱导细胞器应激，但代谢性炎症专题主要处理器官免疫与代谢耦合。本页聚焦细胞器定位扰动后的铁死亡等死亡读出；若研究核心是人体组织免疫代谢状态，应优先使用 H035 专题框架，不应把炎症因子升高直接写成铁死亡证据。",
+          "source_ids": [
+            "H018S002",
+            "H018S013",
+            "H018S015",
+            "H018S018",
+            "H018S019",
+            "H018S020"
+          ]
+        },
+        {
+          "section_id": "H018-SEC-07",
+          "title": "研究技术",
+          "body": "本专题的技术卡包括铁死亡特异判定、线粒体与内质网成像、脂质组与铁代谢分析、应激通路检测，以及原代细胞和组织模型验证。方法组合取决于需要确认的是死亡方式、细胞器定位还是组织级联反应。",
+          "source_ids": []
+        },
+        {
+          "section_id": "H018-SEC-08",
+          "title": "科研参考范围",
+          "body": "本页用于介绍细胞器互作与铁死亡研究中的证据类型、实验设计和适用范围，不提供诊断、治疗或药物开发建议。",
+          "source_ids": []
+        }
+      ],
+      "methods": [
+        {
+          "method_id": "H018-M01",
+          "display_order": 1,
+          "category": "死亡判定",
+          "title": "铁死亡特异读出与并行死亡标志物",
+          "principle": "联合脂质过氧化探针、铁稳态指标、GPX4 通路状态和形态学特征，并用凋亡、坏死或焦亡抑制剂与标志物做并行排除。",
+          "answers": "判断观察到的细胞丢失是否主要由铁死亡贡献，而不是混合死亡。",
+          "sample_design": "预先定义诱导剂、抑制剂、时间点和细胞密度；保留未处理对照和独立重复。",
+          "limitations": "多数读出是间接指标；抑制剂具有脱靶效应，不能单独作为因果证据。",
+          "source_ids": [
+            "H018S001",
+            "H018S002",
+            "H018S013"
+          ],
+          "workflow": "设计阶段先确定：预先定义诱导剂、抑制剂、时间点和细胞密度；保留未处理对照和独立重复。 记录样本来源、处理条件、读出指标和正交验证；把观察结果与预先定义的研究问题放在同一分析框架中比较。 这项方法的直接测量或计算依据是：联合脂质过氧化探针、铁稳态指标、GPX4 通路状态和形态学特征，并用凋亡、坏死或焦亡抑制剂与标志物做并行排除。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：多数读出是间接指标；抑制剂具有脱靶效应，不能单独作为因果证据。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "结果可用于判断观察到的细胞丢失是否主要由铁死亡贡献，而不是混合死亡。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        },
+        {
+          "method_id": "H018-M02",
+          "display_order": 2,
+          "category": "亚细胞成像",
+          "title": "线粒体、内质网与膜接触位点成像",
+          "principle": "使用高分辨率成像或电子显微镜观察线粒体形态、内质网应激、脂滴和膜接触位点在诱导前后的变化。",
+          "answers": "定位细胞器互作重塑是否先于脂质过氧化上升和死亡发生。",
+          "sample_design": "固定时间点序列、活细胞染料和共定位定量；报告成像分辨率和分析阈值。",
+          "limitations": "成像显示关联不等于分子直接作用；固定样本可能改变膜结构。",
+          "source_ids": [
+            "H018S004",
+            "H018S005",
+            "H018S006",
+            "H018S016"
+          ],
+          "workflow": "设计阶段先确定：固定时间点序列、活细胞染料和共定位定量；报告成像分辨率和分析阈值。 记录样本来源、处理条件、读出指标和正交验证；把观察结果与预先定义的研究问题放在同一分析框架中比较。 这项方法的直接测量或计算依据是：使用高分辨率成像或电子显微镜观察线粒体形态、内质网应激、脂滴和膜接触位点在诱导前后的变化。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：成像显示关联不等于分子直接作用；固定样本可能改变膜结构。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "结果可用于定位细胞器互作重塑是否先于脂质过氧化上升和死亡发生。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        },
+        {
+          "method_id": "H018-M03",
+          "display_order": 3,
+          "category": "脂质与铁代谢",
+          "title": "脂质组、铁染色和转运蛋白扰动",
+          "principle": "定量关键磷脂种类、铁载量和铁转运蛋白表达，并通过遗传或药理扰动检验其对铁死亡敏感性的影响。",
+          "answers": "区分脂质组成改变和铁稳态失衡哪一层更接近死亡阈值变化。",
+          "sample_design": "配对脂质组与铁代谢读出；ACSL4、GPX4 等关键节点设置正负向对照。",
+          "limitations": "脂质组结果高度依赖提取方法和细胞类型；扰动效应可能是间接的。",
+          "source_ids": [
+            "H018S003",
+            "H018S009",
+            "H018S010",
+            "H018S011"
+          ],
+          "workflow": "设计阶段先确定：配对脂质组与铁代谢读出；ACSL4、GPX4 等关键节点设置正负向对照。 记录样本来源、处理条件、读出指标和正交验证；把观察结果与预先定义的研究问题放在同一分析框架中比较。 这项方法的直接测量或计算依据是：定量关键磷脂种类、铁载量和铁转运蛋白表达，并通过遗传或药理扰动检验其对铁死亡敏感性的影响。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：脂质组结果高度依赖提取方法和细胞类型；扰动效应可能是间接的。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "结果可用于区分脂质组成改变和铁稳态失衡哪一层更接近死亡阈值变化。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        },
+        {
+          "method_id": "H018-M04",
+          "display_order": 4,
+          "category": "应激通路",
+          "title": "内质网应激与整合应激反应检测",
+          "principle": "检测 PERK、IRE1 或 ATF4 等应激节点激活，并评估其与铁死亡诱导的时间关系。",
+          "answers": "判断 ER 应激是铁死亡的上游触发、并行过程还是保护性反应。",
+          "sample_design": "时间序列取样、应激激动剂和抑制剂并行；保留蛋白质翻译抑制对照。",
+          "limitations": "应激通路具有双向效应；抑制应激不一定阻断铁死亡。",
+          "source_ids": [
+            "H018S007",
+            "H018S008",
+            "H018S012",
+            "H018S017"
+          ],
+          "workflow": "设计阶段先确定：时间序列取样、应激激动剂和抑制剂并行；保留蛋白质翻译抑制对照。 记录样本来源、处理条件、读出指标和正交验证；把观察结果与预先定义的研究问题放在同一分析框架中比较。 这项方法的直接测量或计算依据是：检测 PERK、IRE1 或 ATF4 等应激节点激活，并评估其与铁死亡诱导的时间关系。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：应激通路具有双向效应；抑制应激不一定阻断铁死亡。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "结果可用于判断 ER 应激是铁死亡的上游触发、并行过程还是保护性反应。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        },
+        {
+          "method_id": "H018-M05",
+          "display_order": 5,
+          "category": "组织模型",
+          "title": "原代细胞、类器官和疾病组织样本",
+          "principle": "在更接近生理的模型中重复细胞系结果，并配对病理、损伤标志和患者样本伦理审批信息。",
+          "answers": "检验细胞器互作—铁死亡关系是否存在于目标组织而不仅限于细胞系。",
+          "sample_design": "报告供体信息、培养条件、诱导背景和临床病理注释；关键结论在第二模型复现。",
+          "limitations": "离体模型缺少完整微环境；患者样本通常是横断面观察。",
+          "source_ids": [
+            "H018S015",
+            "H018S018",
+            "H018S019",
+            "H018S020"
+          ],
+          "workflow": "设计阶段先确定：报告供体信息、培养条件、诱导背景和临床病理注释；关键结论在第二模型复现。 记录样本来源、处理条件、读出指标和正交验证；把观察结果与预先定义的研究问题放在同一分析框架中比较。 这项方法的直接测量或计算依据是：在更接近生理的模型中重复细胞系结果，并配对病理、损伤标志和患者样本伦理审批信息。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：离体模型缺少完整微环境；患者样本通常是横断面观察。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "结果可用于检验细胞器互作—铁死亡关系是否存在于目标组织而不仅限于细胞系。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        }
+      ],
+      "shared_findings": [
+        {
+          "finding_id": "H018-C01",
+          "display_order": 1,
+          "title": "铁死亡需要特异生化与形态学证据，不能只靠单一标志物",
+          "shared_result": "铁死亡研究普遍强调脂质过氧化、铁稳态和 GPX4 通路的联合证据；单一 ROS 升高或细胞活力下降不足以区分类铁死亡。",
+          "research_use": "并行使用铁死亡抑制剂、脂质过氧化探针和其他死亡标志物；报告时间序列。",
+          "boundary": "不能把一般细胞毒性或凋亡写成铁死亡；治疗性清除策略不在本页展开。",
+          "source_ids": [
+            "H018S001",
+            "H018S002",
+            "H018S013",
+            "H018S014"
+          ]
+        },
+        {
+          "finding_id": "H018-C02",
+          "display_order": 2,
+          "title": "线粒体与内质网膜接触位点改变死亡阈值",
+          "shared_result": "线粒体 ROS、VDAC 寡聚化、OPA1 调控和 PERK 相关膜接触研究提示，细胞器定位和膜接触重塑可以影响铁死亡敏感性，但效应依赖细胞类型和诱导条件。",
+          "research_use": "记录亚细胞成像、膜接触定量和诱导时序；关键节点用遗传扰动验证。",
+          "boundary": "细胞器形态相关不等于特定分子直接因果；其他死亡方式可并行出现。",
+          "source_ids": [
+            "H018S004",
+            "H018S005",
+            "H018S006",
+            "H018S007",
+            "H018S008"
+          ]
+        },
+        {
+          "finding_id": "H018-C03",
+          "display_order": 3,
+          "title": "脂质组成与铁稳态共同塑造铁死亡易感性",
+          "shared_result": "ACSL4 相关磷脂代谢和铁转运蛋白研究说明，脂质过氧化底物供应与铁可用量共同决定铁死亡是否达到阈值。",
+          "research_use": "配对脂质组、铁代谢读出和 GPX4 状态；比较不同细胞基线。",
+          "boundary": "铁或脂质指标变化本身不是铁死亡发生的充分证据。",
+          "source_ids": [
+            "H018S003",
+            "H018S009",
+            "H018S010",
+            "H018S011"
+          ]
+        },
+        {
+          "finding_id": "H018-C04",
+          "display_order": 4,
+          "title": "组织损伤模型中常出现多种死亡方式串联",
+          "shared_result": "肾脏疾病、肺高压和肿瘤微环境研究表明，铁死亡可与其他程序性死亡和应激反应共同出现，结论具有模型和组织特异性。",
+          "research_use": "在组织模型中保留多种死亡读出和病理注释；抑制一种死亡方式后检查替代路径。",
+          "boundary": "模型中的死亡串联不能直接写成人体治疗靶点。",
+          "source_ids": [
+            "H018S015",
+            "H018S018",
+            "H018S019",
+            "H018S020"
+          ]
+        },
+        {
+          "finding_id": "H018-C05",
+          "display_order": 5,
+          "title": "通用代谢应激应回到代谢性炎症专题",
+          "shared_result": "代谢过载和慢性炎症可以诱导细胞器应激，但代谢性炎症专题主要处理器官免疫与代谢耦合。本页要求把细胞器定位扰动与铁死亡等死亡读出直接对应。",
+          "research_use": "若核心问题是脂肪组织或肝脏免疫状态，使用 H035 专题框架；若核心是死亡方式判定，保留细胞器与死亡读出。",
+          "boundary": "炎症因子升高不能单独写成铁死亡证据；两个专题可交叉引用但不应混写结论。",
+          "source_ids": [
+            "H018S002",
+            "H018S013",
+            "H018S015"
+          ]
+        }
+      ],
+      "references": [
+        {
+          "source_id": "H018S001",
+          "title": "Ferroptosis: an iron-dependent form of nonapoptotic cell death.",
+          "authors": "Dixon SJ et al.",
+          "journal": "Cell",
+          "published_date": "2012 May 2",
+          "doi": "10.1016/j.cell.2012.03.042",
+          "pmid": "22632970",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/22632970/",
+          "source_type": "primary_research",
+          "study_context": "cell death biology",
+          "study_design": "ferroptosis definition",
+          "usable_for": "iron-dependent lipid peroxidation death",
+          "limitations": "foundational cell-line work"
+        },
+        {
+          "source_id": "H018S002",
+          "title": "Ferroptosis: A Regulated Cell Death Nexus Linking Metabolism, Redox Biology, and Disease.",
+          "authors": "Stockwell BR et al.",
+          "journal": "Cell",
+          "published_date": "2017 Oct 5",
+          "doi": "10.1016/j.cell.2017.09.021",
+          "pmid": "28985560",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/28985560/",
+          "source_type": "review",
+          "study_context": "cell death and metabolism",
+          "study_design": "ferroptosis regulatory nexus",
+          "usable_for": "metabolism-redox-disease links",
+          "limitations": "review; context-dependent"
+        },
+        {
+          "source_id": "H018S003",
+          "title": "PKCβII phosphorylates ACSL4 to amplify lipid peroxidation to induce ferroptosis.",
+          "authors": "Zhang HL et al.",
+          "journal": "Nat Cell Biol",
+          "published_date": "2022 Jan",
+          "doi": "10.1038/s41556-021-00818-3",
+          "pmid": "35027735",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/35027735/",
+          "source_type": "primary_research",
+          "study_context": "lipid metabolism",
+          "study_design": "ACSL4 phosphorylation",
+          "usable_for": "lipid peroxidation amplification",
+          "limitations": "mechanistic cell study"
+        },
+        {
+          "source_id": "H018S004",
+          "title": "OPA1 promotes ferroptosis by augmenting mitochondrial ROS and suppressing an integrated stress response.",
+          "authors": "Liang FG et al.",
+          "journal": "Mol Cell",
+          "published_date": "2024 Aug 2",
+          "doi": "10.1016/j.molcel.2024.07.020",
+          "pmid": "39142278",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/39142278/",
+          "source_type": "primary_research",
+          "study_context": "mitochondria",
+          "study_design": "OPA1 and ferroptosis",
+          "usable_for": "mitochondrial ROS and ISR cross-talk",
+          "limitations": "specific pathway context"
+        },
+        {
+          "source_id": "H018S005",
+          "title": "Protecting mitochondria via inhibiting VDAC1 oligomerization alleviates ferroptosis in acetaminophen-induced acute liver injury.",
+          "authors": "Niu B et al.",
+          "journal": "Cell Biol Toxicol",
+          "published_date": "2022 Jun",
+          "doi": "10.1007/s10565-021-09624-x",
+          "pmid": "34401974",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/34401974/",
+          "source_type": "primary_research",
+          "study_context": "mitochondria",
+          "study_design": "VDAC1 oligomerization",
+          "usable_for": "ferroptosis in kidney injury model",
+          "limitations": "model-specific"
+        },
+        {
+          "source_id": "H018S006",
+          "title": "Mitochondria and cell death-associated inflammation.",
+          "authors": "Vringer E et al.",
+          "journal": "Cell Death Differ",
+          "published_date": "2023 Feb",
+          "doi": "10.1038/s41418-022-01094-w",
+          "pmid": "36447047",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/36447047/",
+          "source_type": "review",
+          "study_context": "cell death",
+          "study_design": "mitochondria and inflammation",
+          "usable_for": "organelle death-associated inflammation",
+          "limitations": "review; multiple death modes"
+        },
+        {
+          "source_id": "H018S007",
+          "title": "Mitochondrial and endoplasmic reticulum calcium homeostasis and cell death.",
+          "authors": "Marchi S et al.",
+          "journal": "Cell Calcium",
+          "published_date": "2018 Jan",
+          "doi": "10.1016/j.ceca.2017.05.003",
+          "pmid": "28515000",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/28515000/",
+          "source_type": "review",
+          "study_context": "organelle biology",
+          "study_design": "mitochondria-ER calcium",
+          "usable_for": "organelle stress and cell death",
+          "limitations": "review; not ferroptosis-specific only"
+        },
+        {
+          "source_id": "H018S008",
+          "title": "SLC40A1 in iron metabolism, ferroptosis, and disease: A review.",
+          "authors": "Zhang Y et al.",
+          "journal": "WIREs Mech Dis",
+          "published_date": "2024 Jul-A",
+          "doi": "10.1002/wsbm.1644",
+          "pmid": "38508867",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/38508867/",
+          "source_type": "review",
+          "study_context": "iron metabolism",
+          "study_design": "SLC40A1 and ferroptosis",
+          "usable_for": "iron handling in disease",
+          "limitations": "review; transporter context varies"
+        },
+        {
+          "source_id": "H018S009",
+          "title": "Ferroptosis and Senescence: A Systematic Review.",
+          "authors": "Coradduzza D et al.",
+          "journal": "Int J Mol Sci",
+          "published_date": "2023 Feb 1",
+          "doi": "10.3390/ijms24043658",
+          "pmid": "36835065",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/36835065/",
+          "source_type": "review",
+          "study_context": "cell stress",
+          "study_design": "ferroptosis and senescence",
+          "usable_for": "stress interplay",
+          "limitations": "review; association not causality"
+        },
+        {
+          "source_id": "H018S010",
+          "title": "The integrated stress response in metabolic adaptation.",
+          "authors": "Ryoo HD et al.",
+          "journal": "J Biol Chem",
+          "published_date": "2024 Apr",
+          "doi": "10.1016/j.jbc.2024.107151",
+          "pmid": "38462161",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/38462161/",
+          "source_type": "review",
+          "study_context": "stress signaling",
+          "study_design": "integrated stress response",
+          "usable_for": "metabolic adaptation",
+          "limitations": "review; broad ISR biology"
+        },
+        {
+          "source_id": "H018S011",
+          "title": "ER stress sensor PERK drives ferroptosis by disrupting MAMs-mediated mitochondrial homeostasis and promoting mtROS accumulation in acute myocardial infarction.",
+          "authors": "Tao X et al.",
+          "journal": "Pharmacol Res",
+          "published_date": "2025 Dec",
+          "doi": "10.1016/j.phrs.2025.108029",
+          "pmid": "41205728",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/41205728/",
+          "source_type": "primary_research",
+          "study_context": "ER stress",
+          "study_design": "PERK and MAMs",
+          "usable_for": "ER-mitochondria contacts in ferroptosis",
+          "limitations": "mechanistic study"
+        },
+        {
+          "source_id": "H018S012",
+          "title": "Tagitinin C induces ferroptosis through PERK-Nrf2-HO-1 signaling pathway in colorectal cancer cells.",
+          "authors": "Wei R et al.",
+          "journal": "Int J Biol Sci",
+          "published_date": "2021",
+          "doi": "10.7150/ijbs.59404",
+          "pmid": "34345202",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/34345202/",
+          "source_type": "primary_research",
+          "study_context": "ER stress",
+          "study_design": "PERK-Nrf2-HO-1 pathway",
+          "usable_for": "ferroptosis induction context",
+          "limitations": "cell-line and compound context"
+        },
+        {
+          "source_id": "H018S013",
+          "title": "Ferroptosis at the nexus of metabolism and metabolic diseases.",
+          "authors": "Li S et al.",
+          "journal": "Theranostics",
+          "published_date": "2024",
+          "doi": "10.7150/thno.100080",
+          "pmid": "39346540",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/39346540/",
+          "source_type": "review",
+          "study_context": "metabolic disease",
+          "study_design": "ferroptosis in metabolism",
+          "usable_for": "disease-associated ferroptosis",
+          "limitations": "review; heterogeneous evidence"
+        },
+        {
+          "source_id": "H018S014",
+          "title": "Cell size modulates ferroptosis susceptibility.",
+          "authors": "Zatulovskiy E et al.",
+          "journal": "Elife",
+          "published_date": "2026 Jun 1",
+          "doi": "10.7554/eLife.111544",
+          "pmid": "42267631",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/42267631/",
+          "source_type": "primary_research",
+          "study_context": "cell size",
+          "study_design": "ferroptosis susceptibility",
+          "usable_for": "physical state modulates death",
+          "limitations": "in vitro mechanism"
+        },
+        {
+          "source_id": "H018S015",
+          "title": "Emerging roles of ferroptosis in modulating the immune landscape of glial tumours.",
+          "authors": "Argenziano MG et al.",
+          "journal": "Nat Cell Biol",
+          "published_date": "2026 Jul",
+          "doi": "10.1038/s41556-026-01972-2",
+          "pmid": "42225830",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/42225830/",
+          "source_type": "primary_research",
+          "study_context": "cancer immunity",
+          "study_design": "ferroptosis in glial tumours",
+          "usable_for": "immune landscape modulation",
+          "limitations": "disease-specific"
+        },
+        {
+          "source_id": "H018S016",
+          "title": "Mitochondria ROS and mitophagy in acute kidney injury.",
+          "authors": "Su L et al.",
+          "journal": "Autophagy",
+          "published_date": "2023 Feb",
+          "doi": "10.1080/15548627.2022.2084862",
+          "pmid": "35678504",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/35678504/",
+          "source_type": "review",
+          "study_context": "kidney injury",
+          "study_design": "mitochondria ROS and mitophagy",
+          "usable_for": "organelle stress in AKI",
+          "limitations": "related organelle stress context"
+        },
+        {
+          "source_id": "H018S017",
+          "title": "Programmed cell death in kidney disease: integrated crosstalk among ferroptosis, pyroptosis, apoptosis, and cuproptosis.",
+          "authors": "Sang J et al.",
+          "journal": "Apoptosis",
+          "published_date": "2026 Aug 2",
+          "doi": "10.1007/s10495-026-02428-6",
+          "pmid": "42622731",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/42622731/",
+          "source_type": "primary_research",
+          "study_context": "kidney disease",
+          "study_design": "ferroptosis crosstalk",
+          "usable_for": "multiple programmed death modes",
+          "limitations": "tissue model"
+        },
+        {
+          "source_id": "H018S018",
+          "title": "Mitochondria-centered signalling in pulmonary hypertension: From metabolic reprogramming to vascular remodeling and right ventricular failure.",
+          "authors": "Zhang M et al.",
+          "journal": "Cell Signal",
+          "published_date": "2026 Aug 2",
+          "doi": "10.1016/j.cellsig.2026.112846",
+          "pmid": "42636946",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/42636946/",
+          "source_type": "primary_research",
+          "study_context": "pulmonary hypertension",
+          "study_design": "mitochondria-centered signaling",
+          "usable_for": "metabolic reprogramming and stress",
+          "limitations": "disease model"
+        },
+        {
+          "source_id": "H018S019",
+          "title": "Estrogen signaling and ferroptosis in intervertebral disc degeneration: A proposed mechanistic framework and its evidence gaps.",
+          "authors": "Yang Y et al.",
+          "journal": "Tissue Cell",
+          "published_date": "2026 Aug 2",
+          "doi": "10.1016/j.tice.2026.103892",
+          "pmid": "42659810",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/42659810/",
+          "source_type": "primary_research",
+          "study_context": "intervertebral disc",
+          "study_design": "estrogen and ferroptosis",
+          "usable_for": "tissue degeneration context",
+          "limitations": "specific tissue model"
+        },
+        {
+          "source_id": "H018S020",
+          "title": "Current Progress in the Role of Ferroptosis in Skeletal Muscle Atrophy.",
+          "authors": "Chen Y et al.",
+          "journal": "Mediators Inflamm",
+          "published_date": "2026",
+          "doi": "10.1155/mi/3578349",
+          "pmid": "42010894",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/42010894/",
+          "source_type": "review",
+          "study_context": "muscle atrophy",
+          "study_design": "ferroptosis role",
+          "usable_for": "skeletal muscle stress",
+          "limitations": "review; limited human data"
+        }
+      ]
+    },
+    {
+      "topic_id": "H028",
+      "title": "脑细胞图谱与跨尺度参考图谱",
+      "topic_role": "research_deep_dive",
+      "overview": "脑细胞图谱研究正在从“列出有哪些细胞类型”推进到“在不同尺度上如何对齐和引用”。单细胞转录组、空间转录组、表观组、连接组学和成像数据各自提供不同分辨率的信息，但研究者在比较物种、脑区、发育阶段或技术平台时，往往缺少统一的细胞类型坐标系。跨尺度参考图谱的目标，是把分子定义、空间位置、连接关系和功能属性放到可比较框架中，而不是把某一种技术的结果当作完整真相。\n\n本方向从人类和小鼠脑细胞分类、BICCN 等多模态细胞普查、全脑空间图谱和跨物种映射方法出发，集中处理三类问题：参考图谱如何定义和修订细胞类型；不同尺度数据如何配准到同一细胞坐标；图谱资源如何被独立研究引用而不被误写成疾病机制。由此可以把图谱当作研究基础设施，把机制研究留给疾病验证专题。\n\n比较公开研究时，需要同时交代物种、脑区、发育阶段、技术平台、批次和注释版本。疾病相关细胞状态变化由神经退行性疾病细胞图谱专题处理；本页不讨论治疗靶点或临床分层。图谱中的细胞类型命名不等于功能因果，空间邻接也不等于细胞间直接调控。",
+      "sections": [
+        {
+          "section_id": "H028-SEC-01",
+          "title": "比较不同研究时应先看什么",
+          "body": "| 比较内容 | 应记录的信息 | 关系到什么判断 |\n| --- | --- | --- |\n| 尺度层级 | 单细胞、空间、连接组、成像或多模态整合 | 数据覆盖的是分子、位置还是连接关系 |\n| 物种与发育阶段 | 人、小鼠、非人灵长类、胎儿、成年或衰老 | 细胞类型定义是否可跨物种迁移 |\n| 脑区范围 | 皮层、海马、全脑、血管或特定核团 | 局部图谱能否支持全脑外推 |\n| 注释版本 | 聚类分辨率、参考映射算法和发布版本 | 不同版本之间是否可直接比较 |\n| 使用场景 | 参考注释、数据整合、新细胞发现或方法基准 | 图谱被用作资源还是机制证据 |",
+          "source_ids": []
+        },
+        {
+          "section_id": "H028-SEC-02",
+          "title": "成人脑细胞图谱正在覆盖更完整的分子与空间维度",
+          "body": "跨成人大脑细胞类型的转录组多样性研究，以及全脑分子定义和空间分辨图谱，为脑细胞分类提供了高分辨率参考。小鼠全脑空间转录组图谱和单细胞空间图谱进一步把细胞类型放回三维位置。\n\n这些资源适合作为注释参考和新细胞类型发现起点。图谱发布版本、聚类分辨率和取样脑区必须一并记录，不能把某一版本的标签直接当作所有研究的默认注释。",
+          "source_ids": [
+            "H028S001",
+            "H028S002",
+            "H028S003",
+            "H028S004"
+          ]
+        },
+        {
+          "section_id": "H028-SEC-03",
+          "title": "BICCN 等多模态普查强调细胞类型需要多证据定义",
+          "body": "哺乳动物初级运动皮层多模态细胞普查和 MERFISH 空间图谱显示，转录、表观、形态和电生理特征可以共同约束细胞类型定义。BICCN 数据生态指南为跨实验室数据访问和版本管理提供了框架。\n\n多模态一致支持时，细胞类型注释更稳健；若只有单一组学层，应标明为假设性分类。不同模态之间的缺失和不完全对应需要在整合时显式处理。",
+          "source_ids": [
+            "H028S005",
+            "H028S006",
+            "H028S007",
+            "H028S009"
+          ]
+        },
+        {
+          "section_id": "H028-SEC-04",
+          "title": "跨物种比较需要映射算法，而不是简单同名标签",
+          "body": "人类与小鼠皮层细胞类型比较研究指出，保守类型与物种特异特征并存。跨物种细胞类型分配算法进一步说明，直接把小鼠标签贴到人类数据会遗漏物种差异。\n\n跨尺度参考图谱因此需要保留映射置信度、未匹配细胞和物种特异节点。比较研究应报告映射方法与拒绝率，而不是只展示同名细胞类型。",
+          "source_ids": [
+            "H028S008",
+            "H028S010",
+            "H028S011",
+            "H028S012"
+          ]
+        },
+        {
+          "section_id": "H028-SEC-05",
+          "title": "发育、血管和非神经元成分扩展了参考图谱边界",
+          "body": "人类脑血管发育到成年和疾病状态的单细胞图谱，以及非人灵长类多模态寿命图谱，提示脑细胞参考体系需要覆盖内皮、周细胞、免疫和基质细胞，而不仅是神经元和胶质细胞。空间组学综述也强调脑空间图谱正在向多区域、多尺度整合发展。\n\n把神经元图谱外推到全脑微环境会遗漏血管和免疫成分。发育阶段差异意味着成人图谱不能直接用于胎儿或疾病早期样本注释，除非重新映射并验证。",
+          "source_ids": [
+            "H028S013",
+            "H028S014",
+            "H028S015",
+            "H028S016"
+          ]
+        },
+        {
+          "section_id": "H028-SEC-06",
+          "title": "整合算法与疾病语境的边界",
+          "body": "图对比学习和多组学整合方法可以提高批次间注释一致性，但整合参数和参考版本会影响结果。整合结果适合提高注释一致性和发现新状态，不能单独证明细胞类型在体内的功能或因果作用。\n\n脑细胞参考图谱描述的是参考状态下的细胞类型与空间组织。疾病中的细胞状态变化需要在病例—对照设计中单独验证；若研究核心是比较患病与对照组织，应使用 H029 专题。本页只提供跨尺度参考坐标，不提供疾病机制或治疗靶点结论。",
+          "source_ids": [
+            "H028S001",
+            "H028S008",
+            "H028S009",
+            "H028S017",
+            "H028S018",
+            "H028S019",
+            "H028S020"
+          ]
+        },
+        {
+          "section_id": "H028-SEC-07",
+          "title": "研究技术",
+          "body": "本专题的技术卡包括多模态细胞类型定义、空间转录组与全脑配准、跨物种细胞类型映射、连接组与成像整合，以及参考映射与基准验证。方法选择取决于需要建立参考、整合多尺度数据，还是复用现有图谱注释。",
+          "source_ids": []
+        },
+        {
+          "section_id": "H028-SEC-08",
+          "title": "科研参考范围",
+          "body": "本页用于介绍脑细胞跨尺度参考图谱的资源范围、整合方法和适用边界，不提供疾病机制、诊断或治疗建议。",
+          "source_ids": []
+        }
+      ],
+      "methods": [
+        {
+          "method_id": "H028-M01",
+          "display_order": 1,
+          "category": "参考构建",
+          "title": "多模态细胞类型定义与版本管理",
+          "principle": "联合转录、表观、形态或电生理证据定义细胞类型，并发布可追踪的注释版本和元数据。",
+          "answers": "为后续研究提供可引用的细胞坐标系和修订记录。",
+          "sample_design": "记录物种、脑区、发育阶段、样本数和平台；每个版本保留变更说明和下载入口。",
+          "limitations": "参考图谱是群体汇总，不代表所有个体差异；版本更新会使旧注释失效。",
+          "source_ids": [
+            "H028S005",
+            "H028S006",
+            "H028S009",
+            "H028S014"
+          ],
+          "workflow": "设计阶段先确定：记录物种、脑区、发育阶段、样本数和平台；每个版本保留变更说明和下载入口。 记录样本来源、处理条件、读出指标和正交验证；把观察结果与预先定义的研究问题放在同一分析框架中比较。 这项方法的直接测量或计算依据是：联合转录、表观、形态或电生理证据定义细胞类型，并发布可追踪的注释版本和元数据。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：参考图谱是群体汇总，不代表所有个体差异；版本更新会使旧注释失效。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "结果可用于为后续研究提供可引用的细胞坐标系和修订记录。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        },
+        {
+          "method_id": "H028-M02",
+          "display_order": 2,
+          "category": "空间定位",
+          "title": "空间转录组与全脑图谱配准",
+          "principle": "把单细胞或单核转录组映射到空间切片或全脑坐标，保留位置不确定性和配准误差。",
+          "answers": "判断细胞类型在脑区、层位或核团中的分布，并比较不同尺度图谱。",
+          "sample_design": "使用统一坐标系、切片方向标记和配准质量指标；关键区域用原位杂交或成像复核。",
+          "limitations": "空间点位可能混合多个细胞；配准误差会改变邻域关系。",
+          "source_ids": [
+            "H028S002",
+            "H028S003",
+            "H028S004",
+            "H028S007"
+          ],
+          "workflow": "设计阶段先确定：使用统一坐标系、切片方向标记和配准质量指标；关键区域用原位杂交或成像复核。 记录样本来源、处理条件、读出指标和正交验证；把观察结果与预先定义的研究问题放在同一分析框架中比较。 这项方法的直接测量或计算依据是：把单细胞或单核转录组映射到空间切片或全脑坐标，保留位置不确定性和配准误差。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：空间点位可能混合多个细胞；配准误差会改变邻域关系。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "结果可用于判断细胞类型在脑区、层位或核团中的分布，并比较不同尺度图谱。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        },
+        {
+          "method_id": "H028-M03",
+          "display_order": 3,
+          "category": "跨物种映射",
+          "title": "保守与物种特异细胞类型分配",
+          "principle": "通过同源基因、嵌入映射或图模型，把一种物种的细胞类型对应到另一种物种的参考空间，并报告未匹配细胞。",
+          "answers": "比较人类与小鼠或其他模型中的保守与分歧细胞特征。",
+          "sample_design": "保留映射置信度阈值、拒绝率和独立验证集；不要强制一对一标签。",
+          "limitations": "映射算法依赖参考质量；物种差异可能导致错误对应。",
+          "source_ids": [
+            "H028S008",
+            "H028S010",
+            "H028S011",
+            "H028S012"
+          ],
+          "workflow": "设计阶段先确定：保留映射置信度阈值、拒绝率和独立验证集；不要强制一对一标签。 记录样本来源、处理条件、读出指标和正交验证；把观察结果与预先定义的研究问题放在同一分析框架中比较。 这项方法的直接测量或计算依据是：通过同源基因、嵌入映射或图模型，把一种物种的细胞类型对应到另一种物种的参考空间，并报告未匹配细胞。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：映射算法依赖参考质量；物种差异可能导致错误对应。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "结果可用于比较人类与小鼠或其他模型中的保守与分歧细胞特征。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        },
+        {
+          "method_id": "H028-M04",
+          "display_order": 4,
+          "category": "多尺度整合",
+          "title": "连接组、成像与转录组联合注释",
+          "principle": "把连接组学、成像形态学和分子谱系整合到同一细胞或区域坐标，用于多尺度参考构建。",
+          "answers": "检查分子定义的细胞类型是否具有可重复的空间和连接特征。",
+          "sample_design": "记录成像分辨率、连接组采样密度和跨模态配准方法；保留原始数据链接。",
+          "limitations": "不同尺度数据难以完全同细胞配对；整合结果是模型估计。",
+          "source_ids": [
+            "H028S005",
+            "H028S013",
+            "H028S016",
+            "H028S019"
+          ],
+          "workflow": "设计阶段先确定：记录成像分辨率、连接组采样密度和跨模态配准方法；保留原始数据链接。 记录样本来源、处理条件、读出指标和正交验证；把观察结果与预先定义的研究问题放在同一分析框架中比较。 这项方法的直接测量或计算依据是：把连接组学、成像形态学和分子谱系整合到同一细胞或区域坐标，用于多尺度参考构建。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：不同尺度数据难以完全同细胞配对；整合结果是模型估计。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "结果可用于检查分子定义的细胞类型是否具有可重复的空间和连接特征。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        },
+        {
+          "method_id": "H028-M05",
+          "display_order": 5,
+          "category": "数据复用",
+          "title": "参考映射、整合基准与独立验证",
+          "principle": "把新数据映射到公开参考图谱，并用独立样本、原位验证或正交模态检查注释稳定性。",
+          "answers": "评估新队列或新平台能否复用现有细胞坐标，以及何处需要修订参考。",
+          "sample_design": "报告参考版本、映射算法、批次校正和基准指标；发现新状态时提交修订建议。",
+          "limitations": "复用参考不能代替疾病机制验证；批次差异可导致虚假新类型。",
+          "source_ids": [
+            "H028S009",
+            "H028S015",
+            "H028S017",
+            "H028S018",
+            "H028S020"
+          ],
+          "workflow": "设计阶段先确定：报告参考版本、映射算法、批次校正和基准指标；发现新状态时提交修订建议。 记录样本来源、处理条件、读出指标和正交验证；把观察结果与预先定义的研究问题放在同一分析框架中比较。 这项方法的直接测量或计算依据是：把新数据映射到公开参考图谱，并用独立样本、原位验证或正交模态检查注释稳定性。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：复用参考不能代替疾病机制验证；批次差异可导致虚假新类型。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "结果可用于评估新队列或新平台能否复用现有细胞坐标，以及何处需要修订参考。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        }
+      ],
+      "shared_findings": [
+        {
+          "finding_id": "H028-C01",
+          "display_order": 1,
+          "title": "脑细胞类型需要多模态和版本化参考",
+          "shared_result": "成人脑转录组图谱、全脑空间图谱和 BICCN 多模态普查表明，稳健的细胞类型定义依赖多证据支持和可追踪版本，而不是一次性聚类标签。",
+          "research_use": "引用图谱时记录版本、脑区、物种和平台；更新后重新映射而非沿用旧标签。",
+          "boundary": "参考图谱描述正常或参考状态，不等于疾病机制；疾病验证由 H029 专题处理。",
+          "source_ids": [
+            "H028S001",
+            "H028S002",
+            "H028S005",
+            "H028S009"
+          ]
+        },
+        {
+          "finding_id": "H028-C02",
+          "display_order": 2,
+          "title": "空间位置是跨尺度整合的必要维度",
+          "shared_result": "MERFISH、全脑空间转录组和成像配准研究显示，同一分子类型在不同脑区的比例和邻域关系可以显著不同，脱离空间语境的转录标签不完整。",
+          "research_use": "保留切片方向、配准误差和层位注释；关键分布用原位方法复核。",
+          "boundary": "空间邻接提示组织关系，不能单独证明细胞间直接调控。",
+          "source_ids": [
+            "H028S003",
+            "H028S004",
+            "H028S007",
+            "H028S016"
+          ]
+        },
+        {
+          "finding_id": "H028-C03",
+          "display_order": 3,
+          "title": "跨物种映射必须报告置信度和未匹配细胞",
+          "shared_result": "人类与小鼠皮层比较及跨物种分配算法研究指出，保守类型与物种特异特征并存，强制同名映射会掩盖差异。",
+          "research_use": "使用映射置信度、拒绝率和独立验证集；物种特异节点单独注释。",
+          "boundary": "跨物种相似性不等于功能等价；模型动物结果需要人体样本复核。",
+          "source_ids": [
+            "H028S008",
+            "H028S010",
+            "H028S011",
+            "H028S012"
+          ]
+        },
+        {
+          "finding_id": "H028-C04",
+          "display_order": 4,
+          "title": "血管、免疫和发育样本扩展了参考图谱边界",
+          "shared_result": "脑血管图谱、非人灵长类寿命图谱和空间组学综述提示，脑细胞参考体系必须覆盖非神经元成分和发育阶段差异。",
+          "research_use": "根据研究问题选择发育阶段和细胞谱系范围；成人图谱用于胎儿或疾病样本时需重新映射。",
+          "boundary": "参考范围不全会造成注释偏差；缺失成分不能凭推断补全。",
+          "source_ids": [
+            "H028S013",
+            "H028S014",
+            "H028S015",
+            "H028S020"
+          ]
+        },
+        {
+          "finding_id": "H028-C05",
+          "display_order": 5,
+          "title": "整合算法改善注释一致性，但不构成机制证据",
+          "shared_result": "图对比学习、多组学整合和映射工具可以提高批次间注释一致性，但整合参数和参考版本会影响结果。",
+          "research_use": "报告算法、参数、批次校正和基准指标；新状态用独立样本验证。",
+          "boundary": "计算整合不能代替功能或因果实验；图谱资源不等于治疗靶点。",
+          "source_ids": [
+            "H028S017",
+            "H028S018",
+            "H028S019",
+            "H028S020"
+          ]
+        }
+      ],
+      "references": [
+        {
+          "source_id": "H028S001",
+          "title": "Transcriptomic diversity of cell types across the adult human brain.",
+          "authors": "Siletti K et al.",
+          "journal": "Science",
+          "published_date": "2023 Oct 1",
+          "doi": "10.1126/science.add7046",
+          "pmid": "37824663",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/37824663/",
+          "source_type": "primary_research",
+          "study_context": "adult human brain",
+          "study_design": "transcriptomic cell diversity",
+          "usable_for": "reference cell types across brain",
+          "limitations": "atlas resource"
+        },
+        {
+          "source_id": "H028S002",
+          "title": "Molecularly defined and spatially resolved cell atlas of the whole mouse brain.",
+          "authors": "Zhang M et al.",
+          "journal": "Nature",
+          "published_date": "2023 Dec",
+          "doi": "10.1038/s41586-023-06808-9",
+          "pmid": "38092912",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/38092912/",
+          "source_type": "primary_research",
+          "study_context": "adult mouse brain",
+          "study_design": "molecular spatial whole-brain atlas",
+          "usable_for": "cell types with spatial coordinates",
+          "limitations": "mouse reference"
+        },
+        {
+          "source_id": "H028S003",
+          "title": "Single-cell spatial transcriptomic atlas of the whole mouse brain.",
+          "authors": "Han L et al.",
+          "journal": "Neuron",
+          "published_date": "2025 Jul 9",
+          "doi": "10.1016/j.neuron.2025.02.015",
+          "pmid": "40132589",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/40132589/",
+          "source_type": "primary_research",
+          "study_context": "adult mouse brain",
+          "study_design": "single-cell spatial atlas",
+          "usable_for": "spatial transcriptomic whole brain",
+          "limitations": "platform-specific"
+        },
+        {
+          "source_id": "H028S004",
+          "title": "A multimodal cell census and atlas of the mammalian primary motor cortex.",
+          "authors": "BRAIN Initiative Cell Census Network (BICCN) et al.",
+          "journal": "Nature",
+          "published_date": "2021 Oct",
+          "doi": "10.1038/s41586-021-03950-0",
+          "pmid": "34616075",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/34616075/",
+          "source_type": "primary_research",
+          "study_context": "mouse motor cortex",
+          "study_design": "multimodal cell census",
+          "usable_for": "BICCN multimodal reference",
+          "limitations": "reference atlas"
+        },
+        {
+          "source_id": "H028S005",
+          "title": "Spatially resolved cell atlas of the mouse primary motor cortex by MERFISH.",
+          "authors": "Zhang M et al.",
+          "journal": "Nature",
+          "published_date": "2021 Oct",
+          "doi": "10.1038/s41586-021-03705-x",
+          "pmid": "34616063",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/34616063/",
+          "source_type": "primary_research",
+          "study_context": "mouse motor cortex",
+          "study_design": "MERFISH spatial atlas",
+          "usable_for": "spatially resolved cell atlas",
+          "limitations": "spatial reference"
+        },
+        {
+          "source_id": "H028S006",
+          "title": "Conservation and divergence of cortical cell organization in human and mouse revealed by MERFISH.",
+          "authors": "Fang R et al.",
+          "journal": "Science",
+          "published_date": "2022 Jul",
+          "doi": "10.1126/science.abm1741",
+          "pmid": "35771910",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/35771910/",
+          "source_type": "primary_research",
+          "study_context": "human and mouse cortex",
+          "study_design": "cortical organization comparison",
+          "usable_for": "conserved and divergent organization",
+          "limitations": "cross-species reference"
+        },
+        {
+          "source_id": "H028S007",
+          "title": "Conserved cell types with divergent features in human versus mouse cortex.",
+          "authors": "Hodge RD et al.",
+          "journal": "Nature",
+          "published_date": "2019 Sep",
+          "doi": "10.1038/s41586-019-1506-7",
+          "pmid": "31435019",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/31435019/",
+          "source_type": "primary_research",
+          "study_context": "human and mouse cortex",
+          "study_design": "conserved cell types",
+          "usable_for": "cross-species cortical types",
+          "limitations": "mapping baseline"
+        },
+        {
+          "source_id": "H028S008",
+          "title": "Cross-species cell-type assignment from single-cell RNA-seq data by a heterogeneous graph neural network.",
+          "authors": "Liu X et al.",
+          "journal": "Genome Res",
+          "published_date": "2023 Jan",
+          "doi": "10.1101/gr.276868.122",
+          "pmid": "36526433",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/36526433/",
+          "source_type": "primary_research",
+          "study_context": "cross-species scRNA-seq",
+          "study_design": "heterogeneous graph mapping",
+          "usable_for": "cell-type assignment",
+          "limitations": "computational mapping"
+        },
+        {
+          "source_id": "H028S009",
+          "title": "A guide to the BRAIN Initiative Cell Census Network data ecosystem.",
+          "authors": "Hawrylycz M et al.",
+          "journal": "PLoS Biol",
+          "published_date": "2023 Jun",
+          "doi": "10.1371/journal.pbio.3002133",
+          "pmid": "37390046",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/37390046/",
+          "source_type": "review",
+          "study_context": "BICCN ecosystem",
+          "study_design": "data access and versioning",
+          "usable_for": "reference data infrastructure",
+          "limitations": "resource guide"
+        },
+        {
+          "source_id": "H028S010",
+          "title": "Single-cell atlas of the human brain vasculature across development, adulthood and disease.",
+          "authors": "Wälchli T et al.",
+          "journal": "Nature",
+          "published_date": "2024 Aug",
+          "doi": "10.1038/s41586-024-07493-y",
+          "pmid": "38987604",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/38987604/",
+          "source_type": "primary_research",
+          "study_context": "human brain vasculature",
+          "study_design": "development to disease atlas",
+          "usable_for": "vascular cell reference",
+          "limitations": "includes disease contexts as reference"
+        },
+        {
+          "source_id": "H028S011",
+          "title": "Canonical genetic signatures of the adult human brain.",
+          "authors": "Hawrylycz M et al.",
+          "journal": "Nat Neurosci",
+          "published_date": "2015 Dec",
+          "doi": "10.1038/nn.4171",
+          "pmid": "26571460",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/26571460/",
+          "source_type": "primary_research",
+          "study_context": "adult human brain",
+          "study_design": "canonical genetic signatures",
+          "usable_for": "baseline brain expression reference",
+          "limitations": "bulk reference"
+        },
+        {
+          "source_id": "H028S012",
+          "title": "Genetic, cellular, and connectomic characterization of the brain regions commonly plagued by glioma.",
+          "authors": "Mandal AS et al.",
+          "journal": "Brain",
+          "published_date": "2020 Dec 5",
+          "doi": "10.1093/brain/awaa277",
+          "pmid": "33278823",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/33278823/",
+          "source_type": "primary_research",
+          "study_context": "human brain",
+          "study_design": "connectomic cell characterization",
+          "usable_for": "region-specific cell features",
+          "limitations": "multi-feature reference"
+        },
+        {
+          "source_id": "H028S013",
+          "title": "Multimodal brain cell atlas across the adult macaque lifespan.",
+          "authors": "Zhang X et al.",
+          "journal": "Cell",
+          "published_date": "2026 Aug 1",
+          "doi": "10.1016/j.cell.2026.07.045",
+          "pmid": "42612631",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/42612631/",
+          "source_type": "primary_research",
+          "study_context": "macaque lifespan",
+          "study_design": "multimodal brain atlas",
+          "usable_for": "cross-scale primate reference",
+          "limitations": "non-human primate"
+        },
+        {
+          "source_id": "H028S014",
+          "title": "The ANTsX ecosystem for mapping the mouse brain.",
+          "authors": "Tustison NJ et al.",
+          "journal": "Nat Commun",
+          "published_date": "2025 Nov 2",
+          "doi": "10.1038/s41467-025-66741-5",
+          "pmid": "41274934",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/41274934/",
+          "source_type": "software-method",
+          "study_context": "mouse brain mapping",
+          "study_design": "ANTsX ecosystem",
+          "usable_for": "cross-scale registration tools",
+          "limitations": "tooling"
+        },
+        {
+          "source_id": "H028S015",
+          "title": "Brain Spatial Genomics Atlases.",
+          "authors": "Hindeleh A et al.",
+          "journal": "Genes (Basel)",
+          "published_date": "2026 Jun 2",
+          "doi": "10.3390/genes17070745",
+          "pmid": "42510785",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/42510785/",
+          "source_type": "review",
+          "study_context": "brain spatial omics",
+          "study_design": "spatial genomics atlases",
+          "usable_for": "field overview",
+          "limitations": "review"
+        },
+        {
+          "source_id": "H028S016",
+          "title": "Single-cell multiomic human brain atlas reveals regulatory drivers of cortical regionality.",
+          "authors": "Palmer CR et al.",
+          "journal": "Nat Commun",
+          "published_date": "2026 Feb 2",
+          "doi": "10.1038/s41467-026-69368-2",
+          "pmid": "41723114",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/41723114/",
+          "source_type": "primary_research",
+          "study_context": "human brain cortex",
+          "study_design": "multiomic regulatory atlas",
+          "usable_for": "regulatory drivers of cell types",
+          "limitations": "multi-omic reference"
+        },
+        {
+          "source_id": "H028S017",
+          "title": "Opportunities and challenges for the application of single-cell RNA sequencing and spatial transcriptomics in ischemic stroke.",
+          "authors": "Wang Z et al.",
+          "journal": "Exp Neurol",
+          "published_date": "2026 Oct",
+          "doi": "10.1016/j.expneurol.2026.115901",
+          "pmid": "42402308",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/42402308/",
+          "source_type": "review",
+          "study_context": "brain scRNA-seq",
+          "study_design": "atlas opportunities and challenges",
+          "usable_for": "study design for brain atlases",
+          "limitations": "review"
+        },
+        {
+          "source_id": "H028S018",
+          "title": "Graph-based contrastive learning enables unified integration and niche transfer across single-cell and spatial multi-omics.",
+          "authors": "Zhou W et al.",
+          "journal": "Brief Bioinform",
+          "published_date": "2026 Jul 3",
+          "doi": "10.1093/bib/bbag432",
+          "pmid": "42608748",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/42608748/",
+          "source_type": "software-method",
+          "study_context": "atlas integration",
+          "study_design": "graph contrastive learning",
+          "usable_for": "unified integration",
+          "limitations": "computational method"
+        },
+        {
+          "source_id": "H028S019",
+          "title": "A single-cell transcriptomic atlas of the periventricular proliferative zone in the late gestation fetal brain in the pigtail macaque.",
+          "authors": "Cornelius JA et al.",
+          "journal": "Front Neurosci",
+          "published_date": "2026",
+          "doi": "10.3389/fnins.2026.1785001",
+          "pmid": "42609459",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/42609459/",
+          "source_type": "primary_research",
+          "study_context": "mouse brain development",
+          "study_design": "periventricular zone atlas",
+          "usable_for": "developmental reference",
+          "limitations": "developmental atlas"
+        },
+        {
+          "source_id": "H028S020",
+          "title": "Cell-type and spatiotemporal transcriptional signatures of white matter morphometric similarity network alterations in major depressive disorder.",
+          "authors": "Wu Y et al.",
+          "journal": "Psychol Med",
+          "published_date": "2026 Jun 4",
+          "doi": "10.1017/S0033291726104711",
+          "pmid": "42237602",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/42237602/",
+          "source_type": "primary_research",
+          "study_context": "human white matter",
+          "study_design": "spatiotemporal morphometry signatures",
+          "usable_for": "white matter cell context",
+          "limitations": "specific region atlas"
+        }
+      ]
+    },
+    {
+      "topic_id": "H029",
+      "title": "神经退行性疾病细胞图谱与机制",
+      "topic_role": "research_deep_dive",
+      "overview": "神经退行性疾病研究正在从单一标志物或单一脑区描述，转向在细胞分辨率下比较患病与对照组织的组成、状态和空间关系。阿尔茨海默病、帕金森病、额颞叶痴呆和其他神经退行性疾病中，神经元、小胶质细胞、星形胶质细胞、少突胶质细胞和血管相关细胞都可以呈现疾病阶段特异的转录或蛋白状态，但这些状态是否驱动病理、反映代偿或只是伴随现象，仍需要独立验证。\n\n本方向从疾病组织单细胞与单核图谱、空间转录组、多区域对照设计和蛋白组学分型出发，集中处理三类问题：哪些细胞状态与病理蛋白、神经退行性进程或认知结局相关；参考图谱上的异常状态如何在空间上分布；图谱关联如何推进到功能扰动、队列复核和体液标志物验证。参考图谱资源由脑细胞跨尺度参考图谱专题提供，本页聚焦疾病样本中的验证层。\n\n比较公开研究时，需要同时交代诊断标准、病理分期、脑区、取样批次、对照匹配和抗体制备。图谱中的关联不等于因果机制，也不能直接写成治疗靶点或诊断阈值。液体活检和循环标志物研究可作为补充层，但不能代替组织细胞图谱中的空间与细胞类型信息。",
+      "sections": [
+        {
+          "section_id": "H029-SEC-01",
+          "title": "比较不同研究时应先看什么",
+          "body": "| 比较内容 | 应记录的信息 | 关系到什么判断 |\n| --- | --- | --- |\n| 疾病定义 | 诊断标准、病理分期、遗传背景和共病 | 细胞状态变化对应哪一疾病阶段 |\n| 脑区与取样 | 皮层、海马、黑质、脉络丛或其他区域 | 局部发现能否外推到全脑 |\n| 细胞分辨率 | 单细胞、单核、空间或蛋白组分层 | 观察到的是哪类细胞及其位置 |\n| 病理对照 | 淀粉样蛋白、tau、路易体或 TDP-43 负荷 | 细胞状态与病理沉积如何配对 |\n| 验证层级 | 独立队列、功能扰动、体液标志物或成像 | 图谱关联能否推进到可检验机制 |",
+          "source_ids": []
+        },
+        {
+          "section_id": "H029-SEC-02",
+          "title": "阿尔茨海默病多区域图谱揭示细胞状态与病理分区相关",
+          "body": "多区域单细胞研究、SEA-AD 多模态图谱和认知功能相关图谱显示，阿尔茨海默病中神经元、胶质细胞和血管相关细胞呈现区域和病理阶段依赖的状态变化。单细胞转录研究也指出，疾病相关小胶质细胞和星形胶质细胞状态需要与淀粉样蛋白和 tau 病理分区配对阅读。\n\n这些图谱适合提出疾病相关细胞状态和空间生态假设。关联本身不能证明某一细胞群驱动病理进展，仍需遗传扰动、纵向取样或独立队列复核。",
+          "source_ids": [
+            "H029S001",
+            "H029S002",
+            "H029S003",
+            "H029S004",
+            "H029S005"
+          ]
+        },
+        {
+          "section_id": "H029-SEC-03",
+          "title": "小胶质细胞状态是 AD 研究中最活跃的验证对象之一",
+          "body": "人类小胶质细胞单细胞研究揭示与阿尔茨海默病相关的亚群；后续研究进一步讨论不同队列中疾病相关小胶质细胞模式是否可重复。tau 和淀粉样蛋白相关小胶质细胞谱也提示，不同病理蛋白对应的状态并不完全相同。\n\n小胶质细胞状态命名在不同研究间尚未完全统一。比较时应保留抗体面板、病理分期和脑区信息，并用蛋白或空间原位证据验证关键状态。",
+          "source_ids": [
+            "H029S005",
+            "H029S006",
+            "H029S007",
+            "H029S008"
+          ]
+        },
+        {
+          "section_id": "H029-SEC-04",
+          "title": "帕金森病和路易体病需要区分中枢与外周免疫读出",
+          "body": "帕金森病脑组织单细胞转录和蛋白研究、外周免疫单细胞分析，以及人脑转录组 bulk 与单细胞比较研究，说明路易体病相关变化可以同时出现在脑内细胞和网络免疫层。不同取样部位和疾病分期会导致细胞组成差异。\n\n中枢组织图谱与外周免疫图谱回答的问题不同，不能互相替代。黑质、皮层和脑干等区域的结果也不应直接合并为单一“帕金森图谱”。",
+          "source_ids": [
+            "H029S009",
+            "H029S010",
+            "H029S011",
+            "H029S012"
+          ]
+        },
+        {
+          "section_id": "H029-SEC-05",
+          "title": "额颞叶痴呆和其他神经退行性疾病扩展了细胞图谱边界",
+          "body": "GRN 相关额颞叶痴呆的单核研究和额岛皮层图谱提示，神经退行性病变可以伴随神经血管功能障碍和区域特异细胞重组。泛神经退行性蛋白组研究进一步显示，不同疾病可能存在可分的分子亚型。\n\n疾病特异图谱需要与遗传背景和病理蛋白类型共同阅读。把一种疾病的细胞状态标签直接套用到另一种神经退行性疾病，会掩盖分子和区域差异。",
+          "source_ids": [
+            "H029S013",
+            "H029S014",
+            "H029S015",
+            "H029S016"
+          ]
+        },
+        {
+          "section_id": "H029-SEC-06",
+          "title": "验证分层与参考图谱边界",
+          "body": "tau 种子人源神经元嵌合体、脉络丛免疫细胞富集和神经元来源 cfDNA 等研究，代表从图谱关联走向功能或体液验证的不同路径。这些验证层可以相互补充，但各自有适用边界。\n\n脑细胞参考图谱提供正常状态下的细胞坐标，疾病研究描述的是相对参考的偏离。若目标是建立跨尺度参考坐标，应使用 H028 专题。本页要求把疾病相关细胞状态、病理配对和验证实验放在同一叙述中，并明确哪些结论仍停留在关联层，不提供临床诊断或治疗建议。",
+          "source_ids": [
+            "H029S002",
+            "H029S003",
+            "H029S016",
+            "H029S017",
+            "H029S018",
+            "H029S019",
+            "H029S020"
+          ]
+        },
+        {
+          "section_id": "H029-SEC-07",
+          "title": "研究技术",
+          "body": "本专题的技术卡包括病例—对照脑组织设计、疾病组织单细胞与单核图谱、病理引导的空间转录组、转录—蛋白联合分型，以及扰动模型与体液标志物验证。方法组合取决于需要确认的是疾病相关细胞状态、空间分布还是可重复验证层。",
+          "source_ids": []
+        },
+        {
+          "section_id": "H029-SEC-08",
+          "title": "科研参考范围",
+          "body": "本页用于介绍神经退行性疾病细胞图谱与机制研究中的证据类型、验证边界和适用范围，不提供诊断、治疗或临床分层建议。",
+          "source_ids": []
+        }
+      ],
+      "methods": [
+        {
+          "method_id": "H029-M01",
+          "display_order": 1,
+          "category": "疾病样本设计",
+          "title": "病例—对照配对与病理分期",
+          "principle": "在明确诊断和病理分期的前提下，配对取样患病与对照脑组织，并记录年龄、性别、死后间隔、脑区和共病。",
+          "answers": "判断细胞状态变化是否与特定疾病阶段和脑区相关，而不是批次或取样偏倚。",
+          "sample_design": "预先定义纳入排除标准、病理评分方法和取样部位；保留独立验证队列。",
+          "limitations": "死后组织不能反映生前动态；对照匹配不完美会混淆年龄和疾病效应。",
+          "source_ids": [
+            "H029S001",
+            "H029S002",
+            "H029S003",
+            "H029S004"
+          ],
+          "workflow": "设计阶段先确定：预先定义纳入排除标准、病理评分方法和取样部位；保留独立验证队列。 记录样本来源、处理条件、读出指标和正交验证；把观察结果与预先定义的研究问题放在同一分析框架中比较。 这项方法的直接测量或计算依据是：在明确诊断和病理分期的前提下，配对取样患病与对照脑组织，并记录年龄、性别、死后间隔、脑区和共病。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：死后组织不能反映生前动态；对照匹配不完美会混淆年龄和疾病效应。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "结果可用于判断细胞状态变化是否与特定疾病阶段和脑区相关，而不是批次或取样偏倚。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        },
+        {
+          "method_id": "H029-M02",
+          "display_order": 2,
+          "category": "单细胞与单核图谱",
+          "title": "疾病组织 sc/snRNA-seq 与参考映射",
+          "principle": "对疾病和对照组织进行单细胞或单核转录组测序，并映射到公开脑细胞参考图谱以识别疾病相关状态。",
+          "answers": "发现哪些细胞类型或状态在疾病中富集、缺失或发生转录重编程。",
+          "sample_design": "记录参考版本、批次校正、双细胞过滤和映射置信度；关键状态用原位 RNA 或蛋白验证。",
+          "limitations": "核测序丢失胞质信号；参考映射可能把新状态错误归并到旧标签。",
+          "source_ids": [
+            "H029S004",
+            "H029S005",
+            "H029S006",
+            "H029S007"
+          ],
+          "workflow": "设计阶段先确定：记录参考版本、批次校正、双细胞过滤和映射置信度；关键状态用原位 RNA 或蛋白验证。 记录样本来源、处理条件、读出指标和正交验证；把观察结果与预先定义的研究问题放在同一分析框架中比较。 这项方法的直接测量或计算依据是：对疾病和对照组织进行单细胞或单核转录组测序，并映射到公开脑细胞参考图谱以识别疾病相关状态。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：核测序丢失胞质信号；参考映射可能把新状态错误归并到旧标签。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "结果可用于发现哪些细胞类型或状态在疾病中富集、缺失或发生转录重编程。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        },
+        {
+          "method_id": "H029-M03",
+          "display_order": 3,
+          "category": "空间组学",
+          "title": "病理分区引导的空间转录组",
+          "principle": "在空间上把细胞状态与淀粉样蛋白、tau、路易体或其他病理沉积区域对应，并保留层位和邻域关系。",
+          "answers": "检查疾病相关细胞状态是局限于病理邻近区，还是广泛分布于更大脑区。",
+          "sample_design": "同步病理染色、空间切片定位和邻域分析；报告切片厚度和配准质量。",
+          "limitations": "空间点位混合多个细胞；病理染色与分子切片不完全同位置。",
+          "source_ids": [
+            "H029S002",
+            "H029S003",
+            "H029S008",
+            "H029S018"
+          ],
+          "workflow": "设计阶段先确定：同步病理染色、空间切片定位和邻域分析；报告切片厚度和配准质量。 记录样本来源、处理条件、读出指标和正交验证；把观察结果与预先定义的研究问题放在同一分析框架中比较。 这项方法的直接测量或计算依据是：在空间上把细胞状态与淀粉样蛋白、tau、路易体或其他病理沉积区域对应，并保留层位和邻域关系。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：空间点位混合多个细胞；病理染色与分子切片不完全同位置。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "结果可用于检查疾病相关细胞状态是局限于病理邻近区，还是广泛分布于更大脑区。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        },
+        {
+          "method_id": "H029-M04",
+          "display_order": 4,
+          "category": "多模态与蛋白组",
+          "title": "转录—蛋白联合与疾病分型",
+          "principle": "联合转录组、蛋白组或其他分子层，在疾病队列中寻找可重复的细胞状态或分子亚型。",
+          "answers": "区分转录变化是否落实到蛋白层，以及是否存在跨疾病共享或特异分型。",
+          "sample_design": "配对样本、统一质控和独立队列验证；报告阴性结果和亚型稳定性。",
+          "limitations": "蛋白组覆盖度有限；亚型标签需要外部验证才能用于临床分层。",
+          "source_ids": [
+            "H029S009",
+            "H029S015",
+            "H029S016",
+            "H029S019"
+          ],
+          "workflow": "设计阶段先确定：配对样本、统一质控和独立队列验证；报告阴性结果和亚型稳定性。 记录样本来源、处理条件、读出指标和正交验证；把观察结果与预先定义的研究问题放在同一分析框架中比较。 这项方法的直接测量或计算依据是：联合转录组、蛋白组或其他分子层，在疾病队列中寻找可重复的细胞状态或分子亚型。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：蛋白组覆盖度有限；亚型标签需要外部验证才能用于临床分层。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "结果可用于区分转录变化是否落实到蛋白层，以及是否存在跨疾病共享或特异分型。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        },
+        {
+          "method_id": "H029-M05",
+          "display_order": 5,
+          "category": "机制验证",
+          "title": "扰动模型、体液标志物与独立队列复核",
+          "principle": "通过遗传或病理种子模型、神经元来源 cfDNA 或其他体液标志物，在组织图谱之外检验候选细胞状态或通路。",
+          "answers": "评估图谱关联能否推进到可重复的功能或体液读出。",
+          "sample_design": "报告模型来源、干预、读出和与人体样本的对应关系；体液研究保留前瞻性验证设计。",
+          "limitations": "体外或动物模型不等于人体效应；体液标志物不能恢复空间细胞信息。",
+          "source_ids": [
+            "H029S017",
+            "H029S018",
+            "H029S020",
+            "H029S014"
+          ],
+          "workflow": "设计阶段先确定：报告模型来源、干预、读出和与人体样本的对应关系；体液研究保留前瞻性验证设计。 记录样本来源、处理条件、读出指标和正交验证；把观察结果与预先定义的研究问题放在同一分析框架中比较。 这项方法的直接测量或计算依据是：通过遗传或病理种子模型、神经元来源 cfDNA 或其他体液标志物，在组织图谱之外检验候选细胞状态或通路。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：体外或动物模型不等于人体效应；体液标志物不能恢复空间细胞信息。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "结果可用于评估图谱关联能否推进到可重复的功能或体液读出。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        }
+      ],
+      "shared_findings": [
+        {
+          "finding_id": "H029-C01",
+          "display_order": 1,
+          "title": "疾病相关细胞状态必须与病理分区和脑区配对",
+          "shared_result": "阿尔茨海默病多区域图谱和 tau/淀粉样蛋白相关小胶质细胞研究表明，细胞状态变化高度依赖病理分区和取样脑区，脱离病理语境的转录差异难以解释。",
+          "research_use": "同步记录病理评分、脑区和参考映射版本；关键状态用原位验证。",
+          "boundary": "关联不等于致病驱动；不能把细胞状态直接写成治疗靶点。",
+          "source_ids": [
+            "H029S001",
+            "H029S002",
+            "H029S003",
+            "H029S008"
+          ]
+        },
+        {
+          "finding_id": "H029-C02",
+          "display_order": 2,
+          "title": "小胶质细胞和星形胶质细胞状态命名需要跨研究校准",
+          "shared_result": "多项 AD 小胶质细胞和星形胶质细胞研究揭示了疾病相关状态，但命名、标志物和队列差异导致跨研究比较困难。",
+          "research_use": "保留抗体面板、批次和病理分期；优先使用可重复的蛋白或空间标志物。",
+          "boundary": "状态标签是描述性工具，不是已证实的因果实体。",
+          "source_ids": [
+            "H029S005",
+            "H029S006",
+            "H029S007",
+            "H029S018"
+          ]
+        },
+        {
+          "finding_id": "H029-C03",
+          "display_order": 3,
+          "title": "帕金森病和其他退行性疾病需要疾病特异图谱",
+          "shared_result": "帕金森病脑组织和外周免疫研究、FTD 和泛神经退行性蛋白组研究都表明，不同疾病的细胞重组模式并不相同。",
+          "research_use": "按疾病、遗传背景和病理蛋白类型分别建图谱；避免跨疾病强制同名标签。",
+          "boundary": "一种疾病的细胞状态不能外推到另一种神经退行性疾病。",
+          "source_ids": [
+            "H029S009",
+            "H029S010",
+            "H029S013",
+            "H029S015"
+          ]
+        },
+        {
+          "finding_id": "H029-C04",
+          "display_order": 4,
+          "title": "验证层包括扰动模型、体液标志物和独立队列",
+          "shared_result": "tau 种子嵌合体、脉络丛免疫富集、神经元来源 cfDNA 和 SEA-AD 基准研究代表不同验证路径，可相互补充但各有边界。",
+          "research_use": "预先定义验证问题：机制、体液筛查还是队列复现；不同验证层分开报告。",
+          "boundary": "体外或体液结果不能代替组织空间图谱；基准结果不等于临床性能。",
+          "source_ids": [
+            "H029S017",
+            "H029S018",
+            "H029S019",
+            "H029S020"
+          ]
+        },
+        {
+          "finding_id": "H029-C05",
+          "display_order": 5,
+          "title": "参考图谱与疾病机制必须分层",
+          "shared_result": "脑细胞参考图谱提供坐标系，疾病研究描述的是相对参考的偏离。若目标是建立跨尺度参考，应使用 H028 专题；若目标是疾病验证，本页要求保留病理、对照和验证设计。",
+          "research_use": "引用 H028 参考版本并在疾病样本中报告偏离；机制结论需独立验证。",
+          "boundary": "图谱资源不等于疾病机制；本页不提供诊断或治疗建议。",
+          "source_ids": [
+            "H029S002",
+            "H029S003",
+            "H029S016",
+            "H029S019"
+          ]
+        }
+      ],
+      "references": [
+        {
+          "source_id": "H029S001",
+          "title": "SEA-AD is a multimodal cellular atlas and resource for Alzheimer's disease.",
+          "authors": "Hawrylycz M et al.",
+          "journal": "Nat Aging",
+          "published_date": "2024 Oct",
+          "doi": "10.1038/s43587-024-00719-8",
+          "pmid": "39402332",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/39402332/",
+          "source_type": "primary_research",
+          "study_context": "human AD brain",
+          "study_design": "SEA-AD multimodal atlas",
+          "usable_for": "disease cell atlas resource",
+          "limitations": "atlas with pathology pairing"
+        },
+        {
+          "source_id": "H029S002",
+          "title": "Single-cell multiregion dissection of Alzheimer's disease.",
+          "authors": "Mathys H et al.",
+          "journal": "Nature",
+          "published_date": "2024 Aug",
+          "doi": "10.1038/s41586-024-07606-7",
+          "pmid": "39048816",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/39048816/",
+          "source_type": "primary_research",
+          "study_context": "human AD brain",
+          "study_design": "multiregion single-cell dissection",
+          "usable_for": "region-specific disease states",
+          "limitations": "human postmortem"
+        },
+        {
+          "source_id": "H029S003",
+          "title": "Single-cell atlas reveals correlates of high cognitive function, dementia, and resilience to Alzheimer's disease pathology.",
+          "authors": "Mathys H et al.",
+          "journal": "Cell",
+          "published_date": "2023 Sep 2",
+          "doi": "10.1016/j.cell.2023.08.039",
+          "pmid": "37774677",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/37774677/",
+          "source_type": "primary_research",
+          "study_context": "human ageing and AD",
+          "study_design": "cognitive function cell atlas",
+          "usable_for": "resilience and dementia correlates",
+          "limitations": "association with cognitive endpoints"
+        },
+        {
+          "source_id": "H029S004",
+          "title": "Single-cell transcriptomic analysis of Alzheimer's disease.",
+          "authors": "Mathys H et al.",
+          "journal": "Nature",
+          "published_date": "2019 Jun",
+          "doi": "10.1038/s41586-019-1195-2",
+          "pmid": "31042697",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/31042697/",
+          "source_type": "primary_research",
+          "study_context": "human AD brain",
+          "study_design": "single-cell transcriptomics",
+          "usable_for": "early disease cell programs",
+          "limitations": "foundational disease atlas"
+        },
+        {
+          "source_id": "H029S005",
+          "title": "Single-nucleus transcriptome analysis reveals dysregulation of angiogenic endothelial cells and neuroprotective glia in Alzheimer's disease.",
+          "authors": "Lau SF et al.",
+          "journal": "Proc Natl Acad Sci U S A",
+          "published_date": "2020 Oct 1",
+          "doi": "10.1073/pnas.2008762117",
+          "pmid": "32989152",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/32989152/",
+          "source_type": "primary_research",
+          "study_context": "human AD brain",
+          "study_design": "single-nucleus endothelial study",
+          "usable_for": "vascular cell dysregulation",
+          "limitations": "nuclei-based"
+        },
+        {
+          "source_id": "H029S006",
+          "title": "Single cell RNA sequencing of human microglia uncovers a subset associated with Alzheimer's disease.",
+          "authors": "Olah M et al.",
+          "journal": "Nat Commun",
+          "published_date": "2020 Nov 3",
+          "doi": "10.1038/s41467-020-19737-2",
+          "pmid": "33257666",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/33257666/",
+          "source_type": "primary_research",
+          "study_context": "human microglia",
+          "study_design": "AD-associated microglia subset",
+          "usable_for": "disease-associated microglia",
+          "limitations": "subset definition"
+        },
+        {
+          "source_id": "H029S007",
+          "title": "Microglia in Alzheimer's disease at single-cell level. Are there common patterns in humans and mice?",
+          "authors": "Chen Y et al.",
+          "journal": "J Exp Med",
+          "published_date": "2021 Sep 6",
+          "doi": "10.1084/jem.20202717",
+          "pmid": "34292312",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/34292312/",
+          "source_type": "primary_research",
+          "study_context": "human AD brain",
+          "study_design": "microglia single-cell patterns",
+          "usable_for": "cross-study microglia patterns",
+          "limitations": "review of patterns"
+        },
+        {
+          "source_id": "H029S008",
+          "title": "Distinct amyloid-β and tau-associated microglia profiles in Alzheimer's disease.",
+          "authors": "Gerrits E et al.",
+          "journal": "Acta Neuropathol",
+          "published_date": "2021 May",
+          "doi": "10.1007/s00401-021-02263-w",
+          "pmid": "33609158",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/33609158/",
+          "source_type": "primary_research",
+          "study_context": "human AD brain",
+          "study_design": "Abeta and tau microglia profiles",
+          "usable_for": "pathology-associated microglia",
+          "limitations": "pathology pairing"
+        },
+        {
+          "source_id": "H029S009",
+          "title": "Single-cell transcriptomic and proteomic analysis of Parkinson's disease brains.",
+          "authors": "Zhu B et al.",
+          "journal": "Sci Transl Med",
+          "published_date": "2024 Oct 3",
+          "doi": "10.1126/scitranslmed.abo1997",
+          "pmid": "39475571",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/39475571/",
+          "source_type": "primary_research",
+          "study_context": "human PD brain",
+          "study_design": "single-cell transcriptomic and proteomic",
+          "usable_for": "PD brain cell states",
+          "limitations": "multimodal disease atlas"
+        },
+        {
+          "source_id": "H029S010",
+          "title": "Neurovascular dysfunction in GRN-associated frontotemporal dementia identified by single-nucleus RNA sequencing of human cerebral cortex.",
+          "authors": "Gerrits E et al.",
+          "journal": "Nat Neurosci",
+          "published_date": "2022 Aug",
+          "doi": "10.1038/s41593-022-01124-3",
+          "pmid": "35879464",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/35879464/",
+          "source_type": "primary_research",
+          "study_context": "human FTD",
+          "study_design": "GRN-associated neurovascular dysfunction",
+          "usable_for": "FTD snRNA-seq",
+          "limitations": "genetic subtype context"
+        },
+        {
+          "source_id": "H029S011",
+          "title": "Pan-neurodegeneration proteomics reveals disease subtypes and molecular signatures.",
+          "authors": "Shrestha HK et al.",
+          "journal": "Cell",
+          "published_date": "2026 May 1",
+          "doi": "10.1016/j.cell.2026.02.026",
+          "pmid": "41875888",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/41875888/",
+          "source_type": "primary_research",
+          "study_context": "neurodegeneration cohort",
+          "study_design": "pan-neurodegeneration proteomics",
+          "usable_for": "disease subtypes",
+          "limitations": "proteomic stratification"
+        },
+        {
+          "source_id": "H029S012",
+          "title": "Single-cell peripheral immunoprofiling of lewy body and Parkinson's disease in a multi-site cohort.",
+          "authors": "Phongpreecha T et al.",
+          "journal": "Mol Neurodegener",
+          "published_date": "2024 Aug 1",
+          "doi": "10.1186/s13024-024-00748-2",
+          "pmid": "39090623",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/39090623/",
+          "source_type": "primary_research",
+          "study_context": "human PD cohort",
+          "study_design": "peripheral immunoprofiling",
+          "usable_for": "Lewy body and PD immune context",
+          "limitations": "peripheral not brain tissue"
+        },
+        {
+          "source_id": "H029S013",
+          "title": "Transcriptomics of Human Brain Tissue in Parkinson's Disease: a Comparison of Bulk and Single-cell RNA Sequencing.",
+          "authors": "Fiorini MR et al.",
+          "journal": "Mol Neurobiol",
+          "published_date": "2024 Nov",
+          "doi": "10.1007/s12035-024-04124-5",
+          "pmid": "38578357",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/38578357/",
+          "source_type": "primary_research",
+          "study_context": "human PD brain",
+          "study_design": "bulk versus single-cell transcriptomics",
+          "usable_for": "method comparison in PD",
+          "limitations": "design comparison"
+        },
+        {
+          "source_id": "H029S014",
+          "title": "TTN(+) macrophages are enriched in the human choroid plexus in Alzheimer's disease.",
+          "authors": "Bhatta S et al.",
+          "journal": "Cell Rep",
+          "published_date": "2026 Aug 1",
+          "doi": "10.1016/j.celrep.2026.117859",
+          "pmid": "42599802",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/42599802/",
+          "source_type": "primary_research",
+          "study_context": "human AD brain",
+          "study_design": "choroid plexus macrophages",
+          "usable_for": "TTN+ macrophage enrichment",
+          "limitations": "region-specific immune"
+        },
+        {
+          "source_id": "H029S015",
+          "title": "Disruption of hippocampal upstream regulators of mTOR and insulin pathways in Down syndrome with Alzheimer's disease neuropathology: Preliminary observations.",
+          "authors": "Nordbeck AJ et al.",
+          "journal": "Alzheimers Dement",
+          "published_date": "2026 Aug",
+          "doi": "10.1002/alz.71776",
+          "pmid": "42635110",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/42635110/",
+          "source_type": "primary_research",
+          "study_context": "human AD brain",
+          "study_design": "hippocampal pathway regulators",
+          "usable_for": "mTOR and insulin upstream changes",
+          "limitations": "mechanistic association"
+        },
+        {
+          "source_id": "H029S016",
+          "title": "Patient-derived tau-seeded human neuronal chimeras recapitulate mature Alzheimer's tau pathology and uncover human-specific neuronal vulnerability.",
+          "authors": "Ji Y et al.",
+          "journal": "bioRxiv",
+          "published_date": "2026 Jul 9",
+          "doi": "10.64898/2026.07.06.736894",
+          "pmid": "42465485",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/42465485/",
+          "source_type": "primary_research",
+          "study_context": "human AD model",
+          "study_design": "tau-seeded neuronal chimeras",
+          "usable_for": "mature AD pathology modeling",
+          "limitations": "in vitro validation"
+        },
+        {
+          "source_id": "H029S017",
+          "title": "Single-cell transcriptomic atlas of frontoinsular cortex reveals molecular correlates of selective neuronal vulnerability in FTD.",
+          "authors": "Breevoort A et al.",
+          "journal": "bioRxiv",
+          "published_date": "2026 Jul 1",
+          "doi": "10.64898/2026.07.13.738307",
+          "pmid": "42523377",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/42523377/",
+          "source_type": "primary_research",
+          "study_context": "human FTD cortex",
+          "study_design": "frontoinsular cortex atlas",
+          "usable_for": "FTD molecular correlates",
+          "limitations": "region-specific disease atlas"
+        },
+        {
+          "source_id": "H029S018",
+          "title": "The SEA-AD DREAM Challenge: Community benchmarking human and AI agent solutions for Alzheimer's disease neuropathology prediction from single-nucleus transcriptomics.",
+          "authors": "Lai HY et al.",
+          "journal": "bioRxiv",
+          "published_date": "2026 Aug 1",
+          "doi": "10.64898/2026.07.02.736180",
+          "pmid": "42465286",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/42465286/",
+          "source_type": "primary_research",
+          "study_context": "AD benchmark",
+          "study_design": "SEA-AD DREAM challenge",
+          "usable_for": "community benchmarking",
+          "limitations": "methods benchmark not mechanism"
+        },
+        {
+          "source_id": "H029S019",
+          "title": "Circulating neuron-derived cfDNA for blood-based detection of Alzheimer's and other neurodegenerative conditions.",
+          "authors": "Pollard C et al.",
+          "journal": "Front Neurol",
+          "published_date": "2026",
+          "doi": "10.3389/fneur.2026.1822479",
+          "pmid": "42626456",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/42626456/",
+          "source_type": "primary_research",
+          "study_context": "human blood",
+          "study_design": "neuron-derived cfDNA",
+          "usable_for": "blood-based AD detection",
+          "limitations": "fluid biomarker layer"
+        },
+        {
+          "source_id": "H029S020",
+          "title": "HSPA8 orchestrates SNARE complex assembly to drive extracellular vesicle-mediated spread of p-tau217 in Alzheimer's disease.",
+          "authors": "Xu B et al.",
+          "journal": "Transl Neurodegener",
+          "published_date": "2026 Aug 2",
+          "doi": "10.1186/s40035-026-00570-4",
+          "pmid": "42661225",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/42661225/",
+          "source_type": "primary_research",
+          "study_context": "neurodegeneration model",
+          "study_design": "HSPA8 and EV-mediated pathology",
+          "usable_for": "mechanistic pathway study",
+          "limitations": "model-specific mechanism"
+        }
+      ]
+    }
+  ]
+}

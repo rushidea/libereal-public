@@ -1,0 +1,144 @@
+.page {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 48rpx;
+  background: linear-gradient(180deg, #f0fdf4 0%, #f6f7fb 100%);
+  box-sizing: border-box;
+}
+
+.card {
+  width: 100%;
+  padding: 56rpx 40rpx;
+  border-radius: 36rpx;
+  background: #ffffff;
+  box-shadow: 0 24rpx 80rpx rgba(15, 23, 42, 0.08);
+  text-align: center;
+}
+
+.brand-logo {
+  display: block;
+  width: 132rpx;
+  height: 164rpx;
+  margin: 0 auto 24rpx;
+}
+
+.title {
+  color: #111827;
+  font-size: 40rpx;
+  font-weight: 700;
+  margin-bottom: 18rpx;
+}
+
+.desc {
+  color: #6b7280;
+  font-size: 28rpx;
+  line-height: 1.6;
+  margin-bottom: 32rpx;
+}
+
+.challenge {
+  margin-bottom: 32rpx;
+  padding: 24rpx;
+  border-radius: 24rpx;
+  background: #f9fafb;
+  text-align: left;
+}
+
+.challenge-label {
+  color: #6b7280;
+  font-size: 24rpx;
+  margin-bottom: 8rpx;
+}
+
+.challenge-value {
+  color: #111827;
+  font-size: 24rpx;
+  line-height: 1.4;
+  word-break: break-all;
+}
+
+.manual {
+  margin-bottom: 32rpx;
+}
+
+.manual-input {
+  height: 88rpx;
+  margin-bottom: 20rpx;
+  padding: 0 24rpx;
+  border-radius: 20rpx;
+  background: #f9fafb;
+  color: #111827;
+  font-size: 28rpx;
+  text-align: left;
+}
+
+.login-button {
+  background: #07c160 !important;
+  border-radius: 24rpx;
+}
+
+.secondary-button {
+  margin-top: 24rpx;
+  border-radius: 24rpx;
+  color: #07c160;
+  background: #f0fdf4;
+}
+
+.review-panel {
+  text-align: left;
+}
+
+.review-title {
+  color: #111827;
+  font-size: 30rpx;
+  font-weight: 700;
+  margin-bottom: 12rpx;
+}
+
+.review-desc {
+  color: #6b7280;
+  font-size: 24rpx;
+  line-height: 1.6;
+  margin-bottom: 24rpx;
+}
+
+.review-message {
+  margin-top: 20rpx;
+  color: #b45309;
+  font-size: 24rpx;
+  line-height: 1.6;
+}
+
+.review-message.success {
+  color: #047857;
+}
+
+.direct-entry {
+  margin-bottom: 32rpx;
+  padding: 28rpx;
+  border-radius: 24rpx;
+  background: #f9fafb;
+  text-align: left;
+}
+
+.direct-title {
+  color: #111827;
+  font-size: 30rpx;
+  font-weight: 700;
+  margin-bottom: 12rpx;
+}
+
+.direct-desc {
+  color: #6b7280;
+  font-size: 26rpx;
+  line-height: 1.6;
+}
+
+.tips {
+  margin-top: 28rpx;
+  color: #047857;
+  font-size: 26rpx;
+  line-height: 1.6;
+}

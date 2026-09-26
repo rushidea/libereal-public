@@ -1,0 +1,1146 @@
+{
+  "schema_version": "research-deep-dive-public-v0.1",
+  "batch_id": "B01",
+  "title": "肿瘤生态与克隆演化",
+  "publication_status": "snapshot_ready",
+  "frontend_status": "snapshot_ready",
+  "topics": [
+    {
+      "topic_id": "H025",
+      "title": "肿瘤异质性与微环境生态",
+      "topic_role": "research_deep_dive",
+      "overview": "同一肿瘤在不同区域、不同患者和不同治疗阶段可以呈现不同的细胞组成与组织关系，但传统整块组织测量会把实质、边缘、间质和血管周围信号平均在一起。研究者因此难以判断：局部差异来自克隆、来自细胞状态，还是来自组织结构；原发灶与转移灶、治疗前后的生态是否仍可用同一框架描述。单细胞测序、空间转录组和多重成像把细胞身份放回组织坐标后，完整局部生态才成为可以检验的研究对象。\n\n本方向从多区域取样、空间组学图谱和单细胞状态映射出发，集中处理三类研究问题：同一病灶内多种差异如何分层解释；哪些细胞—基质—血管组合在多种癌症中重复出现、哪些必须保留器官与基因型语境；当部位或治疗阶段改变时，生态组成如何移动。由此可以把恶性细胞、免疫、基质、血管和其他组织细胞放在同一组织坐标系里比较，而不是把某一类细胞单独当作肿瘤的全部背景。\n\n比较公开研究时，需要同时交代取样区域、组织学边界、细胞分型依据、癌症类型和治疗阶段。跨癌种重复出现的程序或组合，仍须回到具体器官和病灶才能解释。免疫进入与三级淋巴结构由空间免疫专题处理；带时间或谱系证据的克隆传播由克隆演化专题处理。",
+      "sections": [
+        {
+          "section_id": "H025-SEC-01",
+          "title": "比较不同研究时应先看什么",
+          "body": "| 比较内容 | 应记录的信息 | 关系到什么判断 |\n| --- | --- | --- |\n| 异质性层级 | 基因组亚克隆、转录或蛋白状态、细胞组成、组织结构 | 观察到的是克隆差异、细胞状态差异，还是组织结构差异 |\n| 组织位置 | 肿瘤实质、侵袭边缘、间质、血管周围、坏死或低氧区 | 同一组成在不同位置是否对应不同组织关系 |\n| 细胞成分 | 恶性细胞、免疫细胞、成纤维细胞、内皮细胞和其他组织细胞 | 局部生态由哪些成分组成，各自如何被鉴定 |\n| 疾病语境 | 癌症类型、分期、原发或转移部位、既往治疗 | 跨样本比较是否处于同一器官和治疗阶段 |\n| 研究系统 | 患者组织、动物模型、类器官或其他患者来源模型 | 结果来自观察图谱还是功能扰动 |",
+          "source_ids": []
+        },
+        {
+          "section_id": "H025-SEC-02",
+          "title": "恶性细胞状态与局部生态共同变化",
+          "body": "跨癌种单细胞RNA测序（scRNA-seq）分析显示，若干恶性细胞状态可以在多种肿瘤中重复出现，并与特定的局部免疫或基质组合相连。人体肿瘤图谱网络（HTAN）在六种癌症的二维和三维空间中，也观察到克隆区域、微区和邻域组成可以共同变化。\n\n跨癌种重复出现不等于该程序在每一种癌症内部普遍存在。肺腺癌中与 TP53 相关的多细胞生态、结直肠肿瘤进展相关的空间格局，以及黑色素瘤模型中血管周围状态与生长能力的关系，都要保留各自的器官和基因型范围。克隆注释若来自推断而非直接基因型测量，需要在结果中标明。",
+          "source_ids": [
+            "H025S001",
+            "B01S005",
+            "B01S006",
+            "B01S007",
+            "B01S009",
+            "B01S010",
+            "H025S010"
+          ]
+        },
+        {
+          "section_id": "H025-SEC-03",
+          "title": "免疫、基质和血管是生态的组成部分",
+          "body": "结直肠癌全标本多重成像、胰腺导管腺癌的邻近分区和跨癌种人体肿瘤图谱均显示，免疫细胞、成纤维细胞、内皮细胞与恶性状态可以形成可重复的局部组合。本页把这些成分放在同一生态单位里比较。研究问题以免疫进入或三级淋巴结构为主时，应使用空间免疫专题。\n\n胰腺导管腺癌中肿瘤邻近与远离区域的成纤维细胞和免疫分区、结直肠癌的肿瘤—基质边界，以及黑色素瘤免疫治疗抵抗语境中的微环境结构，不能使用同一细胞比例阈值互相替换。细胞身份需要抗体、转录或空间原位依据，不能只依赖聚类标签。",
+          "source_ids": [
+            "B01S006",
+            "H025S002",
+            "H025S004",
+            "H025S006",
+            "B01S009",
+            "H025S011",
+            "H025S012"
+          ]
+        },
+        {
+          "section_id": "H025-SEC-04",
+          "title": "组成相近的区域仍可能具有不同组织关系",
+          "body": "细胞组成统计回答的是这里有哪些细胞。空间微区还取决于边界、梯度、细胞邻接和三维结构。人体肿瘤图谱的连续切片重建和结直肠癌三维成像表明，组成相似的切面可以呈现不同的界面和距离关系。\n\n一张切片上的邻域不能代表整个病灶。连续切片配准、三维重建和全标本成像可以补充二维切面，其误差和覆盖范围仍需单独报告。空间共现用于提出组织关系假设，不能单独证明细胞直接接触或调控因果。",
+          "source_ids": [
+            "B01S006",
+            "H025S002",
+            "B01S010",
+            "H025S006"
+          ]
+        },
+        {
+          "section_id": "H025-SEC-05",
+          "title": "原发灶、淋巴结和转移灶不能简单合并",
+          "body": "乳腺癌原发灶与腋窝淋巴结、多灶性乳腺癌的导管原位癌至淋巴结转移，以及结直肠肿瘤的空间制图均显示，不同解剖部位可以保持部分转录程序，细胞组合和状态也会随器官环境改变。跨部位合并会把这些差异写成同一种生态。\n\n配对样本需要标明患者关系、病灶部位、取样时间和既往治疗。血液中的循环细胞或单次淋巴结取样，不能代替当前转移灶的组织生态。若核心证据是克隆播散路线或治疗选择，应使用克隆演化专题。",
+          "source_ids": [
+            "B01S006",
+            "B01S007",
+            "H025S007",
+            "B01S010"
+          ]
+        },
+        {
+          "section_id": "H025-SEC-06",
+          "title": "治疗相关重塑需要时间点和正交验证",
+          "body": "胰腺导管腺癌新辅助治疗后的空间邻域变化、结直肠癌肿瘤—基质边界、黑色素瘤抵抗语境和复发难治霍奇金淋巴瘤的空间微环境研究，都把治疗方案和采样时间写入设计。临床试验相关分析中的空间特征是机制线索，关联不等于干预效应。\n\n类器官共培养、扰动和谱系模型可以检验部分候选关系。模型结果仍要与人体组织观察分开表述。基于空间转录组的药物反应推断需要标明为计算预测。治疗相关空间变化用于提出生态重塑假设，不能写成疗效预测或个体化医疗建议。",
+          "source_ids": [
+            "H025S005",
+            "B01S009",
+            "H025S009",
+            "H025S011",
+            "H025S012",
+            "H025S013",
+            "H025S014",
+            "H025S015"
+          ]
+        },
+        {
+          "section_id": "H025-SEC-07",
+          "title": "研究技术",
+          "body": "本专题的技术卡包括多区域取样与组织学坐标系、测序型空间转录组与生态组成估计、多重成像与三维组织结构、单细胞状态定义与组织映射，以及类器官共培养与微环境扰动。它们分别回答样本对应哪一块组织、局部由哪些细胞组成、结构关系如何测量，以及图谱关系能否在简化系统中被扰动。",
+          "source_ids": []
+        },
+        {
+          "section_id": "H025-SEC-08",
+          "title": "科研参考范围",
+          "body": "本页仅供科研参考，不提供治疗选择、疗效承诺或个体化医疗建议。",
+          "source_ids": []
+        }
+      ],
+      "methods": [
+        {
+          "method_id": "H025-M001",
+          "display_order": 1,
+          "category": "样本设计",
+          "title": "多区域取样与组织学坐标系",
+          "principle": "在测量前按病理区域定义肿瘤实质、侵袭边缘、间质、血管周围和坏死或低氧区，并保留切片方向、保存方式和相邻切片关系。",
+          "answers": "用于判断后续细胞组成和分子状态对应哪一块组织，避免把整块肿瘤的平均信号当作局部生态。",
+          "sample_design": "预先规定取样部位、冷缺血时间、保存方式、切片厚度、染色和相邻切片策略；由病理人员确认区域边界，并记录原发或转移部位。",
+          "limitations": "一张切片不能代表整个病灶；相邻切片中的细胞并非同一细胞。区域标注误差会把基质信号写入实质。",
+          "source_ids": [
+            "B01S001",
+            "B01S002",
+            "B01S006",
+            "H025S006"
+          ],
+          "workflow": "设计阶段先确定：预先规定取样部位、冷缺血时间、保存方式、切片厚度、染色和相邻切片策略；由病理人员确认区域边界，并记录原发或转移部位。  记录取样区域、组织学标注、细胞分型依据、空间或单细胞平台和正交验证；把恶性状态、免疫/基质/血管组成和组织结构放在同一组织坐标系里比较。 这项方法的直接测量或计算依据是：在测量前按病理区域定义肿瘤实质、侵袭边缘、间质、血管周围和坏死或低氧区，并保留切片方向、保存方式和相邻切片关系。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：一张切片不能代表整个病灶；相邻切片中的细胞并非同一细胞。区域标注误差会把基质信号写入实质。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "结果可用于判断后续细胞组成和分子状态对应哪一块组织，避免把整块肿瘤的平均信号当作局部生态。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        },
+        {
+          "method_id": "H025-M002",
+          "display_order": 2,
+          "category": "空间转录组",
+          "title": "测序型空间转录组与生态组成估计",
+          "principle": "在带空间条形码的区域捕获RNA，再以测序读出转录本和坐标；必要时用单细胞参考估计混合点位中的恶性、免疫、基质和血管组成。",
+          "answers": "用于比较不同组织微区的转录程序和细胞组成，并提出跨区域重复出现的生态单位。",
+          "sample_design": "根据预期细胞大小、组织结构和预算选择点位或高密度捕获；设计生物学重复、单细胞参考和病理配准。",
+          "limitations": "一个点位可能含多个细胞；标称像素大小不等于细胞级解析度。去卷积得到的是组成估计，不能单独证明细胞接触。",
+          "source_ids": [
+            "B01S001",
+            "B01S006",
+            "H025S001",
+            "H025S011"
+          ],
+          "workflow": "设计阶段先确定：根据预期细胞大小、组织结构和预算选择点位或高密度捕获；设计生物学重复、单细胞参考和病理配准。  记录取样区域、组织学标注、细胞分型依据、空间或单细胞平台和正交验证；把恶性状态、免疫/基质/血管组成和组织结构放在同一组织坐标系里比较。 这项方法的直接测量或计算依据是：在带空间条形码的区域捕获RNA，再以测序读出转录本和坐标；必要时用单细胞参考估计混合点位中的恶性、免疫、基质和血管组成。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：一个点位可能含多个细胞；标称像素大小不等于细胞级解析度。去卷积得到的是组成估计，不能单独证明细胞接触。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "结果可用于比较不同组织微区的转录程序和细胞组成，并提出跨区域重复出现的生态单位。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        },
+        {
+          "method_id": "H025-M003",
+          "display_order": 3,
+          "category": "空间蛋白成像",
+          "title": "多重成像与三维组织结构",
+          "principle": "循环免疫荧光、索引共检测技术（CODEX）或高倍多重成像在同一张切片上识别恶性细胞、免疫细胞、成纤维细胞和血管，并可对全标本或连续切片做三维重建。",
+          "answers": "用于测量细胞密度、相互距离、边界和局部细胞组合，并把二维切面放到三维组织结构中检查。",
+          "sample_design": "抗体或探针面板同时覆盖恶性状态、基质、内皮和免疫身份；视野按病理区域分层，报告三维配准误差和覆盖体积。",
+          "limitations": "结果依赖抗体特异性、表位保存和细胞分割。空间邻近提示组织关系，不能单独证明功能或治疗反应。",
+          "source_ids": [
+            "H025S002",
+            "H025S004",
+            "H025S006",
+            "B01S006"
+          ],
+          "workflow": "设计阶段先确定：抗体或探针面板同时覆盖恶性状态、基质、内皮和免疫身份；视野按病理区域分层，报告三维配准误差和覆盖体积。  记录取样区域、组织学标注、细胞分型依据、空间或单细胞平台和正交验证；把恶性状态、免疫/基质/血管组成和组织结构放在同一组织坐标系里比较。 这项方法的直接测量或计算依据是：循环免疫荧光、索引共检测技术（CODEX）或高倍多重成像在同一张切片上识别恶性细胞、免疫细胞、成纤维细胞和血管，并可对全标本或连续切片做三维重建。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：结果依赖抗体特异性、表位保存和细胞分割。空间邻近提示组织关系，不能单独证明功能或治疗反应。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "结果可用于测量细胞密度、相互距离、边界和局部细胞组合，并把二维切面放到三维组织结构中检查。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        },
+        {
+          "method_id": "H025-M004",
+          "display_order": 4,
+          "category": "单细胞多模态",
+          "title": "单细胞状态定义与组织映射",
+          "principle": "单细胞或单核转录组、必要时联合表面蛋白或染色质读出，先定义恶性及非恶性细胞状态，再映射回空间切片。",
+          "answers": "用于区分表型接近的恶性程序、成纤维细胞或免疫状态，并判断这些状态偏向实质、边缘还是血管周围。",
+          "sample_design": "单细胞参考和空间切片尽量来自同一病灶或可比较队列；记录解离方案、细胞核与完整细胞差异、批次和取样区域。",
+          "limitations": "组织解离会丢失空间关系，并可能选择性损失脆弱细胞。计算映射是模型估计，需要原位RNA或蛋白成像确认。",
+          "source_ids": [
+            "H025S001",
+            "H025S007",
+            "H025S010",
+            "H025S012"
+          ],
+          "workflow": "设计阶段先确定：单细胞参考和空间切片尽量来自同一病灶或可比较队列；记录解离方案、细胞核与完整细胞差异、批次和取样区域。  记录取样区域、组织学标注、细胞分型依据、空间或单细胞平台和正交验证；把恶性状态、免疫/基质/血管组成和组织结构放在同一组织坐标系里比较。 这项方法的直接测量或计算依据是：单细胞或单核转录组、必要时联合表面蛋白或染色质读出，先定义恶性及非恶性细胞状态，再映射回空间切片。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：组织解离会丢失空间关系，并可能选择性损失脆弱细胞。计算映射是模型估计，需要原位RNA或蛋白成像确认。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "结果可用于区分表型接近的恶性程序、成纤维细胞或免疫状态，并判断这些状态偏向实质、边缘还是血管周围。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        },
+        {
+          "method_id": "H025-M005",
+          "display_order": 5,
+          "category": "功能验证",
+          "title": "类器官共培养与微环境扰动",
+          "principle": "患者来源类器官、肿瘤—基质共培养或谱系模型在可控制条件下改变候选细胞或通路，再用空间或单细胞读出检查局部组成是否随之变化。",
+          "answers": "用于检验图谱提出的生态关系在简化系统中是否可被扰动，并与人体组织观察对照。",
+          "sample_design": "报告模型来源、干预、读出、培养时间和与患者样本的对应关系；保留未处理对照和独立重复。",
+          "limitations": "培养会选择部分细胞群，通常缺少完整血管和系统性免疫。模型中的因果关系不能直接写成人体治疗结论。",
+          "source_ids": [
+            "H025S005",
+            "B01S009",
+            "H025S009"
+          ],
+          "workflow": "设计阶段先确定：报告模型来源、干预、读出、培养时间和与患者样本的对应关系；保留未处理对照和独立重复。  记录取样区域、组织学标注、细胞分型依据、空间或单细胞平台和正交验证；把恶性状态、免疫/基质/血管组成和组织结构放在同一组织坐标系里比较。 这项方法的直接测量或计算依据是：患者来源类器官、肿瘤—基质共培养或谱系模型在可控制条件下改变候选细胞或通路，再用空间或单细胞读出检查局部组成是否随之变化。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：培养会选择部分细胞群，通常缺少完整血管和系统性免疫。模型中的因果关系不能直接写成人体治疗结论。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "结果可用于检验图谱提出的生态关系在简化系统中是否可被扰动，并与人体组织观察对照。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        }
+      ],
+      "shared_findings": [
+        {
+          "finding_id": "H025-C01",
+          "display_order": 1,
+          "title": "若干恶性细胞状态可在多种癌症中重复出现，并与局部组成共同变化",
+          "shared_result": "跨癌种单细胞分析显示若干恶性程序可以在多种肿瘤中重复出现，并与特定的局部免疫或基质组合相连。人体肿瘤图谱在六种癌症中也观察到克隆区域、微区和邻域组成可以共同变化。\n\n跨癌种重复出现不等于该程序在每一种癌症内部普遍存在。肺腺癌中与 TP53 相关的多细胞生态和结直肠肿瘤的进展相关格局，需要保留器官和基因型范围。",
+          "research_use": "记录癌症类型、分期、原发或转移部位、取样区域，以及恶性状态是直接基因型测量还是转录推断；将单细胞状态与空间邻域配对。",
+          "boundary": "静态转录差异本身不能写成克隆演化。单病种图谱中的细胞组合不能外推为通用肿瘤微环境阈值。",
+          "source_ids": [
+            "H025S001",
+            "B01S005",
+            "B01S006",
+            "B01S010",
+            "H025S010"
+          ]
+        },
+        {
+          "finding_id": "H025-C02",
+          "display_order": 2,
+          "title": "局部生态由恶性细胞、免疫、成纤维细胞和血管共同组成",
+          "shared_result": "结直肠癌三维图谱、胰腺导管腺癌邻近分区和跨癌种人体肿瘤图谱均显示，免疫、成纤维细胞、血管与恶性状态可以形成可重复的局部组合。这些组合是完整生态的组成部分。\n\n胰腺导管腺癌中肿瘤邻近与远离区域的分区、结直肠癌的肿瘤—基质边界，以及黑色素瘤抵抗语境中的微环境结构，不能使用同一细胞比例阈值互相替换。",
+          "research_use": "预先定义实质、边缘、间质和血管周围区域；用多重成像或空间转录组记录细胞分型依据，并覆盖恶性、基质、内皮和免疫身份。",
+          "boundary": "研究问题以免疫进入或三级淋巴结构为主时，应使用空间免疫专题。可重复的局部组合仍受器官纤维化和边界结构约束。",
+          "source_ids": [
+            "B01S006",
+            "H025S002",
+            "H025S004",
+            "H025S006",
+            "H025S011"
+          ]
+        },
+        {
+          "finding_id": "H025-C03",
+          "display_order": 3,
+          "title": "细胞组成相近的区域仍可能具有不同的边界和邻接关系",
+          "shared_result": "人体肿瘤图谱的连续切片重建和结直肠癌三维成像表明，空间微区还取决于边界、梯度、细胞邻接和组织结构。细胞组成统计与空间关系是两类读出。\n\n一张切片上的邻域不能代表整个病灶。三维配准可以补充二维切面，其误差和覆盖范围仍需单独报告。",
+          "research_use": "保留组织学标注、距离或邻域算法、切片顺序和配准质量；关键边界用相邻切片或独立成像复核。",
+          "boundary": "空间共现和梯度用于提出组织关系假设，不能单独证明细胞直接接触或调控因果。",
+          "source_ids": [
+            "B01S006",
+            "H025S002",
+            "B01S010",
+            "H025S006"
+          ]
+        },
+        {
+          "finding_id": "H025-C04",
+          "display_order": 4,
+          "title": "原发灶、淋巴结和远处转移灶的生态特征必须按部位分别比较",
+          "shared_result": "乳腺癌淋巴结转移、多灶性乳腺癌空间基因组学和结直肠肿瘤空间制图均显示，不同解剖部位可以保持部分程序，细胞组合和状态也会随器官环境改变。跨部位合并会掩盖这些差异。\n\n配对样本需要标明患者关系、病灶部位、取样时间和既往治疗。血液中的循环细胞或单次淋巴结取样，不能代替当前转移灶的组织生态。",
+          "research_use": "同一患者的原发灶与转移灶配对、多区域覆盖和一致的细胞分型流程；报告无法配对或处理方式不同的样本。",
+          "boundary": "部位差异属于生态观察。若核心证据是克隆播散路线或治疗选择，应使用克隆演化专题。",
+          "source_ids": [
+            "B01S006",
+            "B01S007",
+            "H025S007",
+            "B01S010"
+          ]
+        },
+        {
+          "finding_id": "H025-C05",
+          "display_order": 5,
+          "title": "治疗相关的生态重塑需要明确方案、采样时间和独立验证",
+          "shared_result": "胰腺导管腺癌新辅助治疗后的空间邻域变化、结直肠癌肿瘤—基质边界、黑色素瘤抵抗语境和霍奇金淋巴瘤空间微环境研究，都把治疗时间点写入设计。类器官共培养和谱系模型可以检验部分候选关系。\n\n不同方案、采样窗口和器官中的邻域变化不能直接比较。临床试验相关分析中的空间特征是机制线索，关联不等于干预效应。",
+          "research_use": "记录治疗方案、基线与治疗中或进展时点、病灶来源、空间或单细胞平台和正交验证；模型实验报告干预、读出和与患者样本的对应关系。",
+          "boundary": "治疗相关空间变化用于提出生态重塑假设，不能写成疗效预测、治疗选择或个体化医疗建议。",
+          "source_ids": [
+            "H025S005",
+            "H025S009",
+            "H025S011",
+            "H025S012",
+            "H025S013",
+            "H025S014"
+          ]
+        }
+      ],
+      "references": [
+        {
+          "source_id": "H025S001",
+          "title": "Cancer cell states recur across tumor types and form specific interactions with the tumor microenvironment",
+          "authors": "Barkley D et al.",
+          "journal": "Nature Genetics",
+          "published_date": "2022-08-05",
+          "doi": "10.1038/s41588-022-01141-9",
+          "pmid": "35931863",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/35931863/",
+          "source_type": "primary_research",
+          "study_context": "15 cancer types; melanoma spatial data; mouse models",
+          "study_design": "pan-cancer scRNA-seq analysis with spatial and model follow-up",
+          "usable_for": "recurrent malignant programmes and local immune associations",
+          "limitations": "cross-cancer recurrence does not make a programme universal within each disease"
+        },
+        {
+          "source_id": "H025S002",
+          "title": "Multiplexed 3D atlas of state transitions and immune interaction in colorectal cancer",
+          "authors": "Lin JR et al.",
+          "journal": "Cell",
+          "published_date": "2023-01-19",
+          "doi": "10.1016/j.cell.2022.12.028",
+          "pmid": "36669472",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/36669472/",
+          "source_type": "primary_research",
+          "study_context": "human colorectal cancer",
+          "study_design": "whole-specimen multiplex imaging and 3D reconstruction",
+          "usable_for": "interfaces, gradients and multicellular ecosystems",
+          "limitations": "CRC-specific; observational relationships"
+        },
+        {
+          "source_id": "H025S004",
+          "title": "Single-cell profiling of microenvironment components by spatial localization in pancreatic ductal adenocarcinoma",
+          "authors": "Han S et al.",
+          "journal": "Theranostics",
+          "published_date": "2022-06-27",
+          "doi": "10.7150/thno.73222",
+          "pmid": "35836806",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/35836806/",
+          "source_type": "primary_research",
+          "study_context": "human pancreatic ductal adenocarcinoma",
+          "study_design": "spatially stratified observational study",
+          "usable_for": "tumour-adjacent versus distant fibroblast and immune compartments",
+          "limitations": "small, disease-specific study; spatial ROIs are not whole-tissue single-cell maps"
+        },
+        {
+          "source_id": "H025S005",
+          "title": "Therapy-associated remodeling of pancreatic cancer revealed by single-cell spatial transcriptomics and optimal transport analysis",
+          "authors": "Shiau C et al.",
+          "journal": "bioRxiv",
+          "published_date": "2023-06-29",
+          "doi": "10.1101/2023.06.28.546848",
+          "pmid": "37425692",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/37425692/",
+          "source_type": "primary_research",
+          "study_context": "human pancreatic cancer before/after neoadjuvant therapy",
+          "study_design": "integrated spatial and orthogonal validation study",
+          "usable_for": "therapy-associated multicellular-neighbourhood remodelling",
+          "limitations": "treatment regimen and disease context limit generalization"
+        },
+        {
+          "source_id": "H025S006",
+          "title": "Quantitative Spatial Profiling of Immune Populations in Pancreatic Ductal Adenocarcinoma Reveals Tumor Microenvironment Heterogeneity and Prognostic Biomarkers",
+          "authors": "Mi H et al.",
+          "journal": "Cancer Research",
+          "published_date": "2022-12-02",
+          "doi": "10.1158/0008-5472.CAN-22-1190",
+          "pmid": "36112643",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/36112643/",
+          "source_type": "primary_research",
+          "study_context": "resected human PDAC",
+          "study_design": "spatial pathology cohort",
+          "usable_for": "immune composition, spatial patterns and sample-level heterogeneity",
+          "limitations": "observational cohort; biomarkers not clinical tests"
+        },
+        {
+          "source_id": "H025S007",
+          "title": "Single-cell and spatial transcriptome analyses revealed cell heterogeneity and immune environment alternations in metastatic axillary lymph nodes in breast cancer",
+          "authors": "Mao X et al.",
+          "journal": "Cancer Immunology Immunotherapy",
+          "published_date": "2023-03-01",
+          "doi": "10.1007/s00262-022-03278-2",
+          "pmid": "36040519",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/36040519/",
+          "source_type": "primary_research",
+          "study_context": "8 breast-cancer patients; primary tumour, lymph nodes and blood",
+          "study_design": "multicompartment observational study",
+          "usable_for": "tumour and nodal ecosystem differences; immune/stromal crosstalk",
+          "limitations": "small cohort and disease-specific setting"
+        },
+        {
+          "source_id": "H025S009",
+          "title": "Defining and modeling dynamic spatial heterogeneity within tumor microenvironments",
+          "authors": "Bareham B; Dibble M; Parsons M",
+          "journal": "Current Opinion in Cell Biology",
+          "published_date": "2024-10-01",
+          "doi": "10.1016/j.ceb.2024.102422",
+          "pmid": "39216233",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/39216233/",
+          "source_type": "review",
+          "study_context": "solid tumour microenvironment",
+          "study_design": "review",
+          "usable_for": "language for dynamic heterogeneity and model choice",
+          "limitations": "review"
+        },
+        {
+          "source_id": "H025S010",
+          "title": "A cellular and spatial atlas of TP53-associated tissue remodeling defines a multicellular tumor ecosystem in lung adenocarcinoma",
+          "authors": "Zhao W et al.",
+          "journal": "Nature Cancer",
+          "published_date": "2025-01-01",
+          "doi": "10.1038/s43018-025-01053-7",
+          "pmid": "41057692",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/41057692/",
+          "source_type": "primary_research",
+          "study_context": "23 untreated human lung adenocarcinomas plus models",
+          "study_design": "multiomic cellular and spatial atlas",
+          "usable_for": "malignant genotype, fibroblast-macrophage niche and local immune features",
+          "limitations": "single cancer and genotype focus"
+        },
+        {
+          "source_id": "H025S011",
+          "title": "Spatially organized tumor-stroma boundary determines the efficacy of immunotherapy in colorectal cancer patients",
+          "authors": "Feng Y et al.",
+          "journal": "Nature Communications",
+          "published_date": "2024-11-26",
+          "doi": "10.1038/s41467-024-54710-3",
+          "pmid": "39592630",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/39592630/",
+          "source_type": "primary_research",
+          "study_context": "treatment-naive and anti-PD-1-treated CRC",
+          "study_design": "integrated spatial observational study",
+          "usable_for": "tumour-stroma boundary and immune/stromal context",
+          "limitations": "CRC-specific and observational; no treatment recommendation"
+        },
+        {
+          "source_id": "H025S012",
+          "title": "Single-cell spatial multiomics reveals tumor microenvironment vulnerabilities in cancer resistance to immunotherapy",
+          "authors": "Quek C et al.",
+          "journal": "Cell Reports",
+          "published_date": "2024-07-23",
+          "doi": "10.1016/j.celrep.2024.114392",
+          "pmid": "38944836",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/38944836/",
+          "source_type": "primary_research",
+          "study_context": "melanoma immunotherapy resistance",
+          "study_design": "spatial multiomic study",
+          "usable_for": "TME architecture in an immunotherapy-resistance context",
+          "limitations": "single cancer/treatment context"
+        },
+        {
+          "source_id": "H025S013",
+          "title": "Spatially Resolved Tumor Microenvironment Predicts Treatment Outcomes in Relapsed/Refractory Hodgkin Lymphoma",
+          "authors": "Aoki T et al.",
+          "journal": "Journal of Clinical Oncology",
+          "published_date": "2024-03-20",
+          "doi": "10.1200/JCO.23.01115",
+          "pmid": "38113419",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/38113419/",
+          "source_type": "primary_research",
+          "study_context": "relapsed/refractory Hodgkin lymphoma",
+          "study_design": "spatial clinical-correlative study",
+          "usable_for": "treatment-context design in hematologic malignancy",
+          "limitations": "disease-specific association; no general tumour claim"
+        },
+        {
+          "source_id": "H025S014",
+          "title": "Spatial predictors of response to chemo-immunotherapy in microsatellite stable metastatic colorectal cancer",
+          "authors": "Choo J et al.",
+          "journal": "Nature Communications",
+          "published_date": "2026-04-25",
+          "doi": "10.1038/s41467-026-72204-2",
+          "pmid": "42034603",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/42034603/",
+          "source_type": "primary_research",
+          "study_context": "MAYA clinical trial; longitudinal CRC tumour and blood samples",
+          "study_design": "trial-associated correlative study",
+          "usable_for": "timepoint and treatment-context requirements for ecological response studies",
+          "limitations": "small response subsets; association does not establish intervention effect"
+        },
+        {
+          "source_id": "H025S015",
+          "title": "Spatial transcriptomics in breast cancer reveals tumour microenvironment-driven drug responses and clonal therapeutic heterogeneity",
+          "authors": "Jiménez-Santos MJ et al.",
+          "journal": "NAR Cancer",
+          "published_date": "2024-12-18",
+          "doi": "10.1093/narcan/zcae046",
+          "pmid": "39703753",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/39703753/",
+          "source_type": "primary_research",
+          "study_context": "breast cancer spatial-transcriptomics data",
+          "study_design": "computational analysis of patient datasets",
+          "usable_for": "location-dependent state and inferred drug-response heterogeneity",
+          "limitations": "computational prediction; not a treatment-effect demonstration"
+        },
+        {
+          "source_id": "B01S001",
+          "title": "Advances in spatial transcriptomics and its applications in cancer research",
+          "authors": "Jin Y; Zuo Y; Li G et al.",
+          "journal": "Molecular Cancer",
+          "published_date": "2024-06-20",
+          "doi": "10.1186/s12943-024-02040-9",
+          "pmid": "38902727",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/38902727/",
+          "source_type": "review",
+          "study_context": "cancer spatial transcriptomics",
+          "study_design": "technology and application review",
+          "usable_for": "platform categories; design trade-offs; cancer applications",
+          "limitations": "narrative review, not a platform benchmark"
+        },
+        {
+          "source_id": "B01S002",
+          "title": "Spatial landscapes of cancers: insights and opportunities",
+          "authors": "Chen J; Larsson L; Swarbrick A; Lundeberg J",
+          "journal": "Nature Reviews Clinical Oncology",
+          "published_date": "2024-09-01",
+          "doi": "10.1038/s41571-024-00926-7",
+          "pmid": "39043872",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/39043872/",
+          "source_type": "review",
+          "study_context": "solid tumours across histologies",
+          "study_design": "expert review",
+          "usable_for": "tumour ecosystem and cross-cancer framing",
+          "limitations": "review; does not establish disease-specific effects"
+        },
+        {
+          "source_id": "B01S005",
+          "title": "Spatial biology of cancer evolution",
+          "authors": "Seferbekova Z; Lomakin A; Yates LR; Gerstung M",
+          "journal": "Nature Reviews Genetics",
+          "published_date": "2023-05-01",
+          "doi": "10.1038/s41576-022-00553-x",
+          "pmid": "36494509",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/36494509/",
+          "source_type": "review",
+          "study_context": "cancer evolution and microenvironment",
+          "study_design": "expert review",
+          "usable_for": "spatial evolution and ecology concepts",
+          "limitations": "review; no unified clinical endpoint"
+        },
+        {
+          "source_id": "B01S006",
+          "title": "Tumour evolution and microenvironment interactions in 2D and 3D space",
+          "authors": "Mo CK; Liu J; Chen S et al.; HTAN",
+          "journal": "Nature",
+          "published_date": "2024-10-30",
+          "doi": "10.1038/s41586-024-08087-4",
+          "pmid": "39478210",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/39478210/",
+          "source_type": "primary_research",
+          "study_context": "six-cancer human tumour atlas",
+          "study_design": "cross-cancer observational atlas; serial-section reconstruction",
+          "usable_for": "microregions; boundaries; cross-section alignment; clone-ecology relation",
+          "limitations": "observational; technology resolution and cancer-specific context limit causal and pan-cancer claims"
+        },
+        {
+          "source_id": "B01S007",
+          "title": "Spatial genomics maps the structure, nature and evolution of cancer clones",
+          "authors": "Lomakin A et al.",
+          "journal": "Nature",
+          "published_date": "2022-11-09",
+          "doi": "10.1038/s41586-022-05425-2",
+          "pmid": "36352222",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/36352222/",
+          "source_type": "primary_research",
+          "study_context": "multifocal breast cancer; DCIS to nodal metastasis",
+          "study_design": "human spatial-genomics study with microdissection validation",
+          "usable_for": "clone territory; phenotype; microenvironment; orthogonal validation",
+          "limitations": "few breast-cancer cases; not a longitudinal treatment cohort"
+        },
+        {
+          "source_id": "B01S009",
+          "title": "A cellular hierarchy in melanoma uncouples growth and metastasis",
+          "authors": "Karras P et al.",
+          "journal": "Nature",
+          "published_date": "2022-10-01",
+          "doi": "10.1038/s41586-022-05242-7",
+          "pmid": "36131018",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/36131018/",
+          "source_type": "primary_research",
+          "study_context": "melanoma models",
+          "study_design": "genetic lineage tracing with spatial and single-cell profiling",
+          "usable_for": "perivascular niche, cellular state and metastatic initiation",
+          "limitations": "model-centred; does not establish patient clinical prediction"
+        },
+        {
+          "source_id": "B01S010",
+          "title": "Molecular cartography uncovers evolutionary and microenvironmental dynamics in sporadic colorectal tumors",
+          "authors": "Heiser CN et al.",
+          "journal": "Cell",
+          "published_date": "2023-12-07",
+          "doi": "10.1016/j.cell.2023.11.006",
+          "pmid": "38065082",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/38065082/",
+          "source_type": "primary_research",
+          "study_context": "31 human colorectal specimens",
+          "study_design": "spatial multiomic atlas",
+          "usable_for": "phylogeography; progression-associated ecology; immune exclusion",
+          "limitations": "CRC cohort; prognostic association needs independent validation"
+        }
+      ]
+    },
+    {
+      "topic_id": "H026",
+      "title": "克隆演化、转移与耐药",
+      "topic_role": "research_deep_dive",
+      "overview": "治疗失败、转移和复发常被概括为“肿瘤发生了变化”，但一次静态切片只能显示某一时间、某一部位的细胞差异，无法说明哪些克隆在治疗前已经存在、哪些在压力下被选择或扩增、播散路线是单克隆还是多克隆。若缺少时间点、病灶配对和谱系或基因组证据，预存亚克隆、新突变过程与非遗传性状态适应也无法区分。\n\n本方向从多区域测序与系统发育重建出发，联合空间基因组学、循环肿瘤DNA（ctDNA）纵向追踪、配对活检和功能谱系模型，把基因组克隆、细胞状态、微环境与治疗过程放到同一条时间线上。由此可以回答：治疗开始前已存在哪些亚克隆结构；耐药更符合预存克隆选择还是状态层面的适应；转移播种是单克隆还是多克隆；同一克隆在不同部位是否呈现不同细胞状态。患者纵向样本与模型中的功能验证应分开标明。\n\n从克隆频率变化推断演化方向时，必须同时给出时间点、病灶关系和功能证据。只有静态生态组成、没有时间或谱系证据时，应使用肿瘤生态专题；液体活检的检测性能由循环标志物专题处理。",
+      "sections": [
+        {
+          "section_id": "H026-SEC-01",
+          "title": "比较不同研究时应先看什么",
+          "body": "| 比较内容 | 应记录的信息 | 关系到什么判断 |\n| --- | --- | --- |\n| 时间点 | 诊断、治疗前、治疗中、缓解、复发或耐药 | 变化是否发生在治疗压力之后，还是基线已经存在 |\n| 解剖部位 | 同一病灶多区域、原发灶、淋巴结、远处转移、血液 | 比较的是病灶内差异、跨病灶播散，还是循环监测 |\n| 谱系证据 | 共享变异、拷贝数、单细胞基因型、系统发育树、条形码 | 能否证明细胞来自同一克隆，而不只是表型相似 |\n| 选择压力 | 药物、免疫反应、组织环境和转移瓶颈 | 观察到的频率变化对应哪一种压力 |\n| 研究系统 | 患者纵向队列、配对活检、循环肿瘤DNA、谱系模型 | 证据属于观察时间线还是模型中的功能验证 |",
+          "source_ids": []
+        },
+        {
+          "section_id": "H026-SEC-02",
+          "title": "基线亚克隆需要遗传证据和空间覆盖",
+          "body": "多区域全外显子测序（WES）、原位基因组制图和切片DNA测序表明，克隆是带有共享变异或谱系标记的细胞群体。转录状态相似或空间上相邻，本身不足以证明来自同一克隆。TRACERx 对非小细胞肺癌多个原发区域的分析说明，区域覆盖不足会改变对亚克隆选择和分歧时间的判断。\n\n乳腺癌原位基因组领地、结直肠肿瘤的系统地理格局和人体肿瘤图谱中的克隆—生态关系，覆盖范围和分辨率不同。缺少时间点的空间克隆图描述的是某一时点的领地。静态生态结构而无时间或谱系证据时，应使用肿瘤生态专题。",
+          "source_ids": [
+            "B01S005",
+            "B01S007",
+            "B01S008",
+            "B01S010",
+            "H026S012"
+          ]
+        },
+        {
+          "section_id": "H026-SEC-03",
+          "title": "耐药可来自克隆选择，也可来自状态适应",
+          "body": "卵巢癌治疗过程中的无细胞DNA（cfDNA）追踪、结直肠癌抗表皮生长因子受体（EGFR）治疗的配对活检与循环肿瘤DNA、胶质瘤初发—复发配对，以及治疗模型中的耐药连续体，都显示耐药可以来自预存克隆扩增、新的突变过程或非遗传性状态过渡。需要同时写出治疗方案、连续采样和结局关系。\n\n肝癌纵向活检中的谱系—生态评分、黑色素瘤抵抗期的空间生态，以及体外耐药连续体，回答的问题不同。疾病、方案和采样密度决定能够区分预存选择与新适应的程度。观察性克隆变化不能写成治疗推荐。",
+          "source_ids": [
+            "B01S011",
+            "H026S001",
+            "H026S002",
+            "H026S003",
+            "H026S004",
+            "H026S008",
+            "H026S014",
+            "H026S015"
+          ]
+        },
+        {
+          "section_id": "H026-SEC-04",
+          "title": "转移播散要区分单克隆与多克隆播种",
+          "body": "TRACERx 转移队列在发生转移的非小细胞肺癌中比较原发灶与转移灶，显示早晚期分歧和单克隆、多克隆播种是可区分的模式。单区域原发灶取样会把大量晚期分歧误判为早期分歧。多灶性乳腺癌空间基因组学和结直肠肿瘤制图提供了其他器官中的病灶关系证据。\n\n淋巴结是否作为后续远处转移的必经路线、循环肿瘤细胞计数与组织克隆树的对应关系，在肺癌、乳腺癌和黑色素瘤模型中并不相同。血液中的细胞数量不能定位具体病灶。局部基质或免疫差异但无谱系或时间证据时，应使用肿瘤生态专题。",
+          "source_ids": [
+            "B01S007",
+            "B01S009",
+            "B01S010",
+            "H026S009",
+            "H026S011",
+            "H026S012",
+            "H026S013"
+          ]
+        },
+        {
+          "section_id": "H026-SEC-05",
+          "title": "同一克隆可呈现不同状态和微环境",
+          "body": "空间基因组学把克隆领地与表型、微环境放在同一张组织图上。肝癌纵向单细胞分析和黑色素瘤抵抗期图谱进一步显示，克隆身份、细胞状态和局部生态可以一起移动。要区分同一克隆换了状态与不同克隆占据不同微区，需要联合的遗传、空间和纵向证据。\n\n跨癌种图谱中的克隆—生态共变、肝癌谱系—生态评分和黑色素瘤空间免疫抑制生态，使用的遗传分辨率不同。相关性不能写成某一微环境造成耐药。时间顺序仍需纵向样本或谱系记录。",
+          "source_ids": [
+            "B01S005",
+            "B01S006",
+            "B01S007",
+            "H026S002",
+            "H026S003",
+            "H026S008"
+          ]
+        },
+        {
+          "section_id": "H026-SEC-06",
+          "title": "循环监测、组织定位和模型验证互相补充",
+          "body": "循环肿瘤DNA适合连续读取克隆频率，组织单细胞和空间资料适合把状态放回病灶，条形码或扰动模型用于检验候选机制。卵巢癌和胰腺癌的纵向无细胞DNA、转移性乳腺癌的循环肿瘤细胞计数，以及 TraCe-seq 等模型扰动，各自补足时间线的不同段落。\n\n三类证据的强度不能混用。循环信号不能定位病灶；模型系统缺少完整人体免疫和器官环境。研究型检测不能写成标准临床决策工具。液体活检灵敏度与检测性能由循环标志物专题处理。",
+          "source_ids": [
+            "H026S001",
+            "H026S005",
+            "B01S011",
+            "H026S009",
+            "H026S003",
+            "H026S004"
+          ]
+        },
+        {
+          "section_id": "H026-SEC-07",
+          "title": "研究技术",
+          "body": "本专题的技术卡包括多区域测序与系统发育重建、空间基因组学与克隆领地制图、循环肿瘤DNA纵向克隆追踪、配对活检与单细胞状态—谱系联合分析，以及谱系记录、扰动与患者来源模型。它们分别回答克隆如何被界定、领地如何定位、频率如何随时间变化，以及观察性假设能否在模型中被检验。",
+          "source_ids": []
+        },
+        {
+          "section_id": "H026-SEC-08",
+          "title": "科研参考范围",
+          "body": "本页仅供科研参考，不提供治疗选择、疗效承诺或个体化医疗建议。",
+          "source_ids": []
+        }
+      ],
+      "methods": [
+        {
+          "method_id": "H026-M001",
+          "display_order": 1,
+          "category": "基因组克隆",
+          "title": "多区域测序与系统发育重建",
+          "principle": "对同一病灶多个区域及配对转移灶做全外显子或全基因组测序，依据共享与私有变异、拷贝数构建克隆树，并估计亚克隆频率。",
+          "answers": "用于判断治疗开始前已存在哪些亚克隆，以及随后频率变化更符合预存选择还是新出现的变异过程。",
+          "sample_design": "报告区域数量、肿瘤含量、测序深度、变异过滤、患者配对关系和随访时间；单区域取样需标明其限制。",
+          "limitations": "单区域取样会把晚期分歧误判为早期分歧。克隆频率变化需要时间点才能解释方向。",
+          "source_ids": [
+            "H026S011",
+            "H026S012",
+            "H026S013",
+            "B01S005"
+          ],
+          "workflow": "设计阶段先确定：报告区域数量、肿瘤含量、测序深度、变异过滤、患者配对关系和随访时间；单区域取样需标明其限制。  记录时间点、病灶关系、谱系或基因组证据、治疗语境和正交验证；把克隆频率、细胞状态和取样部位放在同一时间线上比较。 这项方法的直接测量或计算依据是：对同一病灶多个区域及配对转移灶做全外显子或全基因组测序，依据共享与私有变异、拷贝数构建克隆树，并估计亚克隆频率。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：单区域取样会把晚期分歧误判为早期分歧。克隆频率变化需要时间点才能解释方向。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "结果可用于判断治疗开始前已存在哪些亚克隆，以及随后频率变化更符合预存选择还是新出现的变异过程。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        },
+        {
+          "method_id": "H026-M002",
+          "display_order": 2,
+          "category": "空间基因组",
+          "title": "空间基因组学与克隆领地制图",
+          "principle": "原位测序、切片DNA测序或靶向空间基因组方法把突变或拷贝数放回组织坐标，再与转录或蛋白状态配准。",
+          "answers": "用于判断某一克隆占据哪些组织领地，以及相邻微环境是否随克隆边界变化。",
+          "sample_design": "在设计时标注基因组读出来自同切片、相邻切片还是显微切割验证；保留组织学图像和配准质量。",
+          "limitations": "有限病例和方法学演示不能外推到所有癌症。空间克隆图若缺少时间点，描述的是领地而非选择过程。",
+          "source_ids": [
+            "B01S007",
+            "B01S008",
+            "B01S006",
+            "B01S010"
+          ],
+          "workflow": "设计阶段先确定：在设计时标注基因组读出来自同切片、相邻切片还是显微切割验证；保留组织学图像和配准质量。  记录时间点、病灶关系、谱系或基因组证据、治疗语境和正交验证；把克隆频率、细胞状态和取样部位放在同一时间线上比较。 这项方法的直接测量或计算依据是：原位测序、切片DNA测序或靶向空间基因组方法把突变或拷贝数放回组织坐标，再与转录或蛋白状态配准。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：有限病例和方法学演示不能外推到所有癌症。空间克隆图若缺少时间点，描述的是领地而非选择过程。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "结果可用于判断某一克隆占据哪些组织领地，以及相邻微环境是否随克隆边界变化。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        },
+        {
+          "method_id": "H026-M003",
+          "display_order": 3,
+          "category": "循环监测",
+          "title": "循环肿瘤DNA纵向克隆追踪",
+          "principle": "从血浆无细胞DNA中读取体细胞突变或拷贝数，按预先确定的组织克隆树追踪各亚克隆在连续时间点的相对丰度。",
+          "answers": "用于在无法反复活检时观察克隆频率随治疗或疾病负荷变化，并发现组织未覆盖的耐药变异。",
+          "sample_design": "规定采血时间表、检测下限、配对组织基线、病灶信息和正交验证；循环肿瘤细胞计数需单独记录。",
+          "limitations": "循环信号不能定位具体病灶，也难以重建完整组织生态。低肿瘤负荷时未检出不等于克隆消失。",
+          "source_ids": [
+            "H026S001",
+            "H026S005",
+            "H026S015",
+            "H026S009"
+          ],
+          "workflow": "设计阶段先确定：规定采血时间表、检测下限、配对组织基线、病灶信息和正交验证；循环肿瘤细胞计数需单独记录。  记录时间点、病灶关系、谱系或基因组证据、治疗语境和正交验证；把克隆频率、细胞状态和取样部位放在同一时间线上比较。 这项方法的直接测量或计算依据是：从血浆无细胞DNA中读取体细胞突变或拷贝数，按预先确定的组织克隆树追踪各亚克隆在连续时间点的相对丰度。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：循环信号不能定位具体病灶，也难以重建完整组织生态。低肿瘤负荷时未检出不等于克隆消失。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "结果可用于在无法反复活检时观察克隆频率随治疗或疾病负荷变化，并发现组织未覆盖的耐药变异。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        },
+        {
+          "method_id": "H026-M004",
+          "display_order": 4,
+          "category": "纵向组织",
+          "title": "配对活检与单细胞状态—谱系联合分析",
+          "principle": "对同一患者不同时间点或不同病灶的组织做单细胞转录组，必要时联合基因型、空间位置或谱系评分，比较克隆身份与细胞状态。",
+          "answers": "用于区分同一克隆换了状态、不同克隆占据不同微区，以及治疗前后生态如何沿时间线移动。",
+          "sample_design": "明确基线、治疗中、复发样本的配对关系；记录治疗方案、解离或空间平台、基因型依据和独立队列验证。",
+          "limitations": "转录策略得到的谱系或生态评分依赖基因集选择。小队列纵向图谱需要在独立疾病语境中复核。",
+          "source_ids": [
+            "H026S002",
+            "H026S004",
+            "H026S008",
+            "H026S001"
+          ],
+          "workflow": "设计阶段先确定：明确基线、治疗中、复发样本的配对关系；记录治疗方案、解离或空间平台、基因型依据和独立队列验证。  记录时间点、病灶关系、谱系或基因组证据、治疗语境和正交验证；把克隆频率、细胞状态和取样部位放在同一时间线上比较。 这项方法的直接测量或计算依据是：对同一患者不同时间点或不同病灶的组织做单细胞转录组，必要时联合基因型、空间位置或谱系评分，比较克隆身份与细胞状态。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：转录策略得到的谱系或生态评分依赖基因集选择。小队列纵向图谱需要在独立疾病语境中复核。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "结果可用于区分同一克隆换了状态、不同克隆占据不同微区，以及治疗前后生态如何沿时间线移动。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        },
+        {
+          "method_id": "H026-M005",
+          "display_order": 5,
+          "category": "功能验证",
+          "title": "谱系记录、扰动与患者来源模型",
+          "principle": "细胞条形码、谱系示踪、TraCe-seq 类扰动或患者来源模型在已知时间起点引入选择压力，读取克隆或转录程序的后续变化。",
+          "answers": "用于检验观察性时间线提出的演化假设，例如耐药是预存克隆扩增还是诱导的状态适应。",
+          "sample_design": "报告模型类型、干预时间、克隆或状态读出、与患者资料的可比性；预设终点并保留对照。",
+          "limitations": "模型系统缺少完整人体免疫和器官环境。模型机制不能替代患者结局证据。",
+          "source_ids": [
+            "B01S011",
+            "H026S003",
+            "B01S009",
+            "H026S004"
+          ],
+          "workflow": "设计阶段先确定：报告模型类型、干预时间、克隆或状态读出、与患者资料的可比性；预设终点并保留对照。  记录时间点、病灶关系、谱系或基因组证据、治疗语境和正交验证；把克隆频率、细胞状态和取样部位放在同一时间线上比较。 这项方法的直接测量或计算依据是：细胞条形码、谱系示踪、TraCe-seq 类扰动或患者来源模型在已知时间起点引入选择压力，读取克隆或转录程序的后续变化。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：模型系统缺少完整人体免疫和器官环境。模型机制不能替代患者结局证据。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "结果可用于检验观察性时间线提出的演化假设，例如耐药是预存克隆扩增还是诱导的状态适应。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        }
+      ],
+      "shared_findings": [
+        {
+          "finding_id": "H026-C01",
+          "display_order": 1,
+          "title": "界定克隆需要遗传或谱系证据，必要时再叠加空间位置",
+          "shared_result": "多区域测序、原位基因组制图和空间多组学表明，克隆是带有共享变异或谱系标记的细胞群体。转录状态相似或空间上相邻，本身不足以证明来自同一克隆。\n\n乳腺癌原位基因组领地、结直肠肿瘤的系统地理格局和人体肿瘤图谱中的克隆—生态关系，覆盖范围和分辨率不同。缺少时间点的空间克隆图描述的是某一时点的领地。",
+          "research_use": "全基因组或外显子测序、原位基因组测序、拷贝数制图和正交显微切割验证；报告病灶关系、区域覆盖和谱系依据。",
+          "boundary": "静态生态结构而无时间或谱系证据时，应使用肿瘤生态专题。",
+          "source_ids": [
+            "B01S005",
+            "B01S007",
+            "B01S008",
+            "B01S010"
+          ]
+        },
+        {
+          "finding_id": "H026-C02",
+          "display_order": 2,
+          "title": "治疗压力下的变化包括克隆选择和非遗传性状态适应",
+          "shared_result": "卵巢癌无细胞DNA追踪、结直肠癌抗表皮生长因子受体治疗的配对活检与循环肿瘤DNA、胶质瘤初发—复发配对，以及治疗模型中的耐药连续体，都显示耐药可以来自预存克隆扩增、新突变过程或非遗传性状态过渡。\n\n肝癌纵向活检中的谱系—生态评分和黑色素瘤抵抗期的空间生态回答的问题不同。疾病、方案和采样密度决定能够区分预存选择与新适应的程度。",
+          "research_use": "同一患者的基线、治疗中和进展样本，记录治疗方案、克隆树、细胞状态和独立验证；循环与组织证据分开解释。",
+          "boundary": "观察性克隆变化和模型中的状态适应用于提出演化假设，不能转化为治疗推荐。",
+          "source_ids": [
+            "H026S001",
+            "H026S002",
+            "H026S003",
+            "H026S004",
+            "H026S014",
+            "H026S015"
+          ]
+        },
+        {
+          "finding_id": "H026-C03",
+          "display_order": 3,
+          "title": "转移播散需要配对病灶才能区分单克隆与多克隆播种",
+          "shared_result": "TRACERx 非小细胞肺癌转移队列、多灶性乳腺癌空间基因组学和结直肠肿瘤制图表明，单克隆播种、多克隆播种和早晚期分歧是可区分的播散模式。单区域原发灶取样会把晚期分歧误判为早期分歧。\n\n淋巴结是否作为后续远处转移的必经路线，在肺癌、乳腺癌和黑色素瘤模型中并不相同。血液中的细胞数量不能定位具体病灶。",
+          "research_use": "原发与转移配对、多区域覆盖、系统发育树和连续血液样本；标明取样时间和谱系标记。",
+          "boundary": "局部基质或免疫差异但无谱系或时间证据时，应使用肿瘤生态专题。",
+          "source_ids": [
+            "B01S007",
+            "B01S009",
+            "B01S010",
+            "H026S011",
+            "H026S012",
+            "H026S013"
+          ]
+        },
+        {
+          "finding_id": "H026-C04",
+          "display_order": 4,
+          "title": "同一克隆可在不同部位或时间呈现不同细胞状态和微环境",
+          "shared_result": "空间基因组学、肝癌纵向单细胞分析和黑色素瘤抵抗期图谱显示，克隆身份、细胞状态和微环境相互关联。要区分同一克隆换了状态与不同克隆占据不同微区，需要联合的遗传、空间和纵向证据。\n\n跨癌种图谱中的克隆—生态共变与肝癌谱系—生态评分使用的遗传分辨率不同。相关性不能写成某一微环境造成耐药。",
+          "research_use": "同一患者或同一病灶的基因型或谱系、细胞状态、空间环境和时间顺序；报告推断克隆与直接基因型测量的差别。",
+          "boundary": "联合观察支持提出状态可塑性问题，时间顺序仍需纵向样本或谱系记录。",
+          "source_ids": [
+            "B01S005",
+            "B01S006",
+            "B01S007",
+            "H026S002",
+            "H026S003",
+            "H026S008"
+          ]
+        },
+        {
+          "finding_id": "H026-C05",
+          "display_order": 5,
+          "title": "循环肿瘤DNA、组织单细胞和谱系模型分别补足时间线的不同段落",
+          "shared_result": "无细胞DNA适合连续读取克隆频率，组织单细胞和空间资料适合把状态放回病灶，条形码或扰动模型用于检验候选机制。三类证据强度不能混用。\n\n卵巢癌和胰腺癌循环监测的检测下限、转移性乳腺癌循环肿瘤细胞计数，以及 TraCe-seq 等模型扰动，各自受疾病负荷、采血时间和模型系统限制。",
+          "research_use": "预先规定采血和组织时间表、检测下限、病灶信息和模型终点；关键克隆变化用配对组织或独立方法复核。",
+          "boundary": "模型机制不能替代患者结局证据。研究型检测不能写成标准临床决策工具；液体活检灵敏度与临床检测性能由循环标志物专题处理。",
+          "source_ids": [
+            "H026S001",
+            "H026S005",
+            "B01S011",
+            "H026S009",
+            "H026S003",
+            "H026S004"
+          ]
+        }
+      ],
+      "references": [
+        {
+          "source_id": "H026S001",
+          "title": "Tracking clonal evolution during treatment in ovarian cancer using cell-free DNA",
+          "authors": "Williams et al.",
+          "journal": "Nature",
+          "published_date": "2025-10-01",
+          "doi": "10.1038/s41586-025-09580-0",
+          "pmid": "",
+          "url": "https://www.nature.com/articles/s41586-025-09580-0",
+          "source_type": "primary_research",
+          "study_context": "ovarian cancer during treatment",
+          "study_design": "longitudinal clinical molecular study",
+          "usable_for": "treatment selection and serial monitoring",
+          "limitations": "disease-specific; larger cohorts needed for clinical relevance of specific alterations"
+        },
+        {
+          "source_id": "H026S002",
+          "title": "Lineage and ecology define liver tumor evolution in response to treatment",
+          "authors": "Revsine M et al.",
+          "journal": "Cell Reports Medicine",
+          "published_date": "2024-01-01",
+          "doi": "10.1016/j.xcrm.2024.101394",
+          "pmid": "38280378",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/38280378/",
+          "source_type": "primary_research",
+          "study_context": "longitudinal liver-cancer biopsies and external cohorts",
+          "study_design": "longitudinal single-cell study with validation",
+          "usable_for": "joint treatment-time lineage and microenvironment framing",
+          "limitations": "score relies on transcriptomic strategy; validation is not prospective intervention"
+        },
+        {
+          "source_id": "H026S003",
+          "title": "Cellular adaptation to cancer therapy along a resistance continuum",
+          "authors": "França GS et al.",
+          "journal": "Nature",
+          "published_date": "2024-07-10",
+          "doi": "10.1038/s41586-024-07690-9",
+          "pmid": "38987605",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/38987605/",
+          "source_type": "primary_research",
+          "study_context": "cancer therapy models",
+          "study_design": "systems-level longitudinal framework",
+          "usable_for": "non-genetic state transitions and stable resistance",
+          "limitations": "model-to-clinic transfer requires disease-specific evidence"
+        },
+        {
+          "source_id": "H026S004",
+          "title": "Identifying predictors of glioma evolution from longitudinal sequencing",
+          "authors": "Mu Q et al.",
+          "journal": "Science Translational Medicine",
+          "published_date": "2023-10-04",
+          "doi": "10.1126/scitranslmed.adh4181",
+          "pmid": "37792958",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/37792958/",
+          "source_type": "primary_research",
+          "study_context": "544 initial-recurrent adult diffuse glioma pairs plus models",
+          "study_design": "longitudinal paired-sample study with functional follow-up",
+          "usable_for": "initial versus recurrent sampling; treatment-induced hypermutation",
+          "limitations": "glioma-specific molecular and treatment setting"
+        },
+        {
+          "source_id": "H026S005",
+          "title": "ACT-Discover: identifying karyotype heterogeneity in pancreatic cancer evolution using ctDNA",
+          "authors": "Huebner A et al.",
+          "journal": "Genome Medicine",
+          "published_date": "2023-01-01",
+          "doi": "",
+          "pmid": "37081523",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/37081523/",
+          "source_type": "primary_research",
+          "study_context": "24 metastatic PDAC patients; 55 longitudinal cfDNA samples",
+          "study_design": "prospective clinical-trial-associated longitudinal study",
+          "usable_for": "copy-number dynamics and liquid-biopsy design",
+          "limitations": "small cohort; cfDNA does not localize lesions or fully resolve tissue ecology"
+        },
+        {
+          "source_id": "H026S008",
+          "title": "A longitudinal, multi-omic atlas reveals the emergence of a spatially organized immunosuppressive ecosystem in resistant melanoma",
+          "authors": "Wei S et al.",
+          "journal": "Cell Reports Medicine",
+          "published_date": "2026-04-21",
+          "doi": "10.1016/j.xcrm.2026.102716",
+          "pmid": "41916292",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/41916292/",
+          "source_type": "primary_research",
+          "study_context": "45 samples from 10 melanoma patients",
+          "study_design": "longitudinal multiomic and spatial atlas",
+          "usable_for": "treatment resistance, subclone and spatial niche relation",
+          "limitations": "small cohort; result requires independent disease-specific validation"
+        },
+        {
+          "source_id": "H026S009",
+          "title": "Longitudinal analysis of circulating tumor cell numbers improves tracking metastatic breast cancer progression",
+          "authors": "Szostakowska-Rodzos M et al.",
+          "journal": "Scientific Reports",
+          "published_date": "2024-06-05",
+          "doi": "10.1038/s41598-024-63679-4",
+          "pmid": "38839863",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/38839863/",
+          "source_type": "primary_research",
+          "study_context": "135 metastatic breast-cancer patients with serial blood samples",
+          "study_design": "longitudinal observational study",
+          "usable_for": "serial monitoring design and lesion divergence caveat",
+          "limitations": "not clinical standard"
+        },
+        {
+          "source_id": "H026S011",
+          "title": "The evolution of non-small cell lung cancer metastases in TRACERx",
+          "authors": "Al Bakir M et al.; TRACERx Consortium",
+          "journal": "Nature",
+          "published_date": "2023-04-01",
+          "doi": "10.1038/s41586-023-05729-x",
+          "pmid": "37046095",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/37046095/",
+          "source_type": "primary_research",
+          "study_context": "126 metastatic tumours from 421 prospectively recruited NSCLC patients",
+          "study_design": "prospective multiregion and longitudinal evolutionary study",
+          "usable_for": "metastatic divergence, mono/poly-clonal seeding and sampling design",
+          "limitations": "NSCLC-specific; molecular evolution does not imply a treatment recommendation"
+        },
+        {
+          "source_id": "H026S012",
+          "title": "The evolution of lung cancer and impact of subclonal selection in TRACERx",
+          "authors": "Frankell AM et al.; TRACERx Consortium",
+          "journal": "Nature",
+          "published_date": "2023-04-01",
+          "doi": "10.1038/s41586-023-05783-5",
+          "pmid": "37046096",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/37046096/",
+          "source_type": "primary_research",
+          "study_context": "1,644 regions from 421 NSCLC patients",
+          "study_design": "prospective multiregion cohort",
+          "usable_for": "subclonal selection and clinical cohort design",
+          "limitations": "lung-cancer context; publication details to normalize"
+        },
+        {
+          "source_id": "H026S013",
+          "title": "Evolutionary characterization of lung adenocarcinoma morphology in TRACERx",
+          "authors": "Karasaki T et al.; TRACERx Consortium",
+          "journal": "Nature",
+          "published_date": "2023-04-01",
+          "doi": "10.1038/s41586-023-05733-1",
+          "pmid": "37045996",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/37045996/",
+          "source_type": "primary_research",
+          "study_context": "805 primary regions and 121 paired metastases from 248 lung adenocarcinomas",
+          "study_design": "multiregion genomic and histopathology study",
+          "usable_for": "genotype, morphology and regional evolution",
+          "limitations": "LUAD-specific and observational"
+        },
+        {
+          "source_id": "H026S014",
+          "title": "Mutational signatures impact the evolution of anti-EGFR antibody resistance in colorectal cancer",
+          "authors": "Woolston A et al.",
+          "journal": "Nature Ecology & Evolution",
+          "published_date": "2021-07-01",
+          "doi": "10.1038/s41559-021-01470-8",
+          "pmid": "34017094",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/34017094/",
+          "source_type": "primary_research",
+          "study_context": "42 baseline-progression biopsies from cetuximab-treated CRC",
+          "study_design": "paired clinical samples with mutation-signature analysis",
+          "usable_for": "treatment-associated mutation processes and resistance",
+          "limitations": "small CRC cohort; not a clinical test"
+        },
+        {
+          "source_id": "H026S015",
+          "title": "Circulating Tumor DNA Identifies Diverse Landscape of Acquired Resistance to Anti-Epidermal Growth Factor Receptor Therapy in Metastatic Colorectal Cancer",
+          "authors": "Parseghian CM et al.",
+          "journal": "Journal of Clinical Oncology",
+          "published_date": "2022-08-01",
+          "doi": "",
+          "pmid": "36007218",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/36007218/",
+          "source_type": "primary_research",
+          "study_context": "169 metastatic CRC patients",
+          "study_design": "paired tissue and serial ctDNA observational analysis",
+          "usable_for": "polyclonal resistance and post-treatment decay patterns",
+          "limitations": "retrospective treatment exposure and assay-specific limits"
+        },
+        {
+          "source_id": "B01S002",
+          "title": "Spatial landscapes of cancers: insights and opportunities",
+          "authors": "Chen J; Larsson L; Swarbrick A; Lundeberg J",
+          "journal": "Nature Reviews Clinical Oncology",
+          "published_date": "2024-09-01",
+          "doi": "10.1038/s41571-024-00926-7",
+          "pmid": "39043872",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/39043872/",
+          "source_type": "review",
+          "study_context": "solid tumours across histologies",
+          "study_design": "expert review",
+          "usable_for": "tumour ecosystem and cross-cancer framing",
+          "limitations": "review; does not establish disease-specific effects"
+        },
+        {
+          "source_id": "B01S005",
+          "title": "Spatial biology of cancer evolution",
+          "authors": "Seferbekova Z; Lomakin A; Yates LR; Gerstung M",
+          "journal": "Nature Reviews Genetics",
+          "published_date": "2023-05-01",
+          "doi": "10.1038/s41576-022-00553-x",
+          "pmid": "36494509",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/36494509/",
+          "source_type": "review",
+          "study_context": "cancer evolution and microenvironment",
+          "study_design": "expert review",
+          "usable_for": "spatial evolution and ecology concepts",
+          "limitations": "review; no unified clinical endpoint"
+        },
+        {
+          "source_id": "B01S006",
+          "title": "Tumour evolution and microenvironment interactions in 2D and 3D space",
+          "authors": "Mo CK; Liu J; Chen S et al.; HTAN",
+          "journal": "Nature",
+          "published_date": "2024-10-30",
+          "doi": "10.1038/s41586-024-08087-4",
+          "pmid": "39478210",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/39478210/",
+          "source_type": "primary_research",
+          "study_context": "six-cancer human tumour atlas",
+          "study_design": "cross-cancer observational atlas; serial-section reconstruction",
+          "usable_for": "microregions; boundaries; cross-section alignment; clone-ecology relation",
+          "limitations": "observational; technology resolution and cancer-specific context limit causal and pan-cancer claims"
+        },
+        {
+          "source_id": "B01S007",
+          "title": "Spatial genomics maps the structure, nature and evolution of cancer clones",
+          "authors": "Lomakin A et al.",
+          "journal": "Nature",
+          "published_date": "2022-11-09",
+          "doi": "10.1038/s41586-022-05425-2",
+          "pmid": "36352222",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/36352222/",
+          "source_type": "primary_research",
+          "study_context": "multifocal breast cancer; DCIS to nodal metastasis",
+          "study_design": "human spatial-genomics study with microdissection validation",
+          "usable_for": "clone territory; phenotype; microenvironment; orthogonal validation",
+          "limitations": "few breast-cancer cases; not a longitudinal treatment cohort"
+        },
+        {
+          "source_id": "B01S008",
+          "title": "Spatial genomics enables multi-modal study of clonal heterogeneity in tissues",
+          "authors": "Zhao T et al.",
+          "journal": "Nature",
+          "published_date": "2022-01-01",
+          "doi": "10.1038/s41586-021-04217-4",
+          "pmid": "34912115",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/34912115/",
+          "source_type": "primary_research",
+          "study_context": "mouse metastasis model and primary human cancer",
+          "study_design": "method development with biological demonstration",
+          "usable_for": "spatial clone mapping and multimodal linkage",
+          "limitations": "limited disease contexts; method paper, not clinical validation"
+        },
+        {
+          "source_id": "B01S009",
+          "title": "A cellular hierarchy in melanoma uncouples growth and metastasis",
+          "authors": "Karras P et al.",
+          "journal": "Nature",
+          "published_date": "2022-10-01",
+          "doi": "10.1038/s41586-022-05242-7",
+          "pmid": "36131018",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/36131018/",
+          "source_type": "primary_research",
+          "study_context": "melanoma models",
+          "study_design": "genetic lineage tracing with spatial and single-cell profiling",
+          "usable_for": "perivascular niche, cellular state and metastatic initiation",
+          "limitations": "model-centred; does not establish patient clinical prediction"
+        },
+        {
+          "source_id": "B01S010",
+          "title": "Molecular cartography uncovers evolutionary and microenvironmental dynamics in sporadic colorectal tumors",
+          "authors": "Heiser CN et al.",
+          "journal": "Cell",
+          "published_date": "2023-12-07",
+          "doi": "10.1016/j.cell.2023.11.006",
+          "pmid": "38065082",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/38065082/",
+          "source_type": "primary_research",
+          "study_context": "31 human colorectal specimens",
+          "study_design": "spatial multiomic atlas",
+          "usable_for": "phylogeography; progression-associated ecology; immune exclusion",
+          "limitations": "CRC cohort; prognostic association needs independent validation"
+        },
+        {
+          "source_id": "B01S011",
+          "title": "Identifying transcriptional programs underlying cancer drug response with TraCe-seq",
+          "authors": "Chang MT et al.",
+          "journal": "Nature Biotechnology",
+          "published_date": "2022-01-01",
+          "doi": "10.1038/s41587-021-01005-3",
+          "pmid": "",
+          "url": "https://www.nature.com/articles/s41587-021-01005-3",
+          "source_type": "primary_research",
+          "study_context": "cancer drug-response models",
+          "study_design": "perturbation and single-cell study",
+          "usable_for": "connect treatment perturbation to transcriptional programmes",
+          "limitations": "model-system study; not patient outcome evidence"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,2745 @@
+{
+  "schema_version": "research-deep-dive-public-v0.1",
+  "batch_id": "B06",
+  "title": "结构分子设计与候选验证",
+  "publication_status": "snapshot_ready",
+  "frontend_status": "snapshot_ready",
+  "topics": [
+    {
+      "topic_id": "H001",
+      "title": "多模态生物分子结构与相互作用预测",
+      "topic_role": "research_deep_dive",
+      "overview": "蛋白结构与分子相互作用预测把序列、模板、结构数据库和机器学习模型用于提出三维构象或界面假设。整体折叠、局部结构、蛋白—蛋白界面、配体结合和动态状态属于不同问题，单一置信度分数或一个高分构象不能代替对实验边界和功能的判断。\n\n本方向从同源建模与结构数据库、深度结构预测、复合物和界面建模、配体对接、分子模拟以及冷冻电镜或生化验证出发，集中处理三类问题：预测结构是否适合目标蛋白和数据条件；界面或结合姿态是否具有可检验的稳定性和特异性；预测如何进入突变、结合、动力学或功能实验。计算模型、结构测量和功能读出构成递进证据。\n\n比较公开研究时，需要同时交代目标类型、序列同源性、训练与测试边界、参考结构、评价指标、置信度、对接或模拟条件和实验验证方式。预测准确不等于作用机制已证实，结构模型也不能直接推出药物疗效或疾病结论。AI 分子设计专题聚焦候选生成与筛选，冷冻电镜专题聚焦结构测量和动态观察；本页聚焦结构与相互作用预测的适用范围。",
+      "sections": [
+        {
+          "section_id": "H001-SEC-01",
+          "title": "预测对象决定评价方式",
+          "body": "本页所说的多模态，既包括蛋白、核酸和小分子等不同分子对象，也包括序列、模板和实验约束等输入信息。单个蛋白的折叠预测、蛋白复合体装配、蛋白—核酸体系和蛋白—小分子体系所用信息并不相同。一个模型在单体盲测中表现很好，不能据此推断它对复合体界面或配体结合也同样可靠。研究报告应说明链数、计量比、化学状态、模板和输入序列。",
+          "source_ids": [
+            "H001S001",
+            "H001S002",
+            "H001S003",
+            "H001S004",
+            "H001S005",
+            "H001S016"
+          ]
+        },
+        {
+          "section_id": "H001-SEC-02",
+          "title": "整体结构、界面和亲和力需要分开看",
+          "body": "复合体看起来合理，不等于界面残基正确，更不等于两种分子在实验中一定结合。界面评分和局部置信度可帮助研究者选择突变位点或实验候选；结合、竞争、突变和功能实验则分别检验是否直接结合、界面是否正确以及相互作用是否与功能有关。",
+          "source_ids": [
+            "H001S006",
+            "H001S007",
+            "H001S008",
+            "H001S018",
+            "H001S020"
+          ]
+        },
+        {
+          "section_id": "H001-SEC-03",
+          "title": "基准结果要看测试边界",
+          "body": "盲测、时间切分和远同源测试比随机划分更接近研究者面对新对象时的情况。除了排名，还应查看训练截止时间、是否排除了近似模板、候选模型怎样被选出，以及哪些目标失败。",
+          "source_ids": [
+            "H001S012",
+            "H001S013",
+            "H001S014",
+            "H001S015"
+          ]
+        },
+        {
+          "section_id": "H001-SEC-04",
+          "title": "一个高分构象不是完整答案",
+          "body": "柔性区域、多种构象和不同装配计量比常常不能由一张静态模型说明。原生质谱、交联和直接结构测量可以帮助检验样品中的计量比、装配和构象差异。预测置信度可提示哪些区域需要验证，但不能代替这些实验。",
+          "source_ids": [
+            "H001S009",
+            "H001S010",
+            "H001S011"
+          ]
+        },
+        {
+          "section_id": "H001-SEC-05",
+          "title": "预测怎样进入实验",
+          "body": "预测最适合用来缩小实验范围，例如为结合实验排序候选、提出界面突变，或为直接结构测量提供初始模型。研究还应报告被淘汰的候选和不一致结果，便于判断方法在哪些条件下可靠。",
+          "source_ids": [
+            "H001S003",
+            "H001S009",
+            "H001S017",
+            "H001S019",
+            "H001S020"
+          ]
+        },
+        {
+          "section_id": "H001-SEC-06",
+          "title": "研究技术",
+          "body": "本专题关注预测结果能否经得起外部检验。常用方法包括单体和复合体结构预测、界面与局部置信度评价、盲测或时间切分基准，以及结合、竞争和界面突变实验。原生质谱、交联和直接结构测量可进一步核对计量比、装配与构象，但本页不展开冷冻电镜的制样和重建流程，也不把设计蛋白的构建成功率归入预测性能。",
+          "source_ids": []
+        },
+        {
+          "section_id": "H001-SEC-07",
+          "title": "科研参考范围",
+          "body": "本页仅供科研参考，不确认靶点、药物作用、疾病机制或临床价值。",
+          "source_ids": []
+        }
+      ],
+      "methods": [
+        {
+          "method_id": "H001-M001",
+          "display_order": 1,
+          "category": "预测任务",
+          "title": "单体与复合体结构预测",
+          "principle": "模型根据序列、模板和分子表示生成结构坐标或复合体模型。",
+          "answers": "给出单体或复合体的候选构象，供后续评价与实验验证。",
+          "sample_design": "说明分子类别、链数、化学状态、模板和模型版本。",
+          "limitations": "单体结果不能代表复合体、界面或功能。",
+          "source_ids": [
+            "H001S001",
+            "H001S002",
+            "H001S004",
+            "H001S005"
+          ],
+          "workflow": "设计阶段先确定：说明分子类别、链数、化学状态、模板和模型版本。 先界定预测对象、输入信息和可接受的结构假设，再运行模型并记录版本、模板和候选选择规则；输出需要与直接结构、结合或突变实验中的可观测读出对应。 这项方法的直接测量或计算依据是：模型根据序列、模板和分子表示生成结构坐标或复合体模型。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：单体结果不能代表复合体、界面或功能。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "结果给出单体或复合体的候选构象，供后续评价与实验验证。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        },
+        {
+          "method_id": "H001-M002",
+          "display_order": 2,
+          "category": "质量评价",
+          "title": "界面与模型置信度",
+          "principle": "局部置信度、界面评分和候选排名用于识别需要复核的区域。",
+          "answers": "回答哪些模型值得进入实验。",
+          "sample_design": "保留全局与局部指标、多个候选和失败案例。",
+          "limitations": "高置信度不是结合或亲和力证据。",
+          "source_ids": [
+            "H001S006",
+            "H001S007",
+            "H001S008",
+            "H001S018"
+          ],
+          "workflow": "设计阶段先确定：保留全局与局部指标、多个候选和失败案例。 先界定预测对象、输入信息和可接受的结构假设，再运行模型并记录版本、模板和候选选择规则；输出需要与直接结构、结合或突变实验中的可观测读出对应。 这项方法的直接测量或计算依据是：局部置信度、界面评分和候选排名用于识别需要复核的区域。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：高置信度不是结合或亲和力证据。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "结果主要回答哪些模型值得进入实验。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        },
+        {
+          "method_id": "H001-M003",
+          "display_order": 3,
+          "category": "基准",
+          "title": "盲测与外部评估",
+          "principle": "通过时间切分、远同源测试或盲测评价模型面对新对象时的表现。",
+          "answers": "回答报告的性能能否外推。",
+          "sample_design": "记录训练截止、同源排除、目标发布日期和模型选择规则。",
+          "limitations": "随机切分通常高估新对象表现。",
+          "source_ids": [
+            "H001S012",
+            "H001S013",
+            "H001S014",
+            "H001S015"
+          ],
+          "workflow": "设计阶段先确定：记录训练截止、同源排除、目标发布日期和模型选择规则。 先界定预测对象、输入信息和可接受的结构假设，再运行模型并记录版本、模板和候选选择规则；输出需要与直接结构、结合或突变实验中的可观测读出对应。 这项方法的直接测量或计算依据是：通过时间切分、远同源测试或盲测评价模型面对新对象时的表现。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：随机切分通常高估新对象表现。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "结果主要回答报告的性能能否外推。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        },
+        {
+          "method_id": "H001-M004",
+          "display_order": 4,
+          "category": "实验验证",
+          "title": "结合与界面突变",
+          "principle": "直接结合、竞争、突变和功能实验检验预测界面是否存在并与读出相关。",
+          "answers": "回答相互作用是否在特定体系中成立。",
+          "sample_design": "设置阴性候选、界面突变、剂量梯度和独立重复。",
+          "limitations": "一次结合实验不能说明细胞内功能。",
+          "source_ids": [
+            "H001S017",
+            "H001S019",
+            "H001S020"
+          ],
+          "workflow": "设计阶段先确定：设置阴性候选、界面突变、剂量梯度和独立重复。 先界定预测对象、输入信息和可接受的结构假设，再运行模型并记录版本、模板和候选选择规则；输出需要与直接结构、结合或突变实验中的可观测读出对应。 这项方法的直接测量或计算依据是：直接结合、竞争、突变和功能实验检验预测界面是否存在并与读出相关。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：一次结合实验不能说明细胞内功能。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "结果主要回答相互作用是否在特定体系中成立。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        },
+        {
+          "method_id": "H001-M005",
+          "display_order": 5,
+          "category": "结构约束",
+          "title": "原生质谱与直接结构测量",
+          "principle": "原生质谱、交联和直接结构方法可检验计量比、装配和柔性。",
+          "answers": "回答模型与样品状态是否相符。",
+          "sample_design": "记录缓冲液、配体条件、样品纯度、候选构象和不一致区域。",
+          "limitations": "纯化样本不代表细胞环境中的完整构象分布。",
+          "source_ids": [
+            "H001S009",
+            "H001S010",
+            "H001S011"
+          ],
+          "workflow": "设计阶段先确定：记录缓冲液、配体条件、样品纯度、候选构象和不一致区域。 先界定预测对象、输入信息和可接受的结构假设，再运行模型并记录版本、模板和候选选择规则；输出需要与直接结构、结合或突变实验中的可观测读出对应。 这项方法的直接测量或计算依据是：原生质谱、交联和直接结构方法可检验计量比、装配和柔性。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：纯化样本不代表细胞环境中的完整构象分布。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "结果主要回答模型与样品状态是否相符。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        }
+      ],
+      "references": [
+        {
+          "source_id": "H001S001",
+          "title": "Highly accurate protein structure prediction with AlphaFold",
+          "journal": "Nature",
+          "published_date": "2021-07-15",
+          "doi": "10.1038/s41586-021-03819-2",
+          "pmid": "34265844",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/34265844/",
+          "source_type": "primary_research",
+          "study_context": "proteins with available experimental structures and CASP14 targets",
+          "study_design": "method-development and blinded benchmark assessment",
+          "usable_for": "single-chain structure-prediction capability and interpretation of local confidence",
+          "limitations": "single-chain accuracy does not establish complex stoichiometry, binding, dynamics or function",
+          "authors": "Jumper J et al."
+        },
+        {
+          "source_id": "H001S002",
+          "title": "Accurate prediction of protein structures and interactions using a three-track neural network",
+          "journal": "Science",
+          "published_date": "2021-08-20",
+          "doi": "10.1126/science.abj8754",
+          "pmid": "34282049",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/34282049/",
+          "source_type": "primary_research",
+          "study_context": "protein monomers and selected protein complexes",
+          "study_design": "method-development with structural and interaction examples",
+          "usable_for": "comparison of monomer and protein-interaction modeling tasks",
+          "limitations": "examples and benchmark performance do not make every predicted interface experimentally confirmed",
+          "authors": "Baek M et al."
+        },
+        {
+          "source_id": "H001S003",
+          "title": "Computed structures of core eukaryotic protein complexes",
+          "journal": "Science",
+          "published_date": "2021-12-10",
+          "doi": "10.1126/science.abm4805",
+          "pmid": "34762488",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/34762488/",
+          "source_type": "primary_research",
+          "study_context": "Saccharomyces cerevisiae core complexes",
+          "study_design": "proteome-scale complex modeling with selected experimental comparisons",
+          "usable_for": "proteome-scale complex hypothesis generation and orthogonal follow-up",
+          "limitations": "yeast complexes and selected validations cannot establish a complete interactome or human transferability",
+          "authors": "Humphreys IR et al."
+        },
+        {
+          "source_id": "H001S004",
+          "title": "Accurate structure prediction of biomolecular interactions with AlphaFold 3",
+          "journal": "Nature",
+          "published_date": "2024-05-08",
+          "doi": "10.1038/s41586-024-07487-w",
+          "pmid": "38718835",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/38718835/",
+          "source_type": "primary_research",
+          "study_context": "protein, nucleic-acid, small-molecule, ion and modified-residue complexes",
+          "study_design": "method-development with benchmark sets across biomolecular interaction classes",
+          "usable_for": "task coverage for multi-component complexes and the need to assess each interaction class separately",
+          "limitations": "developer benchmarks are not substitutes for independent assessment or experimental confirmation in a new system",
+          "authors": "Abramson J et al."
+        },
+        {
+          "source_id": "H001S005",
+          "title": "Generalized biomolecular modeling and design with RoseTTAFold All-Atom",
+          "journal": "Science",
+          "published_date": "2024-04-19",
+          "doi": "10.1126/science.adl2528",
+          "pmid": "38452047",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/38452047/",
+          "source_type": "primary_research",
+          "study_context": "protein, DNA, RNA, small-molecule and modified-residue systems",
+          "study_design": "method-development with structure and interaction benchmarks",
+          "usable_for": "all-atom representation choices and cross-molecule task coverage",
+          "limitations": "modeling and design examples require independent structural or functional testing",
+          "authors": "Krishna R et al."
+        },
+        {
+          "source_id": "H001S006",
+          "title": "Enhancing alphafold-multimer-based protein complex structure prediction with MULTICOM in CASP15",
+          "journal": "Communications Biology",
+          "published_date": "2023-11-10",
+          "doi": "10.1038/s42003-023-05525-3",
+          "pmid": "37949999",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/37949999/",
+          "source_type": "primary_research",
+          "study_context": "CASP15 protein-complex targets",
+          "study_design": "blind community assessment of complex-prediction workflow",
+          "usable_for": "complex-prediction workflow, ranking and refinement assessment",
+          "limitations": "CASP targets are limited in number and do not fully reproduce cellular abundance, assembly or dynamics",
+          "authors": "Liu J et al."
+        },
+        {
+          "source_id": "H001S007",
+          "title": "Prediction of protein assemblies by structure sampling followed by interface-focused scoring",
+          "journal": "Proteins",
+          "published_date": "2023-12-01",
+          "doi": "10.1002/prot.26569",
+          "pmid": "37578163",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/37578163/",
+          "source_type": "primary_research",
+          "study_context": "protein assembly benchmarks and CASP15-related targets",
+          "study_design": "method comparison for assembly sampling and interface scoring",
+          "usable_for": "why assembly generation and interface ranking need separate evaluation",
+          "limitations": "benchmark assembly behavior does not prove an interaction occurs in a particular cell or condition",
+          "authors": "Olechnovič K et al."
+        },
+        {
+          "source_id": "H001S008",
+          "title": "Assessment of the assessment-All about complexes",
+          "journal": "Proteins",
+          "published_date": "2023-12-01",
+          "doi": "10.1002/prot.26612",
+          "pmid": "37858934",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/37858934/",
+          "source_type": "review",
+          "study_context": "protein-complex prediction assessments",
+          "study_design": "peer-reviewed assessment review",
+          "usable_for": "choice and interpretation of complex-quality assessment metrics",
+          "limitations": "review; it does not validate a particular biological complex",
+          "authors": "Studer G; Tauriello G; Schwede T"
+        },
+        {
+          "source_id": "H001S009",
+          "title": "Unmasking AlphaFold to integrate experiments and predictions in multimeric complexes",
+          "journal": "Nature Communications",
+          "published_date": "2024-10-09",
+          "doi": "10.1038/s41467-024-52951-w",
+          "pmid": "39379372",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/39379372/",
+          "source_type": "primary_research",
+          "study_context": "multimeric complexes with experimental structural information",
+          "study_design": "method study integrating predictions with experimental restraints",
+          "usable_for": "how experimental information can resolve or challenge a predicted multimer",
+          "limitations": "the approach depends on the type and quality of available experimental restraint",
+          "authors": "Mirabello C et al."
+        },
+        {
+          "source_id": "H001S010",
+          "title": "Complementing machine learning-based structure predictions with native mass spectrometry",
+          "journal": "Protein Science",
+          "published_date": "2022-06-01",
+          "doi": "10.1002/pro.4333",
+          "pmid": "35634779",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/35634779/",
+          "source_type": "review",
+          "study_context": "protein complexes and native mass-spectrometry workflows",
+          "study_design": "peer-reviewed methods review",
+          "usable_for": "orthogonal evidence for stoichiometry, assembly and conformational heterogeneity",
+          "limitations": "native mass spectrometry has its own sample-preparation and gas-phase interpretation constraints",
+          "authors": "Allison TM et al."
+        },
+        {
+          "source_id": "H001S011",
+          "title": "Breaking the conformational ensemble barrier: Ensemble structure modeling challenges in CASP15",
+          "journal": "Proteins",
+          "published_date": "2023-12-01",
+          "doi": "10.1002/prot.26584",
+          "pmid": "37872703",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/37872703/",
+          "source_type": "benchmark",
+          "study_context": "CASP15 protein and RNA ensemble targets",
+          "study_design": "blind community challenge assessment",
+          "usable_for": "limits of a single predicted conformation for dynamic systems",
+          "limitations": "sparse or low-resolution reference data and limited targets constrain assessment",
+          "authors": "Kryshtafovych A et al."
+        },
+        {
+          "source_id": "H001S012",
+          "title": "Tertiary structure assessment at CASP15",
+          "journal": "Proteins",
+          "published_date": "2023-12-01",
+          "doi": "10.1002/prot.26593",
+          "pmid": "37746927",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/37746927/",
+          "source_type": "benchmark",
+          "study_context": "CASP15 single-chain targets",
+          "study_design": "blind assessment report",
+          "usable_for": "current single-chain benchmark context and remaining hard targets",
+          "limitations": "single-chain assessment does not evaluate binding or cellular function",
+          "authors": "Simpkin AJ et al."
+        },
+        {
+          "source_id": "H001S013",
+          "title": "AlphaFold3 at CASP16",
+          "journal": "Proteins",
+          "published_date": "2026-01-01",
+          "doi": "10.1002/prot.70044",
+          "pmid": "40851426",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/40851426/",
+          "source_type": "benchmark",
+          "study_context": "CASP16 targets including non-protein molecules",
+          "study_design": "independent post-challenge assessment",
+          "usable_for": "independent assessment of multi-molecule prediction and model ranking",
+          "limitations": "manual intervention and challenge composition affect comparisons; results are not an in-cell validation",
+          "authors": "Elofsson A"
+        },
+        {
+          "source_id": "H001S014",
+          "title": "Assessment of Protein Complex Predictions in CASP16: Are We Making Progress?",
+          "journal": "Proteins",
+          "published_date": "2026-01-01",
+          "doi": "10.1002/prot.70068",
+          "pmid": "41170922",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/41170922/",
+          "source_type": "benchmark",
+          "study_context": "CASP16 oligomer targets",
+          "study_design": "blind assessment of participating complex-prediction methods",
+          "usable_for": "remaining difficulty of complex prediction and model selection",
+          "limitations": "challenge targets and scoring do not cover all transient, disordered or cellular assemblies",
+          "authors": "Zhang J et al."
+        },
+        {
+          "source_id": "H001S015",
+          "title": "A comprehensive benchmarking of the AlphaFold3 for predicting biomacromolecules and their interactions",
+          "journal": "Briefings in Bioinformatics",
+          "published_date": "2025-11-01",
+          "doi": "10.1093/bib/bbaf616",
+          "pmid": "41313605",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/41313605/",
+          "source_type": "benchmark",
+          "study_context": "nine datasets across monomers, complexes, nucleic acids and ligands",
+          "study_design": "independent multi-dataset benchmark",
+          "usable_for": "cross-task comparison and the need to report the test class",
+          "limitations": "dataset composition, split strategy and benchmark availability constrain generalization",
+          "authors": "Peng C et al."
+        },
+        {
+          "source_id": "H001S016",
+          "title": "Single-sequence protein-RNA complex structure prediction by geometric attention-enabled pairing of biological language models",
+          "journal": "Cell Systems",
+          "published_date": "2025-10-15",
+          "doi": "10.1016/j.cels.2025.101400",
+          "pmid": "40961942",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/40961942/",
+          "source_type": "primary_research",
+          "study_context": "protein-RNA complex benchmark sets",
+          "study_design": "method-development and benchmark comparison",
+          "usable_for": "protein-RNA-specific data limitations and task-specific evaluation",
+          "limitations": "benchmark gains do not confirm RNA binding, cellular localization or function",
+          "authors": "Roche R; Tarafder S; Bhattacharya D"
+        },
+        {
+          "source_id": "H001S017",
+          "title": "AlphaFold2 enables accurate deorphanization of ligands to single-pass receptors",
+          "journal": "Cell Systems",
+          "published_date": "2024-11-20",
+          "doi": "10.1016/j.cels.2024.10.004",
+          "pmid": "39541981",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/39541981/",
+          "source_type": "primary_research",
+          "study_context": "known and orphan secreted ligand-single-pass receptor pairs",
+          "study_design": "prediction-guided experimental interaction study",
+          "usable_for": "how a structure-guided ranking can enter an explicit experimental confirmation workflow",
+          "limitations": "performance is specific to single-pass receptor and secreted-ligand settings",
+          "authors": "Banhos Danneskiold-Samsøe N et al."
+        },
+        {
+          "source_id": "H001S018",
+          "title": "Integrated structure-based protein interface prediction",
+          "journal": "BMC Bioinformatics",
+          "published_date": "2022-07-25",
+          "doi": "10.1186/s12859-022-04852-2",
+          "pmid": "35879651",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/35879651/",
+          "source_type": "primary_research",
+          "study_context": "protein-protein interface datasets",
+          "study_design": "method-development and interface-prediction evaluation",
+          "usable_for": "distinction between a plausible global fold and a correctly localized interface",
+          "limitations": "interface benchmark performance does not establish affinity or interaction occurrence",
+          "authors": "Walder M et al."
+        },
+        {
+          "source_id": "H001S019",
+          "title": "Experimental assessment of AI-based interactome mapping",
+          "journal": "Nature Communications",
+          "published_date": "2026-04-04",
+          "doi": "10.1038/s41467-026-70942-x",
+          "pmid": "41935050",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/41935050/",
+          "source_type": "primary_research",
+          "study_context": "large-scale protein-interaction mapping with experimental assays",
+          "study_design": "AI-based interaction prediction compared with experimental mapping",
+          "usable_for": "external experimental assessment of predicted interactome edges",
+          "limitations": "assay choice and coverage limit which interactions are observable; interaction detection is not structural resolution",
+          "authors": "Lambourne L et al."
+        },
+        {
+          "source_id": "H001S020",
+          "title": "Structural characterization and AlphaFold modeling of human T cell receptor recognition of NRAS cancer neoantigens",
+          "journal": "Science Advances",
+          "published_date": "2024-11-22",
+          "doi": "10.1126/sciadv.adq6150",
+          "pmid": "39576860",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/39576860/",
+          "source_type": "primary_research",
+          "study_context": "human T-cell receptor-peptide-MHC recognition of NRAS neoantigens",
+          "study_design": "crystal structures with prediction-guided mutational and functional analyses",
+          "usable_for": "an example of interpreting predictions alongside direct structure and functional specificity experiments",
+          "limitations": "one receptor-antigen system; not a general rule for all TCR or tumor interactions",
+          "authors": "Wu D et al."
+        }
+      ],
+      "shared_findings": [
+        {
+          "finding_id": "H001-C01",
+          "display_order": 1,
+          "title": "预测任务不同，准确的含义也不同",
+          "shared_result": "单体折叠、复合体装配、蛋白—核酸和蛋白—小分子预测使用的输入、评价指标和失败类型并不相同。\n\n一种分子类别或单链任务中的高准确率不能直接移到另一类复合体。",
+          "research_use": "明确分子类别、链数、化学状态、模板与序列信息，并分别评价全局结构和相互作用。",
+          "boundary": "支持任务分类，不支持通用准确率。",
+          "source_ids": [
+            "H001S001",
+            "H001S002",
+            "H001S003",
+            "H001S004",
+            "H001S005",
+            "H001S016"
+          ]
+        },
+        {
+          "finding_id": "H001-C02",
+          "display_order": 2,
+          "title": "整体结构正确不等于结合界面和亲和力正确",
+          "shared_result": "整体坐标、界面位置、配体姿势、亲和力和特异性需要不同证据。预测模型可以提出界面，但结合与功能仍需实验。\n\n蛋白—蛋白、受体—配体和TCR—抗原体系的界面特征与验证方法不同。",
+          "research_use": "结合界面指标与突变、直接结合、结构和功能实验配对。",
+          "boundary": "不从预测界面推断作用强度或生物学功能。",
+          "source_ids": [
+            "H001S006",
+            "H001S007",
+            "H001S008",
+            "H001S018",
+            "H001S020"
+          ]
+        },
+        {
+          "finding_id": "H001-C03",
+          "display_order": 3,
+          "title": "盲测和外部验证比随机切分更接近真实新问题",
+          "shared_result": "训练截止日期、结构同源性和模型选择规则都会影响性能；盲测、时间切分和远同源测试更能检验泛化。\n\n不同CASP轮次和自建数据集的目标构成、指标与人工干预程度不同。",
+          "research_use": "记录训练边界、模板排除、目标发布日期、模型版本、候选选择和失败样本。",
+          "boundary": "基准名次不能替代新体系中的实验验证。",
+          "source_ids": [
+            "H001S001",
+            "H001S006",
+            "H001S012",
+            "H001S013",
+            "H001S014",
+            "H001S015"
+          ]
+        },
+        {
+          "finding_id": "H001-C04",
+          "display_order": 4,
+          "title": "高置信度模型仍可能漏掉构象变化和装配状态",
+          "shared_result": "模型置信度用于判断输出是否稳定，不能证明结合或功能。柔性、多构象和不同计量比需要多个模型与实验约束。\n\n纯化样本、原位环境和不同配体条件下的构象分布不能互换。",
+          "research_use": "结合原生质谱、交联、直接结构测量和候选构象比较。",
+          "boundary": "单一静态坐标不代表完整构象集合。",
+          "source_ids": [
+            "H001S009",
+            "H001S010",
+            "H001S011",
+            "H001S013",
+            "H001S014"
+          ]
+        },
+        {
+          "finding_id": "H001-C05",
+          "display_order": 5,
+          "title": "预测最适合缩小实验范围，而不是代替实验结论",
+          "shared_result": "可靠用途包括排序候选、设计突变和提出可检验的相互作用；有效性取决于实验分母、阴性结果和正交验证。\n\n蛋白互作图谱、受体配对和抗原识别的实验读出不同。",
+          "research_use": "公开候选来源、排序规则、阴性候选、直接结构或结合证据和独立重复。",
+          "boundary": "不从预测直接确认靶点、药物作用、疾病机制或临床价值。",
+          "source_ids": [
+            "H001S003",
+            "H001S009",
+            "H001S017",
+            "H001S019",
+            "H001S020"
+          ]
+        }
+      ]
+    },
+    {
+      "topic_id": "H002",
+      "title": "人工智能（AI）分子设计与虚拟筛选",
+      "topic_role": "research_deep_dive",
+      "overview": "AI 分子设计与虚拟筛选把化学库、生成模型、结构信息和计算评分用于提出或排序候选分子。高分候选仍需满足合成可行性、选择性、暴露、稳定性和可测量功能；回顾性基准中的命中不能代替前瞻性合成与实验检验。\n\n本方向从公共化学数据库、生成模型、分子表示、对接、分子动力学、药效团和细胞或生化实验出发，集中处理三类问题：候选如何在明确约束下产生；计算评分能否把有限实验资源优先分配给更有价值的分子；命中后的结合、选择性、细胞效应和可开发性如何逐步验证。计算命中、直接结合、细胞功能和动物或人体证据属于不同层级。\n\n比较公开研究时，需要同时交代化学库、训练数据泄漏、筛选目标、评分函数、合成成功率、对照、命中定义、实验条件和前瞻性验证比例。虚拟筛选结果不能直接写成活性或治疗效果，命中率也不能跨任务简单比较。蛋白结构预测提供结构假设，表型筛选和候选优选专题提供实验验证与功能背景；本页聚焦 AI 生成和排序候选的证据范围。",
+      "sections": [
+        {
+          "section_id": "H002-SEC-01",
+          "title": "候选从哪里来",
+          "body": "结构驱动虚拟筛选从已有化合物库中排序；生成设计提出新的分子结构；药物再利用则从已有药物中寻找新的用途。虚拟筛选可以采用物理模型、经验评分或机器学习方法，本页不会把所有虚拟筛选统称为人工智能。三种路线的输入和交付物不同，不能用同一个分数比较。",
+          "source_ids": [
+            "H002S005",
+            "H002S006",
+            "H002S009",
+            "H002S010",
+            "H002S011",
+            "H002S013",
+            "H002S015",
+            "H002S019"
+          ]
+        },
+        {
+          "section_id": "H002-SEC-02",
+          "title": "高分候选还要满足实际约束",
+          "body": "亲和力只是一个条件。候选还要能合成、纯化，并在相关实验中显示选择性和合适的理化性质。应保留实际结构、合成路线、纯度、失败候选和优化轮次。",
+          "source_ids": [
+            "H002S004",
+            "H002S008",
+            "H002S012",
+            "H002S016"
+          ]
+        },
+        {
+          "section_id": "H002-SEC-03",
+          "title": "看前瞻性实验，而不是只看回顾性基准",
+          "body": "比起单纯的富集指标，更有用的信息包括进入实验的候选总数、合成成功率、命中阈值、阴性候选和重复结果。酶、细菌、细胞和肽类实验的命中率不能直接横向比较。",
+          "source_ids": [
+            "H002S001",
+            "H002S002",
+            "H002S003",
+            "H002S007",
+            "H002S014",
+            "H002S017"
+          ]
+        },
+        {
+          "section_id": "H002-SEC-04",
+          "title": "命中后还要回答什么",
+          "body": "一个实验命中并不自动成为可继续开发的候选。直接结合、作用机制、选择性、独立模型、初步暴露和毒性需要逐项补齐。证据停在哪一层，结论就应写到哪一层；尚未完成机制或选择性验证的分子，不宜笼统称为可开发候选。",
+          "source_ids": [
+            "H002S002",
+            "H002S004",
+            "H002S006",
+            "H002S008",
+            "H002S016"
+          ]
+        },
+        {
+          "section_id": "H002-SEC-05",
+          "title": "不同项目不能只比较命中率",
+          "body": "命中率会随靶标、候选类型、化合物库、数据划分和实验条件改变。跨项目比较时，应先核对训练与测试数据是否相互独立、是否排除了高度相似的化合物，以及多少候选真正进入了实验。缺少这些信息，单个命中率或模型得分不能用来判断平台优劣。",
+          "source_ids": [
+            "H002S003",
+            "H002S013",
+            "H002S018",
+            "H002S019",
+            "H002S020"
+          ]
+        },
+        {
+          "section_id": "H002-SEC-06",
+          "title": "研究技术",
+          "body": "结构驱动虚拟筛选利用靶标结构或结合口袋对已有化合物排序；生成设计则依据结构、性质和合成约束提出新分子。候选进入实验后，需要记录实际合成数量和纯度，并用直接结合、酶学或细胞功能实验复验，再考察选择性、稳定性、暴露和初步毒性。本页重点是计算候选如何成为实验命中；以细胞表型为起点的规模化筛选、靶点去卷积和候选优选不在此重复展开。",
+          "source_ids": []
+        },
+        {
+          "section_id": "H002-SEC-07",
+          "title": "科研参考范围",
+          "body": "本页讨论候选提出与实验验证，不提供药物选择、疗效承诺或治疗推荐。",
+          "source_ids": []
+        }
+      ],
+      "methods": [
+        {
+          "method_id": "H002-M001",
+          "display_order": 1,
+          "category": "候选提出",
+          "title": "结构驱动虚拟筛选",
+          "principle": "结构驱动虚拟筛选先用实验结构、同源模型或预测结构定义可能结合的小分子口袋，再让对接程序为化合物生成可能的结合姿势并排序。评分函数比较的是结构和化学约束下的相对匹配程度，不是直接测得的结合能。",
+          "answers": "回答在当前结构、口袋定义和筛选库范围内，哪些已有分子值得优先进入实验。它适合缩小实验规模和保留不同化学骨架，不能直接回答化合物是否真正结合、是否选择性作用于目标或是否具有细胞活性。",
+          "sample_design": "记录结构来源、蛋白构象、口袋范围、库规模、去重与过滤规则、对接参数和进入实验的全部候选分母。应设置已知活性物和结构相近但预期无活性的参照，并把未命中或未复现的候选纳入后续评价。",
+          "limitations": "对接或评分不是结合活性。",
+          "source_ids": [
+            "H002S005",
+            "H002S006",
+            "H002S019"
+          ],
+          "workflow": "设计阶段先确定：记录结构来源、蛋白构象、口袋范围、库规模、去重与过滤规则、对接参数和进入实验的全部候选分母。应设置已知活性物和结构相近但预期无活性的参照，并把未命中或未复现的候选纳入后续评价。 计算阶段先定义可搜索的化学空间、目标性质和筛选阈值，再用对接、生成或性质模型排序；入选分子进入合成或采购、纯度确认、直接活性和机制复测。 这项方法的直接测量或计算依据是：结构驱动虚拟筛选先用实验结构、同源模型或预测结构定义可能结合的小分子口袋，再让对接程序为化合物生成可能的结合姿势并排序。评分函数比较的是结构和化学约束下的相对匹配程度，不是直接测得的结合能。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：对接或评分不是结合活性。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "结果主要回答在当前结构、口袋定义和筛选库范围内，哪些已有分子值得优先进入实验。它适合缩小实验规模和保留不同化学骨架，不能直接回答化合物是否真正结合、是否选择性作用于目标或是否具有细胞活性。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        },
+        {
+          "method_id": "H002-M002",
+          "display_order": 2,
+          "category": "生成设计",
+          "title": "从头生成与多参数优化",
+          "principle": "从头生成模型在给定口袋、骨架、理化性质或合成限制下组合新的分子结构，再由结合、性质和合成可行性模型反复筛选。它输出的是满足设定约束的设计建议，而不是已经存在或已经验证的化合物。",
+          "answers": "回答在明确的结合、性质和可合成性约束下，可以提出哪些新的结构候选，以及这些候选与已有分子相比是否保留足够的化学多样性。它不能单独说明候选可以合成、稳定存在或具有预期生物活性。",
+          "sample_design": "记录生成模型版本、输入结构、优化目标、允许的官能团或合成限制、多样性规则、去重方式和每轮筛选阈值。对进入实验的设计应保留完整生成分母、拟定合成路线和未入选原因，避免只展示最终成功个例。",
+          "limitations": "新颖性和可合成性预测仍需实际制备。",
+          "source_ids": [
+            "H002S009",
+            "H002S010",
+            "H002S011",
+            "H002S012"
+          ],
+          "workflow": "设计阶段先确定：记录生成模型版本、输入结构、优化目标、允许的官能团或合成限制、多样性规则、去重方式和每轮筛选阈值。对进入实验的设计应保留完整生成分母、拟定合成路线和未入选原因，避免只展示最终成功个例。 计算阶段先定义可搜索的化学空间、目标性质和筛选阈值，再用对接、生成或性质模型排序；入选分子进入合成或采购、纯度确认、直接活性和机制复测。 这项方法的直接测量或计算依据是：从头生成模型在给定口袋、骨架、理化性质或合成限制下组合新的分子结构，再由结合、性质和合成可行性模型反复筛选。它输出的是满足设定约束的设计建议，而不是已经存在或已经验证的化合物。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：新颖性和可合成性预测仍需实际制备。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "结果主要回答在明确的结合、性质和可合成性约束下，可以提出哪些新的结构候选，以及这些候选与已有分子相比是否保留足够的化学多样性。它不能单独说明候选可以合成、稳定存在或具有预期生物活性。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        },
+        {
+          "method_id": "H002-M003",
+          "display_order": 3,
+          "category": "实验验证",
+          "title": "合成、纯度与直接作用实验",
+          "principle": "候选制备后，先确认化学身份和纯度，再用与研究问题匹配的直接结合、酶学或细胞读出测量效应。计算排序只有在实际分子进入相同或预先规定的实验体系后，才能转化为可比较的命中率。",
+          "answers": "回答计算优选的候选中有多少在实验中复现预期读出、效应量多大，以及命中是否集中在少数近似结构。这个阶段确认的是实验命中，不自动确认靶点机制、选择性或人体可用性。",
+          "sample_design": "报告进入合成和测试的总数、结构确认和纯度、阴性候选、已知阳性对照、浓度梯度、重复次数和预先设定的命中阈值。若使用细胞实验，还应记录细胞模型、处理时间和与细胞毒性区分的对照读出。",
+          "limitations": "单次体外命中不确认机制或开发价值。",
+          "source_ids": [
+            "H002S001",
+            "H002S002",
+            "H002S003",
+            "H002S007"
+          ],
+          "workflow": "设计阶段先确定：报告进入合成和测试的总数、结构确认和纯度、阴性候选、已知阳性对照、浓度梯度、重复次数和预先设定的命中阈值。若使用细胞实验，还应记录细胞模型、处理时间和与细胞毒性区分的对照读出。 计算阶段先定义可搜索的化学空间、目标性质和筛选阈值，再用对接、生成或性质模型排序；入选分子进入合成或采购、纯度确认、直接活性和机制复测。 这项方法的直接测量或计算依据是：候选制备后，先确认化学身份和纯度，再用与研究问题匹配的直接结合、酶学或细胞读出测量效应。计算排序只有在实际分子进入相同或预先规定的实验体系后，才能转化为可比较的命中率。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：单次体外命中不确认机制或开发价值。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "结果主要回答计算优选的候选中有多少在实验中复现预期读出、效应量多大，以及命中是否集中在少数近似结构。这个阶段确认的是实验命中，不自动确认靶点机制、选择性或人体可用性。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        },
+        {
+          "method_id": "H002-M004",
+          "display_order": 4,
+          "category": "机制与选择性",
+          "title": "正交读出和作用机制复验",
+          "principle": "正交验证使用不同测量原理分别检查候选是否直接结合目标、改变目标相关功能，以及在其他蛋白、细胞或遗传背景中是否仍然有效。常见组合包括竞争或结合实验、遗传扰动、选择性谱和独立功能读出。",
+          "answers": "回答候选表型是否与预设靶点和通路一致，哪些观察支持直接作用，哪些可能是脱靶、细胞应激或继发变化。它的目的不是堆积更多阳性实验，而是排除最容易造成错误机制解释的替代原因。",
+          "sample_design": "按假设选择结合竞争、靶点突变或敲低、选择性谱和至少一种独立功能模型。每一项实验都保留不结合或失活对照、浓度梯度和独立重复；不同读出之间的样本、剂量和时间差异需要明示。",
+          "limitations": "检出结合蛋白不等于已经找到驱动表型的靶点。",
+          "source_ids": [
+            "H002S004",
+            "H002S008",
+            "H002S016"
+          ],
+          "workflow": "设计阶段先确定：按假设选择结合竞争、靶点突变或敲低、选择性谱和至少一种独立功能模型。每一项实验都保留不结合或失活对照、浓度梯度和独立重复；不同读出之间的样本、剂量和时间差异需要明示。 计算阶段先定义可搜索的化学空间、目标性质和筛选阈值，再用对接、生成或性质模型排序；入选分子进入合成或采购、纯度确认、直接活性和机制复测。 这项方法的直接测量或计算依据是：正交验证使用不同测量原理分别检查候选是否直接结合目标、改变目标相关功能，以及在其他蛋白、细胞或遗传背景中是否仍然有效。常见组合包括竞争或结合实验、遗传扰动、选择性谱和独立功能读出。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：检出结合蛋白不等于已经找到驱动表型的靶点。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "结果主要回答候选表型是否与预设靶点和通路一致，哪些观察支持直接作用，哪些可能是脱靶、细胞应激或继发变化。它的目的不是堆积更多阳性实验，而是排除最容易造成错误机制解释的替代原因。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        },
+        {
+          "method_id": "H002-M005",
+          "display_order": 5,
+          "category": "候选推进",
+          "title": "初步可开发性评价",
+          "principle": "初步可开发性评价把体外效力和选择性与溶解度、稳定性、代谢、暴露和早期安全信号放在同一决策中。它用于识别候选在进入更大规模研究前最可能失败的环节，而不是预测人体疗效。",
+          "answers": "回答候选是否在当前研究目标下仍值得投入下一轮合成、机制或动物实验，哪些性质已经构成停止或重新设计的理由。不同项目的优先级不同，因此必须预先说明效力、暴露和安全性之间如何权衡。",
+          "sample_design": "记录效力、选择性、溶解度和稳定性、代谢或暴露读出、早期毒性信号、所用体系和停止规则。比较多个候选时，应在相近实验条件下报告全体结果，而不是只列出进入下一轮的分子。",
+          "limitations": "前临床数据不能替代人体安全和疗效。",
+          "source_ids": [
+            "H002S004",
+            "H002S014",
+            "H002S017"
+          ],
+          "workflow": "设计阶段先确定：记录效力、选择性、溶解度和稳定性、代谢或暴露读出、早期毒性信号、所用体系和停止规则。比较多个候选时，应在相近实验条件下报告全体结果，而不是只列出进入下一轮的分子。 计算阶段先定义可搜索的化学空间、目标性质和筛选阈值，再用对接、生成或性质模型排序；入选分子进入合成或采购、纯度确认、直接活性和机制复测。 这项方法的直接测量或计算依据是：初步可开发性评价把体外效力和选择性与溶解度、稳定性、代谢、暴露和早期安全信号放在同一决策中。它用于识别候选在进入更大规模研究前最可能失败的环节，而不是预测人体疗效。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：前临床数据不能替代人体安全和疗效。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "结果主要回答候选是否在当前研究目标下仍值得投入下一轮合成、机制或动物实验，哪些性质已经构成停止或重新设计的理由。不同项目的优先级不同，因此必须预先说明效力、暴露和安全性之间如何权衡。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        }
+      ],
+      "references": [
+        {
+          "source_id": "H002S001",
+          "title": "A Deep Learning Approach to Antibiotic Discovery",
+          "journal": "Cell",
+          "published_date": "2020-02-20",
+          "doi": "10.1016/j.cell.2020.01.021",
+          "pmid": "32084340",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/32084340/",
+          "source_type": "primary_research",
+          "study_context": "antibacterial compound libraries",
+          "study_design": "model-guided prospective screening with experimental tests",
+          "usable_for": "prospective ranking followed by experimental validation",
+          "limitations": "antibacterial model and assay do not establish broad drug-development success",
+          "authors": "Stokes JM et al."
+        },
+        {
+          "source_id": "H002S002",
+          "title": "Deep learning-guided discovery of an antibiotic targeting Acinetobacter baumannii",
+          "journal": "Nature Chemical Biology",
+          "published_date": "2023-05-25",
+          "doi": "10.1038/s41589-023-01349-8",
+          "pmid": "37231267",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/37231267/",
+          "source_type": "primary_research",
+          "study_context": "Acinetobacter baumannii-focused antibiotic discovery",
+          "study_design": "model-guided screening with microbiological characterization",
+          "usable_for": "prospective hit discovery and organism-specific validation",
+          "limitations": "pathogen specificity and preclinical assays limit clinical inference",
+          "authors": "Liu G et al."
+        },
+        {
+          "source_id": "H002S003",
+          "title": "Discovery of a structural class of antibiotics with explainable deep learning",
+          "journal": "Nature",
+          "published_date": "2023-12-20",
+          "doi": "10.1038/s41586-023-06887-8",
+          "pmid": "38123686",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/38123686/",
+          "source_type": "primary_research",
+          "study_context": "antibiotic compound space and resistant bacteria",
+          "study_design": "explainable-model-guided candidate discovery with experimental characterization",
+          "usable_for": "structural novelty, candidate selection and experimental confirmation",
+          "limitations": "reported activity remains context-specific and is not a therapeutic recommendation",
+          "authors": "Wong F et al."
+        },
+        {
+          "source_id": "H002S004",
+          "title": "A small-molecule TNIK inhibitor targets fibrosis in preclinical and clinical models",
+          "journal": "Nature Biotechnology",
+          "published_date": "2024-03-08",
+          "doi": "10.1038/s41587-024-02143-0",
+          "pmid": "38459338",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/38459338/",
+          "source_type": "primary_research",
+          "study_context": "fibrosis target discovery and candidate nomination",
+          "study_design": "generative-AI pipeline with preclinical and clinical-model studies",
+          "usable_for": "candidate-generation workflow and staged validation evidence",
+          "limitations": "one program cannot establish general speed, success rate or safety of AI discovery",
+          "authors": "Ren F et al."
+        },
+        {
+          "source_id": "H002S005",
+          "title": "WaterMap-Guided Structure-Based Virtual Screening for Acetylcholinesterase Inhibitors",
+          "journal": "ChemMedChem",
+          "published_date": "2022-04-20",
+          "doi": "10.1002/cmdc.202100721",
+          "pmid": "35157366",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/35157366/",
+          "source_type": "primary_research",
+          "study_context": "1.7-million-compound database and AChE target",
+          "study_design": "structure-based screen with follow-up calculations and assays",
+          "usable_for": "screening scale, candidate prioritization and experimental assay linkage",
+          "limitations": "one enzyme target and selected library do not benchmark all virtual screens",
+          "authors": "Targowska-Duda KM et al."
+        },
+        {
+          "source_id": "H002S006",
+          "title": "Identification of novel anti-inflammatory Nur77 modulators by virtual screening",
+          "journal": "Bioorganic Chemistry",
+          "published_date": "2021-07-01",
+          "doi": "10.1016/j.bioorg.2021.104912",
+          "pmid": "33933804",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/33933804/",
+          "source_type": "primary_research",
+          "study_context": "Nur77 ligand-binding sites and compound libraries",
+          "study_design": "structure-guided screening with biochemical and cellular follow-up",
+          "usable_for": "need to record binding and functional evidence separately",
+          "limitations": "target-system context limits extrapolation to other nuclear receptors",
+          "authors": "Ding X et al."
+        },
+        {
+          "source_id": "H002S007",
+          "title": "Discovery of Potential Scaffolds for Methionine Adenosyltransferase 2A Inhibitors: Virtual Screening, Synthesis, and Biological Evaluation",
+          "journal": "Molecules",
+          "published_date": "2025-05-12",
+          "doi": "10.3390/molecules30102134",
+          "pmid": "40430308",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/40430308/",
+          "source_type": "primary_research",
+          "study_context": "MAT2A inhibitor discovery",
+          "study_design": "screening, synthesis and biological evaluation",
+          "usable_for": "explicit synthesis-to-assay route",
+          "limitations": "selected scaffolds and assays require independent confirmation",
+          "authors": "Qi C et al."
+        },
+        {
+          "source_id": "H002S008",
+          "title": "AI Promoted Virtual Screening, Structure-Based Hit Optimization, and Synthesis of Novel COVID-19 S-RBD Domain Inhibitors",
+          "journal": "Journal of Chemical Information and Modeling",
+          "published_date": "2024-11-25",
+          "doi": "10.1021/acs.jcim.4c01110",
+          "pmid": "39535926",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/39535926/",
+          "source_type": "primary_research",
+          "study_context": "SARS-CoV-2 spike receptor-binding domain",
+          "study_design": "AI-assisted screening, optimization, synthesis and testing",
+          "usable_for": "design-to-synthesis decision records",
+          "limitations": "viral target and assay setting constrain generalization",
+          "authors": "Gkekas I et al."
+        },
+        {
+          "source_id": "H002S009",
+          "title": "3D molecular generative framework for interaction-guided drug design",
+          "journal": "Nature Communications",
+          "published_date": "2024-03-27",
+          "doi": "10.1038/s41467-024-47011-2",
+          "pmid": "38538598",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/38538598/",
+          "source_type": "primary_research",
+          "study_context": "3D molecular generation and interaction-guided design benchmarks",
+          "study_design": "method development with structure-aware evaluations",
+          "usable_for": "generative-model objectives and evaluation design",
+          "limitations": "computational evaluations alone do not establish synthesis or activity",
+          "authors": "Zhung W; Kim H; Kim WY"
+        },
+        {
+          "source_id": "H002S010",
+          "title": "An equivariant generative framework for molecular graph-structure Co-design",
+          "journal": "Chemical Science",
+          "published_date": "2023-07-19",
+          "doi": "10.1039/d3sc02538a",
+          "pmid": "37564414",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/37564414/",
+          "source_type": "primary_research",
+          "study_context": "molecular graph and 3D-structure design benchmarks",
+          "study_design": "method-development benchmark study",
+          "usable_for": "generation constraints and graph-3D consistency",
+          "limitations": "benchmark validity is not experimental activity",
+          "authors": "Zhang Z et al."
+        },
+        {
+          "source_id": "H002S011",
+          "title": "De novo molecular design with deep molecular generative models for PPI inhibitors",
+          "journal": "Briefings in Bioinformatics",
+          "published_date": "2022-07-18",
+          "doi": "10.1093/bib/bbac285",
+          "pmid": "35830870",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/35830870/",
+          "source_type": "primary_research",
+          "study_context": "PPI-inhibitor design objectives",
+          "study_design": "generative-model development",
+          "usable_for": "PPI-focused design constraints",
+          "limitations": "in-silico outputs require synthesis and binding confirmation",
+          "authors": "Wang J et al."
+        },
+        {
+          "source_id": "H002S012",
+          "title": "MegaSyn: Integrating Generative Molecular Design, Automated Analog Designer, and Synthetic Viability Prediction",
+          "journal": "ACS Omega",
+          "published_date": "2022-05-27",
+          "doi": "10.1021/acsomega.2c01404",
+          "pmid": "35694522",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/35694522/",
+          "source_type": "primary_research",
+          "study_context": "generative-design and synthetic-feasibility tasks",
+          "study_design": "method-development study",
+          "usable_for": "multi-objective and synthetic-feasibility vocabulary",
+          "limitations": "predicted synthesis viability is not demonstrated route success",
+          "authors": "Urbina F et al."
+        },
+        {
+          "source_id": "H002S013",
+          "title": "Prediction of drug efficacy from transcriptional profiles with deep learning",
+          "journal": "Nature Biotechnology",
+          "published_date": "2021-06-17",
+          "doi": "10.1038/s41587-021-00946-z",
+          "pmid": "34140681",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/34140681/",
+          "source_type": "primary_research",
+          "study_context": "transcriptional profiles and repurposing/discovery tasks",
+          "study_design": "model development with experimental follow-up",
+          "usable_for": "phenotype-driven candidate proposal and validation route",
+          "limitations": "expression-based prediction does not by itself identify direct molecular targets",
+          "authors": "Zhu J et al."
+        },
+        {
+          "source_id": "H002S014",
+          "title": "Machine learning-enabled virtual screening indicates the anti-tuberculosis activity of aldoxorubicin and quarfloxin with verification by molecular docking, molecular dynamics simulations, and biological evaluations",
+          "journal": "Briefings in Bioinformatics",
+          "published_date": "2024-11-22",
+          "doi": "10.1093/bib/bbae696",
+          "pmid": "39737570",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/39737570/",
+          "source_type": "primary_research",
+          "study_context": "drug repurposing for tuberculosis",
+          "study_design": "machine-learning screening with biological evaluation",
+          "usable_for": "repurposing workflow and experimental confirmation",
+          "limitations": "biological activity does not establish mechanism, regimen or clinical effectiveness",
+          "authors": "Zheng S et al."
+        },
+        {
+          "source_id": "H002S015",
+          "title": "Integration of machine learning and experimental validation reveals new lipid-lowering drug candidates",
+          "journal": "Acta Pharmacologica Sinica",
+          "published_date": "2025-04-15",
+          "doi": "10.1038/s41401-025-01539-1",
+          "pmid": "40234619",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/40234619/",
+          "source_type": "primary_research",
+          "study_context": "approved-drug repurposing candidates",
+          "study_design": "machine-learning prioritization with experimental validation",
+          "usable_for": "repositioning and validation distinction",
+          "limitations": "candidate evidence does not establish patient benefit",
+          "authors": "Chen JH et al."
+        },
+        {
+          "source_id": "H002S016",
+          "title": "A deep learning-driven discovery of berberine derivatives as novel antibacterial against multidrug-resistant Helicobacter pylori",
+          "journal": "Signal Transduction and Targeted Therapy",
+          "published_date": "2024-07-08",
+          "doi": "10.1038/s41392-024-01895-0",
+          "pmid": "38972904",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/38972904/",
+          "source_type": "primary_research",
+          "study_context": "berberine-derivative antibacterial design",
+          "study_design": "model-guided discovery with microbiological evaluation",
+          "usable_for": "lead optimization linked to testing",
+          "limitations": "pathogen and compound-series specificity limit extrapolation",
+          "authors": "Guo X et al."
+        },
+        {
+          "source_id": "H002S017",
+          "title": "Deep-learning-enabled antibiotic discovery through molecular de-extinction",
+          "journal": "Nature Biomedical Engineering",
+          "published_date": "2024-06-11",
+          "doi": "10.1038/s41551-024-01201-x",
+          "pmid": "38862735",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/38862735/",
+          "source_type": "primary_research",
+          "study_context": "extinct-organism proteomes and antimicrobial peptide candidates",
+          "study_design": "deep-learning mining with experimental characterization",
+          "usable_for": "novel candidate-space sourcing and experimental handoff",
+          "limitations": "peptide activity in selected assays does not establish a clinical candidate",
+          "authors": "Wan F et al."
+        },
+        {
+          "source_id": "H002S018",
+          "title": "Deep generative molecular design and its value in modern drug discovery",
+          "journal": "Expert Opinion on Drug Discovery",
+          "published_date": "2026-03-04",
+          "doi": "10.1080/17460441.2026.2636192",
+          "pmid": "41778634",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/41778634/",
+          "source_type": "review",
+          "study_context": "generative molecular design literature",
+          "study_design": "peer-reviewed review",
+          "usable_for": "model-class vocabulary and reported limitations",
+          "limitations": "review; no single program-level validation claim",
+          "authors": "Ozdemir ES et al."
+        },
+        {
+          "source_id": "H002S019",
+          "title": "New Trends in Virtual Screening",
+          "journal": "Journal of Chemical Information and Modeling",
+          "published_date": "2020-09-28",
+          "doi": "10.1021/acs.jcim.0c01009",
+          "pmid": "32981325",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/32981325/",
+          "source_type": "review",
+          "study_context": "virtual-screening practice",
+          "study_design": "peer-reviewed perspective",
+          "usable_for": "screening-design vocabulary and limitations",
+          "limitations": "perspective; does not validate a given hit",
+          "authors": "Walters WP; Wang R"
+        },
+        {
+          "source_id": "H002S020",
+          "title": "Deep learning tools to accelerate antibiotic discovery",
+          "journal": "Expert Opinion on Drug Discovery",
+          "published_date": "2023-10-18",
+          "doi": "10.1080/17460441.2023.2250721",
+          "pmid": "37794737",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/37794737/",
+          "source_type": "review",
+          "study_context": "antibiotic-discovery literature",
+          "study_design": "peer-reviewed review",
+          "usable_for": "cross-study comparison of antimicrobial discovery workflows",
+          "limitations": "review; primary studies retain responsibility for experimental claims",
+          "authors": "Cesaro A et al."
+        }
+      ],
+      "shared_findings": [
+        {
+          "finding_id": "H002-C01",
+          "display_order": 1,
+          "title": "虚拟筛选、生成设计和再定位产生的是不同类型的候选",
+          "shared_result": "库筛选排序已有分子，生成模型提出新结构，再定位重排已有药物；三者都只产生待验证候选。\n\n结构驱动、配体驱动和表型驱动路线所需输入与评价方式不同。",
+          "research_use": "记录起点、库规模、目标信息、排名规则和实际进入实验的候选数。",
+          "boundary": "不把模型评分、新颖性或排名写成药效。",
+          "source_ids": [
+            "H002S005",
+            "H002S006",
+            "H002S009",
+            "H002S010",
+            "H002S011",
+            "H002S013",
+            "H002S015",
+            "H002S019"
+          ]
+        },
+        {
+          "finding_id": "H002-C02",
+          "display_order": 2,
+          "title": "候选优选是多参数权衡，不是单一亲和力最大化",
+          "shared_result": "高分候选还要能合成、纯化并在相关条件下保持效力、选择性和稳定性。\n\n小分子、肽和再定位候选的合成路线、性质和可开发性要求不同。",
+          "research_use": "报告实际结构、路线、纯度、效力、选择性、失败候选和优化轮次。",
+          "boundary": "预测可合成性不等于实际制备成功。",
+          "source_ids": [
+            "H002S004",
+            "H002S008",
+            "H002S012",
+            "H002S016"
+          ]
+        },
+        {
+          "finding_id": "H002-C03",
+          "display_order": 3,
+          "title": "前瞻性命中率比回顾性基准更能说明真实用途",
+          "shared_result": "能够说明实际用途的研究需报告测试分母、合成成功率、实验阈值、阴性候选与重复，而不是只展示最佳候选。\n\n酶、细菌、细胞和肽类实验的命中定义不能直接比较。",
+          "research_use": "预先固定筛选规则，保留所有进入实验的候选及其结果。",
+          "boundary": "一次体外或细胞命中不确认机制、暴露、安全性或人体获益。",
+          "source_ids": [
+            "H002S001",
+            "H002S002",
+            "H002S003",
+            "H002S005",
+            "H002S007",
+            "H002S014",
+            "H002S017"
+          ]
+        },
+        {
+          "finding_id": "H002-C04",
+          "display_order": 4,
+          "title": "计算命中进入候选阶段还需补齐机制和可开发性",
+          "shared_result": "结合、功能、机制、选择性、体内暴露和初步毒性属于连续但不等价的验证层级。\n\n抗菌、纤维化、受体和病毒项目采用的模型与后续开发标准不同。",
+          "research_use": "结合正交作用实验、遗传或化学机制验证、选择性谱和初步药代毒理。",
+          "boundary": "前临床候选不是临床治疗结论。",
+          "source_ids": [
+            "H002S002",
+            "H002S004",
+            "H002S006",
+            "H002S008",
+            "H002S016"
+          ]
+        },
+        {
+          "finding_id": "H002-C05",
+          "display_order": 5,
+          "title": "跨项目比较必须保留任务、数据和实验分母",
+          "shared_result": "训练边界、化学相似性、候选多样性和实验分母共同决定命中率是否可解释。\n\n不同靶点、库、候选类型和实验条件下的命中率不能直接排名。",
+          "research_use": "记录数据切分、模型版本、候选选择、实验分母、阴性结果和复现实验。",
+          "boundary": "不以单项性能指标形成模型或平台优劣榜。",
+          "source_ids": [
+            "H002S003",
+            "H002S013",
+            "H002S018",
+            "H002S019",
+            "H002S020"
+          ]
+        }
+      ]
+    },
+    {
+      "topic_id": "H014",
+      "title": "冷冻电镜、原位结构与动态构象",
+      "topic_role": "research_deep_dive",
+      "overview": "冷冻电镜、原位结构和动态构象研究关注分子或复合体在接近天然条件下呈现哪些结构状态。单颗粒重建通常从大量颗粒中恢复群体构象，原位断层成像保留细胞中的位置关系，时间分辨实验记录特定时间点的状态变化；这些读出都不能单独等同于完整动态过程或机制证明。\n\n本方向从单颗粒冷冻电镜、冷冻电子断层成像、原位成像、时间分辨制样、图像分类和结构重建出发，集中处理三类问题：样本中有哪些构象和异质性；结构在细胞或细胞器中的位置如何改变解释；时间、制样和扰动条件下的状态变化能否通过独立测量得到支持。图像、重建模型、生化或功能实验承担不同证据作用。\n\n比较公开研究时，需要同时交代分辨率、颗粒选择、FSC 或断层重建指标、倾转范围、冰层、电子剂量、时间窗口、制样条件和模型验证。原位位置不能自动证明分子互作，时间点序列也不能自动恢复连续轨迹。结构预测专题提供计算假设，肿瘤空间免疫专题处理组织免疫位置；本页聚焦结构测量、原位语境与动态观察的边界。",
+      "sections": [
+        {
+          "section_id": "H014-SEC-01",
+          "title": "单颗粒重建看的是样本中的哪些状态",
+          "body": "单颗粒冷冻电镜把大量快速冷冻的颗粒重建为三维结构。全局分辨率是一个摘要指标，不能说明每个区域都同样可靠。柔性区域、取向偏好和颗粒异质性会改变局部质量。",
+          "source_ids": [
+            "H014S007",
+            "H014S008",
+            "H014S009",
+            "H014S012"
+          ]
+        },
+        {
+          "section_id": "H014-SEC-02",
+          "title": "原位断层成像保留细胞位置",
+          "body": "冷冻电子断层成像可在细胞内观察分子的位置和装配。冷冻聚焦离子束制备的薄片、关联光电显微成像和亚断层平均决定研究者实际能测到什么。它们也带来取样范围、样本厚度和目标选择的限制。",
+          "source_ids": [
+            "H014S001",
+            "H014S002",
+            "H014S003",
+            "H014S010"
+          ]
+        },
+        {
+          "section_id": "H014-SEC-03",
+          "title": "时间分辨研究记录的是时间点，不是完整影片",
+          "body": "混合、触发和快速冻结可以富集特定时间点的结构状态。要解释这类结果，需要报告触发方式、时间窗口、温度、重复和独立动力学读出。若这些信息不足，几个离散快照不能被写成完整反应路径。",
+          "source_ids": [
+            "H014S004",
+            "H014S005",
+            "H014S006",
+            "H014S013"
+          ]
+        },
+        {
+          "section_id": "H014-SEC-04",
+          "title": "制样决定可测性",
+          "body": "低样本量和微流控制样技术扩大了可研究对象的范围，但材料回收、纯度、吸附、取向和网格制备仍会影响结果。研究报告应写明样本来源、浓度、制样成功率和失败条件。",
+          "source_ids": [
+            "H014S011",
+            "H014S019"
+          ]
+        },
+        {
+          "section_id": "H014-SEC-05",
+          "title": "结构解释需要正交证据",
+          "body": "地图质量和原子模型拟合说明结构是否被合理解释。计量比、突变、结合或功能读出则检验该结构状态是否与研究问题有关。预测模型可辅助建模，不能替代直接测量。",
+          "source_ids": [
+            "H014S014",
+            "H014S015",
+            "H014S016",
+            "H014S017",
+            "H014S018",
+            "H014S020"
+          ]
+        },
+        {
+          "section_id": "H014-SEC-06",
+          "title": "研究技术",
+          "body": "单颗粒冷冻电镜适合研究纯化后可获得大量同类颗粒的样本，重建时需同时检查颗粒取向、分类结果和局部分辨率。冷冻电子断层成像保留分子在细胞中的位置，通常还要结合冷冻聚焦离子束制样、目标定位和亚断层平均。时间分辨冷冻电镜通过混合、触发和快速冻结捕捉设定时间点的构象分布。预测模型可以辅助原子建模，但本页评价的是直接测量及其制样、重建和验证条件，而不是预测模型本身的性能。",
+          "source_ids": []
+        },
+        {
+          "section_id": "H014-SEC-07",
+          "title": "科研参考范围",
+          "body": "本页仅供科研参考，不依据结构图像给出疾病机制、诊疗或治疗结论。",
+          "source_ids": []
+        }
+      ],
+      "methods": [
+        {
+          "method_id": "H014-M001",
+          "display_order": 1,
+          "category": "单颗粒冷冻电镜",
+          "title": "单颗粒重建与局部精修",
+          "principle": "将大量快速冷冻颗粒的投影重建为三维结构。",
+          "answers": "回答纯化样本中可分辨的结构。",
+          "sample_design": "记录样品纯度、颗粒数、取向、分类和局部分辨率。",
+          "limitations": "全局分辨率不能代表每个局部区域。",
+          "source_ids": [
+            "H014S007",
+            "H014S008",
+            "H014S009"
+          ],
+          "workflow": "设计阶段先确定：记录样品纯度、颗粒数、取向、分类和局部分辨率。 从样品纯度或细胞环境、冷冻制样和数据采集开始控制；重建阶段保留颗粒选择、分类、局部分辨率和模型拟合记录，关键结构状态再与生化或功能读出核对。 这项方法的直接测量或计算依据是：将大量快速冷冻颗粒的投影重建为三维结构。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：全局分辨率不能代表每个局部区域。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "结果主要回答纯化样本中可分辨的结构。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        },
+        {
+          "method_id": "H014-M002",
+          "display_order": 2,
+          "category": "原位结构",
+          "title": "冷冻电子断层与亚断层平均",
+          "principle": "对冷冻细胞薄片采集倾斜序列并对同类颗粒平均。",
+          "answers": "回答分子在细胞中的位置和装配。",
+          "sample_design": "记录细胞类型、薄片厚度、目标定位、断层数和平均流程。",
+          "limitations": "原位定位不直接说明功能因果。",
+          "source_ids": [
+            "H014S001",
+            "H014S002",
+            "H014S003",
+            "H014S010"
+          ],
+          "workflow": "设计阶段先确定：记录细胞类型、薄片厚度、目标定位、断层数和平均流程。 从样品纯度或细胞环境、冷冻制样和数据采集开始控制；重建阶段保留颗粒选择、分类、局部分辨率和模型拟合记录，关键结构状态再与生化或功能读出核对。 这项方法的直接测量或计算依据是：对冷冻细胞薄片采集倾斜序列并对同类颗粒平均。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：原位定位不直接说明功能因果。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "结果主要回答分子在细胞中的位置和装配。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        },
+        {
+          "method_id": "H014-M003",
+          "display_order": 3,
+          "category": "动态研究",
+          "title": "时间分辨冷冻电镜",
+          "principle": "用混合、触发和快速冻结富集设定时间点的结构状态。",
+          "answers": "回答特定条件下的短暂构象分布。",
+          "sample_design": "记录触发、时间点、温度、重复和独立动力学读出。",
+          "limitations": "离散快照不能单独构成反应路径。",
+          "source_ids": [
+            "H014S004",
+            "H014S005",
+            "H014S006",
+            "H014S013"
+          ],
+          "workflow": "设计阶段先确定：记录触发、时间点、温度、重复和独立动力学读出。 从样品纯度或细胞环境、冷冻制样和数据采集开始控制；重建阶段保留颗粒选择、分类、局部分辨率和模型拟合记录，关键结构状态再与生化或功能读出核对。 这项方法的直接测量或计算依据是：用混合、触发和快速冻结富集设定时间点的结构状态。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：离散快照不能单独构成反应路径。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "结果主要回答特定条件下的短暂构象分布。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        },
+        {
+          "method_id": "H014-M004",
+          "display_order": 4,
+          "category": "制样",
+          "title": "低输入与微流控制样",
+          "principle": "通过低输入或微流控路线减少材料需求并形成适合成像的样本。",
+          "answers": "回答有限样本能否进入结构测量。",
+          "sample_design": "记录来源、浓度、回收、网格条件和制样成功率。",
+          "limitations": "低输入流程会引入样本选择和制样偏差。",
+          "source_ids": [
+            "H014S011",
+            "H014S019"
+          ],
+          "workflow": "设计阶段先确定：记录来源、浓度、回收、网格条件和制样成功率。 从样品纯度或细胞环境、冷冻制样和数据采集开始控制；重建阶段保留颗粒选择、分类、局部分辨率和模型拟合记录，关键结构状态再与生化或功能读出核对。 这项方法的直接测量或计算依据是：通过低输入或微流控路线减少材料需求并形成适合成像的样本。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：低输入流程会引入样本选择和制样偏差。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "结果主要回答有限样本能否进入结构测量。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        },
+        {
+          "method_id": "H014-M005",
+          "display_order": 5,
+          "category": "模型验证",
+          "title": "地图、模型与正交约束",
+          "principle": "以地图质量、模型拟合、计量比和实验约束共同评价结构解释。",
+          "answers": "回答提出的结构状态是否可信。",
+          "sample_design": "报告半图验证、模型拟合、约束、突变和功能读出。",
+          "limitations": "预测模型不能代替直接结构测量。",
+          "source_ids": [
+            "H014S014",
+            "H014S015",
+            "H014S016",
+            "H014S017"
+          ],
+          "workflow": "设计阶段先确定：报告半图验证、模型拟合、约束、突变和功能读出。 从样品纯度或细胞环境、冷冻制样和数据采集开始控制；重建阶段保留颗粒选择、分类、局部分辨率和模型拟合记录，关键结构状态再与生化或功能读出核对。 这项方法的直接测量或计算依据是：以地图质量、模型拟合、计量比和实验约束共同评价结构解释。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：预测模型不能代替直接结构测量。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "结果主要回答提出的结构状态是否可信。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        }
+      ],
+      "references": [
+        {
+          "source_id": "H014S001",
+          "title": "Bringing Structure to Cell Biology with Cryo-Electron Tomography",
+          "journal": "Annual Review of Biophysics",
+          "published_date": "2023-05-05",
+          "doi": "10.1146/annurev-biophys-111622-091327",
+          "pmid": "37159298",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/37159298/",
+          "source_type": "review",
+          "study_context": "cellular cryo-ET",
+          "study_design": "methods review",
+          "usable_for": "in-situ scope",
+          "limitations": "review",
+          "authors": "Young LN; Villa E"
+        },
+        {
+          "source_id": "H014S002",
+          "title": "In situ cryo-electron microscopy and tomography of cellular and organismal samples",
+          "journal": "Current Opinion in Structural Biology",
+          "published_date": "2025-06-04",
+          "doi": "10.1016/j.sbi.2025.103076",
+          "pmid": "40472449",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/40472449/",
+          "source_type": "review",
+          "study_context": "cells and organisms",
+          "study_design": "methods review",
+          "usable_for": "sample-to-structure route",
+          "limitations": "review",
+          "authors": "Majumder P; Zhang P"
+        },
+        {
+          "source_id": "H014S003",
+          "title": "Recent advances in targeting regions of interest for In situ cryo-electron tomography of cellular architecture",
+          "journal": "Progress in Biophysics and Molecular Biology",
+          "published_date": "2026-01-23",
+          "doi": "10.1016/j.pbiomolbio.2026.01.002",
+          "pmid": "41581770",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/41581770/",
+          "source_type": "review",
+          "study_context": "cellular architecture",
+          "study_design": "methods review",
+          "usable_for": "ROI and preparation",
+          "limitations": "review",
+          "authors": "Williem CE et al."
+        },
+        {
+          "source_id": "H014S004",
+          "title": "Structural dynamics: review of time-resolved cryo-EM",
+          "journal": "Acta Crystallographica D",
+          "published_date": "2022-08-01",
+          "doi": "10.1107/S2059798322006155",
+          "pmid": "35916218",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/35916218/",
+          "source_type": "review",
+          "study_context": "dynamic complexes",
+          "study_design": "methods review",
+          "usable_for": "time window limits",
+          "limitations": "review",
+          "authors": "Mäeots ME; Enchev RI"
+        },
+        {
+          "source_id": "H014S005",
+          "title": "Time resolved applications for Cryo-EM; approaches, challenges and future directions",
+          "journal": "Current Opinion in Structural Biology",
+          "published_date": "2023-09-01",
+          "doi": "10.1016/j.sbi.2023.102696",
+          "pmid": "37716094",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/37716094/",
+          "source_type": "review",
+          "study_context": "time-resolved cryo-EM",
+          "study_design": "methods review",
+          "usable_for": "method comparison",
+          "limitations": "review",
+          "authors": "Klebl DP et al."
+        },
+        {
+          "source_id": "H014S006",
+          "title": "Frozen in time: analyzing molecular dynamics with time-resolved cryo-EM",
+          "journal": "Structure",
+          "published_date": "2023-01-05",
+          "doi": "10.1016/j.str.2022.11.014",
+          "pmid": "36584678",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/36584678/",
+          "source_type": "review",
+          "study_context": "molecular machines",
+          "study_design": "methods review",
+          "usable_for": "kinetic interpretation",
+          "limitations": "review",
+          "authors": "Amann SJ et al."
+        },
+        {
+          "source_id": "H014S007",
+          "title": "Methods for Cryo-EM Single Particle Reconstruction of Macromolecules Having Continuous Heterogeneity",
+          "journal": "Journal of Molecular Biology",
+          "published_date": "2023-05-01",
+          "doi": "10.1016/j.jmb.2023.168020",
+          "pmid": "36863660",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/36863660/",
+          "source_type": "review",
+          "study_context": "single particles",
+          "study_design": "methods review",
+          "usable_for": "ensemble inference",
+          "limitations": "review",
+          "authors": "Toader B et al."
+        },
+        {
+          "source_id": "H014S008",
+          "title": "Confronting heterogeneity in cryogenic electron microscopy data",
+          "journal": "Current Opinion in Structural Biology",
+          "published_date": "2024-05-01",
+          "doi": "10.1016/j.sbi.2024.102815",
+          "pmid": "38657561",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/38657561/",
+          "source_type": "review",
+          "study_context": "heterogeneous datasets",
+          "study_design": "methods review",
+          "usable_for": "noise and overfitting",
+          "limitations": "review",
+          "authors": "Kimanius D; Schwab J"
+        },
+        {
+          "source_id": "H014S009",
+          "title": "Focused classifications and refinements in high-resolution single particle cryo-EM analysis",
+          "journal": "Journal of Structural Biology",
+          "published_date": "2023-09-01",
+          "doi": "10.1016/j.jsb.2023.108015",
+          "pmid": "37659578",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/37659578/",
+          "source_type": "review",
+          "study_context": "flexible complexes",
+          "study_design": "methods review",
+          "usable_for": "local not global resolution",
+          "limitations": "review",
+          "authors": "Klaholz BP et al."
+        },
+        {
+          "source_id": "H014S010",
+          "title": "nextPYP: a comprehensive and scalable platform for characterizing protein variability in situ using single-particle cryo-electron tomography",
+          "journal": "Nature Methods",
+          "published_date": "2023-11-01",
+          "doi": "",
+          "pmid": "37884796",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/37884796/",
+          "source_type": "primary_research",
+          "study_context": "in-vitro and cellular datasets",
+          "study_design": "workflow validation",
+          "usable_for": "in-situ variability",
+          "limitations": "pipeline-dependent",
+          "authors": "Burt A et al."
+        },
+        {
+          "source_id": "H014S011",
+          "title": "MISO enables cryo-EM structure determination from a single cell colony",
+          "journal": "Nature Methods",
+          "published_date": "2025-11-13",
+          "doi": "10.1038/s41592-025-02894-x",
+          "pmid": "",
+          "url": "https://www.nature.com/articles/s41592-025-02894-x",
+          "source_type": "primary_research",
+          "study_context": "low-input cell colony",
+          "study_design": "method study",
+          "usable_for": "low-input preparation",
+          "limitations": "single workflow",
+          "authors": "Eluru N et al."
+        },
+        {
+          "source_id": "H014S012",
+          "title": "The Inaugural Flatiron Institute Cryo-EM Conformational Heterogeneity Challenge",
+          "journal": "",
+          "published_date": "2025-01-01",
+          "doi": "",
+          "pmid": "41280101",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/41280101/",
+          "source_type": "benchmark",
+          "study_context": "experimental and simulated thyroglobulin",
+          "study_design": "community challenge",
+          "usable_for": "method validation",
+          "limitations": "two datasets",
+          "authors": "Flatiron Institute Cryo-EM Challenge Consortium"
+        },
+        {
+          "source_id": "H014S013",
+          "title": "Ultrathin liquid cells for microsecond time-resolved cryo-EM",
+          "journal": "Nature Communications",
+          "published_date": "2026-01-22",
+          "doi": "",
+          "pmid": "41571671",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/41571671/",
+          "source_type": "primary_research",
+          "study_context": "50S ribosome",
+          "study_design": "time-resolved method study",
+          "usable_for": "microsecond snapshots",
+          "limitations": "specific system",
+          "authors": "Huang J et al."
+        },
+        {
+          "source_id": "H014S014",
+          "title": "Complementing machine learning-based structure predictions with native mass spectrometry",
+          "journal": "Protein Science",
+          "published_date": "2022-06-01",
+          "doi": "10.1002/pro.4333",
+          "pmid": "35634779",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/35634779/",
+          "source_type": "review",
+          "study_context": "protein complexes",
+          "study_design": "methods review",
+          "usable_for": "orthogonal stoichiometry",
+          "limitations": "gas-phase limits",
+          "authors": "Allison TM et al."
+        },
+        {
+          "source_id": "H014S015",
+          "title": "Unmasking AlphaFold to integrate experiments and predictions in multimeric complexes",
+          "journal": "Nature Communications",
+          "published_date": "2024-10-09",
+          "doi": "10.1038/s41467-024-52951-w",
+          "pmid": "39379372",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/39379372/",
+          "source_type": "primary_research",
+          "study_context": "multimers",
+          "study_design": "methods study",
+          "usable_for": "model validation",
+          "limitations": "restraint-dependent",
+          "authors": "Mirabello C et al."
+        },
+        {
+          "source_id": "H014S016",
+          "title": "Breaking the conformational ensemble barrier: Ensemble structure modeling challenges in CASP15",
+          "journal": "Proteins",
+          "published_date": "2023-12-01",
+          "doi": "10.1002/prot.26584",
+          "pmid": "37872703",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/37872703/",
+          "source_type": "benchmark",
+          "study_context": "CASP15 targets",
+          "study_design": "blind assessment",
+          "usable_for": "multiple conformations",
+          "limitations": "limited targets",
+          "authors": "Kryshtafovych A et al."
+        },
+        {
+          "source_id": "H014S017",
+          "title": "Highly accurate protein structure prediction with AlphaFold",
+          "journal": "Nature",
+          "published_date": "2021-07-15",
+          "doi": "10.1038/s41586-021-03819-2",
+          "pmid": "34265844",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/34265844/",
+          "source_type": "primary_research",
+          "study_context": "protein structures",
+          "study_design": "blind benchmark",
+          "usable_for": "prediction comparison",
+          "limitations": "not direct measurement",
+          "authors": "Jumper J et al."
+        },
+        {
+          "source_id": "H014S018",
+          "title": "AlphaFold and the future of structural biology",
+          "journal": "IUCrJ",
+          "published_date": "2023-07-01",
+          "doi": "10.1107/S2052252523004943",
+          "pmid": "37358477",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/37358477/",
+          "source_type": "commentary",
+          "study_context": "structural biology",
+          "study_design": "editorial",
+          "usable_for": "complementarity",
+          "limitations": "editorial",
+          "authors": "Read RJ et al."
+        },
+        {
+          "source_id": "H014S019",
+          "title": "Service Centers and Training",
+          "journal": "NIH",
+          "published_date": "2024-06-28",
+          "doi": "",
+          "pmid": "",
+          "url": "https://commonfund.nih.gov/CryoEM/service-centers-and-training",
+          "source_type": "government_program",
+          "study_context": "shared infrastructure",
+          "study_design": "official program",
+          "usable_for": "access and training",
+          "limitations": "not performance evidence",
+          "authors": "NIH Common Fund"
+        },
+        {
+          "source_id": "H014S020",
+          "title": "AlphaFold Protein Structure Database",
+          "journal": "Nucleic Acids Research",
+          "published_date": "2022-01-07",
+          "doi": "10.1093/nar/gkab1061",
+          "pmid": "34791371",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/34791371/",
+          "source_type": "resource",
+          "study_context": "predicted structures",
+          "study_design": "database paper",
+          "usable_for": "prediction provenance",
+          "limitations": "not direct structure",
+          "authors": "Varadi M et al."
+        }
+      ],
+      "shared_findings": [
+        {
+          "finding_id": "H014-C01",
+          "display_order": 1,
+          "title": "全局分辨率不能代表每个区域都同样可靠",
+          "shared_result": "局部柔性、取向偏好和连续异质性会使同一重建中的可靠程度不同；分类结果还受先验、噪声和模型过拟合影响。\n\n离散状态和连续构象需要不同重建与验证策略。",
+          "research_use": "报告颗粒数、取向、分类过程、半图验证、全局和局部分辨率。",
+          "boundary": "分类得到的状态不能自动解释为功能轨迹。",
+          "source_ids": [
+            "H014S007",
+            "H014S008",
+            "H014S009",
+            "H014S012"
+          ]
+        },
+        {
+          "finding_id": "H014-C02",
+          "display_order": 2,
+          "title": "原位断层成像保留细胞位置，也引入取样和厚度限制",
+          "shared_result": "冷冻聚焦离子束、关联成像和亚断层平均使大分子可在细胞环境中定位和重建，但只覆盖被选中的区域和可识别颗粒。\n\n薄层、细胞类型、目标丰度与定位策略会改变可观察范围。",
+          "research_use": "记录样本厚度、制样、目标定位、断层数量、缺失楔和亚断层平均流程。",
+          "boundary": "原位共存和定位不直接证明动态机制或功能因果。",
+          "source_ids": [
+            "H014S001",
+            "H014S002",
+            "H014S003",
+            "H014S010"
+          ]
+        },
+        {
+          "finding_id": "H014-C03",
+          "display_order": 3,
+          "title": "时间分辨冷冻电镜观察的是设定时间点的构象分布",
+          "shared_result": "混合、触发和快速冻结可富集短暂状态，但时间窗口、混合效率和温度共同决定捕获到的分布。\n\n毫秒与微秒路线、单颗粒与断层研究的时间和空间分辨能力不同。",
+          "research_use": "说明起始条件、触发方式、时间点、温度、重复及独立动力学读出。",
+          "boundary": "若无连续时间和动力学证据，不能把离散结构连成完整反应路径。",
+          "source_ids": [
+            "H014S004",
+            "H014S005",
+            "H014S006",
+            "H014S013"
+          ]
+        },
+        {
+          "finding_id": "H014-C04",
+          "display_order": 4,
+          "title": "低输入制样扩大可研究对象，也可能放大选择偏差",
+          "shared_result": "低输入和微流控路线减少材料需求，但样本回收、纯度、吸附、取向和制样成功率仍决定最终结构。\n\n纯化复合体、细胞原位材料和低丰度目标的失败原因不同。",
+          "research_use": "记录来源、浓度、纯度、回收率、网格条件、成功率和批次重复。",
+          "boundary": "服务设施或单一工作流的可行性不能代表所有样本性能。",
+          "source_ids": [
+            "H014S003",
+            "H014S011",
+            "H014S019"
+          ]
+        },
+        {
+          "finding_id": "H014-C05",
+          "display_order": 5,
+          "title": "结构状态需要模型质量和正交实验共同解释",
+          "shared_result": "地图质量、原子模型拟合、计量比、突变和功能读出共同决定一种结构解释是否可信。\n\n预测、纯化样本结构和细胞原位结构支持的结论层级不同。",
+          "research_use": "提供地图与模型验证、实验约束、突变或生化功能及不一致区域。",
+          "boundary": "预测数据库不能代替直接结构；静态结构不能单独证明功能机制。",
+          "source_ids": [
+            "H014S014",
+            "H014S015",
+            "H014S016",
+            "H014S017",
+            "H014S018",
+            "H014S020"
+          ]
+        }
+      ]
+    },
+    {
+      "topic_id": "H015",
+      "title": "从头蛋白设计与工程化生物分子",
+      "topic_role": "research_deep_dive",
+      "overview": "从头蛋白设计与工程化生物分子研究从目标功能或结构约束出发，提出自然界未必存在的骨架和序列。骨架设计、序列稳定性、特异结合、表达可制造性和最终功能是不同问题，设计模型输出的候选并不等于已经折叠、结合或发挥作用的分子。\n\n本方向从结构生成模型、序列设计、ProteinMPNN、RFdiffusion、结构预测、表达纯化、稳定性测量和结合或功能实验出发，集中处理三类问题：候选是否形成预期骨架；序列是否在实验条件下稳定表达并具有目标特异性；设计结果能否经过结构、动力学、细胞或其他功能读出验证。计算设计、直接结构和实际功能构成递进证据。\n\n比较公开研究时，需要同时交代设计目标、骨架来源、模型和采样条件、序列筛选标准、表达体系、失败候选、稳定性、结合和功能实验。少数成功设计不能代表一般成功率，结构相似也不能自动证明功能相同。蛋白结构预测专题提供构象假设，AI 分子设计专题处理小分子候选；本页聚焦从头蛋白设计的实现程度与可开发性边界。",
+      "sections": [
+        {
+          "section_id": "H015-SEC-01",
+          "title": "先分清骨架设计和序列设计",
+          "body": "骨架设计解决的是几何与功能约束；序列设计寻找可能折叠和装配的氨基酸组合。二者都会生成很多候选。公开研究应报告进入表达和实验测试的候选数，而不只展示最后成功的一个。",
+          "source_ids": [
+            "H015S001",
+            "H015S002",
+            "H015S004",
+            "H015S005"
+          ]
+        },
+        {
+          "section_id": "H015-SEC-02",
+          "title": "稳定折叠、特异结合和功能实现是不同问题",
+          "body": "一个蛋白能够表达并不说明它折叠正确；结构接近设计模型也不保证与目标特异结合；结合也不自动带来预期功能。结合体、酶和纳米孔等不同分子形式需要使用相应的结构、生物物理和功能读出。",
+          "source_ids": [
+            "H015S003",
+            "H015S011",
+            "H015S017"
+          ]
+        },
+        {
+          "section_id": "H015-SEC-03",
+          "title": "直接结构测量检验设计是否实现",
+          "body": "晶体学、冷冻电镜、核磁共振和原生质谱可检验实际构象、界面和计量比。预测模型适合筛选设计，不应取代对纯化样本的直接结构验证。",
+          "source_ids": [
+            "H015S009",
+            "H015S010",
+            "H015S017"
+          ]
+        },
+        {
+          "section_id": "H015-SEC-04",
+          "title": "失败候选也是方法证据",
+          "body": "设计—测试—再设计的循环能提高成功率，也能说明失败通常发生在哪一步。候选总数、表达数、结构命中、功能命中和筛选阈值共同决定一项方法的实际表现。",
+          "source_ids": [
+            "H015S001",
+            "H015S002",
+            "H015S015",
+            "H015S016",
+            "H015S018"
+          ]
+        },
+        {
+          "section_id": "H015-SEC-05",
+          "title": "可开发性不能留到最后才看",
+          "body": "产量、纯度、聚集、储存稳定性和免疫原性风险会限制工程化蛋白的后续使用。前临床开发属性可以支持下一步研究，不能证明人体安全性或疗效。",
+          "source_ids": [
+            "H015S014",
+            "H015S019",
+            "H015S020"
+          ]
+        },
+        {
+          "section_id": "H015-SEC-06",
+          "title": "研究技术",
+          "body": "从头蛋白设计通常先按目标几何或功能生成骨架，再为骨架选择氨基酸序列。候选必须经过实际构建、表达和纯化，随后用晶体学、冷冻电镜、核磁共振或原生质谱核对构象、界面和计量比，并通过亲和力、竞争、酶学或其他功能实验确认设计目标。用于研究的功能分子和拟继续开发的蛋白要求不同；后者还需单独评价产量、聚集、储存稳定性和潜在免疫原性。本页评价的是设计物是否真正制成并达到预期结构或功能，不把结构预测分数当作设计成功。",
+          "source_ids": []
+        },
+        {
+          "section_id": "H015-SEC-07",
+          "title": "科研参考范围",
+          "body": "本页仅供科研参考，不提供蛋白药物的安全、有效或临床使用建议。",
+          "source_ids": []
+        }
+      ],
+      "methods": [
+        {
+          "method_id": "H015-M001",
+          "display_order": 1,
+          "category": "骨架设计",
+          "title": "从目标结构到蛋白骨架",
+          "principle": "计算方法根据结合界面、几何或功能目标提出新的骨架。",
+          "answers": "回答是否存在满足结构约束的设计方案。",
+          "sample_design": "说明目标、设计约束、候选数量和筛选规则。",
+          "limitations": "计算骨架不等于可表达蛋白。",
+          "source_ids": [
+            "H015S001",
+            "H015S004",
+            "H015S005"
+          ],
+          "workflow": "设计阶段先确定：说明目标、设计约束、候选数量和筛选规则。 先明确设计的是骨架、序列、结合界面还是功能，再用计算模型产生候选；实验依次检查表达、可溶性或稳定性、结构或结合以及目标功能，并保留全部测试候选作为分母。 这项方法的直接测量或计算依据是：计算方法根据结合界面、几何或功能目标提出新的骨架。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：计算骨架不等于可表达蛋白。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "结果主要回答是否存在满足结构约束的设计方案。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        },
+        {
+          "method_id": "H015-M002",
+          "display_order": 2,
+          "category": "序列设计",
+          "title": "基于 ProteinMPNN 等模型的序列设计",
+          "principle": "ProteinMPNN 是基于消息传递神经网络的蛋白序列设计模型，可在给定骨架上选择更可能折叠和装配的氨基酸序列。",
+          "answers": "回答哪些序列值得实际构建。",
+          "sample_design": "记录输入结构、序列数、宿主、表达率和失败设计。",
+          "limitations": "序列与设计模型一致不代替真实折叠。",
+          "source_ids": [
+            "H015S002",
+            "H015S015",
+            "H015S016"
+          ],
+          "workflow": "设计阶段先确定：记录输入结构、序列数、宿主、表达率和失败设计。 先明确设计的是骨架、序列、结合界面还是功能，再用计算模型产生候选；实验依次检查表达、可溶性或稳定性、结构或结合以及目标功能，并保留全部测试候选作为分母。 这项方法的直接测量或计算依据是：ProteinMPNN 是基于消息传递神经网络的蛋白序列设计模型，可在给定骨架上选择更可能折叠和装配的氨基酸序列。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：序列与设计模型一致不代替真实折叠。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "结果主要回答哪些序列值得实际构建。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        },
+        {
+          "method_id": "H015-M003",
+          "display_order": 3,
+          "category": "结构验证",
+          "title": "直接结构与生物物理表征",
+          "principle": "晶体学、冷冻电镜、核磁共振和原生质谱检验设计物的构象和装配。",
+          "answers": "回答设计物是否实际形成预期结构。",
+          "sample_design": "记录纯化样本、数据质量、模型拟合和不一致区域。",
+          "limitations": "单一结构不说明全部构象或细胞内状态。",
+          "source_ids": [
+            "H015S009",
+            "H015S010",
+            "H015S017"
+          ],
+          "workflow": "设计阶段先确定：记录纯化样本、数据质量、模型拟合和不一致区域。 先明确设计的是骨架、序列、结合界面还是功能，再用计算模型产生候选；实验依次检查表达、可溶性或稳定性、结构或结合以及目标功能，并保留全部测试候选作为分母。 这项方法的直接测量或计算依据是：晶体学、冷冻电镜、核磁共振和原生质谱检验设计物的构象和装配。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：单一结构不说明全部构象或细胞内状态。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "结果主要回答设计物是否实际形成预期结构。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        },
+        {
+          "method_id": "H015-M004",
+          "display_order": 4,
+          "category": "功能验证",
+          "title": "结合、选择性和功能实验",
+          "principle": "用亲和力、竞争、酶学或功能读出检验设计目标。",
+          "answers": "回答设计物是否实现预期作用。",
+          "sample_design": "设置阴性设计、相关非靶标、剂量反应和独立重复。",
+          "limitations": "结合或体外功能结果不能直接说明其在人体中有效。",
+          "source_ids": [
+            "H015S003",
+            "H015S017"
+          ],
+          "workflow": "设计阶段先确定：设置阴性设计、相关非靶标、剂量反应和独立重复。 先明确设计的是骨架、序列、结合界面还是功能，再用计算模型产生候选；实验依次检查表达、可溶性或稳定性、结构或结合以及目标功能，并保留全部测试候选作为分母。 这项方法的直接测量或计算依据是：用亲和力、竞争、酶学或功能读出检验设计目标。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：结合或体外功能结果不能直接说明其在人体中有效。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "结果主要回答设计物是否实现预期作用。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        },
+        {
+          "method_id": "H015-M005",
+          "display_order": 5,
+          "category": "开发属性",
+          "title": "表达、聚集与免疫原性评估",
+          "principle": "评估产量、纯度、稳定性、聚集和潜在免疫风险。",
+          "answers": "回答设计物是否具备继续开发的基本条件。",
+          "sample_design": "记录宿主、产量、单体比例、储存稳定性和风险评价。",
+          "limitations": "前临床开发属性不保证人体安全性。",
+          "source_ids": [
+            "H015S014",
+            "H015S019",
+            "H015S020"
+          ],
+          "workflow": "设计阶段先确定：记录宿主、产量、单体比例、储存稳定性和风险评价。 先明确设计的是骨架、序列、结合界面还是功能，再用计算模型产生候选；实验依次检查表达、可溶性或稳定性、结构或结合以及目标功能，并保留全部测试候选作为分母。 这项方法的直接测量或计算依据是：评估产量、纯度、稳定性、聚集和潜在免疫风险。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：前临床开发属性不保证人体安全性。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "结果主要回答设计物是否具备继续开发的基本条件。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        }
+      ],
+      "references": [
+        {
+          "source_id": "H015S001",
+          "title": "De novo design of protein structure and function with RFdiffusion",
+          "journal": "Nature",
+          "published_date": "2023-07-11",
+          "doi": "10.1038/s41586-023-06415-8",
+          "pmid": "37433327",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/37433327/",
+          "source_type": "primary_research",
+          "study_context": "protein design tasks",
+          "study_design": "design and experiments",
+          "usable_for": "design-to-test route",
+          "limitations": "not clinical evidence",
+          "authors": "Watson JL et al."
+        },
+        {
+          "source_id": "H015S002",
+          "title": "Robust deep learning-based protein sequence design using ProteinMPNN",
+          "journal": "Science",
+          "published_date": "2022-10-14",
+          "doi": "10.1126/science.add2187",
+          "pmid": "36108050",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/36108050/",
+          "source_type": "primary_research",
+          "study_context": "protein structures",
+          "study_design": "design benchmark and experiments",
+          "usable_for": "sequence design",
+          "limitations": "structure inputs constrain results",
+          "authors": "Dauparas J et al."
+        },
+        {
+          "source_id": "H015S003",
+          "title": "De novo design of high-affinity binders of bioactive helical peptides",
+          "journal": "Nature",
+          "published_date": "2023-12-18",
+          "doi": "10.1038/s41586-023-06953-1",
+          "pmid": "38109936",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/38109936/",
+          "source_type": "primary_research",
+          "study_context": "helical peptide targets",
+          "study_design": "design and binding tests",
+          "usable_for": "binding validation",
+          "limitations": "target-specific",
+          "authors": "Vázquez Torres S et al."
+        },
+        {
+          "source_id": "H015S004",
+          "title": "Generalized biomolecular modeling and design with RoseTTAFold All-Atom",
+          "journal": "Science",
+          "published_date": "2024-04-19",
+          "doi": "10.1126/science.adl2528",
+          "pmid": "38452047",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/38452047/",
+          "source_type": "primary_research",
+          "study_context": "all-atom biomolecules",
+          "study_design": "method and examples",
+          "usable_for": "design scope",
+          "limitations": "not all designs tested",
+          "authors": "Krishna R et al."
+        },
+        {
+          "source_id": "H015S005",
+          "title": "De novo protein design by inversion of the AlphaFold structure prediction network",
+          "journal": "Protein Science",
+          "published_date": "2023-06-01",
+          "doi": "10.1002/pro.4653",
+          "pmid": "37165539",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/37165539/",
+          "source_type": "primary_research",
+          "study_context": "de novo proteins",
+          "study_design": "method study",
+          "usable_for": "design criteria",
+          "limitations": "in-silico validation limited",
+          "authors": "Goverde CA et al."
+        },
+        {
+          "source_id": "H015S006",
+          "title": "ColabFold: making protein folding accessible to all",
+          "journal": "Nature Methods",
+          "published_date": "2022-05-30",
+          "doi": "10.1038/s41592-022-01488-1",
+          "pmid": "35637307",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/35637307/",
+          "source_type": "resource",
+          "study_context": "protein models",
+          "study_design": "software study",
+          "usable_for": "prediction workflow",
+          "limitations": "not design validation",
+          "authors": "Mirdita M et al."
+        },
+        {
+          "source_id": "H015S007",
+          "title": "Accurate prediction of protein structures and interactions using a three-track neural network",
+          "journal": "Science",
+          "published_date": "2021-08-20",
+          "doi": "10.1126/science.abj8754",
+          "pmid": "34282049",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/34282049/",
+          "source_type": "primary_research",
+          "study_context": "structures and interactions",
+          "study_design": "benchmark",
+          "usable_for": "prediction input",
+          "limitations": "not design success",
+          "authors": "Baek M et al."
+        },
+        {
+          "source_id": "H015S008",
+          "title": "Highly accurate protein structure prediction with AlphaFold",
+          "journal": "Nature",
+          "published_date": "2021-07-15",
+          "doi": "10.1038/s41586-021-03819-2",
+          "pmid": "34265844",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/34265844/",
+          "source_type": "primary_research",
+          "study_context": "proteins",
+          "study_design": "benchmark",
+          "usable_for": "structure checking",
+          "limitations": "not direct measurement",
+          "authors": "Jumper J et al."
+        },
+        {
+          "source_id": "H015S009",
+          "title": "Complementing machine learning-based structure predictions with native mass spectrometry",
+          "journal": "Protein Science",
+          "published_date": "2022-06-01",
+          "doi": "10.1002/pro.4333",
+          "pmid": "35634779",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/35634779/",
+          "source_type": "review",
+          "study_context": "complexes",
+          "study_design": "methods review",
+          "usable_for": "orthogonal verification",
+          "limitations": "gas-phase limits",
+          "authors": "Allison TM et al."
+        },
+        {
+          "source_id": "H015S010",
+          "title": "Unmasking AlphaFold to integrate experiments and predictions in multimeric complexes",
+          "journal": "Nature Communications",
+          "published_date": "2024-10-09",
+          "doi": "10.1038/s41467-024-52951-w",
+          "pmid": "39379372",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/39379372/",
+          "source_type": "primary_research",
+          "study_context": "multimers",
+          "study_design": "methods study",
+          "usable_for": "model validation",
+          "limitations": "restraint-dependent",
+          "authors": "Mirabello C et al."
+        },
+        {
+          "source_id": "H015S011",
+          "title": "Computed structures of core eukaryotic protein complexes",
+          "journal": "Science",
+          "published_date": "2021-12-10",
+          "doi": "10.1126/science.abm4805",
+          "pmid": "34762488",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/34762488/",
+          "source_type": "primary_research",
+          "study_context": "yeast complexes",
+          "study_design": "models and tests",
+          "usable_for": "assembly hypotheses",
+          "limitations": "species context",
+          "authors": "Humphreys IR et al."
+        },
+        {
+          "source_id": "H015S012",
+          "title": "AlphaFold and the future of structural biology",
+          "journal": "IUCrJ",
+          "published_date": "2023-07-01",
+          "doi": "10.1107/S2052252523004943",
+          "pmid": "37358477",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/37358477/",
+          "source_type": "commentary",
+          "study_context": "structural biology",
+          "study_design": "editorial",
+          "usable_for": "complementarity",
+          "limitations": "editorial",
+          "authors": "Read RJ et al."
+        },
+        {
+          "source_id": "H015S014",
+          "title": "Closing the loop: Experimentally validated methods in artificial intelligence-driven protein design",
+          "journal": "Current Opinion in Structural Biology",
+          "published_date": "2026-06-01",
+          "doi": "10.1016/j.sbi.2026.103272",
+          "pmid": "42008922",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/42008922/",
+          "source_type": "review",
+          "study_context": "binders antibodies and enzymes",
+          "study_design": "methods review",
+          "usable_for": "experimental validation criteria",
+          "limitations": "review",
+          "authors": "Kosonocky CW et al."
+        },
+        {
+          "source_id": "H015S015",
+          "title": "Improving de novo protein binder design with deep learning",
+          "journal": "Nature Communications",
+          "published_date": "2023-05-06",
+          "doi": "10.1038/s41467-023-38328-5",
+          "pmid": "37149653",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/37149653/",
+          "source_type": "primary_research",
+          "study_context": "target binders",
+          "study_design": "design and binding tests",
+          "usable_for": "success-rate reporting",
+          "limitations": "target dependent",
+          "authors": "Bennett NR et al."
+        },
+        {
+          "source_id": "H015S016",
+          "title": "Dissecting the stability determinants of a challenging de novo protein fold using massively parallel design and experimentation",
+          "journal": "Proceedings of the National Academy of Sciences",
+          "published_date": "2022-10-01",
+          "doi": "",
+          "pmid": "36191185",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/36191185/",
+          "source_type": "primary_research",
+          "study_context": "alpha-beta-beta-alpha miniproteins",
+          "study_design": "thousands of designs tested",
+          "usable_for": "design-test iterations",
+          "limitations": "fold-specific",
+          "authors": "Rocklin GJ et al."
+        },
+        {
+          "source_id": "H015S017",
+          "title": "Sculpting conducting nanopore size and shape through de novo protein design",
+          "journal": "Science",
+          "published_date": "2024-07-19",
+          "doi": "10.1126/science.adn3796",
+          "pmid": "38187764",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/38187764/",
+          "source_type": "primary_research",
+          "study_context": "transmembrane beta barrels",
+          "study_design": "design with NMR crystallography and conductance",
+          "usable_for": "structure-function validation",
+          "limitations": "buffer-specific",
+          "authors": "Berhanu S et al."
+        },
+        {
+          "source_id": "H015S018",
+          "title": "Geometric deep learning assists protein engineering. Opportunities and Challenges",
+          "journal": "Biotechnology Advances",
+          "published_date": "2026-03-01",
+          "doi": "10.1016/j.biotechadv.2025.108790",
+          "pmid": "41456696",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/41456696/",
+          "source_type": "review",
+          "study_context": "protein engineering",
+          "study_design": "review",
+          "usable_for": "method taxonomy",
+          "limitations": "review",
+          "authors": "García-Vinuesa J et al."
+        },
+        {
+          "source_id": "H015S019",
+          "title": "Aggregation of protein therapeutics enhances their immunogenicity: causes and mitigation strategies",
+          "journal": "Biotechnology Advances",
+          "published_date": "2021-08-05",
+          "doi": "",
+          "pmid": "34458822",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/34458822/",
+          "source_type": "review",
+          "study_context": "protein therapeutics",
+          "study_design": "review",
+          "usable_for": "developability boundary",
+          "limitations": "review",
+          "authors": "Scanlan EM et al."
+        },
+        {
+          "source_id": "H015S020",
+          "title": "Preclinical risk assessment strategy to mitigate the T-cell dependent immunogenicity of protein biotherapeutics: State of the art, challenges and future perspectives",
+          "journal": "Journal of Pharmaceutical and Biomedical Analysis",
+          "published_date": "2023-06-14",
+          "doi": "10.1016/j.jpba.2023.115500",
+          "pmid": "37311374",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/37311374/",
+          "source_type": "review",
+          "study_context": "protein therapeutics",
+          "study_design": "review",
+          "usable_for": "clinical-extrapolation boundary",
+          "limitations": "review",
+          "authors": "Riccardi-Sirtori F et al."
+        }
+      ],
+      "shared_findings": [
+        {
+          "finding_id": "H015-C01",
+          "display_order": 1,
+          "title": "骨架生成和序列设计是两个需要分别验证的环节",
+          "shared_result": "生成模型提出骨架或界面，序列模型为其寻找可折叠序列；计算一致性不能说明蛋白已成功制备。\n\n单体、复合体、膜蛋白和全原子设计的表达与折叠难点不同。",
+          "research_use": "记录设计目标、输入结构、候选数、表达宿主、表达成功率、纯度和折叠检测。",
+          "boundary": "设计分数不等于表达、折叠或结构正确。",
+          "source_ids": [
+            "H015S001",
+            "H015S002",
+            "H015S004",
+            "H015S005"
+          ]
+        },
+        {
+          "finding_id": "H015-C02",
+          "display_order": 2,
+          "title": "稳定折叠、特异结合和预期功能是三项不同结果",
+          "shared_result": "一个设计可以稳定表达但不结合，也可以结合却缺少选择性或预期功能；每一层都需要相应实验。\n\n结合体、复合体和功能孔道的读出不能使用同一成功标准。",
+          "research_use": "使用结构或生物物理折叠检测、亲和力和选择性实验、功能对照及独立重复。",
+          "boundary": "体外结合不能外推为治疗有效性。",
+          "source_ids": [
+            "H015S003",
+            "H015S011",
+            "H015S017"
+          ]
+        },
+        {
+          "finding_id": "H015-C03",
+          "display_order": 3,
+          "title": "预测模型适合筛选设计，直接结构用于检验设计是否实现",
+          "shared_result": "结构预测可淘汰明显不一致的序列，晶体学、冷冻电镜、核磁共振或质谱等直接证据才能检验实际构象和装配。\n\n单体和多聚体需要不同的计量比、界面与结构质量评价。",
+          "research_use": "保存设计模型、预测置信度、纯化样本、直接结构、模型拟合和不一致区域。",
+          "boundary": "预测与设计模型相似不能替代直接测量。",
+          "source_ids": [
+            "H015S008",
+            "H015S009",
+            "H015S010",
+            "H015S012"
+          ]
+        },
+        {
+          "finding_id": "H015-C04",
+          "display_order": 4,
+          "title": "设计成功率必须以所有进入实验的候选为分母",
+          "shared_result": "大规模设计—测试循环和深度学习筛选能够提高命中率，但只有保留失败候选和每轮筛选规则，改进幅度才可解释。\n\n小型结合体、大规模稳定性筛选和生成模型研究的实验通量不同。",
+          "research_use": "报告候选总数、表达数、结构和功能命中、失败原因、筛选阈值及迭代轮次。",
+          "boundary": "只展示最佳设计会高估方法的稳定性与通用性。",
+          "source_ids": [
+            "H015S001",
+            "H015S002",
+            "H015S015",
+            "H015S016",
+            "H015S018"
+          ]
+        },
+        {
+          "finding_id": "H015-C05",
+          "display_order": 5,
+          "title": "可制造性和免疫原性需要在功能之外单独评价",
+          "shared_result": "表达产量、溶解性、聚集、稳定性和免疫原性会决定一个有功能的设计能否继续开发。\n\n研究试剂、传感分子和拟用于人体的蛋白面对的质量与风险要求不同。",
+          "research_use": "记录宿主、产量、纯度、单体比例、聚集、热与储存稳定性及免疫原性风险评估。",
+          "boundary": "前临床可开发性数据不能证明人体安全、有效或低免疫原性。",
+          "source_ids": [
+            "H015S014",
+            "H015S019",
+            "H015S020"
+          ]
+        }
+      ]
+    },
+    {
+      "topic_id": "H040",
+      "title": "表型筛选、靶点验证与候选优选",
+      "topic_role": "research_deep_dive",
+      "overview": "表型筛选、靶点验证与候选优选从细胞、组织或生物体的可测表型出发，寻找能改变状态的化合物、基因或其他干预。图像变化、存活率或报告信号可以提出候选，但表型信号未必已经说明直接靶点、作用机制或临床价值，因此筛选和后续验证需要分段评价。\n\n本方向从高内涵成像、Cell Painting、化学和遗传扰动、单细胞读出、靶点去卷积、结合测量和功能复验出发，集中处理三类问题：筛选信号是否稳定并具有生物学意义；候选表型能否在独立实验和不同模型中复现；直接靶点、通路关系和候选优先级如何通过正交证据确定。图像表型、分子靶点、结合和功能结果属于不同证据层级。\n\n比较公开研究时，需要同时交代模型、板式与随机化、阳性和阴性对照、批次、读出、重复、命中阈值、细胞状态和靶点去卷积方法。图像相似或筛选分数不能单独证明机制，细胞系命中也不能直接外推到患者或人体效应。AI 分子设计专题聚焦计算候选，CRISPR 编辑专题聚焦序列改变；本页聚焦表型信号到靶点和候选验证的证据推进。",
+      "sections": [
+        {
+          "section_id": "H040-SEC-01",
+          "title": "先判断筛选信号是否稳定",
+          "body": "无论采用高内涵成像、池化扰动还是单细胞读出，对照、重复、批次和扰动效率都决定结果能否复现。大量细胞或大量特征不能代替生物学重复。",
+          "source_ids": [
+            "H040S001",
+            "H040S004",
+            "H040S008",
+            "H040S019"
+          ]
+        },
+        {
+          "section_id": "H040-SEC-02",
+          "title": "模型和读出决定筛选回答的问题",
+          "body": "图像、转录、蛋白和功能读出反映的生物学层面不同。细胞系、原代细胞、患者共培养、类器官和无细胞体系也有各自的适用范围。研究报告应说明模型来源、培养条件、时间点和读出定义。",
+          "source_ids": [
+            "H040S001",
+            "H040S005",
+            "H040S006",
+            "H040S007",
+            "H040S018"
+          ]
+        },
+        {
+          "section_id": "H040-SEC-03",
+          "title": "初筛命中需要独立复验",
+          "body": "独立单导向 RNA（sgRNA）或化合物、阵列复验、剂量反应、救援实验和正交功能读出，帮助判断一个信号是否稳定并接近因果。报告系统的结果通常还需要回到内源位点或相关模型确认。",
+          "source_ids": [
+            "H040S005",
+            "H040S009",
+            "H040S010",
+            "H040S011",
+            "H040S019"
+          ]
+        },
+        {
+          "section_id": "H040-SEC-04",
+          "title": "找到结合蛋白，不等于找到驱动靶点",
+          "body": "化学蛋白组学和竞争探针可识别与化合物结合的蛋白。遗传扰动、选择性分析和功能救援用于判断哪些结合事件真正与表型相关。两类证据应同时保留。",
+          "source_ids": [
+            "H040S002",
+            "H040S003",
+            "H040S012",
+            "H040S013",
+            "H040S014",
+            "H040S015",
+            "H040S016",
+            "H040S017"
+          ]
+        },
+        {
+          "section_id": "H040-SEC-05",
+          "title": "候选优选需要预先说明标准",
+          "body": "效力、选择性、机制、独立模型、暴露和初步毒性共同决定一个命中是否值得继续。细胞或动物研究可以支持后续实验，不能替代人体疗效或安全性结论。",
+          "source_ids": [
+            "H040S003",
+            "H040S010",
+            "H040S011",
+            "H040S015",
+            "H040S020"
+          ]
+        },
+        {
+          "section_id": "H040-SEC-06",
+          "title": "研究技术",
+          "body": "高内涵成像筛选用细胞形态和多参数图像寻找表型变化；成簇规律间隔短回文重复序列（CRISPR）扰动筛选则比较基因抑制、激活或敲除后的变化。Perturb-seq 是把遗传扰动身份与单细胞转录读出配对的方法，可分辨不同细胞状态对同一扰动的反应。初筛后还需用独立试剂、剂量反应、救援和正交功能实验复验；化学蛋白组学与竞争探针用于寻找直接结合蛋白，再结合遗传和功能证据判断哪个作用与表型有关。本页从实验筛选讲到靶点和候选优选，不重复评价虚拟筛选模型的计算性能。",
+          "source_ids": []
+        },
+        {
+          "section_id": "H040-SEC-07",
+          "title": "科研参考范围",
+          "body": "本页仅供科研参考，不确认疾病靶点，不提供治疗推荐。",
+          "source_ids": []
+        }
+      ],
+      "methods": [
+        {
+          "method_id": "H040-M001",
+          "display_order": 1,
+          "category": "筛选设计",
+          "title": "池化扰动与高内涵筛选",
+          "principle": "在大规模候选或基因扰动下读取图像、转录或功能变化。",
+          "answers": "回答哪些信号值得复验。",
+          "sample_design": "记录库、对照、批次、重复、阈值和扰动效率。",
+          "limitations": "一次筛选的统计命中不是确认结果。",
+          "source_ids": [
+            "H040S001",
+            "H040S004",
+            "H040S008"
+          ],
+          "workflow": "设计阶段先确定：记录库、对照、批次、重复、阈值和扰动效率。 筛选前固定读出、阈值和统计规则；初筛命中经过独立配液、剂量反应和正交读出复测，再用遗传或生化实验区分直接靶点与继发表型。 这项方法的直接测量或计算依据是：在大规模候选或基因扰动下读取图像、转录或功能变化。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：一次筛选的统计命中不是确认结果。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "结果主要回答哪些信号值得复验。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        },
+        {
+          "method_id": "H040-M002",
+          "display_order": 2,
+          "category": "多维读出",
+          "title": "Perturb-seq 单细胞扰动转录组分析",
+          "principle": "Perturb-seq 将遗传扰动身份与单细胞转录读出配对；结合蛋白测量时可进一步比较多模态变化。",
+          "answers": "回答不同扰动改变了哪些细胞状态。",
+          "sample_design": "说明模型、细胞数、导向分配、取样时间和批次控制。",
+          "limitations": "转录变化不单独代表功能机制。",
+          "source_ids": [
+            "H040S004",
+            "H040S005",
+            "H040S006"
+          ],
+          "workflow": "设计阶段先确定：说明模型、细胞数、导向分配、取样时间和批次控制。 筛选前固定读出、阈值和统计规则；初筛命中经过独立配液、剂量反应和正交读出复测，再用遗传或生化实验区分直接靶点与继发表型。 这项方法的直接测量或计算依据是：Perturb-seq 将遗传扰动身份与单细胞转录读出配对；结合蛋白测量时可进一步比较多模态变化。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：转录变化不单独代表功能机制。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "结果主要回答不同扰动改变了哪些细胞状态。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        },
+        {
+          "method_id": "H040-M003",
+          "display_order": 3,
+          "category": "命中复验",
+          "title": "阵列复验、救援与正交功能实验",
+          "principle": "以独立试剂、剂量反应和救援检验初筛信号。",
+          "answers": "回答命中是否稳定并接近因果。",
+          "sample_design": "使用独立单导向 RNA（sgRNA）或化合物、救援、内源位点和独立模型。",
+          "limitations": "单一实验系统不能确认跨系统因果。",
+          "source_ids": [
+            "H040S005",
+            "H040S009",
+            "H040S010",
+            "H040S011"
+          ],
+          "workflow": "设计阶段先确定：使用独立单导向 RNA（sgRNA）或化合物、救援、内源位点和独立模型。 筛选前固定读出、阈值和统计规则；初筛命中经过独立配液、剂量反应和正交读出复测，再用遗传或生化实验区分直接靶点与继发表型。 这项方法的直接测量或计算依据是：以独立试剂、剂量反应和救援检验初筛信号。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：单一实验系统不能确认跨系统因果。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "结果主要回答命中是否稳定并接近因果。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        },
+        {
+          "method_id": "H040-M004",
+          "display_order": 4,
+          "category": "靶点去卷积",
+          "title": "化学蛋白组学与竞争探针",
+          "principle": "寻找化合物结合蛋白，并以竞争和遗传实验判断哪一项关联表型。",
+          "answers": "回答哪些蛋白与候选化合物发生直接结合。",
+          "sample_design": "报告探针、竞争、占有、选择性谱和功能救援。",
+          "limitations": "结合蛋白不等于表型驱动靶点。",
+          "source_ids": [
+            "H040S002",
+            "H040S003",
+            "H040S012",
+            "H040S013"
+          ],
+          "workflow": "设计阶段先确定：报告探针、竞争、占有、选择性谱和功能救援。 筛选前固定读出、阈值和统计规则；初筛命中经过独立配液、剂量反应和正交读出复测，再用遗传或生化实验区分直接靶点与继发表型。 这项方法的直接测量或计算依据是：寻找化合物结合蛋白，并以竞争和遗传实验判断哪一项关联表型。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：结合蛋白不等于表型驱动靶点。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "结果主要回答哪些蛋白与候选化合物发生直接结合。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        },
+        {
+          "method_id": "H040-M005",
+          "display_order": 5,
+          "category": "候选推进",
+          "title": "独立模型与初步可开发性",
+          "principle": "在不同模型中比较效力、选择性、机制和初步暴露或毒性。",
+          "answers": "回答命中是否值得继续研究。",
+          "sample_design": "记录模型来源、剂量、选择性、失败条件和停止规则。",
+          "limitations": "前临床候选不能替代人体疗效或安全性。",
+          "source_ids": [
+            "H040S015",
+            "H040S020"
+          ],
+          "workflow": "设计阶段先确定：记录模型来源、剂量、选择性、失败条件和停止规则。 筛选前固定读出、阈值和统计规则；初筛命中经过独立配液、剂量反应和正交读出复测，再用遗传或生化实验区分直接靶点与继发表型。 这项方法的直接测量或计算依据是：在不同模型中比较效力、选择性、机制和初步暴露或毒性。",
+          "quality_control": "用空白、阴性或基线对照界定背景；如果该方法有公认标准，再用阳性对照或参考样本检查流程性能。技术重复与生物学重复应分别记录，分析时还要回看原始数据、样本身份和批次分布。特别要注意：前临床候选不能替代人体疗效或安全性。 关键发现应根据研究问题，在独立批次、独立样本或正交方法中复核。",
+          "result_interpretation": "结果主要回答命中是否值得继续研究。 解读时，应确认结果与预先定义的研究问题、样本层级和对照相符。机制、疾病关联或应用价值仍须由与问题相符的独立证据支持。"
+        }
+      ],
+      "references": [
+        {
+          "source_id": "H040S001",
+          "title": "Scalable compressed phenotypic screening",
+          "journal": "Nature Biotechnology",
+          "published_date": "2023-06-06",
+          "doi": "10.1038/s41587-024-02403-z",
+          "pmid": "",
+          "url": "https://www.nature.com/articles/s41587-024-02403-z",
+          "source_type": "primary_research",
+          "study_context": "pooled perturbations and image-based high-content profiling",
+          "study_design": "method-development and scale study",
+          "usable_for": "screen-scale expansion and the separation of pooled signal recovery from biological confirmation",
+          "limitations": "deconvolution accuracy and phenotypes depend on the perturbation library, image features and assay context",
+          "authors": "Normand R et al."
+        },
+        {
+          "source_id": "H040S002",
+          "title": "Chemoproteomic-enabled phenotypic screening",
+          "journal": "Cell Chemical Biology",
+          "published_date": "2021-03-18",
+          "doi": "10.1016/j.chembiol.2021.01.012",
+          "pmid": "33577749",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/33577749/",
+          "source_type": "review",
+          "study_context": "small-molecule phenotypic discovery and target deconvolution",
+          "study_design": "peer-reviewed methods review",
+          "usable_for": "target-deconvolution routes after a phenotype-first screen",
+          "limitations": "review; does not establish the target of a particular compound",
+          "authors": "Conway LP; Li W; Parker CG"
+        },
+        {
+          "source_id": "H040S003",
+          "title": "Recent advances in identifying protein targets in drug discovery",
+          "journal": "Cell Chemical Biology",
+          "published_date": "2021-03-18",
+          "doi": "10.1016/j.chembiol.2020.12.001",
+          "pmid": "33357463",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/33357463/",
+          "source_type": "review",
+          "study_context": "small-molecule target-identification studies",
+          "study_design": "peer-reviewed methods review",
+          "usable_for": "orthogonal routes for identifying compound-bound proteins",
+          "limitations": "review; protein engagement alone does not establish the phenotype-causing target",
+          "authors": "Ha J; Park H; Park J; Park SB"
+        },
+        {
+          "source_id": "H040S004",
+          "title": "Mapping information-rich genotype-phenotype landscapes with genome-scale Perturb-seq",
+          "journal": "Cell",
+          "published_date": "2022-06-09",
+          "doi": "10.1016/j.cell.2022.05.013",
+          "pmid": "35688146",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/35688146/",
+          "source_type": "primary_research",
+          "study_context": "K562 and RPE1 human cell lines",
+          "study_design": "genome-scale CRISPRi Perturb-seq study",
+          "usable_for": "genome-scale perturbation quality metrics and transcriptomic phenotype design",
+          "limitations": "transformed cell lines; transcriptomic associations require context-specific functional validation",
+          "authors": "Replogle JM et al."
+        },
+        {
+          "source_id": "H040S005",
+          "title": "CRISPR activation and interference screens decode stimulation responses in primary human T cells",
+          "journal": "Science",
+          "published_date": "2022-02-04",
+          "doi": "10.1126/science.abj4008",
+          "pmid": "35113687",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/35113687/",
+          "source_type": "primary_research",
+          "study_context": "stimulated primary human T cells",
+          "study_design": "genome-wide CRISPRa and CRISPRi screens with targeted single-cell characterization",
+          "usable_for": "primary-cell screen design and gain-loss comparison",
+          "limitations": "donor and activation conditions constrain transfer to other immune states",
+          "authors": "Schmidt R et al."
+        },
+        {
+          "source_id": "H040S006",
+          "title": "Multimodal pooled Perturb-CITE-seq screens in patient models define mechanisms of cancer immune evasion",
+          "journal": "Nature Genetics",
+          "published_date": "2021-03-01",
+          "doi": "10.1038/s41588-021-00779-1",
+          "pmid": "33649592",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/33649592/",
+          "source_type": "primary_research",
+          "study_context": "patient-derived melanoma cells and autologous T-cell co-cultures",
+          "study_design": "pooled perturbation screen with single-cell RNA and protein readouts",
+          "usable_for": "multimodal response confirmation in a patient-derived co-culture",
+          "limitations": "melanoma and selected co-cultures; hits are not pan-cancer mechanisms",
+          "authors": "Frangieh CJ et al."
+        },
+        {
+          "source_id": "H040S007",
+          "title": "Single-cell brain organoid screening identifies developmental defects in autism",
+          "journal": "Nature",
+          "published_date": "2023-09-13",
+          "doi": "10.1038/s41586-023-06473-y",
+          "pmid": "37704762",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/37704762/",
+          "source_type": "primary_research",
+          "study_context": "human cerebral organoids with autism-risk gene perturbations",
+          "study_design": "pooled inducible CRISPR loss-of-function screen",
+          "usable_for": "organoid screen design and cell-type-specific validation",
+          "limitations": "selected genes and cerebral-organoid context limit generalization",
+          "authors": "Li C et al."
+        },
+        {
+          "source_id": "H040S008",
+          "title": "NIS-Seq enables cell-type-agnostic optical perturbation screening",
+          "journal": "Nature Biotechnology",
+          "published_date": "2024-12-19",
+          "doi": "10.1038/s41587-024-02516-5",
+          "pmid": "39702735",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/39702735/",
+          "source_type": "primary_research",
+          "study_context": "cell lines, primary human macrophages and human skin tissue",
+          "study_design": "optical pooled-screen benchmark",
+          "usable_for": "guide identity recovery with optical phenotypes across cell types",
+          "limitations": "image readouts do not replace transcriptome-wide or functional assessment",
+          "authors": "Fandrey CI et al."
+        },
+        {
+          "source_id": "H040S009",
+          "title": "Improving prime editing with an endogenous small RNA-binding protein",
+          "journal": "Nature",
+          "published_date": "2024-04-03",
+          "doi": "10.1038/s41586-024-07259-6",
+          "pmid": "38570691",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/38570691/",
+          "source_type": "primary_research",
+          "study_context": "human cell lines and prime-editing reporters",
+          "study_design": "genome-scale CRISPRi screen followed by editor engineering",
+          "usable_for": "screen-to-mechanism progression and reporter-to-endogenous validation",
+          "limitations": "reporter and cell-line effects vary by editor, guide and cell type",
+          "authors": "Yan J et al."
+        },
+        {
+          "source_id": "H040S010",
+          "title": "Base editing screens define the genetic landscape of cancer drug resistance mechanisms",
+          "journal": "Nature Genetics",
+          "published_date": "2024-10-18",
+          "doi": "10.1038/s41588-024-01948-8",
+          "pmid": "39424923",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/39424923/",
+          "source_type": "primary_research",
+          "study_context": "four cancer cell lines and ten oncology drugs",
+          "study_design": "prospective mutagenesis screens with validation",
+          "usable_for": "variant-to-phenotype mapping and independent validation design",
+          "limitations": "cancer-cell-line and drug-panel results do not determine patient treatment",
+          "authors": "Coelho MA et al."
+        },
+        {
+          "source_id": "H040S011",
+          "title": "Mapping variant effects on anti-tumor hallmarks of primary human T cells with base-editing screens",
+          "journal": "Nature Biotechnology",
+          "published_date": "2024-05-23",
+          "doi": "10.1038/s41587-024-02235-x",
+          "pmid": "38783148",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/38783148/",
+          "source_type": "primary_research",
+          "study_context": "primary human T cells from multiple donors",
+          "study_design": "massively parallel base-editing screens with arrayed functional validation",
+          "usable_for": "donor-aware replication and genotype-to-functional-readout validation",
+          "limitations": "specific T-cell and co-culture settings; screen hits are not clinical classifications",
+          "authors": "Walsh ZH et al."
+        },
+        {
+          "source_id": "H040S012",
+          "title": "C646 degrades Exportin-1 to modulate p300 chromatin occupancy and function",
+          "journal": "Cell Chemical Biology",
+          "published_date": "2024-07-18",
+          "doi": "10.1016/j.chembiol.2024.05.016",
+          "pmid": "38917791",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/38917791/",
+          "source_type": "primary_research",
+          "study_context": "cellular phenotypic and chemical-probe studies",
+          "study_design": "mechanism and target-deconvolution study",
+          "usable_for": "why compound annotation must be tested against direct mechanism evidence",
+          "limitations": "one compound and cellular context; not a general rule for all p300 inhibitors",
+          "authors": "Chen YF et al."
+        },
+        {
+          "source_id": "H040S013",
+          "title": "Identification of DDX5 as a Potential Therapeutic Target of Osteosarcoma Using Thiazolone Probes",
+          "journal": "ACS Chemical Biology",
+          "published_date": "2024-08-16",
+          "doi": "10.1021/acschembio.4c00360",
+          "pmid": "39069677",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/39069677/",
+          "source_type": "primary_research",
+          "study_context": "osteosarcoma cell and probe studies",
+          "study_design": "phenotypic screen followed by target-identification experiments",
+          "usable_for": "disease-model-specific route from phenotype to candidate target",
+          "limitations": "osteosarcoma model and probe series; not independent clinical target validation",
+          "authors": "Sun D et al."
+        },
+        {
+          "source_id": "H040S014",
+          "title": "Identification of Nogo-B as a potential therapeutic target of osteosarcoma via stereochemically selective covalent probes",
+          "journal": "Cell Death & Disease",
+          "published_date": "2025-07-19",
+          "doi": "10.1038/s41419-025-07765-z",
+          "pmid": "40683874",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/40683874/",
+          "source_type": "primary_research",
+          "study_context": "osteosarcoma cellular models",
+          "study_design": "phenotypic screen with covalent-probe target identification",
+          "usable_for": "probe controls and target-engagement evidence after a cellular hit",
+          "limitations": "single cancer context; target status needs independent disease validation",
+          "authors": "Xue J et al."
+        },
+        {
+          "source_id": "H040S015",
+          "title": "Discovery of a tau-aggregate clearing compound that covalently targets P4HB",
+          "journal": "Cell Chemical Biology",
+          "published_date": "2025-10-16",
+          "doi": "10.1016/j.chembiol.2025.09.006",
+          "pmid": "41056949",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/41056949/",
+          "source_type": "primary_research",
+          "study_context": "tau-aggregate cellular discovery system",
+          "study_design": "phenotypic discovery and covalent target-identification study",
+          "usable_for": "linking phenotype, target engagement and follow-up mechanism experiments",
+          "limitations": "model-specific tau system and compound series; no clinical inference",
+          "authors": "Conway LP et al."
+        },
+        {
+          "source_id": "H040S016",
+          "title": "Appendage- and Scaffold-Diverse Electrophilic and Photoreactive Probes for Integrated Phenotypic Screening-Target Identification Campaigns via a Minimalist Bifunctional Isocyanide",
+          "journal": "ACS Omega",
+          "published_date": "2024-10-02",
+          "doi": "10.1021/acsomega.4c06879",
+          "pmid": "39431108",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/39431108/",
+          "source_type": "primary_research",
+          "study_context": "chemical-probe library development",
+          "study_design": "probe-platform study",
+          "usable_for": "probe-library controls for integrated screening and target identification",
+          "limitations": "platform chemistry; biological results depend on each assay and probe",
+          "authors": "Jackson PA et al."
+        },
+        {
+          "source_id": "H040S017",
+          "title": "Phenotypic screening with target identification and validation in the discovery and development of E3 ligase modulators",
+          "journal": "Cell Chemical Biology",
+          "published_date": "2021-03-18",
+          "doi": "10.1016/j.chembiol.2021.02.011",
+          "pmid": "33740433",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/33740433/",
+          "source_type": "review",
+          "study_context": "E3-ligase modulator discovery",
+          "study_design": "peer-reviewed review",
+          "usable_for": "workflow examples where molecular mechanism changes candidate interpretation",
+          "limitations": "review and E3-ligase focus; not a general success-rate estimate",
+          "authors": "Ege N et al."
+        },
+        {
+          "source_id": "H040S018",
+          "title": "Engineering cell-free systems by chemoproteomic-assisted phenotypic screening",
+          "journal": "RSC Chemical Biology",
+          "published_date": "2024-03-06",
+          "doi": "10.1039/d4cb00004h",
+          "pmid": "38576719",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/38576719/",
+          "source_type": "primary_research",
+          "study_context": "cell-free biological systems",
+          "study_design": "phenotype-first system engineering study",
+          "usable_for": "scope and limits of target-agnostic screening outside intact cells",
+          "limitations": "cell-lysate system does not model tissue exposure or multicellular responses",
+          "authors": "Levitskaya Z et al."
+        },
+        {
+          "source_id": "H040S019",
+          "title": "Robust differential expression testing for single-cell CRISPR screens at low multiplicity of infection",
+          "journal": "Genome Biology",
+          "published_date": "2024-05-17",
+          "doi": "10.1186/s13059-024-03254-2",
+          "pmid": "38760839",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/38760839/",
+          "source_type": "primary_research",
+          "study_context": "published low-multiplicity single-cell CRISPR-screen datasets",
+          "study_design": "association-testing benchmark and calibration study",
+          "usable_for": "false-positive control and prespecified statistical analysis",
+          "limitations": "analysis cannot correct weak perturbation efficacy or absent biological replication",
+          "authors": "Barry T; Mason K; Roeder K; Katsevich E"
+        },
+        {
+          "source_id": "H040S020",
+          "title": "The landscape of targets and lead molecules for remyelination",
+          "journal": "Nature Chemical Biology",
+          "published_date": "2022-09-01",
+          "doi": "10.1038/s41589-022-01115-2",
+          "pmid": "35995862",
+          "url": "https://pubmed.ncbi.nlm.nih.gov/35995862/",
+          "source_type": "review",
+          "study_context": "remyelination discovery studies",
+          "study_design": "peer-reviewed review",
+          "usable_for": "how disease-relevant phenotypes and target evidence are linked in one application area",
+          "limitations": "review and disease-specific literature; not a transferable candidate ranking",
+          "authors": "Caprariello AV; Adams DJ"
+        }
+      ],
+      "shared_findings": [
+        {
+          "finding_id": "H040-C01",
+          "display_order": 1,
+          "title": "筛选命中首先要排除技术和统计假阳性",
+          "shared_result": "大规模成像、组学或扰动筛选仍需依靠对照、重复、扰动效率和多重检验判断信号是否稳定。\n\n板式、池化、单细胞和光学筛选的误差来源不同。",
+          "research_use": "记录筛选库、对照、批次、细胞数、生物学重复、阈值和扰动效率。",
+          "boundary": "单一分数或一次初筛不能确认靶点。",
+          "source_ids": [
+            "H040S001",
+            "H040S004",
+            "H040S008",
+            "H040S019"
+          ]
+        },
+        {
+          "finding_id": "H040-C02",
+          "display_order": 2,
+          "title": "模型和读出决定筛选实际测到了什么",
+          "shared_result": "成像、转录、蛋白和功能读出描述的是不同层面的变化；模型来源和培养条件决定命中适用范围。\n\n细胞系、原代细胞、患者共培养、类器官和无细胞体系不能互相替代。",
+          "research_use": "记录模型来源、细胞组成、培养、剂量、时间点、平台和独立模型复验。",
+          "boundary": "图像或组学表型不单独代表疾病机制。",
+          "source_ids": [
+            "H040S001",
+            "H040S005",
+            "H040S006",
+            "H040S007",
+            "H040S018"
+          ]
+        },
+        {
+          "finding_id": "H040-C03",
+          "display_order": 3,
+          "title": "命中复验需要独立扰动和正交功能证据",
+          "shared_result": "独立试剂、阵列复验、剂量反应、救援实验和内源位点验证可检验命中是否可重复并接近因果。\n\n报告系统、细胞系和原代细胞对扰动的反应范围不同。",
+          "research_use": "采用独立单导向 RNA（sgRNA）或化合物、剂量反应、救援、正交读出和供体或批次重复。",
+          "boundary": "筛选相关性不能直接写成因果机制或临床相关性。",
+          "source_ids": [
+            "H040S005",
+            "H040S009",
+            "H040S010",
+            "H040S011",
+            "H040S019"
+          ]
+        },
+        {
+          "finding_id": "H040-C04",
+          "display_order": 4,
+          "title": "化合物结合的蛋白不一定是驱动表型的靶点",
+          "shared_result": "化学蛋白组学可发现结合蛋白，遗传扰动、竞争实验和功能救援用于判断哪个作用与表型相关。\n\n共价探针、光亲和探针和无标记路线的覆盖、偏差和对照不同。",
+          "research_use": "记录探针结构、竞争、占有、选择性谱、遗传复验和功能救援。",
+          "boundary": "结合或丰度变化不足以确认疾病机制靶点。",
+          "source_ids": [
+            "H040S002",
+            "H040S003",
+            "H040S012",
+            "H040S013",
+            "H040S014",
+            "H040S015",
+            "H040S016",
+            "H040S017"
+          ]
+        },
+        {
+          "finding_id": "H040-C05",
+          "display_order": 5,
+          "title": "候选推进取决于效力、选择性、机制和可开发性的共同证据",
+          "shared_result": "稳定命中还需比较效力、选择性、机制一致性、独立模型和初步暴露与毒性，才能决定是否进入后续研究。\n\n遗传命中、化合物命中和疾病模型中的候选使用不同推进标准。",
+          "research_use": "预先记录候选标准、结构系列、复验模型、暴露、毒性和停止规则。",
+          "boundary": "细胞或动物候选不等于人体疗效与安全性。",
+          "source_ids": [
+            "H040S003",
+            "H040S010",
+            "H040S011",
+            "H040S015",
+            "H040S020"
+          ]
+        }
+      ]
+    }
+  ]
+}

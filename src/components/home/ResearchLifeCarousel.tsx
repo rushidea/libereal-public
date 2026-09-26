@@ -1,0 +1,4 @@
+export type ResearchLifeSlide = { eyebrow: string; title: string; description: string; ctaLabel: string; image: string; alt: string; href: string };
+export const RESEARCH_LIFE_AUTO_ROTATE_MS = 10_000;
+export const RESEARCH_LIFE_SLIDES: ResearchLifeSlide[] = [{ eyebrow: 'Research resources', title: 'Research resources', description: 'Browse tools and resources for common research workflows.', ctaLabel: 'Explore resources', image: '/images/home/research-life/microscope-discovery.webp', alt: 'Research microscope', href: '/support' }];
+export default function ResearchLifeCarousel({ ariaLabel }: { showActivityName: boolean; ariaLabel: string }) { return <section aria-label={ariaLabel} className="rounded-xl border p-8"><h2 className="text-xl font-semibold">Research resources</h2><p className="mt-2 text-gray-600">Browse tools and resources for common research workflows.</p></section>; }

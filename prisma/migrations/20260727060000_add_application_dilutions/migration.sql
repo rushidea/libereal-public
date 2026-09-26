@@ -1,0 +1,1 @@
+-- migration already applied in this database; local file restored as no-op placeholder
