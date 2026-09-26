@@ -19,7 +19,7 @@ export interface PriceLookupItem {
    * 购物车促销标记（换购/赠品行）：服务端按原价计价、不叠加会员/品牌折扣与促销价，
    * 活动优惠由下单 API 统一按订单级负调整扣减（对应 cart-promotions 引擎）。
    */
-  promoMark?: { ruleId: string; price?: number } | null;
+  promoMark?: { ruleId: string; price?: number; choice?: string } | null;
 }
 
 export interface VerifiedItem {

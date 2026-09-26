@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { requireActiveSession, requireAdmin } from '@/lib/session';
-import { AMBIGUOUS_PRODUCT_CATALOG_NUMBER, CustomerUnavailableProductError, getVerifiedInventoryError, verifyAndPriceItems } from '@/lib/pricing';
+import { AMBIGUOUS_PRODUCT_CATALOG_NUMBER, CustomerUnavailableProductError, getVerifiedInventoryError, verifyAndPriceItems, type PriceLookupItem } from '@/lib/pricing';
 import { reportError } from '@/lib/errorReporting';
 import type { Prisma } from '@prisma/client';
 import { sendAdminOperationalEmail } from '@/lib/mail';
@@ -19,8 +19,9 @@ import { orderAutoCloseAt } from '@/lib/order-auto-close';
 import { normalizePointsIntent } from '@/lib/points-checkout';
 import { applyOrderPointsDeduction, previewPointsRedeem } from '@/lib/points-checkout-service';
 import { assertNoPendingForcedAck } from '@/lib/notification-ack';
-import { computePromoAdjustments, validateAddonPromotionLines, validateGiftPromotionLines } from '@/lib/cart-promotions/service';
+import { computePromoAdjustments, hasExceededSelectionAddonQuota, hasMisbrandedEligibleAddonMain, validateAddonPromotionLines, validateGiftPromotionLines } from '@/lib/cart-promotions/service';
 import type { CartLine } from '@/lib/cart-promotions/types';
+import { buildCheckoutRevision } from '@/lib/checkout-revision';
 import { redeemCoupon } from '@/lib/coupon-service';
 import { getReadableOrganizationIds, resolveRecordOwnership } from '@/lib/organization-record-access';
 import { listOrganizationIdsForPermission } from '@/lib/organization-service';
@@ -122,7 +123,28 @@ export async function POST(req: NextRequest) {
   const session = { user: activeUser };
 
   try {
-    const { items, paymentMethod, addressId, addressName, addressPhone, addressText, addressInstitution, acceptedLegalIds, personalPoints, groupPoints, groupId, couponCode, organizationId } = await req.json();
+    const body = await req.json() as {
+      items?: PriceLookupItem[];
+      paymentMethod?: string;
+      addressId?: string;
+      addressName?: string;
+      addressPhone?: string;
+      addressText?: string;
+      addressInstitution?: string;
+      acceptedLegalIds?: unknown;
+      personalPoints?: unknown;
+      groupPoints?: unknown;
+      groupId?: unknown;
+      couponCode?: unknown;
+      organizationId?: string | null;
+      checkoutRevision?: unknown;
+    };
+    const { items, paymentMethod, addressId, addressName, addressPhone, addressText, addressInstitution,
+      acceptedLegalIds, personalPoints, groupPoints, groupId, couponCode, organizationId } = body;
+    if (Object.hasOwn(body, 'checkoutRevision') && (typeof body.checkoutRevision !== 'string' || !/^[a-f0-9]{64}$/.test(body.checkoutRevision))) {
+      return NextResponse.json({ error: '结算版本格式无效', code: 'CHECKOUT_REVISION_INVALID' }, { status: 400 });
+    }
+    const checkoutRevision = typeof body.checkoutRevision === 'string' ? body.checkoutRevision : undefined;
 
     if (!Array.isArray(items) || items.length === 0) {
       return NextResponse.json({ error: 'items must be a non-empty array' }, { status: 400 });
@@ -217,6 +239,7 @@ export async function POST(req: NextRequest) {
           id: vi.productId ?? '',
           brand: vi.brand ?? raw?.brand ?? '',
           catalogNumber: vi.catalogNumber ?? '',
+          name: vi.name ?? '',
           price: vi.unitPrice,
           spec: vi.spec ?? null,
           serverVerified: vi.source === 'db',
@@ -229,7 +252,11 @@ export async function POST(req: NextRequest) {
     const { evals: promoEvals, adjustments: promoAdjustments, discountTotal: promoDiscountTotal } =
       computePromoAdjustments(promoLines, new Date());
     const addonValidationError = validateAddonPromotionLines(promoLines, promoEvals);
-    if (addonValidationError) {
+    if (hasMisbrandedEligibleAddonMain(promoLines, promoEvals)) {
+      return NextResponse.json({ error: '换购商品不符合活动范围，请刷新购物车后再试' }, { status: 400 });
+    }
+    const exceededOptionSelectionQuota = hasExceededSelectionAddonQuota(promoLines, promoEvals);
+    if (addonValidationError && (exceededOptionSelectionQuota || !['ADDON_NOT_TRIGGERED', 'ADDON_QUOTA_EXCEEDED'].includes(addonValidationError))) {
       const messages: Record<typeof addonValidationError, string> = {
         PROMOTION_NOT_FOUND: '促销活动不存在或已结束，请刷新购物车后再试',
         ADDON_NOT_TRIGGERED: '主品数量未达到换购门槛，请核对购物车',
@@ -339,6 +366,13 @@ export async function POST(req: NextRequest) {
       verifiedItems.map((item) => ({ unitPrice: item.unitPrice, quantity: item.quantity })),
       adjustments,
     );
+
+    if (checkoutRevision) {
+      const currentRevision = buildCheckoutRevision({ items: verifiedItems, adjustments, total: pointsBreakdown?.payableAfterPoints ?? amounts.total, points: pointsBreakdown });
+      if (currentRevision !== checkoutRevision) {
+        return NextResponse.json({ error: '结算价格已变化，请重新确认', code: 'CHECKOUT_REVISION_MISMATCH' }, { status: 409 });
+      }
+    }
 
     const orderCreatedAt = new Date();
     const orderDate = orderDateInShanghai(orderCreatedAt);
