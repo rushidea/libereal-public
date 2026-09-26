@@ -253,6 +253,9 @@ export function getTestDb(): Database.Database {
     );
     CREATE TABLE IF NOT EXISTS Inquiry (
       id TEXT PRIMARY KEY,
+      checkoutAttemptId TEXT UNIQUE,
+      checkout_request_fingerprint TEXT,
+      has_unresolved_pricing INTEGER NOT NULL DEFAULT 0,
       userId TEXT,
       organization_id TEXT,
       owner_scope TEXT NOT NULL DEFAULT 'personal',
@@ -278,6 +281,8 @@ export function getTestDb(): Database.Database {
     );
     CREATE TABLE IF NOT EXISTS "Order" (
       id TEXT PRIMARY KEY,
+      checkoutAttemptId TEXT UNIQUE,
+      checkout_request_fingerprint TEXT,
       inquiryId TEXT,
       organization_id TEXT,
       owner_scope TEXT NOT NULL DEFAULT 'personal',
@@ -361,6 +366,9 @@ export function getTestDb(): Database.Database {
       updatedAt DATETIME NOT NULL,
       FOREIGN KEY (orderId) REFERENCES "Order"(id) ON DELETE CASCADE
     );
+    CREATE UNIQUE INDEX IF NOT EXISTS PaymentAttempt_active_alipay_order_key
+    ON PaymentAttempt(orderId)
+    WHERE provider = 'alipay' AND status IN ('created', 'redirected', 'WAIT_BUYER_PAY');
     CREATE TABLE IF NOT EXISTS Product (
       id TEXT PRIMARY KEY,
       catalogNumber TEXT NOT NULL,
@@ -559,6 +567,7 @@ export function getTestDb(): Database.Database {
       UNIQUE(inquiryId, version)
     );
     CREATE TABLE IF NOT EXISTS QuoteItem (
+      metadata TEXT,
       id TEXT PRIMARY KEY, quoteId TEXT NOT NULL, inquiryItemId TEXT, position INTEGER NOT NULL,
       productId TEXT, catalogNumber TEXT, name TEXT NOT NULL, unitPrice REAL NOT NULL,
       quantity INTEGER NOT NULL DEFAULT 1, orderedQty INTEGER NOT NULL DEFAULT 0, lineTotal REAL NOT NULL,

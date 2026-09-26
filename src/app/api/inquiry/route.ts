@@ -2,7 +2,7 @@ import { generateId } from '@/lib/id';
 import { NextRequest, NextResponse } from 'next/server';
 import { rateLimitAsync } from '@/lib/rateLimit';
 import { prisma } from '@/lib/prisma';
-import { AMBIGUOUS_PRODUCT_CATALOG_NUMBER, CustomerUnavailableProductError, verifyAndPriceItems } from '@/lib/pricing';
+import { AMBIGUOUS_PRODUCT_CATALOG_NUMBER, CustomerUnavailableProductError, verifyAndPriceItems, type PriceLookupItem } from '@/lib/pricing';
 import { reportError } from '@/lib/errorReporting';
 import { auth } from '@/lib/auth';
 import { requireActiveSession } from '@/lib/session';
@@ -11,9 +11,18 @@ import { toInquiryItemCreates } from '@/lib/commerce-records';
 import { assertNoPendingForcedAck } from '@/lib/notification-ack';
 import { resolveRecordOwnership } from '@/lib/organization-record-access';
 import { organizationRbacErrorStatus, OrganizationRbacError } from '@/lib/organization-service';
+import { buildCheckoutRequestFingerprint, isUniqueConstraintError, validCheckoutAttemptId } from '@/lib/checkout-idempotency';
 
 const HIGH_VALUE_INQUIRY_THRESHOLD = Number(process.env.HIGH_VALUE_INQUIRY_THRESHOLD ?? 5000);
 const BATCH_INQUIRY_ITEM_THRESHOLD = Number(process.env.BATCH_INQUIRY_ITEM_THRESHOLD ?? 5);
+
+type InquiryBody = {
+  name?: string; email?: string; phone?: string; institution?: string;
+  department?: string | null; address?: string | null; notes?: string | null;
+  items?: PriceLookupItem[]; paymentMethod?: string | null; identity?: string | null;
+  advisorName?: string | null; advisorPhone?: string | null; organizationId?: string | null;
+  honeypot?: string; checkoutAttemptId?: unknown; [key: string]: unknown;
+};
 
 export async function POST(req: NextRequest) {
   const ip = req.headers.get('x-forwarded-for')?.split(',')[0].trim()
@@ -36,8 +45,14 @@ export async function POST(req: NextRequest) {
       sessionUserId = activeUser.id;
     }
 
-    const body = await req.json();
+    const body = await req.json() as InquiryBody;
     const { name, email, phone, institution, department, address, notes, items, paymentMethod, identity, advisorName, advisorPhone, organizationId, honeypot } = body;
+    const headerAttemptId = req.headers.get('idempotency-key');
+    const bodyAttemptId = body.checkoutAttemptId;
+    if (headerAttemptId !== null && bodyAttemptId !== undefined && headerAttemptId !== bodyAttemptId) return NextResponse.json({ error: '幂等键不一致' }, { status: 400 });
+    const checkoutAttemptId = bodyAttemptId ?? headerAttemptId ?? undefined;
+    if (checkoutAttemptId !== undefined && !validCheckoutAttemptId(checkoutAttemptId)) return NextResponse.json({ error: '幂等键格式无效' }, { status: 400 });
+    if (checkoutAttemptId !== undefined && !sessionUserId) return NextResponse.json({ error: '询价幂等重试需要登录' }, { status: 401 });
 
     // Honeypot check
     if (honeypot) {
@@ -59,27 +74,59 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: '询价单至少包含一个商品' }, { status: 400 });
     }
 
+    // Commerce restrictions are checked before an existing keyed request can replay.
+    if (sessionUserId) {
+      const actor = await prisma.user.findUnique({ where: { id: sessionUserId }, select: { isFrozen: true, isBlacklisted: true, approvalStatus: true, creditAccount: { select: { status: true } } } });
+      if (actor?.isFrozen || actor?.isBlacklisted || actor?.approvalStatus === 'rejected' || actor?.creditAccount?.status === 'paused' || actor?.creditAccount?.status === 'overdue_hold') {
+        return NextResponse.json({ error: '账户当前无法提交采购订单或询价。' }, { status: 403 });
+      }
+    }
+
+    // Resolve the actor and idempotency key before pricing or any other volatile work.
+    let ownership: { organizationId: string | null; ownerScope: 'personal' | 'organization' };
+    try {
+      ownership = await resolveRecordOwnership(sessionUserId, organizationId, 'organization.inquiries.create');
+    } catch (error) {
+      if (error instanceof OrganizationRbacError) {
+        return NextResponse.json({ error: error.message, code: error.code }, { status: organizationRbacErrorStatus(error) });
+      }
+      throw error;
+    }
+    const requestFingerprint = checkoutAttemptId
+      ? buildCheckoutRequestFingerprint({ operation: 'inquiry', actorId: sessionUserId, organizationId: ownership.organizationId, ownerScope: ownership.ownerScope, request: body })
+      : null;
+    if (checkoutAttemptId) {
+      const existing = await prisma.inquiry.findUnique({ where: { checkoutAttemptId } });
+      if (existing) {
+        if (existing.userId !== sessionUserId || existing.organizationId !== ownership.organizationId || existing.ownerScope !== ownership.ownerScope || existing.checkoutRequestFingerprint !== requestFingerprint) {
+          return NextResponse.json({ error: '幂等键已用于其他请求' }, { status: 409 });
+        }
+        return NextResponse.json({ success: true, id: existing.id, message: 'Inquiry received', status: existing.status, replayed: true });
+      }
+    }
+
     const id = generateId();
     const itemsArray = Array.isArray(items) ? items : [];
     // Server-side price verification: never trust client-submitted prices
-    const { verifiedItems, verifiedSubtotal, mismatchedCount } = await verifyAndPriceItems(itemsArray, { userId: sessionUserId });
+    const { verifiedItems, verifiedSubtotal, mismatchedCount } = await verifyAndPriceItems(itemsArray, { userId: sessionUserId, allowQuoteRequired: true });
     if (mismatchedCount > 0) {
       console.warn(`[inquiry POST] ${mismatchedCount} item(s) missing DB price; using client price`);
     }
     const pricedItems = verifiedItems.map((item, index) => {
-      const original = itemsArray[index] as Record<string, unknown> | undefined;
+      const original = itemsArray[index] as unknown as Record<string, unknown> | undefined;
       return {
         ...(original ?? {}),
         productId: item.productId,
         catalogNumber: item.catalogNumber,
         name: item.name,
-        price: item.unitPrice,
+        price: item.quoteRequired ? null : item.unitPrice,
         quantity: item.quantity,
-        lineTotal: item.lineTotal,
+        lineTotal: item.quoteRequired ? null : item.lineTotal,
         clientPrice: item.clientPrice,
         priceMismatch: item.priceMismatch,
         pricingSource: item.source,
         pricingSnapshot: item.pricingSnapshot,
+        quoteRequired: item.quoteRequired === true,
       };
     });
     const ua = req.headers.get('user-agent') ?? null;
@@ -132,17 +179,8 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    let ownership: { organizationId: string | null; ownerScope: 'personal' | 'organization' };
     try {
-      ownership = await resolveRecordOwnership(sessionUserId, organizationId, 'organization.inquiries.create');
-    } catch (error) {
-      if (error instanceof OrganizationRbacError) {
-        return NextResponse.json({ error: error.message, code: error.code }, { status: organizationRbacErrorStatus(error) });
-      }
-      throw error;
-    }
-
-    await prisma.inquiry.create({
+      await prisma.inquiry.create({
       data: {
         id,
         name,
@@ -152,7 +190,7 @@ export async function POST(req: NextRequest) {
         department: department || null,
         address: address || null,
         notes: notes || null,
-        subtotal: verifiedSubtotal,
+        subtotal: pricedItems.some((item) => item.quoteRequired) ? 0 : verifiedSubtotal,
         paymentMethod: paymentMethod || null,
         identity: identity || null,
         advisorName: advisorName || null,
@@ -163,11 +201,26 @@ export async function POST(req: NextRequest) {
         userId: sessionUserId,
         organizationId: ownership.organizationId,
         ownerScope: ownership.ownerScope,
+        checkoutAttemptId: checkoutAttemptId ?? null,
+        checkoutRequestFingerprint: requestFingerprint,
+        hasUnresolvedPricing: pricedItems.some((item) => item.quoteRequired),
         inquiryItems: {
           create: toInquiryItemCreates(pricedItems),
         },
       },
-    });
+      });
+    } catch (error) {
+      if (isUniqueConstraintError(error) && checkoutAttemptId) {
+        const winner = await prisma.inquiry.findUnique({ where: { checkoutAttemptId } });
+        if (winner) {
+          if (winner.userId !== sessionUserId || winner.organizationId !== ownership.organizationId || winner.ownerScope !== ownership.ownerScope || winner.checkoutRequestFingerprint !== requestFingerprint) {
+            return NextResponse.json({ error: '幂等键已用于其他请求' }, { status: 409 });
+          }
+          return NextResponse.json({ success: true, id: winner.id, message: 'Inquiry received', status: winner.status, replayed: true });
+        }
+      }
+      throw error;
+    }
 
     // Notify admin of new inquiry
     await prisma.notification.create({
