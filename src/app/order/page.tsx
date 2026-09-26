@@ -1,6 +1,7 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
+import { useSession } from 'next-auth/react';
 import { useCart, getCartItemKey, ProductCartItem, QuickOrderItem } from '@/context/CartContext';
 import { useRouter } from 'next/navigation';
 import Image from 'next/image';
@@ -17,6 +18,7 @@ import { ORDER_PAYMENT_METHODS } from '@/data/payment-methods';
 import PricingBreakdown from '@/components/order/PricingBreakdown';
 import OrganizationContextSelect from '@/components/account/OrganizationContextSelect';
 import { uiSurfaces } from '@/lib/ui-surfaces';
+import { clearCheckoutAttempt, getOrCreateCheckoutAttempt } from '@/lib/checkout-attempt';
 
 interface Address {
   id: string;
@@ -62,6 +64,8 @@ interface PricingPreviewItem {
 }
 
 interface PricingPreview {
+  pricingRevision?: string;
+  checkoutRevision?: string;
   subtotal: number;
   adjustmentTotal?: number;
   promotionDiscount: number;
@@ -108,8 +112,9 @@ const PAYMENT_METHODS: PaymentMethod[] = ORDER_PAYMENT_METHODS.map((method) => (
 }));
 
 export default function OrderCheckoutPage() {
-  const { items, removeItem, syncFromDb } = useCart();
+  const { items, removeItem, syncFromDb, syncToDb } = useCart();
   const router = useRouter();
+  const { data: session } = useSession();
   const [cartReady, setCartReady] = useState(false);
   const [addresses, setAddresses] = useState<Address[]>([]);
   const [selectedAddressId, setSelectedAddressId] = useState<string | null>(null);
@@ -135,6 +140,10 @@ export default function OrderCheckoutPage() {
   const [couponCode, setCouponCode] = useState('');
   const [couponError, setCouponError] = useState('');
   const [organizationId, setOrganizationId] = useState('');
+  const [pricingRevision, setPricingRevision] = useState('');
+  const [pricingRefreshNonce, setPricingRefreshNonce] = useState(0);
+  const submitInFlightRef = useRef(false);
+
 
   useEffect(() => {
     let active = true;
@@ -231,6 +240,9 @@ export default function OrderCheckoutPage() {
         setPointsError('');
         setCouponError(data.couponError || '');
         setPricingPreview(data as PricingPreview);
+        setPricingRevision(typeof data.checkoutRevision === 'string'
+          ? data.checkoutRevision
+          : typeof data.pricingRevision === 'string' ? data.pricingRevision : '');
       })
       .catch((previewError: unknown) => {
         if (controller.signal.aborted) return;
@@ -242,7 +254,7 @@ export default function OrderCheckoutPage() {
       });
 
     return () => controller.abort();
-  }, [spotItems, paymentMethod, personalPointsInput, groupPointsInput, pointsBalance?.group?.id, pointsBalance?.group?.usable, couponCode, organizationId]);
+  }, [spotItems, paymentMethod, personalPointsInput, groupPointsInput, pointsBalance?.group?.id, pointsBalance?.group?.usable, couponCode, organizationId, pricingRefreshNonce]);
 
   useEffect(() => {
     let cancelled = false;
@@ -383,12 +395,16 @@ export default function OrderCheckoutPage() {
   };
 
   const createSpotOrder = async (acceptedLegalIds: string[] = []) => {
+    if (submitInFlightRef.current || submitting) return;
+    submitInFlightRef.current = true;
     if (!selectedAddressId && !showNewAddress) {
       setError('请选择或添加收货地址');
+      submitInFlightRef.current = false;
       return;
     }
     if (!paymentMethod) {
       setError('请选择付款方式');
+      submitInFlightRef.current = false;
       return;
     }
 
@@ -396,28 +412,15 @@ export default function OrderCheckoutPage() {
       ? newAddress
       : addresses.find(a => a.id === selectedAddressId);
 
-    if (!addrToUse) {
-      setError('请选择收货地址');
+    if (!addrToUse || !addrToUse.name || !addrToUse.phone || !addrToUse.address) {
+      setError('请填写收货人、手机和收货地址');
+      submitInFlightRef.current = false;
       return;
     }
 
-    let addressId = selectedAddressId;
-    if (showNewAddress) {
-      try {
-        const res = await fetch('/api/addresses', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ ...newAddress, isDefault: false }),
-        });
-        const savedAddr = await res.json();
-        if (!res.ok) throw new Error(savedAddr.error);
-        addressId = savedAddr.id;
-      } catch (e: unknown) {
-        const message = e instanceof Error ? e.message : '保存地址失败';
-        setError(message);
-        return;
-      }
-    }
+    // Saving an address is the separate explicit action above. Checkout captures
+    // the submitted address without creating another address on an uncertain retry.
+    const addressId = showNewAddress ? null : selectedAddressId;
 
     setSubmitting(true);
     setError('');
@@ -430,6 +433,7 @@ export default function OrderCheckoutPage() {
         brand: item.product.brand,
         catalogNumber: item.product.catalogNumber,
         spec: item.product.spec || null,
+        unit: item.product.salesUnit || null,
         price: getEffectiveProductPrice(item.product),
         quantity: item.quantity,
         shippedQty: 0,
@@ -441,44 +445,67 @@ export default function OrderCheckoutPage() {
           : null,
       }));
 
+      const requestIntent = {
+        items: orderItems,
+        paymentMethod,
+        addressId,
+        addressName: addrToUse.name,
+        addressPhone: addrToUse.phone,
+        addressText: addrToUse.address,
+        addressInstitution: addrToUse.institution || null,
+        acceptedLegalIds: [...acceptedLegalIds].sort(),
+        personalPoints: personalPointsInput,
+        groupPoints: groupPointsInput,
+        groupId: pointsBalance?.group?.usable ? pointsBalance.group.id : undefined,
+        couponCode: couponCode.trim() || undefined,
+        organizationId: organizationId || undefined,
+      };
+      const { attemptId: checkoutAttemptId } = await getOrCreateCheckoutAttempt('order', { ...requestIntent, actorId: session?.user?.id ?? null });
       const res = await fetch('/api/orders', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          items: orderItems,
-          paymentMethod,
-          addressId,
-          addressName: addrToUse.name,
-          addressPhone: addrToUse.phone,
-          addressText: addrToUse.address,
-          addressInstitution: addrToUse.institution || null,
-          acceptedLegalIds,
-          personalPoints: personalPointsInput,
-          groupPoints: groupPointsInput,
-          groupId: pointsBalance?.group?.usable ? pointsBalance.group.id : undefined,
-          couponCode: couponCode.trim() || undefined,
-          organizationId: organizationId || undefined,
-        }),
+        headers: { 'Content-Type': 'application/json', 'Idempotency-Key': checkoutAttemptId },
+        body: JSON.stringify({ ...requestIntent, checkoutAttemptId, checkoutRevision: pricingRevision }),
       });
 
       if (!res.ok) {
         const data = await res.json();
+        if (res.status === 409 && (data.code === 'CHECKOUT_REVALIDATION_REQUIRED' || data.code === 'CHECKOUT_REVISION_MISMATCH')) {
+          setPricingPreview(null);
+          setPricingRevision('');
+          setPricingRefreshNonce((value) => value + 1);
+          throw new Error('价格或活动已变化，请重新确认后再提交');
+        }
         throw new Error(data.error || '创建订单失败');
       }
 
       const data = await res.json();
+      try { window.sessionStorage.setItem('libereal:last-checkout-order-id', data.orderId); } catch {}
 
       if (paymentMethod === 'alipay') {
-        const paymentRes = await fetch(`/api/orders/${encodeURIComponent(data.orderId)}/alipay`, { method: 'POST' });
-        const paymentData = await paymentRes.json();
-        if (!paymentRes.ok || typeof paymentData.redirectUrl !== 'string') {
-          throw new Error(paymentData.error || '支付宝支付创建失败');
+        // Order creation already succeeded. Keep its durable id as the recovery
+        // handle even when the payment request or response cannot be completed.
+        try {
+          const paymentRes = await fetch(`/api/orders/${encodeURIComponent(data.orderId)}/alipay`, { method: 'POST' });
+          const paymentData = await paymentRes.json() as { redirectUrl?: unknown };
+          if (!paymentRes.ok || typeof paymentData.redirectUrl !== 'string') {
+            router.push(`/account/orders/${encodeURIComponent(data.orderId)}`);
+            return;
+          }
+          spotItems.forEach(item => removeItem(getCartItemKey(item)));
+          syncToDb(inquiryItems.length > 0 ? items.filter((item) => item.isQuickOrder || !isPricedProduct(item.product)) : []);
+          clearCheckoutAttempt('order');
+          window.location.assign(paymentData.redirectUrl);
+          return;
+        } catch {
+          router.push(`/account/orders/${encodeURIComponent(data.orderId)}`);
+          return;
         }
-        window.location.assign(paymentData.redirectUrl);
-        return;
       }
 
       spotItems.forEach(item => removeItem(getCartItemKey(item)));
+      syncToDb(inquiryItems.length > 0 ? items.filter((item) => item.isQuickOrder || !isPricedProduct(item.product)) : []);
+      clearCheckoutAttempt('order');
+      try { window.sessionStorage.removeItem('libereal:last-checkout-order-id'); } catch {}
       await new Promise(resolve => setTimeout(resolve, 600));
 
       if (inquiryItems.length > 0) {
@@ -490,6 +517,7 @@ export default function OrderCheckoutPage() {
       const message = e instanceof Error ? e.message : '创建订单失败，请重试';
       setError(message);
       setSubmitting(false);
+      submitInFlightRef.current = false;
     }
   };
 

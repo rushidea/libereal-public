@@ -66,7 +66,9 @@ jobs:
         run: npm ci
 
       - name: Prepare database
-        run: npx prisma db push
+        run: |
+          npx prisma db push
+          npx tsx scripts/prepare-ci-db-invariants.ts
         env:
           DATABASE_URL: file:./prisma/ci.db
 
@@ -89,7 +91,9 @@ jobs:
         run: npm ci
 
       - name: Prepare database
-        run: npx prisma db push
+        run: |
+          npx prisma db push
+          npx tsx scripts/prepare-ci-db-invariants.ts
         env:
           DATABASE_URL: file:./prisma/ci.db
 
@@ -119,7 +123,9 @@ jobs:
         run: npm ci
 
       - name: Prepare database
-        run: npx prisma db push
+        run: |
+          npx prisma db push
+          npx tsx scripts/prepare-ci-db-invariants.ts
         env:
           DATABASE_URL: file:./prisma/ci.db
 
@@ -154,7 +160,9 @@ jobs:
         run: npm ci
 
       - name: Prepare database
-        run: npx prisma db push
+        run: |
+          npx prisma db push
+          npx tsx scripts/prepare-ci-db-invariants.ts
         env:
           DATABASE_URL: file:./prisma/ci.db
 

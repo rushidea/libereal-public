@@ -69,6 +69,7 @@ export function toOrderItemCreates(items: ItemRecord[]): Prisma.OrderItemCreateW
     shippedQty: nonNegativeInteger(item.shippedQty),
     leadTime: text(item.actualLeadTime) ?? text(item.leadTime),
     status: text(item.status) ?? 'pending',
+    metadata: text(item.metadata),
     pricingSnapshot: text(item.pricingSnapshot),
   }));
 }
@@ -111,9 +112,21 @@ type OrderItemView = {
   leadTime: string | null;
   status: string;
   pricingSnapshot: string | null;
+  metadata?: string | null;
 };
 
 export function inquiryItemView(item: InquiryItemView) {
+  let variantId: string | null = null;
+  let spec: string | null = null;
+  let unit: string | null = null;
+  if (item.metadata) {
+    try {
+      const metadata = JSON.parse(item.metadata) as Record<string, unknown>;
+      variantId = text(metadata.variantId);
+      spec = text(metadata.spec);
+      unit = text(metadata.unit);
+    } catch { /* malformed metadata is ignored */ }
+  }
   return {
     productId: item.productId,
     catalogNumber: item.catalogNumber,
@@ -124,6 +137,9 @@ export function inquiryItemView(item: InquiryItemView) {
     lineTotal: item.lineTotal,
     leadTime: item.leadTime,
     customerLeadTime: customerLeadTimeFromMetadata(item.metadata),
+    variantId,
+    spec,
+    unit,
     available: item.available,
     ordered: item.ordered,
     pricingSource: item.pricingSource,
@@ -131,6 +147,17 @@ export function inquiryItemView(item: InquiryItemView) {
 }
 
 export function orderItemView(item: OrderItemView) {
+  let variantId: string | null = null;
+  let spec: string | null = null;
+  let unit: string | null = null;
+  if (item.metadata) {
+    try {
+      const metadata = JSON.parse(item.metadata) as Record<string, unknown>;
+      variantId = text(metadata.variantId);
+      spec = text(metadata.spec);
+      unit = text(metadata.unit);
+    } catch { /* malformed metadata is ignored */ }
+  }
   return {
     id: item.id,
     productId: item.productId,
@@ -144,5 +171,9 @@ export function orderItemView(item: OrderItemView) {
     leadTime: item.leadTime,
     status: item.status,
     pricingSnapshot: item.pricingSnapshot,
+    metadata: item.metadata ?? null,
+    variantId,
+    spec,
+    unit,
   };
 }

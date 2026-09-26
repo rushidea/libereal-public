@@ -13,10 +13,14 @@ import AdaptiveHeader from '@/components/AdaptiveHeader';
 import { uiSurfaces } from '@/lib/ui-surfaces';
 import { isPricedProduct } from '@/lib/product-pricing';
 import OrganizationContextSelect from '@/components/account/OrganizationContextSelect';
+import { clearCheckoutAttempt, getOrCreateCheckoutAttempt } from '@/lib/checkout-attempt';
 
 type Step = 'confirm' | 'form' | 'success';
 
 interface ConfirmedItem {
+  productId?: string;
+  variantId?: string | null;
+  spec?: string | null;
   name: string;
   brand: string;
   catalogNumber: string;
@@ -88,6 +92,7 @@ export default function InquiryPage() {
     [items],
   );
   const unpricedItems = useMemo(() => [...productItems, ...quickOrderItems], [productItems, quickOrderItems]);
+
 
   useEffect(() => {
     if (unpricedItems.length === 0 && step === 'confirm' && status === 'authenticated') {
@@ -170,19 +175,19 @@ export default function InquiryPage() {
     return null;
   }
 
-  const formatPrice = (price: number) =>
-    new Intl.NumberFormat('zh-CN', { style: 'currency', currency: 'CNY' }).format(price);
-
   const handleConfirmItems = () => {
     const confirmed: ConfirmedItem[] = unpricedItems.map((item, idx) => {
       const editState = editStates[idx] || { quantity: 1, maxLeadTime: '' };
       if ('product' in item) {
         return {
+          productId: item.product.id,
+          variantId: item.product.variantId || null,
+          spec: item.product.spec || null,
           name: item.product.name,
           brand: item.product.brand,
           catalogNumber: item.product.catalogNumber,
           quantity: editState.quantity,
-          unit: item.product.spec || '单位',
+          unit: item.product.salesUnit || '单位',
           maxLeadTime: editState.maxLeadTime,
           isQuickOrder: false,
           itemId: item.product.id,
@@ -249,12 +254,16 @@ export default function InquiryPage() {
         return `${i + 1}. ${item.name} [${item.brand}]\n   货号: ${item.catalogNumber}\n   数量: ${item.quantity} ${item.unit}\n   最大货期: ${item.maxLeadTime || '不限'}\n   价格: 待报价`;
       }),
       '',
-      '合计: ' + formatPrice(0),
+      '合计: 待报价确认',
     ];
 
     const body = lines.filter(Boolean).join('\n');
 
     const inquiryItems = confirmedItems.map(item => ({
+      productId: item.productId,
+      variantId: item.variantId || null,
+      spec: item.spec || null,
+      isQuickOrder: item.isQuickOrder,
       name: item.name,
       brand: item.brand,
       catalogNumber: item.catalogNumber,
@@ -267,11 +276,14 @@ export default function InquiryPage() {
     }));
 
     try {
+      const requestIntent = { ...form, items: inquiryItems, organizationId: organizationId || undefined };
+      const { attemptId: checkoutAttemptId } = await getOrCreateCheckoutAttempt('inquiry', { ...requestIntent, actorId: user?.id ?? null });
       const res = await fetch('/api/inquiry', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'Idempotency-Key': checkoutAttemptId },
         body: JSON.stringify({
           ...form,
+          checkoutAttemptId,
           items: inquiryItems,
           subtotal: 0,
           body,
@@ -285,10 +297,18 @@ export default function InquiryPage() {
         setSubmitting(false);
         return;
       }
-      if (!res.ok) throw new Error('Request failed');
-    } catch {}
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || '提交询价失败');
+      }
+    } catch (submitError) {
+      setRateLimitError(submitError instanceof Error ? submitError.message : '提交询价失败，请重试');
+      setSubmitting(false);
+      return;
+    }
 
     setSubmitting(false);
+    clearCheckoutAttempt('inquiry');
     setStep('success');
     unpricedItems.forEach(item => {
       if ('product' in item) {

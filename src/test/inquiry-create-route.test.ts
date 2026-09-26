@@ -130,4 +130,72 @@ describe('POST /api/inquiry', () => {
     expect(res.status).toBe(403);
     expect(json.error).toMatch(/新用户额度已用完/);
   });
+
+  it('replays a keyed inquiry before pricing and keeps the original result stable', async () => {
+    const db = getTestDb();
+    seedUser(db, { id: 'replay_user', email: 'replay@test.com', role: 'customer' });
+    authMock.mockResolvedValue({
+      user: { id: 'replay_user', email: 'replay@test.com', name: 'Replay User', role: 'customer', sessionId: 'replay-session' },
+      expires: new Date(Date.now() + 86400000).toISOString(),
+    });
+
+    const first = await inquiryPOST(makeReq({ ...validBody(), checkoutAttemptId: 'inquiry-replay-1' }, '10.0.0.3'));
+    const firstJson = await first.json();
+    expect(first.status).toBe(200);
+    expect(firstJson.replayed).toBeUndefined();
+
+    db.prepare("DELETE FROM Product WHERE id = 'prod_1'").run();
+    const second = await inquiryPOST(makeReq({ ...validBody(), checkoutAttemptId: 'inquiry-replay-1' }, '10.0.0.3'));
+    const secondJson = await second.json();
+    expect(second.status).toBe(200);
+    expect(secondJson).toMatchObject({ id: firstJson.id, replayed: true });
+    expect(db.prepare('SELECT COUNT(*) AS count FROM Inquiry').get()).toEqual({ count: 1 });
+  });
+
+  it('rejects a keyed inquiry replay with a different actor or intent', async () => {
+    const db = getTestDb();
+    seedUser(db, { id: 'owner_user', email: 'owner@test.com', role: 'customer' });
+    seedUser(db, { id: 'other_user', email: 'other@test.com', role: 'customer' });
+    authMock.mockResolvedValue({
+      user: { id: 'owner_user', email: 'owner@test.com', name: 'Owner', role: 'customer', sessionId: 'owner-session' },
+      expires: new Date(Date.now() + 86400000).toISOString(),
+    });
+
+    const first = await inquiryPOST(makeReq({ ...validBody(), checkoutAttemptId: 'inquiry-conflict-1' }, '10.0.0.4'));
+    expect(first.status).toBe(200);
+
+    authMock.mockResolvedValue({
+      user: { id: 'other_user', email: 'other@test.com', name: 'Other', role: 'customer', sessionId: 'other-session' },
+      expires: new Date(Date.now() + 86400000).toISOString(),
+    });
+    const actorConflict = await inquiryPOST(makeReq({ ...validBody(), checkoutAttemptId: 'inquiry-conflict-1' }, '10.0.0.5'));
+    expect(actorConflict.status).toBe(409);
+
+    authMock.mockResolvedValue({
+      user: { id: 'owner_user', email: 'owner@test.com', name: 'Owner', role: 'customer', sessionId: 'owner-session' },
+      expires: new Date(Date.now() + 86400000).toISOString(),
+    });
+    const intentConflict = await inquiryPOST(makeReq({ ...validBody({ notes: 'changed intent' }), checkoutAttemptId: 'inquiry-conflict-1' }, '10.0.0.4'));
+    expect(intentConflict.status).toBe(409);
+  });
+
+  it('requires authentication for anonymous keyed inquiries', async () => {
+    authMock.mockResolvedValue(null);
+    const response = await inquiryPOST(makeReq({ ...validBody(), checkoutAttemptId: 'anonymous-inquiry-key' }, '10.0.0.6'));
+    expect(response.status).toBe(401);
+  });
+
+  it('marks inquiry pricing as unresolved and leaves the unit price null', async () => {
+    const db = getTestDb();
+    db.prepare("UPDATE Product SET pricingMode = 'inquiry' WHERE id = 'prod_1'").run();
+    const response = await inquiryPOST(makeReq(validBody(), '10.0.0.7'));
+    expect(response.status).toBe(200);
+
+    const row = db.prepare('SELECT has_unresolved_pricing AS hasUnresolvedPricing FROM Inquiry ORDER BY createdAt DESC LIMIT 1')
+      .get() as { hasUnresolvedPricing: number };
+    expect(row.hasUnresolvedPricing).toBe(1);
+    const item = db.prepare('SELECT unitPrice, lineTotal FROM InquiryItem ORDER BY createdAt DESC LIMIT 1')
+      .get() as { unitPrice: number | null; lineTotal: number | null };
+    expect(item).toEqual({ unitPrice: null, lineTotal: null });
+  });
 });

@@ -2,8 +2,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   checkNotifySign: vi.fn(),
+  executeRaw: vi.fn(),
   paymentAttemptFindUnique: vi.fn(),
   paymentAttemptUpdate: vi.fn(),
+  paymentAttemptUpdateMany: vi.fn(),
   orderUpdate: vi.fn(),
   orderUpdateMany: vi.fn(),
   orderFindUnique: vi.fn(),
@@ -27,11 +29,21 @@ vi.mock('@/lib/prisma', () => ({
     paymentAttempt: { findUnique: mocks.paymentAttemptFindUnique },
     $transaction: async (
       callback: (tx: {
-        paymentAttempt: { update: typeof mocks.paymentAttemptUpdate };
+        $executeRawUnsafe: typeof mocks.executeRaw;
+        paymentAttempt: {
+          findUnique: typeof mocks.paymentAttemptFindUnique;
+          update: typeof mocks.paymentAttemptUpdate;
+          updateMany: typeof mocks.paymentAttemptUpdateMany;
+        };
         order: { update: typeof mocks.orderUpdate; updateMany: typeof mocks.orderUpdateMany; findUnique: typeof mocks.orderFindUnique };
       }) => Promise<unknown>,
     ) => callback({
-      paymentAttempt: { update: mocks.paymentAttemptUpdate },
+      $executeRawUnsafe: mocks.executeRaw,
+      paymentAttempt: {
+        findUnique: mocks.paymentAttemptFindUnique,
+        update: mocks.paymentAttemptUpdate,
+        updateMany: mocks.paymentAttemptUpdateMany,
+      },
       order: { update: mocks.orderUpdate, updateMany: mocks.orderUpdateMany, findUnique: mocks.orderFindUnique },
     }),
   },
@@ -64,15 +76,18 @@ function notifyRequest(overrides: Record<string, string> = {}) {
 describe('Alipay payment notify route', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.executeRaw.mockResolvedValue(0);
     mocks.checkNotifySign.mockReturnValue(true);
     mocks.paymentAttemptFindUnique.mockResolvedValue({
       id: 'attempt-1',
       outTradeNo: 'LPTEST001',
       amount: 0.1 * 3,
+      status: 'created',
       paidAt: null,
       order: { id: 'order-1', total: 0.1 * 3, paidAt: null, status: 'unpaid' },
     });
     mocks.paymentAttemptUpdate.mockResolvedValue({});
+    mocks.paymentAttemptUpdateMany.mockResolvedValue({ count: 1 });
     mocks.orderUpdate.mockResolvedValue({});
     mocks.orderUpdateMany.mockResolvedValue({ count: 1 });
     mocks.orderFindUnique.mockResolvedValue({ status: 'pending', paidAt: new Date() });
@@ -93,7 +108,7 @@ describe('Alipay payment notify route', () => {
       }),
     });
     expect(mocks.orderUpdateMany).toHaveBeenCalledWith({
-      where: { id: 'order-1', paidAt: null, status: { in: ['unpaid', 'pending'] } },
+      where: { id: 'order-1', total: 0.1 * 3, paidAt: null, status: { in: ['unpaid', 'pending'] } },
       data: { paidAt: expect.any(Date), status: 'pending', autoCloseAt: null },
     });
     expect(mocks.orderUpdate).toHaveBeenCalledWith(expect.objectContaining({
@@ -128,8 +143,8 @@ describe('Alipay payment notify route', () => {
     expect(response.status).toBe(200);
     await expect(response.text()).resolves.toBe('success');
     expect(mocks.orderUpdateMany).not.toHaveBeenCalled();
-    expect(mocks.paymentAttemptUpdate).toHaveBeenCalledWith({
-      where: { id: 'attempt-1' },
+    expect(mocks.paymentAttemptUpdateMany).toHaveBeenCalledWith({
+      where: expect.objectContaining({ id: 'attempt-1' }),
       data: expect.objectContaining({ status: 'rejected_order_cancelled' }),
     });
   });
@@ -146,6 +161,51 @@ describe('Alipay payment notify route', () => {
     expect(mocks.writeAuditLog).not.toHaveBeenCalled();
   });
 
+  it('records a paid superseded attempt for reconciliation without settling the order', async () => {
+    mocks.paymentAttemptFindUnique.mockResolvedValue({
+      id: 'attempt-old',
+      outTradeNo: 'LPTEST001',
+      amount: 0.3,
+      status: 'superseded',
+      paidAt: null,
+      order: { id: 'order-1', total: 0.3, paidAt: null, status: 'unpaid' },
+    });
+
+    const response = await POST(notifyRequest());
+
+    expect(response.status).toBe(200);
+    await expect(response.text()).resolves.toBe('success');
+    expect(mocks.paymentAttemptUpdateMany).toHaveBeenCalledWith({
+      where: { id: 'attempt-old', status: 'superseded' },
+      data: expect.objectContaining({ status: 'paid_superseded_reconciliation_required', tradeNo: '202607190001' }),
+    });
+    expect(mocks.orderUpdateMany).not.toHaveBeenCalled();
+    expect(mocks.orderUpdate).not.toHaveBeenCalled();
+    expect(mocks.writeAuditLog).toHaveBeenCalledWith(expect.objectContaining({
+      action: 'payment.alipay_superseded_paid_reconciliation_required',
+    }), expect.anything());
+  });
+
+  it('does not re-settle or re-audit a repeated superseded paid notification', async () => {
+    mocks.paymentAttemptFindUnique.mockResolvedValue({
+      id: 'attempt-old',
+      outTradeNo: 'LPTEST001',
+      amount: 0.3,
+      status: 'paid_superseded_reconciliation_required',
+      paidAt: new Date(),
+      order: { id: 'order-1', total: 0.3, paidAt: null, status: 'unpaid' },
+    });
+
+    const response = await POST(notifyRequest());
+
+    expect(response.status).toBe(200);
+    await expect(response.text()).resolves.toBe('success');
+    expect(mocks.paymentAttemptUpdate).not.toHaveBeenCalled();
+    expect(mocks.orderUpdateMany).not.toHaveBeenCalled();
+    expect(mocks.orderUpdate).not.toHaveBeenCalled();
+    expect(mocks.writeAuditLog).not.toHaveBeenCalled();
+  });
+
   it('rejects a late payment after the order was closed between notify reads', async () => {
     mocks.orderUpdateMany.mockResolvedValue({ count: 0 });
     mocks.orderFindUnique.mockResolvedValue({ status: 'closed', paidAt: null });
@@ -154,8 +214,8 @@ describe('Alipay payment notify route', () => {
 
     expect(response.status).toBe(200);
     await expect(response.text()).resolves.toBe('success');
-    expect(mocks.paymentAttemptUpdate).toHaveBeenCalledWith({
-      where: { id: 'attempt-1' },
+    expect(mocks.paymentAttemptUpdateMany).toHaveBeenCalledWith({
+      where: { id: 'attempt-1', status: 'created' },
       data: expect.objectContaining({ status: 'rejected_order_cancelled' }),
     });
     expect(mocks.orderUpdate).not.toHaveBeenCalled();
@@ -186,4 +246,136 @@ describe('Alipay payment notify route', () => {
     expect(mocks.applyOrderPointsDeduction).toHaveBeenCalledWith(expect.anything(), 'order-1');
     expect(mocks.writeAuditLog).toHaveBeenCalledWith(expect.objectContaining({ action: 'payment.alipay_points_pending' }), expect.anything());
   });
+
+  it('rechecks a concurrently superseded attempt before claiming the order', async () => {
+    const active = {
+      id: 'attempt-1', outTradeNo: 'LPTEST001', amount: 0.3, status: 'created', paidAt: null,
+      order: { id: 'order-1', total: 0.3, paidAt: null, status: 'unpaid' },
+    };
+    const superseded = { ...active, status: 'superseded' };
+    mocks.paymentAttemptFindUnique.mockResolvedValueOnce(active).mockResolvedValueOnce(superseded);
+
+    const response = await POST(notifyRequest());
+
+    expect(response.status).toBe(200);
+    expect(mocks.orderUpdateMany).not.toHaveBeenCalled();
+    expect(mocks.paymentAttemptUpdateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: 'attempt-1', status: 'superseded' },
+    }));
+    expect(mocks.writeAuditLog).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects a payment when the order total changes before the transaction claim', async () => {
+    const initial = {
+      id: 'attempt-1', outTradeNo: 'LPTEST001', amount: 0.3, status: 'created', paidAt: null,
+      order: { id: 'order-1', total: 0.3, paidAt: null, status: 'unpaid' },
+    };
+    const changed = { ...initial, order: { ...initial.order, total: 0.4 } };
+    mocks.paymentAttemptFindUnique.mockResolvedValueOnce(initial).mockResolvedValueOnce(changed);
+
+    const response = await POST(notifyRequest());
+
+    expect(response.status).toBe(200);
+    expect(mocks.orderUpdateMany).not.toHaveBeenCalled();
+    expect(mocks.paymentAttemptUpdateMany).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ status: 'rejected_amount_mismatch' }),
+    }));
+  });
+
+  it('does not downgrade a paid attempt for a delayed non-paid callback', async () => {
+    mocks.paymentAttemptFindUnique.mockResolvedValue({
+      id: 'attempt-1', outTradeNo: 'LPTEST001', amount: 0.3, status: 'paid', paidAt: new Date(),
+      order: { id: 'order-1', total: 0.3, paidAt: new Date(), status: 'pending' },
+    });
+
+    const response = await POST(notifyRequest({ trade_status: 'WAIT_BUYER_PAY' }));
+
+    expect(response.status).toBe(200);
+    expect(mocks.paymentAttemptUpdate).not.toHaveBeenCalled();
+    expect(mocks.paymentAttemptUpdateMany).not.toHaveBeenCalled();
+    expect(mocks.orderUpdateMany).not.toHaveBeenCalled();
+  });
+
+  it('retries pending points for an already paid attempt without rewriting payment state', async () => {
+    const paidAt = new Date();
+    mocks.paymentAttemptFindUnique.mockResolvedValue({
+      id: 'attempt-1', outTradeNo: 'LPTEST001', amount: 0.3, status: 'paid', paidAt,
+      order: {
+        id: 'order-1', total: 0.3, paidAt, status: 'pending',
+        pointsApplied: false, pointsPersonal: 10, pointsGroup: 0,
+      },
+    });
+    mocks.applyOrderPointsDeduction.mockResolvedValue({ ok: false, error: '个人积分不足' });
+
+    const response = await POST(notifyRequest());
+
+    expect(response.status).toBe(200);
+    expect(mocks.applyOrderPointsDeduction).toHaveBeenCalledTimes(1);
+    expect(mocks.paymentAttemptUpdate).not.toHaveBeenCalled();
+    expect(mocks.paymentAttemptUpdateMany).not.toHaveBeenCalled();
+    expect(mocks.orderUpdateMany).not.toHaveBeenCalled();
+    expect(mocks.orderUpdate).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: 'order-1' },
+      data: expect.objectContaining({ events: expect.anything() }),
+    }));
+    expect(mocks.writeAuditLog).toHaveBeenCalledWith(expect.objectContaining({
+      action: 'payment.alipay_points_pending',
+    }), expect.anything());
+  });
+
+  it('does not rewrite a paid attempt after the order is cancelled', async () => {
+    mocks.paymentAttemptFindUnique.mockResolvedValue({
+      id: 'attempt-1', outTradeNo: 'LPTEST001', amount: 0.3, status: 'paid', paidAt: new Date(),
+      order: { id: 'order-1', total: 0.3, paidAt: new Date(), status: 'cancelled' },
+    });
+
+    const response = await POST(notifyRequest());
+
+    expect(response.status).toBe(200);
+    expect(mocks.paymentAttemptUpdate).not.toHaveBeenCalled();
+    expect(mocks.paymentAttemptUpdateMany).not.toHaveBeenCalled();
+    expect(mocks.writeAuditLog).not.toHaveBeenCalled();
+  });
+
+  it('audits superseded reconciliation only for the winning CAS', async () => {
+    mocks.paymentAttemptFindUnique.mockResolvedValue({
+      id: 'attempt-old', outTradeNo: 'LPTEST001', amount: 0.3, status: 'superseded', paidAt: null,
+      order: { id: 'order-1', total: 0.3, paidAt: null, status: 'unpaid' },
+    });
+    mocks.paymentAttemptUpdateMany.mockResolvedValue({ count: 0 });
+
+    const response = await POST(notifyRequest());
+
+    expect(response.status).toBe(200);
+    expect(mocks.writeAuditLog).not.toHaveBeenCalled();
+    expect(mocks.orderUpdateMany).not.toHaveBeenCalled();
+  });
+  it('returns a retryable failure when a points savepoint cannot be created', async () => {
+    mocks.paymentAttemptFindUnique.mockResolvedValue({
+      id: 'attempt-paid', outTradeNo: 'LPTEST001', amount: 0.3, status: 'paid', paidAt: new Date(),
+      order: { id: 'order-1', total: 0.3, paidAt: new Date(), status: 'pending', pointsApplied: false, pointsPersonal: 10, pointsGroup: 0 },
+    });
+    mocks.executeRaw.mockRejectedValueOnce(new Error('synthetic savepoint failure'));
+    const response = await POST(notifyRequest());
+    expect(response.status).toBe(500);
+    expect(mocks.applyOrderPointsDeduction).not.toHaveBeenCalled();
+    expect(mocks.orderUpdate).not.toHaveBeenCalled();
+    expect(mocks.writeAuditLog).not.toHaveBeenCalled();
+  });
+
+  it('does not reopen a closed attempt for a delayed waiting callback', async () => {
+    mocks.paymentAttemptFindUnique.mockResolvedValue({ id: 'closed-attempt', outTradeNo: 'LPTEST001', amount: 0.3, status: 'TRADE_CLOSED', paidAt: null, order: { id: 'order-1', total: 0.3, paidAt: null, status: 'unpaid' } });
+    expect((await POST(notifyRequest({ trade_status: 'WAIT_BUYER_PAY' }))).status).toBe(200);
+    expect(mocks.paymentAttemptUpdate).not.toHaveBeenCalled();
+    expect(mocks.paymentAttemptUpdateMany).not.toHaveBeenCalled();
+    expect(mocks.orderUpdateMany).not.toHaveBeenCalled();
+  });
+  it('records a late paid closed attempt for reconciliation without settling the order', async () => {
+    mocks.paymentAttemptFindUnique.mockResolvedValue({ id: 'closed-attempt', outTradeNo: 'LPTEST001', amount: 0.3, status: 'TRADE_CLOSED', paidAt: null, order: { id: 'order-1', total: 0.3, paidAt: null, status: 'unpaid' } });
+    expect((await POST(notifyRequest())).status).toBe(200);
+    expect(mocks.paymentAttemptUpdateMany).toHaveBeenCalledWith(expect.objectContaining({ where: { id: 'closed-attempt', status: 'TRADE_CLOSED' }, data: expect.objectContaining({ status: 'paid_terminal_reconciliation_required' }) }));
+    expect(mocks.orderUpdateMany).not.toHaveBeenCalled();
+    expect(mocks.writeAuditLog).toHaveBeenCalledWith(expect.objectContaining({ action: 'payment.alipay_terminal_paid_reconciliation_required' }), expect.anything());
+  });
+
 });
