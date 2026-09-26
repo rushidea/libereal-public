@@ -43,11 +43,19 @@ export function validatePromoMarks(lines: CartLine[], evaluations: RuleEvaluatio
       message = '加购商品价格需要重新确认，请移除后重新选择';
     } else {
       const rule = evaluation.rule;
-      const expected = rule.type === 'addon' ? rule.addonPrice : 0;
-      if (line.product.price == null || !Number.isFinite(line.product.price) || line.product.price < expected) {
+      const option = rule.type === 'addon'
+        ? rule.addonOptions?.find((candidate) => candidate.catalogNumber === line.product.catalogNumber)
+        : undefined;
+      const expected = rule.type === 'addon' ? (option?.price ?? rule.addonPrice) : 0;
+      const optionQuantity = option?.quantity ?? 1;
+      const selectedPriceTotal = (line.product.price ?? 0) * optionQuantity;
+      if (line.product.price == null || !Number.isFinite(line.product.price)
+        || (option ? selectedPriceTotal < expected : line.product.price < expected)) {
         message = '加购商品价格需要重新确认，请移除后重新选择';
       } else if (price != null && (typeof price !== 'number' || !Number.isFinite(price) || Math.abs(price - expected) > 0.005)) {
         message = '加购价格发生变化，请移除加购商品后重新选择';
+      } else if (rule.type === 'addon' && rule.addonOptions?.length && !option) {
+        message = '商品未参加所选加购活动，请移除后重新选择';
       } else if (evaluation.details?.overSharedQuota === true) {
         message = '本活动的换购额度已用完，请保留其中一件换购商品后重新结算';
       } else if ((rule.type === 'addon' && !isAddonProduct(rule, line.product))
@@ -98,26 +106,64 @@ export type GiftValidationError =
   | 'GIFT_PRICE_INVALID';
 
 export function validateAddonPromotionLines(lines: CartLine[], evaluations: RuleEvaluation[]): AddonValidationError | null {
+  let softError: AddonValidationError | null = null;
   for (const line of lines) {
     if (!line.promoMark) continue;
     const evaluation = evaluations.find((entry) => entry.rule.id === line.promoMark?.ruleId);
     if (!evaluation || !evaluation.active) return 'PROMOTION_NOT_FOUND';
     const addonRule = evaluation.rule;
     if (addonRule.type !== 'addon') continue;
-    if (!evaluation.triggered) return 'ADDON_NOT_TRIGGERED';
+    if (!evaluation.triggered) {
+      softError ??= 'ADDON_NOT_TRIGGERED';
+    }
     const quota = Number(evaluation.details?.quota ?? 0);
     const usedQuota = Number(evaluation.details?.usedQuota ?? 0);
-    if (usedQuota > quota) return 'ADDON_QUOTA_EXCEEDED';
+    if (usedQuota > quota) {
+      softError ??= 'ADDON_QUOTA_EXCEEDED';
+    }
     const hasUnverifiedEligibleMain = lines.some((candidate) =>
       !candidate.promoMark && candidate.product.serverVerified === false
       && isEligibleMainProduct(addonRule, candidate.product));
     if (line.product.serverVerified === false || hasUnverifiedEligibleMain) return 'ADDON_PRODUCT_INVALID';
     if (!isAddonProduct(addonRule, line.product)) return 'ADDON_PRODUCT_INVALID';
-    if (line.promoMark.price != null && Math.abs(line.promoMark.price - addonRule.addonPrice) > 0.005) {
+    const option = addonRule.addonOptions?.find((candidate) => candidate.catalogNumber === line.product.catalogNumber);
+    if (option && line.promoMark.choice !== option.catalogNumber) return 'ADDON_PRODUCT_INVALID';
+    if (option && (line.quantity <= 0 || line.quantity % option.quantity !== 0)) return 'ADDON_PRODUCT_INVALID';
+    const expectedPrice = option?.price ?? addonRule.addonPrice;
+    if (line.promoMark.price != null && Math.abs(line.promoMark.price - expectedPrice) > 0.005) {
       return 'ADDON_PRICE_INVALID';
     }
   }
-  return null;
+  return softError;
+}
+
+/** Reject over-quota selectable add-ons even if another marked add-on fails first. */
+export function hasExceededSelectionAddonQuota(lines: CartLine[], evaluations: RuleEvaluation[]): boolean {
+  return lines.some((line) => {
+    const ruleId = line.promoMark?.ruleId;
+    if (!ruleId) return false;
+    const evaluation = evaluations.find((entry) => entry.rule.id === ruleId);
+    if (!evaluation || evaluation.rule.type !== 'addon') return false;
+    const selectionRule = evaluation.rule.sharedQuotaMode === 'selection' || Boolean(evaluation.rule.addonOptions?.length);
+    if (!selectionRule) return false;
+    return Number(evaluation.details?.usedQuota ?? 0) > Number(evaluation.details?.quota ?? 0);
+  });
+}
+
+/** Reject a marked add-on paired with a wrong-brand main matching its qualifier. */
+export function hasMisbrandedEligibleAddonMain(lines: CartLine[], evaluations: RuleEvaluation[]): boolean {
+  return lines.some((line) => {
+    if (line.promoMark) return false;
+    return evaluations.some((evaluation) => {
+      const rule = evaluation.rule;
+      if (rule.type !== 'addon' || evaluation.triggered || !rule.eligibleBrand || line.product.brand === rule.eligibleBrand) return false;
+      const name = line.product.name?.toLocaleLowerCase();
+      const matches = rule.eligibleTerms.some((term) => line.product.catalogNumber.startsWith(term))
+        || rule.eligibleExactTerms?.includes(line.product.catalogNumber) === true
+        || Boolean(rule.eligibleNameIncludes?.length && rule.eligibleNameIncludes.every((term) => name?.includes(term.toLocaleLowerCase())));
+      return matches && lines.some((candidate) => candidate.promoMark?.ruleId === rule.id);
+    });
+  });
 }
 
 export function validateGiftPromotionLines(lines: CartLine[], evaluations: RuleEvaluation[]): GiftValidationError | null {

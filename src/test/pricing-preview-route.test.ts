@@ -20,6 +20,7 @@ vi.mock('@/lib/pricing', () => ({
   },
 }));
 
+import { buildCheckoutRevision } from '@/lib/checkout-revision';
 import { POST } from '@/app/api/orders/pricing-preview/route';
 import { promotionLines, submittedPromotion, verifiedPromotion } from './cart-promotion-fixtures';
 
@@ -50,6 +51,7 @@ describe('POST /api/orders/pricing-preview', () => {
     expect(response.status).toBe(200);
     const data = await response.json();
     expect(data.total).toBe(650);
+    expect(data.checkoutRevision).toMatch(/^[a-f0-9]{64}$/);
     expect(data.promotionDiscount).toBe(250);
     expect(data.items[1]).toMatchObject({ unitPrice: 300, lineTotal: 300, finalLineTotal: 50 });
   });
@@ -67,14 +69,21 @@ describe('POST /api/orders/pricing-preview', () => {
     const response = await POST(new Request('https://libereal.cn/api/orders/pricing-preview', {
       method: 'POST', body: JSON.stringify({ items: submitted, paymentMethod: 'bank_transfer', acceptedLegalIds: ['checkout-terms'] }),
     }) as never);
-    if (['shortfall', 'excess', 'wrongSku', 'wrongBrand', 'wrongPrice', 'unknownRule', 'fallback'].includes(kind)) {
-      expect(response.status).toBe(400);
-      expect((await response.json()).error).toBeTruthy();
-    } else {
+    if (kind === 'shortfall') {
       expect(response.status).toBe(200);
       const data = await response.json();
-      expect(data.promotionDiscount).toBe(kind === 'excess' ? 250 : 0);
-      expect(data.items[1].finalLineTotal).toBe(kind === 'excess' ? 350 : 300);
+      expect(data.total).toBe(800);
+      expect(data.promotionDiscount).toBe(0);
+    } else if (kind === 'excess') {
+      expect(response.status).toBe(200);
+      const data = await response.json();
+      expect(data.subtotal).toBe(1200);
+      expect(data.total).toBe(950);
+      expect(data.promotionDiscount).toBe(250);
+      expect(data.items[1].finalLineTotal).toBe(350);
+    } else {
+      expect(response.status).toBe(400);
+      expect((await response.json()).error).toBeTruthy();
     }
   });
 
@@ -135,6 +144,7 @@ describe('POST /api/orders/pricing-preview', () => {
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({
+      checkoutRevision: buildCheckoutRevision({ items: [{ productId: 'product-1', catalogNumber: 'CAT-1', unitPrice: 99, quantity: 1 }], adjustments: [], total: 99, points: null }),
       subtotal: 99,
       totalBeforePoints: 99,
       adjustmentTotal: 0,

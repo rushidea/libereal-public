@@ -7,7 +7,10 @@ export function assignAutomaticPromotions(input: CartLine[], rules: RuleConfig[]
   let lines = input.map((line, index) => ({ ...line, id: line.id ?? String(index) }));
   const originalIds = new Map(lines.map((line) => [line.id, line.id]));
   const active = promotionEngine.activeRules(rules, now)
-    .filter((rule) => rule.type === 'addon' || rule.type === 'gift');
+    .filter((rule) => (rule.type === 'addon' || rule.type === 'gift')
+      // Selectable add-ons require an explicit client choice. Their option
+      // quantities are not safely discoverable by the legacy binary search.
+      && !(rule.type === 'addon' && (rule.sharedQuotaMode === 'selection' || Boolean(rule.addonOptions?.length))));
   const candidates = lines.flatMap((line) => {
     if (line.isQuickOrder || line.promoMark || !Number.isFinite(line.product.price) || (line.product.price ?? 0) <= 0) return [];
     return active.flatMap((rule) => {
