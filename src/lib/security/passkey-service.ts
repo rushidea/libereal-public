@@ -5,8 +5,10 @@ import {
   generateRegistrationOptions,
   verifyAuthenticationResponse,
   verifyRegistrationResponse,
+  type AuthenticatorTransportFuture,
+  type AuthenticationResponseJSON,
+  type RegistrationResponseJSON,
 } from '@simplewebauthn/server';
-import type { AuthenticatorTransportFuture } from '@simplewebauthn/types';
 import { getDatabasePath } from '@/lib/databasePath';
 import { getEphemeralStore, type EphemeralStore } from '@/lib/ephemeral-store';
 import { hashChallengeForStorage, MFA_MAX_ATTEMPTS, recordMfaFailure, type MfaChallengeProvider } from './mfa-challenge-store';
@@ -18,8 +20,8 @@ import { recordSecurityEvent } from './security-events';
 
 const PASSKEY_CHALLENGE_TTL_MS = 5 * 60 * 1000;
 
-export type PasskeyRegistrationResponse = Parameters<typeof verifyRegistrationResponse>[0]['response'];
-export type PasskeyAuthenticationResponse = Parameters<typeof verifyAuthenticationResponse>[0]['response'];
+export type PasskeyRegistrationResponse = RegistrationResponseJSON;
+export type PasskeyAuthenticationResponse = AuthenticationResponseJSON;
 export type PasskeyEphemeralStore = Pick<EphemeralStore, 'get' | 'set' | 'compareAndDelete'>;
 
 export interface PasskeySummary {
@@ -106,7 +108,7 @@ function encode(value: Uint8Array): string {
   return Buffer.from(value).toString('base64url');
 }
 
-function decode(value: string): Uint8Array {
+function decode(value: string): Uint8Array<ArrayBuffer> {
   return Uint8Array.from(Buffer.from(value, 'base64url'));
 }
 
@@ -244,14 +246,14 @@ export async function createPasskeyRegistrationOptions(input: {
   const options = await generateRegistrationOptions({
     rpName: config.rpName,
     rpID: config.rpId,
-    userID: input.userId,
+    userID: new TextEncoder().encode(input.userId),
     userName: input.email,
     userDisplayName: input.name?.trim() || input.email,
     challenge,
     timeout: 60_000,
     attestationType: 'none',
     excludeCredentials: listRows(input.userId).map((row) => ({
-      id: decode(row.credential_id),
+      id: row.credential_id,
       type: 'public-key' as const,
       transports: parseCredentialData(row.credential_data).transports,
     })),
@@ -303,13 +305,13 @@ export async function verifyPasskeyRegistration(input: {
   if (!verified.verified || !verified.registrationInfo) throw new Error('PASSKEY_REGISTRATION_INVALID');
 
   const info = verified.registrationInfo;
-  const credentialId = encode(info.credentialID);
+  const credentialId = info.credential.id;
   const credentialData = JSON.stringify({
-    publicKey: encode(info.credentialPublicKey),
-    counter: info.counter,
+    publicKey: encode(info.credential.publicKey),
+    counter: info.credential.counter,
     deviceType: info.credentialDeviceType,
     backedUp: info.credentialBackedUp,
-    transports: input.response.response.transports ?? [],
+    transports: info.credential.transports ?? input.response.response.transports ?? [],
   } satisfies StoredCredentialData);
   const now = new Date().toISOString();
   return withDatabase((db) => {
@@ -362,7 +364,7 @@ export async function createPasskeyLoginOptions(input: {
     timeout: 60_000,
     userVerification: 'required',
     allowCredentials: rows.map((row) => ({
-      id: decode(row.credential_id),
+      id: row.credential_id,
       type: 'public-key' as const,
       transports: parseCredentialData(row.credential_data).transports,
     })),
@@ -482,9 +484,9 @@ export async function verifyPasskeyLogin(input: {
       expectedChallenge: state.challenge,
       expectedOrigin: config.origins,
       expectedRPID: config.rpId,
-      authenticator: {
-        credentialID: decode(row.credential_id),
-        credentialPublicKey: decode(storedData.publicKey),
+      credential: {
+        id: row.credential_id,
+        publicKey: decode(storedData.publicKey),
         counter: storedData.counter,
         transports: storedData.transports as Array<'ble' | 'cable' | 'hybrid' | 'internal' | 'nfc' | 'smart-card' | 'usb'> | undefined,
       },
@@ -614,9 +616,9 @@ export async function verifyDiscoverablePasskeyLogin(input: {
       expectedChallenge: state.challenge,
       expectedOrigin: config.origins,
       expectedRPID: config.rpId,
-      authenticator: {
-        credentialID: decode(row.credential_id),
-        credentialPublicKey: decode(storedData.publicKey),
+      credential: {
+        id: row.credential_id,
+        publicKey: decode(storedData.publicKey),
         counter: storedData.counter,
         transports: storedData.transports as Array<'ble' | 'cable' | 'hybrid' | 'internal' | 'nfc' | 'smart-card' | 'usb'> | undefined,
       },

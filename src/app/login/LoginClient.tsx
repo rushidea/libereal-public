@@ -154,7 +154,9 @@ function LoginForm() {
         verifyUrl = '/api/authenticator/passkey/login/discoverable/verify';
       }
 
-      const assertion = await startAuthentication(options as Parameters<typeof startAuthentication>[0]);
+      const assertion = await startAuthentication({
+        optionsJSON: options as Parameters<typeof startAuthentication>[0]['optionsJSON'],
+      });
       const verifyResponse = await fetch(verifyUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
