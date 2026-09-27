@@ -5,6 +5,7 @@ import {
   creditLimitForAccount,
   creditRestrictionForOverdueDays,
   effectiveCreditLimit,
+  ensureCreditAccount,
   overdueDaysFromDueAt,
   releaseOrderReceivableOnCancellation,
   reserveOrderCredit,
@@ -36,6 +37,18 @@ describe('membership and customer credit', () => {
   it('uses supplied tier policy configuration', () => {
     expect(getTierByRollingSpend(0, tierFixture).name).toBe('Sample tier');
     expect(getTierByRollingSpend(1000, tierFixture).name).toBe('Sample plus');
+  });
+
+  it('initializes credit using the configured matching tier', async () => {
+    const account = await prisma.$transaction((tx) => ensureCreditAccount(tx, 'user_1', 'Sample plus'));
+    expect(account.baseLimit).toBe(tierFixture[1].creditLimit);
+  });
+
+  it('uses the default policy for an unknown tier without changing existing accounts', async () => {
+    const account = await prisma.$transaction((tx) => ensureCreditAccount(tx, 'user_1', 'Unknown synthetic tier'));
+    expect(account.baseLimit).toBe(tierFixture[0].creditLimit);
+    const preserved = await prisma.$transaction((tx) => ensureCreditAccount(tx, 'user_1', 'Sample plus'));
+    expect(preserved.baseLimit).toBe(account.baseLimit);
   });
 
   it('adds temporary credit only before its expiry', () => {

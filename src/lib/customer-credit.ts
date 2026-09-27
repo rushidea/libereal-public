@@ -1,7 +1,7 @@
 import type { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { calculateOrderPoints } from '@/lib/points';
-import { getTierByRollingSpend, DEFAULT_TIER } from '@/lib/discount';
+import { getTierByRollingSpend, DEFAULT_TIER, TIERS } from '@/lib/discount';
 
 type Tx = Prisma.TransactionClient;
 
@@ -48,7 +48,7 @@ export function effectiveCreditLimit(account: {
 }
 
 export async function ensureCreditAccount(tx: Tx, userId: string, tierName: string) {
-  const tier = tierName === DEFAULT_TIER.name ? DEFAULT_TIER : DEFAULT_TIER;
+  const tier = TIERS.find((item) => item.name === tierName) ?? DEFAULT_TIER;
   return tx.creditAccount.upsert({
     where: { userId },
     update: {},
