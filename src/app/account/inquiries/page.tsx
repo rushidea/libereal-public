@@ -1,17 +1,20 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useSession } from 'next-auth/react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { Package, FileText, Check, Clock, ExternalLink } from 'lucide-react';
 import AdaptiveHeader from '@/components/AdaptiveHeader';
 import SiteFooter from '@/components/SiteFooter';
 import MobileBottomNav from '@/components/mobile/MobileBottomNav';
+import LegalConsentModal from '@/components/legal/LegalConsentModal';
 
 import Breadcrumb from '@/components/Breadcrumb';
 import { ORDER_STATUS_LABELS } from '@/lib/order-domain';
 
 interface InquiryItem {
+  id?: string;
   isQuickOrder?: boolean;
   name?: string;
   brand?: string;
@@ -24,6 +27,7 @@ interface InquiryItem {
     price?: number;
   };
   quantity?: number;
+  orderedQty?: number;
   price?: number;
   unit?: string;
   leadTime?: string;
@@ -53,11 +57,12 @@ interface Inquiry {
   department?: string;
   items: InquiryItem[];
   subtotal: number;
+  hasUnresolvedPricing?: boolean;
   status: string;
   createdAt: string;
   organizationId?: string | null;
   ownerScope?: 'personal' | 'organization';
-  activeQuote?: { status: string; sentAt?: string; acceptedAt?: string; items: InquiryItem[] } | null;
+  activeQuote?: { id: string; version: number; status: string; subtotal: number; validUntil?: string | null; sentAt?: string; acceptedAt?: string; items: InquiryItem[] } | null;
   orderCount?: number;
   orders?: Order[];
 }
@@ -68,16 +73,45 @@ const STATUS_CONFIG: Record<string, { label: string; color: string; icon: React.
   'closed': { label: '待报价', color: 'bg-amber-100 text-amber-700', icon: Clock },
 };
 
+type AcceptanceSnapshot = { inquiryId: string; quoteId: string; quoteVersion: number; itemIndices: number[]; itemIds: string[]; quantities: number[]; acceptedLegalIds: string[]; actorScope: string; attemptId: string; createdAt: string };
+const ACCEPTANCE_STORAGE_PREFIX = 'libereal:pending-acceptance:';
+function remainingQuantity(item: InquiryItem) {
+  const quoted = item.quantity || 1;
+  return Math.max(0, quoted - Math.min(quoted, item.orderedQty ?? (item.ordered ? quoted : 0)));
+}
+function acceptanceStorageKey(snapshot: AcceptanceSnapshot) {
+  return `${ACCEPTANCE_STORAGE_PREFIX}${encodeURIComponent(snapshot.actorScope)}:${snapshot.inquiryId}:${snapshot.quoteId}:v${snapshot.quoteVersion}:${snapshot.itemIds.join(',')}:${snapshot.quantities.join(',')}`;
+}
+function validAcceptanceSnapshot(snapshot: AcceptanceSnapshot, items: InquiryItem[]) {
+  return Array.isArray(snapshot.itemIndices) && Array.isArray(snapshot.itemIds) && Array.isArray(snapshot.quantities)
+    && snapshot.itemIndices.length > 0 && snapshot.itemIndices.length === snapshot.itemIds.length && snapshot.itemIndices.length === snapshot.quantities.length
+    && snapshot.itemIndices.every((idx, n) => Number.isInteger(idx) && idx >= 0 && idx < items.length && snapshot.itemIds[n] === (items[idx].id ?? String(idx)) && Number.isInteger(snapshot.quantities[n]) && snapshot.quantities[n] > 0)
+    && new Set(snapshot.itemIndices).size === snapshot.itemIndices.length && Array.isArray(snapshot.acceptedLegalIds) && snapshot.acceptedLegalIds.every((id) => typeof id === 'string')
+    && typeof snapshot.actorScope === 'string' && snapshot.actorScope.length > 0 && typeof snapshot.attemptId === 'string' && snapshot.attemptId.length > 0;
+}
+function removeAcceptanceSnapshots(inquiryId: string) {
+  if (typeof window === 'undefined') return;
+  for (let i = window.sessionStorage.length - 1; i >= 0; i -= 1) {
+    const key = window.sessionStorage.key(i);
+    if (key?.includes(`:${inquiryId}:`)) { try { window.sessionStorage.removeItem(key); } catch {} }
+  }
+}
+
 export default function MyInquiriesPage() {
+  const router = useRouter();
   const { data: session, status } = useSession();
   const [inquiries, setInquiries] = useState<Inquiry[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedInquiry, setSelectedInquiry] = useState<Inquiry | null>(null);
   const [showConfirmModal, setShowConfirmModal] = useState(false);
+  const [showLegalModal, setShowLegalModal] = useState(false);
+  const [acceptanceAttempts, setAcceptanceAttempts] = useState<Record<string, AcceptanceSnapshot>>({});
+  const acceptanceAttemptsRef = useRef<Record<string, AcceptanceSnapshot>>({});
   const [submitting, setSubmitting] = useState(false);
   const [selectedItems, setSelectedItems] = useState<Record<string, Set<number>>>({});
   const [editedQuantities, setEditedQuantities] = useState<Record<string, Record<number, number>>>({});
   const [inquiryOrders, setInquiryOrders] = useState<Record<string, Order[]>>({});
+  const actorScope = (inq: Inquiry) => `${session?.user?.id || session?.user?.email || 'unknown'}:${inq.ownerScope || 'personal'}:${inq.organizationId || ''}`;
 
   useEffect(() => {
     if (status === 'authenticated') {
@@ -93,6 +127,24 @@ export default function MyInquiriesPage() {
       const data = await res.json();
       const freshInquiries: Inquiry[] = data.inquiries || [];
       setInquiries(freshInquiries);
+      if (typeof window !== 'undefined') freshInquiries.forEach((inq) => {
+        const quote = inq.activeQuote;
+        if (!quote || acceptanceAttemptsRef.current[inq.id]) return;
+        for (let i = window.sessionStorage.length - 1; i >= 0; i -= 1) {
+          const key = window.sessionStorage.key(i);
+          if (!key?.startsWith(ACCEPTANCE_STORAGE_PREFIX) || !key.includes(`:${inq.id}:`)) continue;
+          try {
+            const snapshot = JSON.parse(window.sessionStorage.getItem(key) || '') as AcceptanceSnapshot;
+            if (snapshot.quoteId === quote.id && snapshot.quoteVersion === quote.version && snapshot.actorScope === actorScope(inq) && validAcceptanceSnapshot(snapshot, quote.items)) {
+              acceptanceAttemptsRef.current[inq.id] = snapshot;
+              setAcceptanceAttempts((prev) => ({ ...prev, [inq.id]: snapshot }));
+              setSelectedItems((prev) => ({ ...prev, [inq.id]: new Set(snapshot.itemIndices) }));
+              setEditedQuantities((prev) => ({ ...prev, [inq.id]: Object.fromEntries(snapshot.itemIndices.map((idx, n) => [idx, snapshot.quantities[n]])) }));
+              break;
+            }
+          } catch { try { window.sessionStorage.removeItem(key); } catch {} }
+        }
+      });
 
       // Fetch orders for each inquiry that has associated orders
       const ordersMap: Record<string, Order[]> = {};
@@ -139,8 +191,9 @@ export default function MyInquiriesPage() {
   }
 
   function selectAll(inquiryId: string, items: InquiryItem[]) {
+    if (acceptanceAttemptsRef.current[inquiryId]) return;
     const selectableIndices = items
-      .map((item, idx) => (!item.ordered && item.price != null) ? idx : -1)
+      .map((item, idx) => ((item.orderedQty ?? (item.ordered ? item.quantity || 1 : 0)) < (item.quantity || 1) && item.available !== false && item.price != null) ? idx : -1)
       .filter(idx => idx >= 0);
     setSelectedItems(prev => ({
       ...prev,
@@ -148,7 +201,8 @@ export default function MyInquiriesPage() {
     }));
   }
 
-  function clearSelection(inquiryId: string) {
+  function clearSelection(inquiryId: string, force = false) {
+    if (acceptanceAttemptsRef.current[inquiryId] && !force) return;
     setSelectedItems(prev => {
       const copy = { ...prev };
       delete copy[inquiryId];
@@ -159,6 +213,9 @@ export default function MyInquiriesPage() {
       delete copy[inquiryId];
       return copy;
     });
+    delete acceptanceAttemptsRef.current[inquiryId];
+    removeAcceptanceSnapshots(inquiryId);
+    setAcceptanceAttempts(prev => { const next = { ...prev }; delete next[inquiryId]; return next; });
   }
 
   function getItemQty(inquiryId: string, idx: number, defaultQty: number) {
@@ -174,23 +231,50 @@ export default function MyInquiriesPage() {
     });
   }
 
-  async function submitOrder(inquiryId: string, itemIndices: number[]) {
+  async function submitOrder(inquiryId: string, itemIndices: number[], acceptedLegalIds: string[]) {
     if (itemIndices.length === 0) return;
     setSubmitting(true);
     try {
       const quantities = editedQuantities[inquiryId] || {};
+      const quote = inquiries.find((inq) => inq.id === inquiryId)?.activeQuote;
+      if (!quote) return;
+      const quantityVector = itemIndices.map((idx) => quantities[idx] ?? remainingQuantity(quote.items[idx]));
+      const requestQuantities = Object.fromEntries(itemIndices.map((idx, n) => [idx, quantityVector[n]]));
+      const currentAttempt = acceptanceAttemptsRef.current[inquiryId];
+      const normalizedLegalIds = [...new Set(acceptedLegalIds)].sort();
+      const matches = currentAttempt
+        && currentAttempt.quoteId === quote.id && currentAttempt.quoteVersion === quote.version
+        && JSON.stringify(currentAttempt.itemIndices) === JSON.stringify(itemIndices)
+        && JSON.stringify(currentAttempt.quantities) === JSON.stringify(quantityVector)
+        && JSON.stringify(currentAttempt.acceptedLegalIds) === JSON.stringify(normalizedLegalIds);
+      const attemptId = matches ? currentAttempt.attemptId : `quote-${inquiryId}-${quote.id}-${quote.version}-${crypto.randomUUID()}`;
+      if (!matches) {
+        const attempt = { inquiryId, quoteId: quote.id, quoteVersion: quote.version, itemIndices: [...itemIndices], itemIds: itemIndices.map((idx) => quote.items[idx]?.id ?? String(idx)), quantities: [...quantityVector], acceptedLegalIds: normalizedLegalIds, actorScope: actorScope(inquiries.find((inq) => inq.id === inquiryId) || ({ ownerScope: 'personal' } as Inquiry)), attemptId, createdAt: new Date().toISOString() };
+        removeAcceptanceSnapshots(inquiryId);
+        try { window.sessionStorage.setItem(acceptanceStorageKey(attempt), JSON.stringify(attempt)); } catch {}
+        acceptanceAttemptsRef.current[inquiryId] = attempt;
+        setAcceptanceAttempts(prev => ({ ...prev, [inquiryId]: attempt }));
+      }
       const res = await fetch(`/api/orders/${inquiryId}/confirm-items`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ itemIndices, quantities }),
+        headers: { 'Content-Type': 'application/json', 'Idempotency-Key': attemptId },
+        body: JSON.stringify({ itemIndices, quantities: requestQuantities, quoteId: quote?.id, quoteVersion: quote?.version, acceptanceAttemptId: attemptId, acceptedLegalIds }),
       });
       if (res.ok) {
+        const data = await res.json() as { orderId?: string };
         setShowConfirmModal(false);
-        clearSelection(inquiryId);
-        await fetchInquiries();
+        delete acceptanceAttemptsRef.current[inquiryId];
+        setAcceptanceAttempts(prev => { const next = { ...prev }; delete next[inquiryId]; return next; });
+        clearSelection(inquiryId, true);
+        if (data.orderId) router.push(`/account/orders/${encodeURIComponent(data.orderId)}`);
+        else await fetchInquiries();
       } else {
         const err = await res.json();
-        alert(err.detail || err.error || '提交失败');
+        const code = typeof err.code === 'string' ? err.code : null;
+        if (code === 'QUOTE_STALE' || code === 'QUOTE_EXPIRED' || code === 'QUOTE_NOT_ACTIONABLE' || code === 'QUOTE_VERSION_CONFLICT' || res.status === 400 || res.status === 409) {
+          await fetchInquiries();
+        }
+        alert(code ? `${err.error || '报价状态已变化'} 请刷新后重新核对。` : (res.status === 400 || res.status === 409 ? `${err.detail || err.error || '报价状态已变化'} 请刷新后重新核对。` : (err.detail || err.error || '提交失败')));
       }
     } catch (e) {
       console.error(e);
@@ -292,8 +376,8 @@ export default function MyInquiriesPage() {
                         <p className="text-xs text-gray-400">{new Date(inquiry.createdAt).toLocaleDateString('zh-CN')}</p>
                       </div>
                       <div className="text-right">
-                        <p className="text-lg font-bold text-brand-600 dark:text-brand-500">{formatPrice(inquiry.subtotal)}</p>
-                        <p className="text-xs text-gray-400">{items.length} 种产品</p>
+                          <p className="text-lg font-bold text-brand-600 dark:text-brand-500">{inquiry.hasUnresolvedPricing ? '待报价确认' : formatPrice(inquiry.activeQuote?.subtotal ?? inquiry.subtotal)}</p>
+                        <p className="text-xs text-gray-400">{inquiry.hasUnresolvedPricing ? '已知价仅作部分小计' : `${items.length} 种产品`}</p>
                       </div>
                     </div>
                     <p className="text-sm text-gray-600 dark:text-gray-500">{inquiry.institution}</p>
@@ -310,7 +394,7 @@ export default function MyInquiriesPage() {
                             <p className="font-medium">您的询价已收到报价</p>
                           </div>
                           <p className="text-sm text-brand-600/80 dark:text-brand-400/70">
-                            报价时间：{inquiry.activeQuote.sentAt ? new Date(inquiry.activeQuote.sentAt).toLocaleString('zh-CN') : '-'}
+                            报价版本：v{inquiry.activeQuote.version} · 报价时间：{inquiry.activeQuote.sentAt ? new Date(inquiry.activeQuote.sentAt).toLocaleString('zh-CN') : '-'}
                           </p>
                         </div>
                       )}
@@ -323,7 +407,7 @@ export default function MyInquiriesPage() {
                             {linkedOrders.map(order => (
                               <Link
                                 key={order.id}
-                                href="/account/orders"
+                                href={`/account/orders/${encodeURIComponent(order.id)}`}
                                 className="flex items-center justify-between p-3 bg-blue-50 dark:bg-blue-500/20 border border-blue-200 dark:border-blue-500/40 rounded-xl hover:bg-blue-100 dark:hover:bg-blue-500/30 transition-colors"
                               >
                                 <div className="flex items-center gap-2">
@@ -386,12 +470,15 @@ export default function MyInquiriesPage() {
                             ? item.price
                             : (item.price ?? productInfo?.promotionalPrice ?? productInfo?.price);
                           const qty = item.quantity || 1;
+                          const quotedQty = qty;
+                          const alreadyAccepted = Math.min(quotedQty, item.orderedQty ?? (item.ordered ? quotedQty : 0));
+                          const remaining = Math.max(0, quotedQty - alreadyAccepted);
                           const leadTime = item.actualLeadTime || item.customerLeadTime || item.leadTime;
-                          const isOrdered = !!item.ordered;
+                          const isOrdered = remaining === 0;
                           const isSelected = selectedItems[inquiry.id]?.has(i) || false;
-                          const canEdit = inquiry.activeQuote?.status === 'sent' && price != null && !isOrdered && !item.locked;
+                          const canEdit = inquiry.activeQuote?.status === 'sent' && price != null && remaining > 0 && item.available !== false && !item.locked;
                           const canSelect = canEdit;
-                          const finalQty = getItemQty(inquiry.id, i, qty);
+                          const finalQty = getItemQty(inquiry.id, i, remaining);
                           const subtotal = (price || 0) * finalQty;
                           const needsQuote = !price || price === 0;
 
@@ -404,7 +491,7 @@ export default function MyInquiriesPage() {
  isOrdered ? 'border-gray-200 dark:border-slate-400 bg-gray-50/50 dark:bg-slate-700/50 opacity-70' :
  isSelected ? 'border-brand-300 dark:border-brand-500 bg-brand-50/50 dark:bg-brand-500/20' : 'border-gray-100 dark:border-slate-400'
  }`}
-                              onClick={() => canSelect ? toggleItem(inquiry.id, i) : undefined}
+                              onClick={() => canSelect && !acceptanceAttempts[inquiry.id] ? toggleItem(inquiry.id, i) : undefined}
                             >
                               {/* 顶部：复选框 + 产品名 + 状态徽章 */}
                               <div className="p-4 flex items-center gap-3">
@@ -444,7 +531,7 @@ export default function MyInquiriesPage() {
                               </div>
 
                               {/* 底部：单价 / 数量 / 货期 三栏 */}
-                              <div className="grid grid-cols-3 gap-3 px-4 pb-4 text-sm border-t border-gray-100 dark:border-slate-400 pt-3">
+                              <div className="grid grid-cols-4 gap-3 px-4 pb-4 text-sm border-t border-gray-100 dark:border-slate-400 pt-3">
                                 <div>
                                   <p className="text-xs text-gray-400 dark:text-gray-500 mb-1">单价</p>
                                   <p className={`font-medium ${needsQuote ? 'text-amber-600 dark:text-amber-500' : 'text-brand-600 dark:text-brand-500'}`}>
@@ -457,10 +544,12 @@ export default function MyInquiriesPage() {
                                     <input
                                       type="number"
                                       min="1"
+                                      max={remaining}
                                       value={finalQty}
+                                      disabled={Boolean(acceptanceAttempts[inquiry.id])}
                                       onChange={e => {
                                         e.stopPropagation();
-                                        setItemQty(inquiry.id, i, parseInt(e.target.value) || 1);
+                                        setItemQty(inquiry.id, i, Math.min(remaining, parseInt(e.target.value) || 1));
                                       }}
                                       onClick={e => e.stopPropagation()}
                                       className="w-16 px-2 py-1 border border-gray-200 dark:border-slate-400 rounded-lg text-sm font-medium text-gray-700 dark:text-slate-900 focus:outline-none focus:ring-2 focus:ring-brand-400"
@@ -468,6 +557,11 @@ export default function MyInquiriesPage() {
                                   ) : (
                                     <p className="font-medium text-gray-700 dark:text-slate-900">{finalQty}</p>
                                   )}
+                                </div>
+                                <div>
+                                  <p className="text-xs text-gray-400 dark:text-gray-500 mb-1">接受情况</p>
+                                  <p className="text-xs font-medium text-gray-600 dark:text-gray-500">报价 {quotedQty} · 已接受 {alreadyAccepted} · 剩余 {remaining}</p>
+                                  {canEdit && <p className="text-xs text-brand-600 dark:text-brand-500">本次接受 ≤ {remaining}</p>}
                                 </div>
                                 <div>
                                   <p className="text-xs text-gray-400 dark:text-gray-500 mb-1">货期</p>
@@ -480,16 +574,17 @@ export default function MyInquiriesPage() {
                       </div>
 
                       {/* Bottom: Submit selected items as order */}
-                      {inquiry.activeQuote?.status === 'sent' && (
+                      {(inquiry.activeQuote?.status === 'sent' || acceptanceAttempts[inquiry.id]) && (
                         <div className="mt-4 pt-4 border-t border-gray-200 dark:border-slate-400">
                           {(() => {
                             const selId = selectedItems[inquiry.id];
                             const selCount = selId?.size || 0;
-                            const selTotal = selCount > 0 ? items
-                              .filter((_, idx) => selId?.has(idx))
-                              .reduce((sum, item, itemIdx) => {
-                                const p = item.isQuickOrder ? item.price : (item.product?.promotionalPrice ?? item.product?.price);
-                                return sum + (p || 0) * getItemQty(inquiry.id, itemIdx, item.quantity || 1);
+                            const selected = items.map((item, idx) => ({ item, idx })).filter(({ idx }) => selId?.has(idx));
+                            const selQty = selected.reduce((sum, { item, idx }) => sum + getItemQty(inquiry.id, idx, remainingQuantity(item)), 0);
+                            const selTotal = selCount > 0 ? selected
+                              .reduce((sum, { item, idx }) => {
+                                const p = item.price ?? (item.product?.promotionalPrice ?? item.product?.price);
+                                return sum + (p || 0) * getItemQty(inquiry.id, idx, remainingQuantity(item));
                               }, 0) : 0;
 
                             return (
@@ -497,7 +592,7 @@ export default function MyInquiriesPage() {
                                 <div>
                                   <p className="font-medium text-gray-700 dark:text-gray-600">已选产品小计</p>
                                   <p className="text-xl font-bold text-brand-600 dark:text-brand-500">{formatPrice(selTotal)}</p>
-                                  {selCount > 0 && <p className="text-xs text-gray-500 dark:text-gray-400">已选 {selCount} 种产品</p>}
+                                  {selCount > 0 && <p className="text-xs text-gray-500 dark:text-gray-400">本次接受 {selQty} 件 · {selCount} 种产品</p>}
                                 </div>
                                 <div className="flex items-center gap-3">
                                   {selCount > 0 && (
@@ -534,11 +629,9 @@ export default function MyInquiriesPage() {
       {showConfirmModal && selectedInquiry && (() => {
         const items = parseItems(selectedInquiry.activeQuote?.items ?? selectedInquiry.items);
         const selId = selectedItems[selectedInquiry.id];
-        const selIndices = selId ? Array.from(selId) : [];
-        const selItems = items.filter((_, idx) => selId?.has(idx));
-        const selTotal = selItems.reduce((sum, item, itemIdx) => {
-          const p = item.isQuickOrder ? item.price : (item.product?.promotionalPrice ?? item.product?.price);
-          return sum + (p || 0) * getItemQty(selectedInquiry.id, itemIdx, item.quantity || 1);
+        const selItems = items.map((item, idx) => ({ item, idx })).filter(({ idx }) => selId?.has(idx));
+        const selTotal = selItems.reduce((sum, { item, idx }) => {
+          return sum + (item.price || 0) * getItemQty(selectedInquiry.id, idx, remainingQuantity(item));
         }, 0);
 
         return (
@@ -546,11 +639,11 @@ export default function MyInquiriesPage() {
             <div className="bg-white dark:bg-slate-200/65 rounded-2xl shadow-xl p-6 max-w-sm w-full mx-4">
               <h3 className="text-lg font-bold text-gray-900 dark:text-slate-900 mb-2">确认提交订单</h3>
               <p className="text-sm text-gray-600 dark:text-gray-500 mb-4">
-                确认后将生成正式订单，已选 {selIndices.length} 种产品将转为独立订单，信息及价格不可再更改。
+                你正在接受报价 v{selectedInquiry.activeQuote?.version}。确认前请核对报价编号、商品、规格、数量与金额；本次选择将转为独立订单。
               </p>
               <div className="bg-brand-50 dark:bg-brand-500/20 rounded-xl p-3 mb-4">
                 <p className="text-sm text-brand-700 dark:text-brand-600">
-                  订单金额：<span className="font-bold">{formatPrice(selTotal)}</span>
+                  报价 {selectedInquiry.activeQuote?.id} · 本次接受金额：<span className="font-bold">{formatPrice(selTotal)}</span>
                 </p>
               </div>
               <div className="flex gap-3">
@@ -561,9 +654,7 @@ export default function MyInquiriesPage() {
                   取消
                 </button>
                 <button
-                  onClick={async () => {
-                    await submitOrder(selectedInquiry.id, selIndices);
-                  }}
+                  onClick={() => { setShowConfirmModal(false); setShowLegalModal(true); }}
                   disabled={submitting}
                   className="flex-1 py-2.5 rounded-xl bg-brand-500 hover:bg-brand-600 disabled:bg-brand-300 text-white text-sm font-medium transition-colors"
                 >
@@ -574,6 +665,19 @@ export default function MyInquiriesPage() {
           </div>
         );
       })()}
+
+      <LegalConsentModal
+        open={showLegalModal}
+        onClose={() => setShowLegalModal(false)}
+        onConfirm={async (acceptedIds) => {
+          setShowLegalModal(false);
+          if (!selectedInquiry) return;
+          const selId = selectedItems[selectedInquiry.id];
+          const persistedLegalIds = acceptanceAttemptsRef.current[selectedInquiry.id]?.acceptedLegalIds;
+          await submitOrder(selectedInquiry.id, selId ? Array.from(selId) : [], persistedLegalIds !== undefined ? persistedLegalIds : acceptedIds);
+        }}
+        submitting={submitting}
+      />
 
       <SiteFooter />
       <MobileBottomNav />

@@ -19,6 +19,7 @@ interface Inquiry {
   address?: string;
   items: InquiryItem[];
   subtotal: number;
+  hasUnresolvedPricing?: boolean;
   status: string;
   createdAt: string;
   paymentMethod?: string;
@@ -47,6 +48,9 @@ interface InquiryItem {
   name?: string;
   brand?: string;
   catalogNumber?: string;
+  variantId?: string | null;
+  spec?: string | null;
+  unit?: string | null;
   quantity?: number;
   price?: number;
   leadTime?: string;
@@ -289,7 +293,7 @@ function InquiryRow({
           <div className="font-medium text-gray-900">{inquiry.name}（{inquiry.email}）</div>
         </td>
         <td className="px-4 py-3 text-gray-700">{inquiry.institution}</td>
-        <td className="px-4 py-3 font-semibold text-gray-900">¥{inquiry.subtotal.toLocaleString('zh-CN', { minimumFractionDigits: 2 })}</td>
+        <td className="px-4 py-3 font-semibold text-gray-900">{inquiry.hasUnresolvedPricing ? '待报价确认' : `¥${inquiry.subtotal.toLocaleString('zh-CN', { minimumFractionDigits: 2 })}`}</td>
         <td className="px-4 py-3">
           <span className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium ${
             inquiry.status === 'closed' ? 'bg-gray-100 text-gray-600' :
@@ -522,7 +526,7 @@ function InquiryDetailPanel({
 }
 
 function InquiryOperationLogs({ operationLogs, expanded, onToggle }: { operationLogs?: string; expanded: boolean; onToggle: () => void }) {
-  let logs: { adminEmail?: string; adminId?: string; time: string; items?: { name: string; price: number; quantity: number; leadTime?: string }[] }[] = [];
+  let logs: { adminEmail?: string; adminId?: string; time: string; items?: { name: string; price: number | null; quantity: number; leadTime?: string }[] }[] = [];
   try { logs = JSON.parse(operationLogs || '[]'); } catch {}
   if (logs.length === 0) return null;
   const latest = logs[logs.length - 1];

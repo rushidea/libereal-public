@@ -97,6 +97,49 @@ describe('Alipay order payment routes', () => {
     expect(mocks.paymentAttemptCreate).not.toHaveBeenCalled();
   });
 
+  it('reuses an attempt while the gateway reports WAIT_BUYER_PAY', async () => {
+    mocks.paymentAttemptFindFirst.mockResolvedValue({
+      orderId: order.id, provider: 'alipay', outTradeNo: 'LPWAIT001', amount: order.total, status: 'WAIT_BUYER_PAY',
+    });
+
+    const response = await createPayment(
+      new Request('https://libereal.cn/api/orders/order-1/alipay', { method: 'POST' }),
+      { params: Promise.resolve({ id: order.id }) },
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual(expect.objectContaining({
+      redirectUrl: '/api/orders/order-1/alipay/redirect?attemptId=LPWAIT001',
+    }));
+    expect(mocks.paymentAttemptCreate).not.toHaveBeenCalled();
+  });
+
+  it('rereads the active winner after a unique constraint race', async () => {
+    const winner = { orderId: order.id, provider: 'alipay', outTradeNo: 'LPRACEWINNER', amount: order.total, status: 'created' };
+    mocks.paymentAttemptFindFirst.mockResolvedValueOnce(null).mockResolvedValueOnce(winner);
+    mocks.paymentAttemptCreate.mockRejectedValueOnce({ code: 'P2002' });
+
+    const response = await createPayment(
+      new Request('https://libereal.cn/api/orders/order-1/alipay', { method: 'POST' }),
+      { params: Promise.resolve({ id: order.id }) },
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual(expect.objectContaining({
+      redirectUrl: '/api/orders/order-1/alipay/redirect?attemptId=LPRACEWINNER',
+    }));
+    expect(mocks.writeAuditLog).not.toHaveBeenCalled();
+  });
+
+  it('preserves a mismatched active payment for explicit reconciliation', async () => {
+    mocks.paymentAttemptFindFirst.mockResolvedValue({ id: 'stale', orderId: order.id, provider: 'alipay', outTradeNo: 'LPSTALE', amount: 12, status: 'WAIT_BUYER_PAY' });
+    const response = await createPayment(new Request('https://example.test/api/orders/order-1/alipay', { method: 'POST' }), { params: Promise.resolve({ id: order.id }) });
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({ code: 'PAYMENT_RECONCILIATION_REQUIRED' });
+    expect(mocks.paymentAttemptCreate).not.toHaveBeenCalled();
+    expect(mocks.writeAuditLog).not.toHaveBeenCalled();
+  });
+
   it('accepts an unpaid order using the legacy zfb value', async () => {
     mocks.orderFindUnique.mockResolvedValue({ ...order, paymentMethod: 'zfb' });
 
@@ -238,5 +281,20 @@ describe('Alipay order payment routes', () => {
       error: '支付宝付款签名失败，请联系网站管理员',
       code: 'ALIPAY_SIGNING_FAILED',
     });
+  });
+
+  it('rejects a superseded attempt so an old link cannot create another payment', async () => {
+    mocks.paymentAttemptFindUnique.mockResolvedValue({
+      orderId: order.id, provider: 'alipay', outTradeNo: 'LPSUPERSEDED', amount: order.total,
+      status: 'superseded', order,
+    });
+
+    const response = await redirectToAlipay(
+      new Request(`https://libereal.cn/api/orders/${order.id}/alipay/redirect?attemptId=LPSUPERSEDED`),
+      { params: Promise.resolve({ id: order.id }) },
+    );
+
+    expect(response.status).toBe(409);
+    expect(mocks.pageExecute).not.toHaveBeenCalled();
   });
 });

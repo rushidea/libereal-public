@@ -5,6 +5,7 @@ import { Fragment, use } from 'react';
 import { useEffect, useState } from 'react';
 import { useSession } from 'next-auth/react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import {
   Package, CheckCircle, Clock, Truck, XCircle, RotateCcw,
   User, MapPin, CreditCard
@@ -26,6 +27,9 @@ type OrderItem = {
   id?: string;
   productId?: string;
   catalogNumber?: string;
+  variantId?: string | null;
+  spec?: string | null;
+  unit?: string | null;
   name?: string;
   price?: number;
   quantity?: number;
@@ -64,6 +68,7 @@ type Order = {
     address?: string;
     phone?: string;
   };
+  quoteOrigin?: { inquiryId: string; quoteId: string; quoteVersion: number; acceptedAt?: string | null } | null;
 };
 
 const STATUS_CONFIG: Record<string, { label: string; color: string; bg: string; icon: React.ComponentType<{ size?: number; className?: string }> }> = {
@@ -189,6 +194,7 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
               <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">
                 {new Date(order.createdAt).toLocaleString('zh-CN')}
               </p>
+              {order.ownerScope === 'organization' && <p className="mt-1 text-xs text-gray-500 dark:text-slate-600">组织采购记录 · {order.inquiry?.institution || '当前组织'}</p>}
             </div>
             <div className="flex flex-col items-end gap-2">
               <span className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium ${s.bg} ${s.color}`}>
@@ -280,6 +286,14 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
                 <CreditCard className="w-4 h-4 text-brand-600 dark:text-brand-500" /> 订单信息
               </h2>
               <div className="space-y-3 text-sm">
+                {order.quoteOrigin && (
+                  <div className="rounded-lg border border-brand-200 bg-brand-50/60 p-3 dark:border-brand-500/30 dark:bg-brand-500/10">
+                    <p className="text-xs font-semibold text-brand-700 dark:text-brand-500">报价来源追溯</p>
+                    <Link href={`/account/inquiries/${encodeURIComponent(order.quoteOrigin.inquiryId)}?quoteId=${encodeURIComponent(order.quoteOrigin.quoteId)}&version=${order.quoteOrigin.quoteVersion}`} className="mt-2 block text-xs leading-5 text-gray-700 underline decoration-brand-300 underline-offset-2 dark:text-slate-700">
+                      询价 {order.quoteOrigin.inquiryId} → 报价 {order.quoteOrigin.quoteId} · v{order.quoteOrigin.quoteVersion} → 订单 {order.id}
+                    </Link>
+                  </div>
+                )}
                 <div className="flex justify-between items-start border-b border-gray-50 dark:border-slate-400 pb-2">
                   <span className="text-gray-500 dark:text-gray-500">付款方式</span>
                   <span className="text-gray-800 dark:text-slate-900 text-right font-medium">{translatePaymentMethod(order.paymentMethod || '') || '-'}</span>
@@ -326,6 +340,7 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
                         <tr className="hover:bg-gray-50/30 dark:hover:bg-slate-200/45">
                           <td className="px-4 py-3">
                             <div className="font-medium text-gray-800 dark:text-slate-900">{item.name || '未知产品'}</div>
+                            {(item.spec || item.unit) && <div className="text-xs text-gray-500 dark:text-gray-400">规格：{item.spec || '-'} · 单位：{item.unit || '-'}</div>}
                             {item.productId && (
                               <div className="text-xs text-gray-400 dark:text-gray-500 mt-0.5 font-mono">SKU: {item.productId}</div>
                             )}

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { requireActiveSession, requireAdmin } from '@/lib/session';
-import { AMBIGUOUS_PRODUCT_CATALOG_NUMBER, CustomerUnavailableProductError, getVerifiedInventoryError, verifyAndPriceItems } from '@/lib/pricing';
+import { AMBIGUOUS_PRODUCT_CATALOG_NUMBER, CustomerUnavailableProductError, getVerifiedInventoryError, verifyAndPriceItems, type PriceLookupItem } from '@/lib/pricing';
 import { reportError } from '@/lib/errorReporting';
 import type { Prisma } from '@prisma/client';
 import { sendAdminOperationalEmail } from '@/lib/mail';
@@ -19,16 +19,14 @@ import { orderAutoCloseAt } from '@/lib/order-auto-close';
 import { normalizePointsIntent } from '@/lib/points-checkout';
 import { applyOrderPointsDeduction, previewPointsRedeem } from '@/lib/points-checkout-service';
 import { assertNoPendingForcedAck } from '@/lib/notification-ack';
-import { computePromoAdjustments, validateAddonPromotionLines, validateGiftPromotionLines } from '@/lib/cart-promotions/service';
+import { computePromoAdjustments, hasExceededSelectionAddonQuota, hasMisbrandedEligibleAddonMain, validateAddonPromotionLines, validateGiftPromotionLines } from '@/lib/cart-promotions/service';
 import type { CartLine } from '@/lib/cart-promotions/types';
+import { buildCheckoutRevision } from '@/lib/checkout-revision';
 import { redeemCoupon } from '@/lib/coupon-service';
 import { getReadableOrganizationIds, resolveRecordOwnership } from '@/lib/organization-record-access';
 import { listOrganizationIdsForPermission } from '@/lib/organization-service';
 import { organizationRbacErrorStatus, OrganizationRbacError, requireOrganizationPermission } from '@/lib/organization-service';
-
-function isUniqueConstraintError(error: unknown): error is { code: 'P2002' } {
-  return typeof error === 'object' && error !== null && 'code' in error && error.code === 'P2002';
-}
+import { buildCheckoutRequestFingerprint, isUniqueConstraintError, validCheckoutAttemptId } from '@/lib/checkout-idempotency';
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 export async function GET(_req: NextRequest) {
@@ -122,7 +120,35 @@ export async function POST(req: NextRequest) {
   const session = { user: activeUser };
 
   try {
-    const { items, paymentMethod, addressId, addressName, addressPhone, addressText, addressInstitution, acceptedLegalIds, personalPoints, groupPoints, groupId, couponCode, organizationId } = await req.json();
+    const body = await req.json() as Record<string, unknown>;
+    const typedBody = body as {
+      items?: PriceLookupItem[];
+      paymentMethod?: string;
+      addressId?: string;
+      addressName?: string;
+      addressPhone?: string;
+      addressText?: string;
+      addressInstitution?: string;
+      acceptedLegalIds?: unknown;
+      personalPoints?: unknown;
+      groupPoints?: unknown;
+      groupId?: unknown;
+      couponCode?: unknown;
+      organizationId?: string | null;
+      checkoutRevision?: unknown;
+      checkoutAttemptId?: unknown;
+    };
+    const { items, paymentMethod, addressId, addressName, addressPhone, addressText, addressInstitution,
+      acceptedLegalIds, personalPoints, groupPoints, groupId, couponCode, organizationId } = typedBody;
+    if (Object.hasOwn(body, 'checkoutRevision') && (typeof typedBody.checkoutRevision !== 'string' || !/^[a-f0-9]{64}$/.test(typedBody.checkoutRevision))) {
+      return NextResponse.json({ error: '结算版本格式无效', code: 'CHECKOUT_REVISION_INVALID' }, { status: 400 });
+    }
+    const checkoutRevision = typeof typedBody.checkoutRevision === 'string' ? typedBody.checkoutRevision : undefined;
+    const headerAttemptId = req.headers.get('idempotency-key');
+    const bodyAttemptId = typedBody.checkoutAttemptId;
+    if (headerAttemptId !== null && bodyAttemptId !== undefined && headerAttemptId !== bodyAttemptId) return NextResponse.json({ error: '幂等键不一致' }, { status: 400 });
+    const checkoutAttemptId = bodyAttemptId ?? headerAttemptId ?? undefined;
+    if (checkoutAttemptId !== undefined && !validCheckoutAttemptId(checkoutAttemptId)) return NextResponse.json({ error: '幂等键格式无效' }, { status: 400 });
 
     if (!Array.isArray(items) || items.length === 0) {
       return NextResponse.json({ error: 'items must be a non-empty array' }, { status: 400 });
@@ -159,6 +185,19 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ error: error.message, code: error.code }, { status: organizationRbacErrorStatus(error) });
       }
       throw error;
+    }
+
+    const requestFingerprint = checkoutAttemptId
+      ? buildCheckoutRequestFingerprint({ operation: 'order', actorId: session.user.id as string, organizationId: ownership.organizationId, ownerScope: ownership.ownerScope, request: body })
+      : null;
+    if (checkoutAttemptId) {
+      const existing = await prisma.order.findUnique({ where: { checkoutAttemptId } });
+      if (existing) {
+        if (existing.customerId !== session.user.id || existing.organizationId !== ownership.organizationId || existing.ownerScope !== ownership.ownerScope || existing.checkoutRequestFingerprint !== requestFingerprint) {
+          return NextResponse.json({ error: '幂等键已用于其他请求' }, { status: 409 });
+        }
+        return NextResponse.json({ order: existing, orderId: existing.id, replayed: true });
+      }
     }
 
     const legalAcceptedAt = new Date();
@@ -217,6 +256,7 @@ export async function POST(req: NextRequest) {
           id: vi.productId ?? '',
           brand: vi.brand ?? raw?.brand ?? '',
           catalogNumber: vi.catalogNumber ?? '',
+          name: vi.name ?? '',
           price: vi.unitPrice,
           spec: vi.spec ?? null,
           serverVerified: vi.source === 'db',
@@ -229,7 +269,11 @@ export async function POST(req: NextRequest) {
     const { evals: promoEvals, adjustments: promoAdjustments, discountTotal: promoDiscountTotal } =
       computePromoAdjustments(promoLines, new Date());
     const addonValidationError = validateAddonPromotionLines(promoLines, promoEvals);
-    if (addonValidationError) {
+    if (hasMisbrandedEligibleAddonMain(promoLines, promoEvals)) {
+      return NextResponse.json({ error: '换购商品不符合活动范围，请刷新购物车后再试' }, { status: 400 });
+    }
+    const exceededOptionSelectionQuota = hasExceededSelectionAddonQuota(promoLines, promoEvals);
+    if (addonValidationError && (exceededOptionSelectionQuota || !['ADDON_NOT_TRIGGERED', 'ADDON_QUOTA_EXCEEDED'].includes(addonValidationError))) {
       const messages: Record<typeof addonValidationError, string> = {
         PROMOTION_NOT_FOUND: '促销活动不存在或已结束，请刷新购物车后再试',
         ADDON_NOT_TRIGGERED: '主品数量未达到换购门槛，请核对购物车',
@@ -340,6 +384,13 @@ export async function POST(req: NextRequest) {
       adjustments,
     );
 
+    if (checkoutRevision) {
+      const currentRevision = buildCheckoutRevision({ items: verifiedItems, adjustments, total: pointsBreakdown?.payableAfterPoints ?? amounts.total, points: pointsBreakdown });
+      if (currentRevision !== checkoutRevision) {
+        return NextResponse.json({ error: '结算价格已变化，请重新确认', code: 'CHECKOUT_REVISION_MISMATCH' }, { status: 409 });
+      }
+    }
+
     const orderCreatedAt = new Date();
     const orderDate = orderDateInShanghai(orderCreatedAt);
     let order: Awaited<ReturnType<typeof prisma.order.create>> | null = null;
@@ -372,6 +423,8 @@ export async function POST(req: NextRequest) {
           const created = await tx.order.create({
             data: {
               id: orderId,
+              checkoutAttemptId: checkoutAttemptId ?? null,
+              checkoutRequestFingerprint: requestFingerprint,
               email: user.email,
               customerId: session.user!.id as string,
               organizationId: ownership.organizationId,
@@ -458,6 +511,15 @@ export async function POST(req: NextRequest) {
         if (error instanceof Error && error.message.startsWith('POINTS_')) {
           const msg = error.message.replace(/^POINTS_(PRECHECK|APPLY):/, '');
           return NextResponse.json({ error: msg }, { status: 400 });
+        }
+        if (isUniqueConstraintError(error) && checkoutAttemptId) {
+          const winner = await prisma.order.findUnique({ where: { checkoutAttemptId } });
+          if (winner) {
+            if (winner.customerId !== session.user.id || winner.organizationId !== ownership.organizationId || winner.ownerScope !== ownership.ownerScope || winner.checkoutRequestFingerprint !== requestFingerprint) {
+              return NextResponse.json({ error: '幂等键已用于其他请求' }, { status: 409 });
+            }
+            return NextResponse.json({ order: winner, orderId: winner.id, replayed: true });
+          }
         }
         if (!isUniqueConstraintError(error) || attempt === 2) throw error;
       }

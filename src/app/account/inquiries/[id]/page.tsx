@@ -4,6 +4,7 @@ import { use } from 'react';
 import { useEffect, useState } from 'react';
 import { useSession } from 'next-auth/react';
 import { useRouter } from 'next/navigation';
+import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import {
   ArrowLeft, FileText, Clock, Check,
@@ -30,6 +31,9 @@ type InquiryItem = {
   name?: string;
   brand?: string;
   catalogNumber?: string;
+  variantId?: string | null;
+  spec?: string | null;
+  unit?: string | null;
   quantity?: number;
   price?: number;
   leadTime?: string;
@@ -56,6 +60,7 @@ type Inquiry = {
   notes?: string;
   items: InquiryItem[];
   subtotal: number;
+  hasUnresolvedPricing?: boolean;
   status: string;
   paymentMethod?: string;
   leadTime?: string;
@@ -63,7 +68,9 @@ type Inquiry = {
   advisorName?: string;
   advisorPhone?: string;
   createdAt: string;
-  activeQuote?: { status: string; sentAt?: string; acceptedAt?: string; items: InquiryItem[] } | null;
+  activeQuote?: { id: string; version: number; status: string; subtotal: number; validUntil?: string | null; sentAt?: string; acceptedAt?: string; items: InquiryItem[] } | null;
+  currentQuote?: { id: string; version: number; status: string; subtotal: number; validUntil?: string | null; sentAt?: string; acceptedAt?: string; items: InquiryItem[] } | null;
+  quoteIsHistorical?: boolean;
   operationLogs?: string;
 };
 
@@ -81,7 +88,7 @@ interface LogEntry {
   adminId: string;
   adminEmail: string;
   time: string;
-  items: { name?: string; quantity?: number; price?: number; leadTime?: string }[];
+  items: { name?: string; quantity?: number; price?: number | null; leadTime?: string }[];
 }
 
 function parseLogs(json: string): LogEntry[] {
@@ -91,7 +98,8 @@ function parseLogs(json: string): LogEntry[] {
 export default function InquiryDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
-const { data: session, status } = useSession();
+  const { data: session, status } = useSession();
+  const searchParams = useSearchParams();
   const router = useRouter();
   const [inquiry, setInquiry] = useState<Inquiry | null>(null);
   const [loading, setLoading] = useState(true);
@@ -106,7 +114,10 @@ const { data: session, status } = useSession();
 
   useEffect(() => {
     if (status !== 'authenticated' || !id) return;
-    fetch(`/api/inquiries/${id}`)
+    const quoteId = searchParams.get('quoteId');
+    const version = searchParams.get('version');
+    const query = quoteId && version ? `?quoteId=${encodeURIComponent(quoteId)}&version=${encodeURIComponent(version)}` : '';
+    fetch(`/api/inquiries/${id}${query}`)
       .then(r => r.json())
       .then(data => {
         if (data.error) {
@@ -119,7 +130,7 @@ const { data: session, status } = useSession();
         setLoading(false);
       })
       .catch(() => setLoading(false));
-  }, [status, id, router]);
+  }, [status, id, router, searchParams]);
 
   if (status === 'loading' || loading) {
     return (
@@ -145,7 +156,7 @@ const { data: session, status } = useSession();
 
       <main className="flex-1 max-w-6xl mx-auto w-full px-4 py-8 space-y-5">
         {/* Header */}
-        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3">
           <Link href="/account/inquiries" className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700/50">
             <ArrowLeft className="w-5 h-5 text-gray-600 dark:text-gray-400" />
           </Link>
@@ -158,6 +169,33 @@ const { data: session, status } = useSession();
             {s.label}
           </span>
         </div>
+
+        <section className="rounded-2xl border border-brand-200 bg-brand-50/60 p-5 dark:border-brand-500/30 dark:bg-brand-500/10" aria-live="polite">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.14em] text-brand-700 dark:text-brand-500">当前采购状态</p>
+              <h2 className="mt-1 text-lg font-semibold text-gray-900 dark:text-slate-900">
+                {inquiry.quoteIsHistorical ? '历史报价版本（已被新版本替代）' : inquiry.activeQuote?.status === 'sent' && inquiry.activeQuote.validUntil && new Date(inquiry.activeQuote.validUntil) < new Date() ? '报价已失效，需要重新报价' : inquiry.activeQuote?.status === 'sent' ? '报价可供核对与接受' : inquiry.activeQuote?.status === 'accepted' ? '报价已接受，订单已生成' : '询价已提交，等待报价'}
+              </h2>
+              <p className="mt-1 text-sm text-gray-600 dark:text-slate-600">
+                {inquiry.quoteIsHistorical ? '该版本仅用于历史核对，不能接受；请打开当前报价版本。' : inquiry.activeQuote?.status === 'sent' && inquiry.activeQuote.validUntil && new Date(inquiry.activeQuote.validUntil) < new Date() ? '下一步：联系 Libereal 获取新的报价版本。当前报价不可接受。' : inquiry.activeQuote?.status === 'sent' ? `下一步：确认报价 v${inquiry.activeQuote.version} 的商品、规格、数量与金额。` : inquiry.activeQuote?.status === 'accepted' ? '下一步：查看由该报价生成的订单记录。' : '下一步：Libereal 将根据本次提交准备报价；最终金额尚未确定。'}
+              </p>
+            </div>
+            {inquiry.activeQuote && <span className="whitespace-nowrap rounded-full bg-white px-3 py-1.5 text-sm font-semibold text-brand-700 shadow-sm dark:bg-slate-200 dark:text-brand-600">报价 v{inquiry.activeQuote.version}{inquiry.quoteIsHistorical ? ' · superseded' : ''}</span>}
+          </div>
+          {inquiry.activeQuote && (
+            <div className="mt-4 grid gap-3 border-t border-brand-200/70 pt-4 text-sm sm:grid-cols-3 dark:border-brand-500/20">
+              <div><p className="text-xs text-gray-500 dark:text-slate-600">报价编号</p><p className="mt-1 break-all font-mono text-gray-900 dark:text-slate-900">{inquiry.activeQuote.id}</p></div>
+              <div><p className="text-xs text-gray-500 dark:text-slate-600">发送时间</p><p className="mt-1 text-gray-900 dark:text-slate-900">{inquiry.activeQuote.sentAt ? new Date(inquiry.activeQuote.sentAt).toLocaleString('zh-CN') : '-'}</p></div>
+              <div><p className="text-xs text-gray-500 dark:text-slate-600">有效期</p><p className="mt-1 text-gray-900 dark:text-slate-900">{inquiry.activeQuote.validUntil ? new Date(inquiry.activeQuote.validUntil).toLocaleString('zh-CN') : '未提供'}</p></div>
+            </div>
+          )}
+          {inquiry.quoteIsHistorical && inquiry.currentQuote && (
+            <Link href={`/account/inquiries/${encodeURIComponent(inquiry.id)}?quoteId=${encodeURIComponent(inquiry.currentQuote.id)}&version=${inquiry.currentQuote.version}`} className="mt-4 inline-flex text-sm font-semibold text-brand-700 underline underline-offset-2 dark:text-brand-500">
+              查看当前报价 v{inquiry.currentQuote.version}
+            </Link>
+          )}
+        </section>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
           {/* Left: Contact Info */}
@@ -276,16 +314,16 @@ const { data: session, status } = useSession();
                   <Clock className="w-4 h-4 text-brand-600 dark:text-brand-500" /> 操作记录
                 </h2>
                 <div className="space-y-4">
-                  {parsedLogs.map((log, i) => (
+                        {parsedLogs.map((log, i) => (
                     <div key={i} className="text-sm">
                       <div className="flex justify-between items-start mb-1">
                         <span className="font-medium text-gray-800 dark:text-slate-900">{log.adminEmail}</span>
                         <span className="text-xs text-gray-400">{new Date(log.time).toLocaleString('zh-CN')}</span>
                       </div>
                       <div className="pl-3 border-l-2 border-gray-100 dark:border-slate-400 space-y-1">
-                        {log.items?.map((item: { name?: string; quantity?: number; price?: number; leadTime?: string }, j: number) => (
+                        {log.items?.map((item: { name?: string; quantity?: number; price?: number | null; leadTime?: string }, j: number) => (
                           <div key={j} className="text-xs text-gray-600 dark:text-gray-500">
-                            {item.name} × {item.quantity} @ {formatPrice(item.price ?? 0)} {item.leadTime && `| 货期: ${item.leadTime}`}
+                            {item.name} × {item.quantity} @ {item.price == null ? '待报价' : formatPrice(item.price)} {item.leadTime && `| 货期: ${item.leadTime}`}
                           </div>
                         ))}
                       </div>
@@ -321,12 +359,13 @@ const { data: session, status } = useSession();
                       const brand = item.brand || item.product?.brand || '-';
                       const catalogNumber = item.catalogNumber || item.product?.catalogNumber || '-';
                       const qty = item.quantity || 1;
-                      const price = item.price || item.product?.price || item.product?.promotionalPrice || 0;
+                      const price = item.price ?? item.product?.price ?? item.product?.promotionalPrice ?? null;
 
                       return (
                         <tr key={i} className="hover:bg-gray-50/30 dark:hover:bg-gray-700/20">
                           <td className="px-4 py-3">
                             <div className="font-medium text-gray-800 dark:text-slate-900">{name}</div>
+                            {(item.spec || item.unit) && <div className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">规格：{item.spec || '-'} · 单位：{item.unit || '-'}</div>}
                             {item.isQuickOrder && (
                               <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs bg-orange-100 dark:bg-orange-500/30 text-orange-600 dark:text-orange-500 mt-0.5">快捷订单</span>
                             )}
@@ -337,7 +376,7 @@ const { data: session, status } = useSession();
                             <span className="inline-flex items-center justify-center w-8 h-6 bg-gray-100 dark:bg-gray-700/50 rounded text-gray-700 dark:text-gray-300 font-medium text-xs">× {qty}</span>
                           </td>
                           <td className="px-4 py-3 text-center">
-                            {price > 0 ? (
+                            {price != null && price > 0 ? (
                               <span className="text-brand-600 dark:text-brand-500 font-medium">{formatPrice(price)}</span>
                             ) : (
                               <span className="text-xs text-gray-400 dark:text-gray-500">待报价</span>
@@ -357,7 +396,7 @@ const { data: session, status } = useSession();
                             )}
                           </td>
                           <td className="px-4 py-3 text-right font-semibold text-gray-800 dark:text-slate-900">
-                            {price > 0 ? formatPrice(price * qty) : '-'}
+                            {price != null && price > 0 ? formatPrice(price * qty) : '待报价'}
                           </td>
                         </tr>
                       );
@@ -366,11 +405,11 @@ const { data: session, status } = useSession();
                 </table>
               </div>
               <div className="border-t border-gray-100 bg-brand-50/30 px-5 py-4 dark:border-slate-400 dark:bg-slate-200/30">
-                <div className="flex justify-between items-center">
-                  <span className="text-sm text-gray-500 dark:text-gray-400">询价单合计</span>
+                  <div className="flex justify-between items-center">
+                    <span className="text-sm text-gray-500 dark:text-gray-400">{inquiry.activeQuote ? '报价合计' : inquiry.hasUnresolvedPricing ? '最终应付金额' : '询价单合计'}</span>
                   <div className="flex items-center gap-3">
                     <span className="text-xs text-gray-400 dark:text-gray-500">({parsedItems.length} 项)</span>
-                    <span className="text-xl font-bold text-brand-600 dark:text-brand-500">{formatPrice(inquiry.subtotal)}</span>
+                    <span className="text-xl font-bold text-brand-600 dark:text-brand-500">{inquiry.activeQuote ? formatPrice(inquiry.activeQuote.subtotal) : inquiry.hasUnresolvedPricing ? '待报价确认' : formatPrice(inquiry.subtotal)}</span>
                   </div>
                 </div>
               </div>

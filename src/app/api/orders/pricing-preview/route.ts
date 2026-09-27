@@ -7,8 +7,9 @@ import { isThirdPartyPaymentMethod } from '@/data/payment-methods';
 import { calculateOrderAmounts } from '@/lib/order-domain';
 import { previewPointsRedeem } from '@/lib/points-checkout-service';
 import { normalizePointsIntent } from '@/lib/points-checkout';
-import { computePromoAdjustments, validateAddonPromotionLines, validateGiftPromotionLines } from '@/lib/cart-promotions/service';
+import { computePromoAdjustments, hasExceededSelectionAddonQuota, hasMisbrandedEligibleAddonMain, validateAddonPromotionLines, validateGiftPromotionLines } from '@/lib/cart-promotions/service';
 import type { CartLine } from '@/lib/cart-promotions/types';
+import { buildCheckoutRevision } from '@/lib/checkout-revision';
 import { buildCouponRule } from '@/lib/coupon-service';
 import { requireOrganizationPermission } from '@/lib/organization-service';
 
@@ -64,6 +65,7 @@ export async function POST(req: NextRequest) {
           id: vi.productId ?? '',
           brand: vi.brand ?? raw?.brand ?? '',
           catalogNumber: vi.catalogNumber ?? '',
+          name: vi.name ?? '',
           price: vi.unitPrice,
           spec: vi.spec ?? null,
           serverVerified: vi.source === 'db',
@@ -76,7 +78,11 @@ export async function POST(req: NextRequest) {
 
     const promoComputation = computePromoAdjustments(promoLines, new Date());
     const addonValidationError = validateAddonPromotionLines(promoLines, promoComputation.evals);
-    if (addonValidationError) {
+    if (hasMisbrandedEligibleAddonMain(promoLines, promoComputation.evals)) {
+      return NextResponse.json({ error: '换购商品不符合活动范围，请刷新购物车后再试' }, { status: 400 });
+    }
+    const exceededOptionSelectionQuota = hasExceededSelectionAddonQuota(promoLines, promoComputation.evals);
+    if (addonValidationError && (exceededOptionSelectionQuota || !['ADDON_NOT_TRIGGERED', 'ADDON_QUOTA_EXCEEDED'].includes(addonValidationError))) {
       const messages: Record<typeof addonValidationError, string> = {
         PROMOTION_NOT_FOUND: '促销活动不存在或已结束，请刷新购物车后再试',
         ADDON_NOT_TRIGGERED: '主品数量未达到换购门槛，请核对购物车',
@@ -164,12 +170,13 @@ export async function POST(req: NextRequest) {
       adjustmentTotal: amounts.adjustmentTotal,
       // Keep cart-promotion adjustments in the preview so checkout can explain
       // the authoritative total without recomputing discounts in the browser.
-      adjustments: [...adjustments, ...promoAdjustments],
+      adjustments: [...allAdjustments, ...(pointsBreakdown && pointsBreakdown.pointsDiscount > 0 ? [{ type: 'points_redeem', amount: -pointsBreakdown.pointsDiscount }] : [])],
       coupon: couponAdjustment,
       couponError,
       totalBeforePoints: amounts.total,
       points: pointsBreakdown,
       total: payable,
+      checkoutRevision: buildCheckoutRevision({ items: priced.verifiedItems, adjustments: [...allAdjustments, ...(pointsBreakdown && pointsBreakdown.pointsDiscount > 0 ? [{ type: 'points_redeem', amount: -pointsBreakdown.pointsDiscount }] : [])], total: payable, points: pointsBreakdown }),
       items: priced.verifiedItems.map((item, index) => ({
         productId: item.productId,
         catalogNumber: item.catalogNumber,

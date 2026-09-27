@@ -484,6 +484,9 @@ model WechatMiniLoginChallenge {
 }
 
 model Inquiry {
+  checkoutAttemptId String? @unique
+  checkoutRequestFingerprint String? @map("checkout_request_fingerprint")
+  hasUnresolvedPricing Boolean @default(false) @map("has_unresolved_pricing")
   id           String   @id @default(cuid())
   userId       String?
   organizationId String? @map("organization_id")
@@ -518,9 +521,12 @@ model Inquiry {
   @@index([status])
   @@index([archivedAt])
   @@index([organizationId, ownerScope, createdAt])
+  @@index([checkoutRequestFingerprint])
 }
 
 model Order {
+  checkoutAttemptId String? @unique
+  checkoutRequestFingerprint String? @map("checkout_request_fingerprint")
   id              String   @id @default(cuid())
   inquiryId       String?  // 外键 → Inquiry.id (可选，用于直接购买)
   inquiry         Inquiry? @relation(fields: [inquiryId], references: [id])
@@ -579,8 +585,11 @@ model Order {
   @@index([status, autoCloseAt])
   @@index([pointsGroupId])
   @@index([organizationId, ownerScope, createdAt])
+  @@index([checkoutRequestFingerprint])
 }
 
+// Migration-managed partial unique index: at most one active Alipay attempt per order.
+// Active statuses: created, redirected, WAIT_BUYER_PAY. db push alone cannot install it.
 model PaymentAttempt {
   id          String   @id @default(cuid())
   orderId     String
@@ -824,6 +833,7 @@ model Quote {
 }
 
 model QuoteItem {
+  metadata String?
   id            String   @id @default(cuid())
   quoteId       String
   inquiryItemId String?

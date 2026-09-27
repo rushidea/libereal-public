@@ -6,12 +6,15 @@ import { writeAuditLog } from '@/lib/audit';
 import { canPayOrderWithAlipay, getAlipayPaymentExpiresAt } from '@/data/alipay-payment';
 import { normalizeOrderPaymentMethod } from '@/data/payment-methods';
 import { OrganizationRbacError, requireOrganizationPermission } from '@/lib/organization-service';
+import { ACTIVE_PAYMENT_ATTEMPT_STATUSES, isUniqueConstraintError } from '@/lib/payment-concurrency';
 
 function amountsEqualInCents(left: number, right: number): boolean {
   const leftCents = alipayAmountToCents(left);
   const rightCents = alipayAmountToCents(right);
   return leftCents !== null && rightCents !== null && leftCents === rightCents;
 }
+
+const ACTIVE_ALIPAY_ATTEMPT_STATUSES = [...ACTIVE_PAYMENT_ATTEMPT_STATUSES];
 
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const user = await requireActiveSession();
@@ -77,20 +80,28 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   }
 
   let attempt = await prisma.paymentAttempt.findFirst({
-    where: { orderId: id, provider: 'alipay', status: { in: ['created', 'redirected'] } },
+    where: { orderId: id, provider: 'alipay', status: { in: ACTIVE_ALIPAY_ATTEMPT_STATUSES } },
     orderBy: { createdAt: 'desc' },
   });
   if (attempt && !amountsEqualInCents(attempt.amount, order.total)) {
-    await prisma.paymentAttempt.update({
-      where: { id: attempt.id },
-      data: { status: 'superseded' },
-    });
-    attempt = null;
+    // Preserve gateway facts until a separate reconciliation decision is made.
+    return NextResponse.json({ error: '活动支付金额已变化，请先核对原支付记录', code: 'PAYMENT_RECONCILIATION_REQUIRED' }, { status: 409 });
   }
+
   if (!attempt) {
     const outTradeNo = `LP${Date.now()}${Math.random().toString(36).slice(2, 8)}`.slice(0, 64);
-    attempt = await prisma.paymentAttempt.create({ data: { orderId: id, provider: 'alipay', outTradeNo, amount: order.total } });
-    await writeAuditLog({ actorId: user.id, actorEmail: user.email, action: 'payment.alipay_created', resource: 'payments', targetType: 'Order', targetId: id, after: { outTradeNo, amount: order.total } });
+    try {
+      attempt = await prisma.paymentAttempt.create({ data: { orderId: id, provider: 'alipay', outTradeNo, amount: order.total } });
+      await writeAuditLog({ actorId: user.id, actorEmail: user.email, action: 'payment.alipay_created', resource: 'payments', targetType: 'Order', targetId: id, after: { outTradeNo, amount: order.total } });
+    } catch (error) {
+      if (!isUniqueConstraintError(error)) throw error;
+      attempt = await prisma.paymentAttempt.findFirst({
+        where: { orderId: id, provider: 'alipay', status: { in: ACTIVE_ALIPAY_ATTEMPT_STATUSES } },
+        orderBy: { createdAt: 'desc' },
+      });
+      if (!attempt) throw error;
+      if (!amountsEqualInCents(attempt.amount, order.total)) return NextResponse.json({ error: '活动支付金额已变化，请先核对原支付记录', code: 'PAYMENT_RECONCILIATION_REQUIRED' }, { status: 409 });
+    }
   }
 
   return NextResponse.json({

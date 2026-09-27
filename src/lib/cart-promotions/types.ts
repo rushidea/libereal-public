@@ -59,10 +59,14 @@ export interface AddonRuleConfig extends BaseRuleConfig {
    * 组内规则必须使用相同的主品范围与门槛。
    */
   sharedQuotaGroup?: string;
+  sharedQuotaMode?: 'item' | 'selection';
+  addonQuantityPerTrigger?: number;
   /** 换购品品牌（不限定则为 undefined） */
   addonBrand?: string;
   /** 换购品货号前缀（命中任一前缀即为可换购品） */
   addonTerms: string[];
+  eligibleExactTerms?: string[];
+  addonOptions?: { catalogNumber: string; price: number; quantity: number }[];
 }
 
 /** 赠品规则：主品累计件数达到门槛 → 直接赠送指定产品（0 元） */
@@ -207,7 +211,7 @@ export interface CartLine {
   /** 快速下单行不参与活动 */
   isQuickOrder?: boolean;
   /** 促销标记：命中规则后由结算页加入（ruleId 对应 RuleConfig.id；price 为行内特价，如换购价/赠品 0 元） */
-  promoMark?: { ruleId: string; price?: number } | null;
+  promoMark?: { ruleId: string; price?: number; choice?: string } | null;
 }
 
 /** 评估上下文 */

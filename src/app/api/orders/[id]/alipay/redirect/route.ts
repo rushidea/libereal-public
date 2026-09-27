@@ -6,6 +6,7 @@ import { getPublicSiteOrigin, isPublicHttpOrigin } from '@/lib/site-url';
 import { canPayOrderWithAlipay, formatAlipayTimeExpire } from '@/data/alipay-payment';
 import { reportError } from '@/lib/errorReporting';
 import { OrganizationRbacError, requireOrganizationPermission } from '@/lib/organization-service';
+import { isActivePaymentAttemptStatus } from '@/lib/payment-concurrency';
 
 function amountsEqualInCents(left: number, right: number): boolean {
   const leftCents = alipayAmountToCents(left);
@@ -49,7 +50,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
   if (!amountsEqualInCents(attempt.amount, attempt.order.total)) {
     return NextResponse.json({ error: '订单金额已变更，请重新发起支付' }, { status: 409 });
   }
-  if (!canPayOrderWithAlipay(attempt.order) || attempt.status === 'paid') {
+  if (!canPayOrderWithAlipay(attempt.order) || !isActivePaymentAttemptStatus(attempt.status)) {
     return NextResponse.json({ error: '订单付款状态不允许继续支付' }, { status: 409 });
   }
 

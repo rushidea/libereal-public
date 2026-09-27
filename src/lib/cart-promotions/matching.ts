@@ -5,12 +5,15 @@ type ProductIdentity = Pick<CartLine['product'], 'brand' | 'catalogNumber' | 'na
 export function isEligibleMainProduct(rule: AddonRuleConfig, product: ProductIdentity): boolean {
   return product.brand === rule.eligibleBrand
     && (rule.eligibleTerms.some((term) => product.catalogNumber.startsWith(term))
+      || Boolean(rule.eligibleExactTerms?.includes(product.catalogNumber))
       || Boolean(rule.eligibleNameIncludes?.length && rule.eligibleNameIncludes.every((term) => product.name?.toLowerCase().includes(term.toLowerCase()))));
 }
 
 export function isAddonProduct(rule: AddonRuleConfig, product: ProductIdentity): boolean {
   return (!rule.addonBrand || product.brand === rule.addonBrand)
-    && rule.addonTerms.some((term) => product.catalogNumber.startsWith(term));
+    && (rule.addonOptions?.length
+      ? rule.addonOptions.some((option) => option.catalogNumber === product.catalogNumber)
+      : rule.addonTerms.some((term) => product.catalogNumber.startsWith(term)));
 }
 
 export function isGiftProduct(rule: GiftRuleConfig, product: ProductIdentity): boolean {

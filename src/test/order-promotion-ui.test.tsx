@@ -6,6 +6,9 @@ import { promotionLines } from './cart-promotion-fixtures';
 const cart = vi.hoisted(() => ({ items: [] as unknown[], syncFromDb: vi.fn(async () => {}), removeItem: vi.fn() }));
 vi.mock('@/context/CartContext', () => ({ useCart: () => cart, getCartItemKey: vi.fn() }));
 vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn() }) }));
+vi.mock('next-auth/react', () => ({
+  useSession: () => ({ data: { user: { id: 'synthetic-checkout-user' } }, status: 'authenticated' }),
+}));
 vi.mock('@/components/AdaptiveHeader', () => ({ default: () => null }));
 vi.mock('@/components/SiteFooter', () => ({ default: () => null }));
 vi.mock('@/components/mobile/MobileBottomNav', () => ({ default: () => null }));

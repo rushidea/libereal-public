@@ -37,11 +37,11 @@ function seedInquiry(db: ReturnType<typeof getTestDb>, inquiry: {
     inquiry.archivedAt ?? null,
   );
   const items = JSON.parse(inquiry.items ?? JSON.stringify([{ productId: 'p1', name: 'A', price: 100, quantity: 1 }])) as Array<{
-    productId?: string; name: string; price: number; quantity: number;
+    productId?: string; name: string; price: number; quantity: number; metadata?: Record<string, unknown>;
   }>;
   const insertItem = db.prepare(`
-    INSERT INTO InquiryItem (id, inquiryId, position, productId, name, unitPrice, quantity, lineTotal, createdAt, updatedAt)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+    INSERT INTO InquiryItem (id, inquiryId, position, productId, name, unitPrice, quantity, lineTotal, metadata, createdAt, updatedAt)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
   `);
   items.forEach((item, position) => insertItem.run(
     `${inquiry.id}_item_${position}`,
@@ -52,6 +52,7 @@ function seedInquiry(db: ReturnType<typeof getTestDb>, inquiry: {
     item.price,
     item.quantity,
     item.price * item.quantity,
+    item.metadata ? JSON.stringify(item.metadata) : null,
   ));
 }
 
@@ -230,6 +231,98 @@ describe('POST /api/inquiries/[id]/quote (admin send quote)', () => {
     expect(confirmation).toEqual({ action: 'accept', email: 'admin@test.com' });
     const orderItem = db.prepare('SELECT unitPrice, quantity FROM OrderItem').get() as { unitPrice: number; quantity: number };
     expect(orderItem).toEqual({ unitPrice: 150, quantity: 2 });
+  });
+
+  it('round trips variant, spec, and unit metadata from inquiry to quote to order', async () => {
+    const db = getTestDb();
+    clearAllTables(db);
+    seedAdmin(db);
+    seedInquiry(db, {
+      id: 'metadata-inquiry',
+      name: '元数据客户',
+      email: 'metadata@test.com',
+      items: JSON.stringify([{
+        productId: 'p1', name: 'A 规格', price: 150, quantity: 2,
+        metadata: { variantId: 'variant-10ml', spec: '10 mL', unit: '盒' },
+      }]),
+    });
+
+    const quoteResponse = await quotePOST(makeReq('metadata-inquiry', {
+      items: [{ productId: 'p1', name: 'A 规格', price: 150, quantity: 2 }],
+    }) as NextRequest, { params: Promise.resolve({ id: 'metadata-inquiry' }) });
+    expect(quoteResponse.status).toBe(200);
+    const quoteItem = db.prepare('SELECT metadata FROM QuoteItem WHERE quoteId = (SELECT id FROM Quote WHERE inquiryId = ?)')
+      .get('metadata-inquiry') as { metadata: string | null };
+    expect(JSON.parse(quoteItem.metadata ?? '{}')).toMatchObject({ variantId: 'variant-10ml', spec: '10 mL', unit: '盒' });
+
+    const confirmResponse = await confirmQuotePOST(new NextRequest('http://localhost:3000/api/orders/metadata-inquiry/confirm-items', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ itemIndices: [0], quantities: { 0: 2 } }),
+    }), { params: Promise.resolve({ id: 'metadata-inquiry' }) });
+    expect(confirmResponse.status).toBe(200);
+    const orderItem = db.prepare('SELECT metadata FROM OrderItem LIMIT 1').get() as { metadata: string | null };
+    expect(JSON.parse(orderItem.metadata ?? '{}')).toMatchObject({ variantId: 'variant-10ml', spec: '10 mL', unit: '盒' });
+  });
+
+  it('rejects duplicate item indices before changing quote quantities', async () => {
+    await quotePOST(makeReq('i1', { items: [{ productId: 'p1', name: 'A', price: 150, quantity: 2 }] }) as NextRequest, {
+      params: Promise.resolve({ id: 'i1' }),
+    });
+    const response = await confirmQuotePOST(new NextRequest('http://localhost:3000/api/orders/i1/confirm-items', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ itemIndices: [0, 0], quantities: { 0: 1 } }),
+    }), { params: Promise.resolve({ id: 'i1' }) });
+    expect(response.status).toBe(400);
+    expect(getTestDb().prepare('SELECT orderedQty FROM QuoteItem WHERE quoteId = (SELECT id FROM Quote WHERE inquiryId = ?)').get('i1')).toEqual({ orderedQty: 0 });
+  });
+
+  it('replays keyed confirmation after quota consumption for the delegate actor', async () => {
+    await quotePOST(makeReq('i1', { items: [{ productId: 'p1', name: 'A', price: 150, quantity: 1 }] }) as NextRequest, {
+      params: Promise.resolve({ id: 'i1' }),
+    });
+    const body = { itemIndices: [0], quantities: { 0: 1 }, acceptanceAttemptId: 'delegate-confirm-1' };
+    const makeConfirm = () => new NextRequest('http://localhost:3000/api/orders/i1/confirm-items', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+    });
+    const first = await confirmQuotePOST(makeConfirm(), { params: Promise.resolve({ id: 'i1' }) });
+    expect(first.status).toBe(200);
+    const replay = await confirmQuotePOST(makeConfirm(), { params: Promise.resolve({ id: 'i1' }) });
+    expect(replay.status).toBe(200);
+    expect(await replay.json()).toMatchObject({ replayed: true });
+    expect(getTestDb().prepare('SELECT COUNT(*) AS count FROM "Order"').get()).toEqual({ count: 1 });
+    expect(getTestDb().prepare('SELECT orderedQty FROM QuoteItem WHERE quoteId = (SELECT id FROM Quote WHERE inquiryId = ?)').get('i1')).toEqual({ orderedQty: 1 });
+  });
+
+  it('rejects the whole stale selection when one requested line was already accepted', async () => {
+    await quotePOST(makeReq('i1', { items: [{ productId: 'p1', name: 'Synthetic A', price: 150, quantity: 1 }, { name: 'Synthetic B', price: 20, quantity: 1 }] }) as NextRequest, { params: Promise.resolve({ id: 'i1' }) });
+    const db = getTestDb();
+    db.prepare('UPDATE QuoteItem SET orderedQty = quantity WHERE position = 0').run();
+    const response = await confirmQuotePOST(new NextRequest('http://localhost:3000/api/orders/i1/confirm-items', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ itemIndices: [0, 1], acceptanceAttemptId: 'stale-selection-key' }) }), { params: Promise.resolve({ id: 'i1' }) });
+    expect(response.status).toBe(409);
+    expect(db.prepare('SELECT COUNT(*) AS count FROM "Order"').get()).toEqual({ count: 0 });
+    expect(db.prepare('SELECT orderedQty FROM QuoteItem WHERE position = 1').get()).toEqual({ orderedQty: 0 });
+  });
+
+  it('returns a version conflict for stale quote identity and changed quantity', async () => {
+    await quotePOST(makeReq('i1', { items: [{ productId: 'p1', name: 'A', price: 150, quantity: 2 }] }) as NextRequest, {
+      params: Promise.resolve({ id: 'i1' }),
+    });
+    const quote = getTestDb().prepare('SELECT id, version FROM Quote WHERE inquiryId = ?').get('i1') as { id: string; version: number };
+    const stale = await confirmQuotePOST(new NextRequest('http://localhost:3000/api/orders/i1/confirm-items', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ itemIndices: [0], quantities: { 0: 2 }, quoteId: 'stale-quote', quoteVersion: quote.version }),
+    }), { params: Promise.resolve({ id: 'i1' }) });
+    expect(stale.status).toBe(409);
+
+    getTestDb().prepare('UPDATE QuoteItem SET orderedQty = 1 WHERE quoteId = ?').run(quote.id);
+    const changedQuantity = await confirmQuotePOST(new NextRequest('http://localhost:3000/api/orders/i1/confirm-items', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ itemIndices: [0], quantities: { 0: 2 }, quoteId: quote.id, quoteVersion: quote.version }),
+    }), { params: Promise.resolve({ id: 'i1' }) });
+    expect(changedQuantity.status).toBe(409);
+    expect(getTestDb().prepare('SELECT orderedQty FROM QuoteItem WHERE quoteId = ?').get(quote.id)).toEqual({ orderedQty: 1 });
   });
 
   it('returns 400 for invalid items JSON string', async () => {

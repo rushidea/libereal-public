@@ -78,6 +78,7 @@ export async function POST(
         leadTime: typeof item.actualLeadTime === 'string' ? item.actualLeadTime : typeof item.leadTime === 'string' ? item.leadTime : null,
         available: item.available !== false,
         notes: typeof item.notes === 'string' ? item.notes : null,
+        metadata: typeof inquiryItem?.metadata === 'string' ? inquiryItem.metadata : null,
         pricingSnapshot: pricedItem.pricingSnapshot,
       };
     });
