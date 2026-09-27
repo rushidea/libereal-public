@@ -137,9 +137,12 @@ describe('Passkey security flow', () => {
     webauthnMocks.verifyRegistrationResponse.mockResolvedValue({
       verified: true,
       registrationInfo: {
-        credentialID: Uint8Array.from([1, 2, 3]),
-        credentialPublicKey: Uint8Array.from([4, 5, 6]),
-        counter: 0,
+        credential: {
+          id: 'AQID',
+          publicKey: Uint8Array.from([4, 5, 6]),
+          counter: 0,
+          transports: ['internal'],
+        },
         credentialDeviceType: 'multiDevice',
         credentialBackedUp: true,
         userVerified: true,
@@ -156,7 +159,11 @@ describe('Passkey security flow', () => {
       expectedRPID: 'localhost',
       requireUserVerification: true,
     }));
+    expect(webauthnMocks.verifyRegistrationResponse).toHaveBeenCalledWith(expect.objectContaining({
+      response: registrationResponse,
+    }));
     expect(webauthnMocks.generateRegistrationOptions).toHaveBeenCalledWith(expect.objectContaining({
+      userID: new TextEncoder().encode('user-1'),
       authenticatorSelection: {
         residentKey: 'required',
         userVerification: 'required',
@@ -165,6 +172,10 @@ describe('Passkey security flow', () => {
 
     await expect(verifyPasskeyRegistration({ userId: 'user-1', response: registrationResponse, store: ephemeralStore.store })).rejects.toThrow('PASSKEY_REGISTRATION_EXPIRED');
     await createPasskeyRegistrationOptions({ userId: 'user-1', email: 'user@example.com', name: 'User', store: ephemeralStore.store, rateLimitStore: ephemeralStore.store });
+    expect(webauthnMocks.generateRegistrationOptions).toHaveBeenLastCalledWith(expect.objectContaining({
+      userID: new TextEncoder().encode('user-1'),
+      excludeCredentials: [expect.objectContaining({ id: 'AQID' })],
+    }));
     await expect(verifyPasskeyRegistration({ userId: 'user-1', response: registrationResponse, store: ephemeralStore.store })).rejects.toThrow('PASSKEY_CREDENTIAL_EXISTS');
     const db = new Database(dbPath, { readonly: true });
     expect((db.prepare('SELECT COUNT(*) AS count FROM user_authenticators WHERE type = \'passkey\'').get() as { count: number }).count).toBe(1);
@@ -199,6 +210,14 @@ describe('Passkey security flow', () => {
     });
     const consumed = await consumePasskeyVerifiedToken(result.passkeyToken, loginChallenge.id, loginChallenge.token, ephemeralStore.store);
     expect(consumed).toMatchObject({ userId: 'user-1', email: 'user@example.com' });
+    expect(webauthnMocks.verifyAuthenticationResponse).toHaveBeenCalledWith(expect.objectContaining({
+      credential: {
+        id: 'AQID',
+        publicKey: Uint8Array.from([4, 5, 6]),
+        counter: 0,
+        transports: ['internal'],
+      },
+    }));
     expect(await consumePasskeyVerifiedToken(result.passkeyToken, loginChallenge.id, loginChallenge.token, ephemeralStore.store)).toBeNull();
 
     const verificationDb = new Database(dbPath, { readonly: true });
@@ -255,6 +274,14 @@ describe('Passkey security flow', () => {
       rateLimitStore: ephemeralStore.store,
     });
     expect(result.login).toMatchObject({ userId: 'user-1', email: 'user@example.com' });
+    expect(webauthnMocks.verifyAuthenticationResponse).toHaveBeenCalledWith(expect.objectContaining({
+      credential: {
+        id: 'AQID',
+        publicKey: Uint8Array.from([4, 5, 6]),
+        counter: 0,
+        transports: ['internal'],
+      },
+    }));
     expect(await consumePasskeyVerifiedToken(result.passkeyToken, result.challengeId, result.challengeToken, ephemeralStore.store)).toMatchObject({ userId: 'user-1' });
   });
 

@@ -72,7 +72,9 @@ function MfaLoginContent() {
       });
       const optionsBody = await optionsResponse.json().catch(() => null) as { error?: string } | null;
       if (!optionsResponse.ok) throw new Error(optionsBody?.error || '无法开始通行密钥验证');
-      const assertion = await startAuthentication(optionsBody as Parameters<typeof startAuthentication>[0]);
+      const assertion = await startAuthentication({
+        optionsJSON: optionsBody as Parameters<typeof startAuthentication>[0]['optionsJSON'],
+      });
       const verifyResponse = await fetch('/api/authenticator/passkey/login/verify', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
