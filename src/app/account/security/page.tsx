@@ -331,7 +331,9 @@ export default function AccountSecurityPage() {
       const optionsResponse = await fetch('/api/authenticator/passkey/register/options', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ stepUpToken }) });
       const optionsBody = await optionsResponse.json().catch(() => null) as { error?: string } | null;
       if (!optionsResponse.ok) throw new Error(optionsBody?.error || '无法开始添加通行密钥');
-      const creation = await startRegistration(optionsBody as Parameters<typeof startRegistration>[0]);
+      const creation = await startRegistration({
+        optionsJSON: optionsBody as Parameters<typeof startRegistration>[0]['optionsJSON'],
+      });
       const verifyResponse = await fetch('/api/authenticator/passkey/register/verify', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
