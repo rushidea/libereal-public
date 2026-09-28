@@ -3,7 +3,7 @@
 This public-safe overview intentionally excludes production host addresses,
 private database paths, credentials and deployment coordinates.
 
-Public application source lives in `rushidea/libereal`.
+Public application source lives in `rushidea/libereal-public`.
 Private commercial and operational material lives in `rushidea/libereal-private`.
 
 Environment-specific publishing and deployment details are supplied through
