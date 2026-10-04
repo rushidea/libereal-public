@@ -89,7 +89,7 @@ export default function SiteFooter() {
               />
             </div>
             <p className="max-w-xs text-sm leading-6 text-white/86">
-              LIBEREAL 由南京天放生物科技有限公司运营，{SITE_FOOTER_SLOGAN}
+              {SITE_FOOTER_SLOGAN}
             </p>
           </div>
 
