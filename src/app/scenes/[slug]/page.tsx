@@ -166,7 +166,9 @@ export default async function ScenePage({ params }: ScenePageProps) {
               <div className="relative min-h-[320px] lg:min-h-[360px]">
                 <Image
                   src={theme.heroIllustration}
-                  alt=""
+                  alt={scene.slug === 'elisa'
+                    ? '科研人员使用多道移液器向 ELISA 微孔板加样'
+                    : `${scene.title}实验场景示意图`}
                   fill
                   priority
                   className="object-cover"

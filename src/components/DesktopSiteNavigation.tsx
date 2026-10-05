@@ -90,12 +90,10 @@ function NavigationIcon({ icon, href }: { icon?: SiteNavigationIcon; href?: stri
   const Icon = icon ? navigationIcons[icon] : null;
   if (faviconSrc) {
     return (
-      <img
-        src={faviconSrc}
-        alt=""
+      <span
         aria-hidden="true"
-        className="h-4 w-4 shrink-0 rounded-sm object-contain"
-        loading="lazy"
+        className="h-4 w-4 shrink-0 rounded-sm bg-contain bg-center bg-no-repeat"
+        style={{ backgroundImage: `url("${faviconSrc}")` }}
       />
     );
   }

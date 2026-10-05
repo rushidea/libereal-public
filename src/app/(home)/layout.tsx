@@ -2,13 +2,14 @@ import type { Metadata } from 'next';
 import {
   SITE_DISPLAY_NAME,
   SITE_HOME_DESCRIPTION,
+  SITE_HOME_TITLE,
 } from '@/lib/seo/site-identity';
 import { getCanonicalSiteOrigin } from '@/lib/site-url';
 
 export const revalidate = 3600;
 
 export const metadata: Metadata = {
-  title: { absolute: SITE_DISPLAY_NAME },
+  title: { absolute: SITE_HOME_TITLE },
   description: SITE_HOME_DESCRIPTION,
   alternates: {
     canonical: getCanonicalSiteOrigin(),
@@ -18,7 +19,7 @@ export const metadata: Metadata = {
     locale: 'zh_CN',
     url: getCanonicalSiteOrigin(),
     siteName: SITE_DISPLAY_NAME,
-    title: SITE_DISPLAY_NAME,
+    title: SITE_HOME_TITLE,
     description: SITE_HOME_DESCRIPTION,
     images: [
       {
