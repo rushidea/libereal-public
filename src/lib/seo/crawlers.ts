@@ -35,7 +35,7 @@ export function renderRobotsTxt(): string {
   const origin = getCanonicalSiteOrigin();
   const agents = ['*', ...NAMED_SEARCH_ENGINE_USER_AGENTS];
   const blocks = agents.map(renderAgentBlock).join('\n\n');
-  return `${blocks}\n\nSitemap: ${origin}/sitemap.xml\nHost: ${origin}\n`;
+  return `${blocks}\n\nSitemap: ${origin}/sitemap.xml\n`;
 }
 
 export function buildSearchEngineOtherMeta(): Record<string, string> {
