@@ -40,6 +40,14 @@ describe('public SEO URL rules', () => {
     }
   });
 
+  it('exposes product selection pages and inquiry-only brands in the sitemap', () => {
+    for (const slug of ['antibodies', 'elisa-kits', 'western-blot-reagents', 'cell-culture-plates', 'cell-culture-flasks']) {
+      expect(STATIC_SITEMAP_PATHS).toContain(`/products/categories/${slug}`);
+    }
+    expect(STATIC_SITEMAP_PATHS).toContain('/brands/Proteintech');
+    expect(STATIC_SITEMAP_PATHS).toContain('/brands/' + encodeURIComponent('近岸蛋白'));
+  });
+
   it('limits sitemap products to non-hazardous rows with catalog number, brand and name', () => {
     expect(STOREFRONT_SITEMAP_PRODUCT_WHERE).toMatchObject({
       hazardous: false,

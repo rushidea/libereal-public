@@ -32,6 +32,7 @@ export default function BrandProductsClient({
   const brandSlug = decodeURIComponent(brand);
   const dbBrandName = resolveDbBrandName(brandSlug);
   const brandInfo = getBrandInfo(brandSlug);
+  const inquiryOnly = brandInfo?.catalogStatus === 'inquiry';
   const displayName = getBrandDisplayName(brandSlug);
   const { addItem, removeItem, isInCart } = useCart();
   const [showQuickOrder, setShowQuickOrder] = useState(false);
@@ -40,7 +41,7 @@ export default function BrandProductsClient({
   const [products, setProducts] = useState<Product[]>(initialProducts);
   const [total, setTotal] = useState(initialTotal);
   const [page, setPage] = useState(1);
-  const [loading, setLoading] = useState(initialProducts.length === 0 && initialTotal === 0);
+  const [loading, setLoading] = useState(initialProducts.length === 0 && initialTotal === 0 && !inquiryOnly);
 
   const fetchProducts = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
@@ -59,9 +60,9 @@ export default function BrandProductsClient({
   }, [dbBrandName, page]);
 
   useEffect(() => {
-    const silent = page === 1 && initialProducts.length > 0;
+    const silent = page === 1 && (initialProducts.length > 0 || inquiryOnly);
     void fetchProducts(silent);
-  }, [fetchProducts, page, initialProducts.length]);
+  }, [fetchProducts, inquiryOnly, page, initialProducts.length]);
 
   const totalPages = Math.ceil(total / PAGE_SIZE);
 
@@ -128,6 +129,18 @@ export default function BrandProductsClient({
         {loading ? (
           <div className="flex justify-center py-20">
             <div className="animate-spin w-8 h-8 border-2 border-brand-500 border-t-transparent rounded-full" />
+          </div>
+        ) : inquiryOnly && total === 0 ? (
+          <div className="bg-white/70 backdrop-blur-md border border-white/70 rounded-3xl p-12 text-center shadow-xl shadow-black/5">
+            <Package className="w-12 h-12 mx-auto text-gray-300 mb-4" />
+            <h2 className="text-lg font-semibold text-gray-700 mb-2">产品目录待完善</h2>
+            <p className="text-gray-500 mb-6">该品牌目前可咨询采购，具体产品、货号与供货情况请联系确认。</p>
+            <Link
+              href="/contact"
+              className="inline-flex items-center gap-2 px-5 py-2.5 bg-brand-500/90 backdrop-blur-sm text-white rounded-xl hover:bg-brand-600 transition-colors shadow-md"
+            >
+              联系咨询
+            </Link>
           </div>
         ) : products.length === 0 ? (
           <div className="bg-white/70 backdrop-blur-md border border-white/70 rounded-3xl p-12 text-center shadow-xl shadow-black/5">

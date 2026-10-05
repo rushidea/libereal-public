@@ -13,8 +13,8 @@ type ProductsPageProps = {
 };
 
 export const metadata: Metadata = {
-  title: '产品中心',
-  description: '汇总 LIBEREAL 当前促销专题、促销产品与完整产品目录入口。',
+  title: '抗体、ELISA 试剂盒、WB 试剂与细胞培养耗材',
+  description: '在 LIBEREAL 按实验需求选购一抗、二抗、ELISA 试剂盒、Western Blot 试剂、细胞培养板与培养瓶。浏览品牌目录、比较应用与规格，结合实验选型资料按货号询价，确认供应情况和交期。',
   alternates: {
     canonical: canonicalSiteUrl('/products'),
   },

@@ -44,7 +44,7 @@ export default function ProductsHomeClient({ features, products, featuredProduct
           <div className="relative flex flex-col gap-8 lg:flex-row lg:items-end lg:justify-between">
             <div className="max-w-2xl">
               <h1 className={`text-2xl font-semibold tracking-tight [text-wrap:balance] sm:text-3xl ${uiSurfaces.titleText}`}>
-                促销信息与产品入口
+                抗体、试剂与细胞培养耗材
               </h1>
             </div>
             <div className="flex flex-wrap gap-2">
@@ -63,6 +63,24 @@ export default function ProductsHomeClient({ features, products, featuredProduct
                 快速订购
               </button>
             </div>
+          </div>
+        </section>
+
+        <section aria-labelledby="product-category-heading">
+          <h2 id="product-category-heading" className="mb-4 text-xl font-semibold">按实验需求选型</h2>
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {[
+              { slug: 'antibodies', name: '抗体', detail: '一抗、二抗、WB 抗体与应用验证' },
+              { slug: 'elisa-kits', name: 'ELISA 试剂盒', detail: '按靶标、物种与样本类型选择' },
+              { slug: 'western-blot-reagents', name: 'WB 试剂', detail: '蛋白提取、定量、转膜与 ECL 检测' },
+              { slug: 'cell-culture-plates', name: '细胞培养板', detail: '孔数、表面处理与培养方式' },
+              { slug: 'cell-culture-flasks', name: '细胞培养瓶', detail: '培养面积、瓶盖与细胞类型' },
+            ].map((category) => (
+              <Link key={category.slug} href={`/products/categories/${category.slug}`} className={`rounded-xl p-5 ${uiSurfaces.panel}`}>
+                <h3 className="font-semibold">{category.name}</h3>
+                <p className={`mt-2 text-sm ${uiSurfaces.mutedText}`}>{category.detail}</p>
+              </Link>
+            ))}
           </div>
         </section>
 

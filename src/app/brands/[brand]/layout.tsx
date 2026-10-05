@@ -16,7 +16,7 @@ export async function generateMetadata({ params }: LayoutProps): Promise<Metadat
   const brandInfo = getBrandInfo(brandSlug);
   const displayName = getBrandDisplayName(brandSlug);
 
-  const title = `${displayName} 产品`;
+  const title = brandInfo?.seoTitle ?? `${displayName} 产品`;
   const description =
     brandInfo?.description ??
     `浏览 ${displayName} 品牌生物试剂产品，正品保障，支持在线询价与采购。`;

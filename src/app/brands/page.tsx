@@ -12,6 +12,7 @@ import {
   brandPageHref,
   getBrandDisplayName,
   getBrandInfo,
+  inquiryBrands,
 } from '@/data/brands';
 
 interface BrandInfo {
@@ -91,7 +92,7 @@ function BrandsPageContent() {
             </div>
             <div>
               <h1 className="text-2xl font-bold text-gray-900">品牌中心</h1>
-              <p className="text-sm text-gray-500">共 {brands.length} 个品牌</p>
+              <p className="text-sm text-gray-500">目录中有 {brands.length} 个品牌</p>
             </div>
           </div>
 
@@ -195,6 +196,32 @@ function BrandsPageContent() {
               })}
             </div>
           )}
+
+          <section aria-labelledby="inquiry-brands-heading" className="pt-8">
+            <div className="mb-4">
+              <h2 id="inquiry-brands-heading" className="text-xl font-bold text-gray-900">可咨询品牌</h2>
+              <p className="text-sm text-gray-500 mt-1">品牌产品目录待完善，可联系确认具体产品与供货情况。</p>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {inquiryBrands.map(dbName => {
+                const brandInfo = getBrandInfo(dbName);
+                if (!brandInfo) return null;
+                return (
+                  <article key={dbName} className="bg-white/70 backdrop-blur-md border border-white/70 rounded-3xl p-6 shadow-xl shadow-black/5">
+                    <div className="flex items-start justify-between gap-3 mb-2">
+                      <div>
+                        <h3 className="text-lg font-bold text-gray-900">{brandInfo.name}</h3>
+                        <span className="inline-flex mt-2 rounded-full bg-amber-50 text-amber-800 px-2.5 py-1 text-xs font-medium">目录待完善 · 可咨询</span>
+                      </div>
+                      <Link href={brandPageHref(dbName)} className="text-sm font-medium text-brand-600 hover:text-brand-700">品牌详情 →</Link>
+                    </div>
+                    <p className="text-sm text-gray-600 mb-4">{brandInfo.description}</p>
+                    <Link href="/contact" className="text-sm font-medium text-brand-600 hover:text-brand-700">联系咨询产品与供货情况 →</Link>
+                  </article>
+                );
+              })}
+            </div>
+          </section>
         </main>
 
         <div className="bg-white/70 backdrop-blur-md border-t border-white/70 py-4">

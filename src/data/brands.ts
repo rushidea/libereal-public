@@ -2,6 +2,9 @@ interface BrandDescription {
   name: string;
   description: string;
   detail?: string;
+  aliases?: string[];
+  catalogStatus?: 'catalog' | 'inquiry';
+  seoTitle?: string;
   promotion?: {
     title: string;
     href: string;
@@ -17,11 +20,20 @@ const brandDbNames: Record<string, string> = {
   'Cell Signaling Technology': 'CST',
 };
 
+function resolveBrandAlias(name: string): string | undefined {
+  const normalizedName = name.toLocaleLowerCase();
+  return Object.entries(brandDescriptions).find(([, info]) =>
+    info.aliases?.some(alias => alias.toLocaleLowerCase() === normalizedName)
+  )?.[0];
+}
+
 export function resolveDbBrandName(name: string): string {
-  return brandDbNames[name] ?? name;
+  return resolveBrandAlias(name) ?? brandDbNames[name] ?? name;
 }
 
 export function resolveBrandKey(name: string): string {
+  const aliasMatch = resolveBrandAlias(name);
+  if (aliasMatch) return aliasMatch;
   const dbName = resolveDbBrandName(name);
   if (brandDescriptions[dbName]) return dbName;
   if (brandDescriptions[name]) return name;
@@ -57,31 +69,24 @@ export const brandDescriptions: Record<string, BrandDescription> = {
   },
   'Thermo Fisher': {
     name: 'Thermo Fisher Scientific',
-    description: '科学服务领域的大型供应商,提供仪器、试剂、耗材等实验室产品。旗下拥有多个子品牌,覆盖分子、细胞、蛋白、基因组学等多条实验线。',
-    detail: `赛默飞世尔(TMO)成立于1956年,总部位于美国马萨诸塞州。年营收约400亿美元,全球约7万名员工,在50个国家有业务运营。1982年进入中国,中国总部设在上海,在北京、苏州、广州设有研发中心,员工超过7000人。
-
-通过多次并购(Life Technologies、Patheon、PPD 等)形成了多条产品线的品牌矩阵:
-• Thermo Scientific:分析仪器、实验室设备、质谱、色谱、耗材软件
-• Invitrogen / Gibco:细胞培养基、血清、转染试剂、抗体、核酸纯化
-• Applied Biosystems:qPCR、数字PCR、测序系统
-• Fisher Scientific:渠道品牌,提供超200万种产品的采购与物流
-
-在中国大陆通过授权代理商提供售前售后技术支持。`,
+    seoTitle: '赛默飞 Thermo Fisher Scientific 抗体、ELISA 与细胞培养产品',
+    description: '赛默飞（Thermo Fisher Scientific）生命科学产品涵盖科研抗体、免疫分析试剂、细胞培养基与实验室耗材。可按 Invitrogen、Gibco、Thermo Scientific Nunc 等产品线和具体货号查找。',
+    detail: `可按具体产品线查找：Invitrogen 一抗、二抗及免疫分析产品；Gibco 细胞培养基与培养试剂；Thermo Scientific Nunc 细胞培养板、培养瓶及培养皿。产品品牌和系列以各产品页面标注为准。`,
     subBrands: [
       { name: 'Thermo Scientific', description: '分析仪器、实验室设备、质谱、色谱、耗材和软件' },
-      { name: 'Fisher BioReagents', description: '分子生物学、细胞培养、蛋白研究常用试剂,支持小规格采购' },
+      { name: 'Fisher BioReagents', description: '分子生物学、细胞培养、蛋白研究常用试剂' },
       { name: 'FastDigest', description: '快速限制性内切酶' },
       { name: 'ABfinity', description: '重组单克隆抗体' },
       { name: 'Novex', description: '预制 SDS-PAGE 凝胶与电泳试剂' },
-      { name: 'Pierce', description: 'BCA 蛋白定量等经典试剂' },
+      { name: 'Pierce', description: '蛋白定量与蛋白分析相关试剂' },
       { name: 'DreamTaq', description: 'Taq DNA 聚合酶' },
       { name: 'Phusion', description: '高保真 DNA 聚合酶' },
-      { name: 'Phire', description: '快速 PCR 试剂' },
+      { name: 'Phire', description: 'PCR 试剂' },
       { name: 'Annexin', description: '细胞凋亡检测试剂' },
       { name: 'GeneJET', description: '核酸纯化试剂盒' },
-      { name: 'Invariant', description: '链霉亲和素系统' },
+      { name: 'Invariant', description: '免疫分析相关试剂' },
       { name: 'Image-iT', description: '荧光成像试剂' },
-      { name: 'PAGEruler', description: '预染蛋白分子量标准' },
+      { name: 'PAGEruler', description: '蛋白分子量标准' },
       { name: 'RNAlater', description: 'RNA 稳定保存试剂' },
     ],
   },
@@ -93,15 +98,9 @@ export const brandDescriptions: Record<string, BrandDescription> = {
   },
   'Abcam': {
     name: 'Abcam',
-    description: '英国抗体生产与供应商,以重组抗体和透明的验证数据为特色。2023 年被丹纳赫集团收购。全球超过 75 万名科研用户。',
-    detail: `Abcam 1998 年成立于英国剑桥,2023 年被丹纳赫(Danaher)收购。总部位于英国,在美国、日本、中国香港设有分公司,覆盖 140 多个国家。
-
-其特点是:
-• 抗体品类全:超过 11 万种产品,含 3.7 万多种重组抗体
-• 验证数据透明:官网提供实验图示、稀释比例、敲除(Knockout)验证数据
-• 定制服务:提供从靶点到抗体的全周期支持
-
-在中国大陆通过授权代理(如江苏康成百澳)提供现货和技术支持。`,
+    seoTitle: 'Abcam 抗体、Western blot 验证抗体与 ELISA 试剂盒',
+    description: 'Abcam 科研产品包括一抗、二抗、重组抗体、ELISA 试剂盒及免疫分析组件，提供 Western blot 验证抗体、SimpleStep ELISA 与配对抗体等产品类别。',
+    detail: `可按靶标、宿主、应用及验证信息筛选抗体。相关品类包括一抗、二抗、Western blot 验证抗体、SimpleStep ELISA 试剂盒、配对抗体及 ELISA 开发组件。具体适用实验与验证结果请以对应产品资料为准。`,
     subBrands: [],
   },
   'Sigma-Aldrich': {
@@ -125,14 +124,9 @@ export const brandDescriptions: Record<string, BrandDescription> = {
   },
   'CST': {
     name: 'Cell Signaling Technology',
-    description: '美国抗体公司,由科学家创立并管理,主做细胞信号转导和翻译后修饰(特别是磷酸化)抗体。',
-    detail: `CST 1999 年成立于美国马萨诸塞州,由科学家创立并管理的私营家族企业。研发团队中超过 90% 为博士,兼做产品开发和技术支持。
-
-主做磷酸化等翻译后修饰抗体,每支抗体经过多种实验平台(WB、IP、IHC、IF、Flow、ChIP)验证,含基因敲除验证数据。还提供 ELISA 试剂盒、染色质免疫沉淀试剂盒、siRNA 等科研工具。
-
-免费开放 PhosphoSitePlus® 数据库(蛋白质翻译后修饰)和《Cell Signaling Handbook》信号通路手册。
-
-2008 年在上海设立中国分公司,通过授权代理提供现货和技术支持。`,
+    seoTitle: 'CST Cell Signaling Technology 抗体与 Western blot 试剂',
+    description: 'Cell Signaling Technology（CST）提供细胞信号研究抗体和实验试剂，覆盖常见靶标及磷酸化等修饰检测；另有 Western blotting 应用解决方案试剂盒。',
+    detail: `可按靶标和实验应用查找 CST 抗体及配套试剂。Western Blotting Application Solutions Kit 覆盖从样品制备到检测所需的相关试剂；抗体的适用应用和验证信息请以具体产品资料为准。`,
     subBrands: [],
   },
   'Labselect': {
@@ -147,4 +141,26 @@ export const brandDescriptions: Record<string, BrandDescription> = {
     detail: `Biosharp 是中国实验室耗材品牌,主营一次性实验耗材(离心管、吸头、手套、PCR 管等)和部分常用基础试剂科研场景。`,
     subBrands: [],
   },
+  Proteintech: {
+    name: 'Proteintech',
+    seoTitle: 'Proteintech 抗体、ELISA 试剂盒与免疫分析产品',
+    aliases: ['武汉三鹰', '武汉三鹰生物技术有限公司', 'Proteintech Group', 'PTG'],
+    catalogStatus: 'inquiry',
+    description: 'Proteintech（武汉三鹰）科研产品涵盖一抗、二抗、重组抗体、免疫印迹（WB）抗体、ELISA 试剂盒及抗体对。当前目录尚未展示具体货号，可联系咨询并询价采购。',
+    detail: `相关产品类别包括一抗、二抗、重组抗体、免疫印迹（WB）抗体、ELISA 试剂盒及抗体对。当前品牌页尚未展示可浏览的产品条目；如需确认具体靶标、货号与供货信息，请通过咨询联系。`,
+    subBrands: [],
+  },
+  '近岸蛋白': {
+    name: '近岸蛋白（NovoProtein）',
+    seoTitle: '近岸蛋白 NovoProtein 细胞因子、靶点蛋白与参照抗体',
+    aliases: ['NovoProtein', '苏州近岸蛋白质科技股份有限公司'],
+    catalogStatus: 'inquiry',
+    description: '近岸蛋白（NovoProtein）产品包括细胞因子、靶点蛋白、参照抗体、病毒研究相关产品及基质胶和培养基。当前目录尚未展示具体货号，可联系咨询并询价采购。',
+    detail: `近岸蛋白官方产品分类包括细胞因子、靶点蛋白、参照抗体、病毒研究相关产品及基质胶和培养基。当前品牌页尚未展示可浏览的产品条目；请联系咨询具体靶点、货号与供货信息。`,
+    subBrands: [],
+  },
 };
+
+export const inquiryBrands = Object.entries(brandDescriptions)
+  .filter(([, info]) => info.catalogStatus === 'inquiry')
+  .map(([dbName]) => dbName);
