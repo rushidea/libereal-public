@@ -87,15 +87,10 @@ export default function SceneResourceExplorer({ protocols, analysisSoftware = []
           <span>
             <span className={`flex items-center gap-2 font-medium ${sceneSurfaceClasses.text}`}>
               {faviconUrl ? (
-                <img
-                  src={faviconUrl}
-                  alt=""
+                <span
                   aria-hidden="true"
-                  className="h-4 w-4 flex-shrink-0 rounded-sm"
-                  loading="lazy"
-                  onError={(event) => {
-                    event.currentTarget.style.display = 'none';
-                  }}
+                  className="h-4 w-4 flex-shrink-0 rounded-sm bg-contain bg-center bg-no-repeat"
+                  style={{ backgroundImage: `url("${faviconUrl}")` }}
                 />
               ) : null}
               <span>{item.label}</span>

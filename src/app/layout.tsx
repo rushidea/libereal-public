@@ -19,6 +19,7 @@ import {
   SITE_BRAND_NAME,
   SITE_DISPLAY_NAME,
   SITE_HOME_DESCRIPTION,
+  SITE_HOME_TITLE,
   SITE_LEGAL_NAME,
 } from "@/lib/seo/site-identity";
 import { getCanonicalSiteOrigin } from "@/lib/site-url";
@@ -29,7 +30,7 @@ const SITE_URL = getCanonicalSiteOrigin();
 export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),
   title: {
-    default: SITE_DISPLAY_NAME,
+    default: SITE_HOME_TITLE,
     template: '%s | LIBEREAL',
   },
   description: SITE_HOME_DESCRIPTION,
@@ -61,7 +62,7 @@ export const metadata: Metadata = {
     locale: "zh_CN",
     url: SITE_URL,
     siteName: SITE_DISPLAY_NAME,
-    title: SITE_DISPLAY_NAME,
+    title: SITE_HOME_TITLE,
     description: SITE_HOME_DESCRIPTION,
     images: [
       {
@@ -74,7 +75,7 @@ export const metadata: Metadata = {
   },
   twitter: {
     card: "summary_large_image",
-    title: SITE_DISPLAY_NAME,
+    title: SITE_HOME_TITLE,
     description: SITE_HOME_DESCRIPTION,
     images: ["/og-image.jpg"],
   },
