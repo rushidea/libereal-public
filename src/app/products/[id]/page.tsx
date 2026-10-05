@@ -17,6 +17,7 @@ import { buildBreadcrumbListJsonLd, buildProductJsonLd } from '@/lib/seo/json-ld
 import { productCanonicalPath } from '@/lib/seo/public-urls';
 import { noindexFollowRobots } from '@/lib/seo/robots';
 import { canonicalSiteUrl } from '@/lib/site-url';
+import { buildProductSeoTitle } from '@/lib/seo/product-title';
 import ProductDetailClient from './ProductDetailClient';
 import { Product } from '@/types/Product';
 import AdaptiveHeader from '@/components/AdaptiveHeader';
@@ -132,7 +133,7 @@ export async function generateMetadata({ params, searchParams }: PageProps): Pro
 
   if (!product) notFound();
 
-  const title = `${product.name} | ${product.brand} Cat#${product.catalogNumber}`;
+  const title = buildProductSeoTitle(product.name, product.brand, product.catalogNumber);
   const description =
     product.description?.trim() ||
     `${product.brand} ${product.name}（货号 ${product.catalogNumber}）${product.category ? `，${product.category}` : ''}${product.target ? `，靶点 ${product.target}` : ''}。LIBEREAL 生物试剂采购平台。`;
