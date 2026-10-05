@@ -36,7 +36,7 @@ describe('robots.txt for Bing and Sogou', () => {
     expect(body).toContain('Disallow: /reset-password');
     expect(body).toContain('Disallow: /forgot-password');
     expect(body).toContain('Sitemap: https://libereal.cn/sitemap.xml');
-    expect(body).toContain('Host: https://libereal.cn');
+    expect(body).not.toMatch(/^Host:/m);
   });
 
   it('serves the generated robots.txt as plain text', async () => {

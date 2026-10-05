@@ -103,4 +103,3 @@ Disallow: /reset-password
 Disallow: /forgot-password
 
 Sitemap: https://libereal.cn/sitemap.xml
-Host: https://libereal.cn
