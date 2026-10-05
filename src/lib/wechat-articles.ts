@@ -1,18 +1,12 @@
 import 'server-only';
 import { readdirSync, readFileSync } from 'fs';
 import { join } from 'path';
-import MarkdownIt from 'markdown-it';
 import type { WechatArticle, WechatArticleMeta } from '@/data/wechat-articles';
+import { renderArticleMarkdown } from '@/lib/seo/article-markdown';
 
 const ARTICLES_DIR = join(process.cwd(), 'content', 'wechat');
 /** 仅以三位数字编号开头的 .md 文件视为文章，排除 CONTENT-CALENDAR.md 等辅助文件。 */
 const ARTICLE_FILE_PATTERN = /^\d{3,}-[a-z0-9-]+\.md$/;
-
-const md = new MarkdownIt({
-  html: false,
-  linkify: true,
-  typographer: false,
-});
 
 type ParsedFrontMatter = {
   data: Record<string, string>;
@@ -112,7 +106,7 @@ function loadArticle(fileName: string): WechatArticle | null {
   if (!meta) return null;
   // 正文开头的 H1 与 frontmatter title 重复，页面已有自己的 <h1>，渲染时去掉。
   const bodyWithoutTitleH1 = parsed.body.replace(/^#{1}\s+.+\n?/, '');
-  const contentHtml = resolveImagePaths(md.render(bodyWithoutTitleH1), slug);
+  const contentHtml = resolveImagePaths(renderArticleMarkdown(bodyWithoutTitleH1), slug);
   return { ...meta, contentHtml };
 }
 
