@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import { connection } from 'next/server';
 import { canonicalSiteUrl } from '@/lib/site-url';
 
 export const revalidate = 3600;
@@ -12,6 +13,8 @@ export const metadata: Metadata = {
   },
 };
 
-export default function BrandsLayout({ children }: { children: React.ReactNode }) {
+export default async function BrandsLayout({ children }: { children: React.ReactNode }) {
+  // The directory uses useSearchParams: render its heading on incoming requests.
+  await connection();
   return children;
 }

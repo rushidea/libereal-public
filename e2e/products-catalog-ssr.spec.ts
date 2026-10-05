@@ -28,3 +28,24 @@ test.describe('products catalog server-rendered heading', () => {
     expect(heading).toContain('ssr-heading-probe');
   });
 });
+
+test.describe('support server-rendered heading', () => {
+  test('returns the support H1 in raw HTML for the base and tool tab URLs', async ({ request }) => {
+    for (const path of ['/support', '/support?tab=calculators', '/support?tab=spectra', '/support?tab=buffers']) {
+      const response = await request.get(path);
+      expect(response.ok(), path).toBeTruthy();
+
+      const html = await response.text();
+      const heading = html.match(/<h1\b[^>]*>([\s\S]*?)<\/h1>/i)?.[1] ?? '';
+      expect(heading, `raw HTML H1 for ${path}`).toContain('实验与支持');
+    }
+  });
+});
+
+test('returns the brand directory heading without client JavaScript', async ({ request }) => {
+  const response = await request.get('/brands');
+  expect(response.ok()).toBeTruthy();
+  const html = await response.text();
+  const heading = html.match(/<h1\b[^>]*>([\s\S]*?)<\/h1>/i)?.[1] ?? '';
+  expect(heading).toContain('品牌中心');
+});
