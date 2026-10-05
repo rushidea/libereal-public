@@ -65,7 +65,9 @@ export async function buildPagesSitemapEntries(): Promise<SitemapUrlEntry[]> {
     }
   }
   for (const [loc, lastModified] of brandLocs) {
-    entries.push({ loc, lastModified });
+    const existing = entries.find((entry) => entry.loc === loc);
+    if (existing) existing.lastModified = lastModified;
+    else entries.push({ loc, lastModified });
   }
 
   for (const scene of scenes) {
