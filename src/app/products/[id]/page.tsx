@@ -413,6 +413,7 @@ export default async function ProductDetailPage({ params, searchParams }: PagePr
         ])}
       />
       <ProductDetailClient
+        key={canonicalPath}
         product={displayProduct}
         variants={displayVariants as Product[]}
         related={displayRelated as Product[]}
