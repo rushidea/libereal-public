@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, useEffect, useMemo } from 'react';
+import { useState, useCallback, useEffect, useMemo, useRef, type KeyboardEvent } from 'react';
 import { getProductCartKey, useCart } from '@/context/CartContext';
 import Link from 'next/link';
 import Image from 'next/image';
@@ -28,6 +28,7 @@ import { PROMOTION_RULES } from '@/lib/cart-promotions/rules';
 import { getRuleLifecycle } from '@/lib/cart-promotions/lifecycle';
 import type { AddonRuleConfig } from '@/lib/cart-promotions/types';
 import { getProductFulfillmentPresentation } from '@/lib/product-fulfillment';
+import { productCanonicalPath } from '@/lib/seo/public-urls';
 
 interface ProductDetailClientProps {
   product: Product;
@@ -101,6 +102,7 @@ export default function ProductDetailClient({ product, variants, related }: Prod
       : [product, ...variants]
   ).filter((variant) => variant.catalogNumber);
   const hasVariants = allVariants.length > 1;
+  const variantOptionRefs = useRef<Array<HTMLButtonElement | null>>([]);
 
   const [selectedVariant, setSelectedVariant] = useState<Product>(() => {
     if (!usePackageOptions) return product;
@@ -115,10 +117,9 @@ export default function ProductDetailClient({ product, variants, related }: Prod
   });
   const selectedCartKey = getProductCartKey(selectedVariant);
   const inCart = isInCart(selectedCartKey);
-  // 方案③：展示价由服务端预计算（displayPrice）；非正式会员的变体无价格时回退到主商品展示价
+  // A missing server display price must not borrow another SKU’s price.
   const selectedDisplay =
     selectedVariant.displayPrice ??
-    product.displayPrice ??
     { salePrice: 0, showGuestDiscount: false, isPromo: false, hasPrice: false };
   const selectedPrice = selectedDisplay.salePrice;
   const selectedHasPrice = selectedDisplay.hasPrice;
@@ -148,7 +149,28 @@ export default function ProductDetailClient({ product, variants, related }: Prod
   }, [router]);
 
   const handleVariantChange = (variant: Product) => {
+    if (!variant.variantId && variant.catalogNumber !== product.catalogNumber) {
+      // Keep the old route's body intact until the server supplies this SKU's
+      // price, metadata and JSON-LD. Packaging rows remain on the parent PDP.
+      router.replace(productCanonicalPath(variant.catalogNumber, variant.brand));
+      return;
+    }
     setSelectedVariant(variant);
+  };
+
+  const handleVariantKeyDown = (event: KeyboardEvent<HTMLButtonElement>, index: number) => {
+    if (!['ArrowRight', 'ArrowDown', 'ArrowLeft', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
+    event.preventDefault();
+    const lastIndex = allVariants.length - 1;
+    const nextIndex = event.key === 'Home'
+      ? 0
+      : event.key === 'End'
+        ? lastIndex
+        : ['ArrowRight', 'ArrowDown'].includes(event.key)
+          ? (index + 1) % allVariants.length
+          : (index - 1 + allVariants.length) % allVariants.length;
+    handleVariantChange(allVariants[nextIndex]);
+    variantOptionRefs.current[nextIndex]?.focus();
   };
 
   const handleL1Click = (idx: number) => {
@@ -552,6 +574,9 @@ export default function ProductDetailClient({ product, variants, related }: Prod
                           <button
                             key={optionKey}
                             type="button"
+                            aria-pressed={isSelected}
+                            ref={(element) => { variantOptionRefs.current[allVariants.indexOf(v)] = element; }}
+                            onKeyDown={(event) => handleVariantKeyDown(event, allVariants.indexOf(v))}
                             onClick={() => handleVariantChange(v)}
                             className={`px-4 py-2 rounded-xl text-sm font-medium transition-all ${
  isSelected

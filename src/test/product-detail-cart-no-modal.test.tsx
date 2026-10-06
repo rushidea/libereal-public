@@ -173,6 +173,72 @@ describe('ProductDetailClient add to cart', () => {
     }));
   });
 
+  const routeProduct: Product = {
+    id: 'route-base', brand: 'Sample', catalogNumber: 'SAMPLE-S', name: 'Sample reagent',
+    spec: '100 mL', price: 55, inStock: true,
+    displayPrice: { salePrice: 55, showGuestDiscount: false, isPromo: false, hasPrice: true },
+  };
+
+  it('does not borrow the parent price for an undisclosed guest packaging option', () => {
+    const hiddenOption: Product = {
+      id: 'hidden-package', variantId: 'hidden-package', brand: 'Sample',
+      catalogNumber: 'SAMPLE-HIDDEN', name: 'Sample reagent', spec: '500 mL', inStock: true,
+    };
+    render(<ProductDetailClient product={{ ...routeProduct, price: undefined }} variants={[hiddenOption]} related={[]} />);
+    fireEvent.click(screen.getByRole('button', { name: /500 mL/ }));
+    expect(screen.getByText('待报价')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /500 mL/ })).toHaveTextContent('登录查看');
+    expect(screen.getAllByText('¥55.00')).toHaveLength(1); // only the unselected base option
+    expect(router.replace).not.toHaveBeenCalled();
+  });
+
+  it('navigates a standalone SKU using encoded product and brand without changing the old route body', () => {
+    const standalone: Product = {
+      id: 'route-other', brand: 'Sample Brand', catalogNumber: 'SAMPLE/T',
+      name: 'Sample trial', spec: '20 mL', inStock: true,
+    };
+    render(<ProductDetailClient product={routeProduct} variants={[standalone]} related={[]} />);
+    fireEvent.click(screen.getByRole('button', { name: /20 mL/ }));
+    expect(router.replace).toHaveBeenCalledWith('/products/SAMPLE%2FT?brand=Sample%20Brand');
+    expect(screen.getByText('SAMPLE-S')).toBeInTheDocument();
+    expect(screen.queryByText('SAMPLE/T')).not.toBeInTheDocument();
+  });
+
+  it('uses only the directly loaded SKU display price and preserves an explicit unknown price', () => {
+    const direct: Product = {
+      ...routeProduct, id: 'route-trial', catalogNumber: 'SAMPLE-T', spec: '20 mL',
+      displayPrice: { salePrice: 18, showGuestDiscount: false, isPromo: false, hasPrice: true },
+    };
+    const { unmount } = render(<ProductDetailClient product={direct} variants={[]} related={[]} />);
+    expect(screen.getByText('SAMPLE-T')).toBeInTheDocument();
+    expect(screen.getByText('¥18.00')).toBeInTheDocument();
+    unmount();
+    render(<ProductDetailClient product={{ ...direct, displayPrice: { salePrice: 18, showGuestDiscount: false, isPromo: false, hasPrice: false } }} variants={[]} related={[]} />);
+    expect(screen.getByText('待报价')).toBeInTheDocument();
+    expect(screen.queryByText('¥18.00')).not.toBeInTheDocument();
+  });
+
+  it('supports keyboard packaging selection without navigating and reports its selected state', () => {
+    const memberOption: Product = {
+      ...routeProduct, id: 'member-option', variantId: 'member-option',
+      catalogNumber: 'SAMPLE-PACK', spec: '500 mL', price: 90,
+      displayPrice: { salePrice: 90, showGuestDiscount: false, isPromo: false, hasPrice: true },
+    };
+    render(<ProductDetailClient product={routeProduct} variants={[memberOption]} related={[]} />);
+    const base = screen.getByRole('button', { name: /100 mL/ });
+    fireEvent.keyDown(base, { key: 'ArrowRight' });
+    expect(screen.getByRole('button', { name: /500 mL/ })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getAllByText('¥90.00')).toHaveLength(2);
+    expect(router.replace).not.toHaveBeenCalled();
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: /500 mL/ }));
+    fireEvent.keyDown(document.activeElement!, { key: 'Home' });
+    expect(base).toHaveAttribute('aria-pressed', 'true');
+    fireEvent.keyDown(base, { key: 'ArrowLeft' });
+    expect(screen.getByRole('button', { name: /500 mL/ })).toHaveAttribute('aria-pressed', 'true');
+    fireEvent.keyDown(document.activeElement!, { key: 'End' });
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: /500 mL/ }));
+  });
+
   it('缺货规格显示货期并禁用采购动作', () => {
     render(
       <ProductDetailClient
