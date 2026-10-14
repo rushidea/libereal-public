@@ -1,8 +1,12 @@
 import type { Prisma } from '@prisma/client';
 
 /**
+ * 顾客端商品查询的可见性条件。
  * 危险化学品（hazardous = true）仅后台可见。
- * 顾客端所有商品查询（列表、搜索、详情、推荐、促销、筛选计数）都必须附带该条件，
- * 确保危化品从前端完全下架，而数据库记录与后台管理不受影响。
+ * 已软删除（deletedAt 非空）的商品从顾客端下架，订单、报价和库存记录仍保留。
+ * 顾客端列表、搜索、详情、推荐和筛选计数应附带该条件。
  */
-export const STOREFRONT_HIDDEN_HAZARDOUS: Prisma.ProductWhereInput = { hazardous: false };
+export const STOREFRONT_HIDDEN_HAZARDOUS: Prisma.ProductWhereInput = {
+  hazardous: false,
+  deletedAt: null,
+};

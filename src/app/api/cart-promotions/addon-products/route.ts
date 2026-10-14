@@ -3,6 +3,7 @@ import { prisma } from '@/lib/prisma';
 import { CART_ADDON_RULES } from '@/lib/cart-promotions/rules';
 import { isRuleActive } from '@/lib/cart-promotions/detect';
 import { attachDisplayPrices, resolveIsFormalMember } from '@/lib/product-display';
+import { STOREFRONT_HIDDEN_HAZARDOUS } from '@/lib/product-visibility';
 
 export const dynamic = 'force-dynamic';
 
@@ -21,7 +22,7 @@ export async function GET(req: NextRequest) {
         ...(rule.addonBrand ? [{ brand: rule.addonBrand }] : []),
         { inStock: true },
         { pricingMode: 'fixed' },
-        { hazardous: false },
+        STOREFRONT_HIDDEN_HAZARDOUS,
         { price: { gt: 0 } },
       ],
     },

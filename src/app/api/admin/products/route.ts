@@ -11,11 +11,14 @@ import {
   replaceGeneratedProductRecords,
 } from '@/lib/product-catalog-records';
 import { setActualInventory } from '@/lib/inventory';
+import { parseExplicitStockQuantity } from '@/lib/admin-product-stock';
 import { requireAdmin } from '@/lib/session';
 import { writeAuditLog } from '@/lib/audit';
 import { ProductSearchService } from '@/lib/product-search';
 
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
+const STOCK_QUANTITY_ERROR = '库存数量无效。请填写整数，0 表示无库存，-1 表示不限库存。';
+const STOCK_STATUS_ERROR = '库存数量为 0 时不能标为有货。请把数量改为大于 0，或改为 -1（不限库存）。';
+
 export async function GET(req: NextRequest) {
   const admin = await requireAdmin('products.read');
   if (admin instanceof NextResponse) return admin;
@@ -47,13 +50,14 @@ export async function GET(req: NextRequest) {
       prisma.product.findMany({
         select: { brand: true },
         distinct: ['brand'],
+        where: { deletedAt: null },
       }),
       prisma.product.findMany({
         select: { category: true },
         distinct: ['category'],
-        where: { category: { not: null } },
+        where: { deletedAt: null, category: { not: null } },
       }),
-      prisma.product.count(),
+      prisma.product.count({ where: { deletedAt: null } }),
     ]);
 
     const stats = {
@@ -113,6 +117,10 @@ function nullablePackageType(value: unknown): string | null {
   return VARIANT_PACKAGE_TYPES.has(text) ? text : null;
 }
 
+function hasField(body: Record<string, unknown>, key: string): boolean {
+  return Object.prototype.hasOwnProperty.call(body, key);
+}
+
 function positiveIntOrDefault(value: unknown, fallback: number): number {
   const number = typeof value === 'number' ? value : Number(value);
   return Number.isInteger(number) && number >= 1 ? number : fallback;
@@ -152,120 +160,165 @@ function variantsCarryInternalPricing(variants: VariantInput[] | null): boolean 
   return !!variants && variants.some((item) => item.costPrice !== null || item.minimumSalePrice !== null);
 }
 
+const GENERATED_RECORD_FIELDS = ['target', 'host', 'cloneNumber', 'purity', 'concentration', 'applications', 'reactivity', 'cofaUrl', 'sdsUrl'] as const;
+
 export async function PUT(req: NextRequest) {
   const admin = await requireAdmin('products.write');
   if (admin instanceof NextResponse) return admin;
 
   try {
-    const body = await req.json();
+    const payload = await req.json();
+    if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+      return NextResponse.json({ error: '请求内容格式无效' }, { status: 400 });
+    }
+    const body = payload as Record<string, unknown>;
     const id = typeof body.id === 'string' ? body.id : '';
     if (!id) {
       return NextResponse.json({ error: 'Missing product id' }, { status: 400 });
     }
+    if (hasField(body, 'catalogNumber') && !String(body.catalogNumber ?? '').trim()) {
+      return NextResponse.json({ error: 'Catalog number, name and brand are required' }, { status: 400 });
+    }
+    if (hasField(body, 'name') && !String(body.name ?? '').trim()) {
+      return NextResponse.json({ error: 'Catalog number, name and brand are required' }, { status: 400 });
+    }
+    if (hasField(body, 'brand') && !String(body.brand ?? '').trim()) {
+      return NextResponse.json({ error: 'Catalog number, name and brand are required' }, { status: 400 });
+    }
 
-    const brand = String(body.brand ?? '').trim();
-    const category = nullableString(body.category);
-    const subcategory = nullableString(body.subcategory);
-    const applications = stringList(body.applications);
-    const reactivity = stringList(body.reactivity);
-    const price = numberOrDefault(body.price, 0);
-    const originalPrice = nullableNumber(body.originalPrice);
-    const promotionalPrice = nullableNumber(body.promotionalPrice);
-    const costPrice = nullableNumber(body.costPrice);
-    const minimumSalePrice = nullableNumber(body.minimumSalePrice);
     const variants = variantList(body.variants);
-    const requestedStockQuantity = Number.isInteger(Number(body.stockQuantity)) ? Number(body.stockQuantity) : -1;
     if (
-      ['price', 'originalPrice', 'promotionalPrice', 'costPrice', 'minimumSalePrice'].some((field) => Object.prototype.hasOwnProperty.call(body, field))
+      ['price', 'originalPrice', 'promotionalPrice', 'costPrice', 'minimumSalePrice'].some((field) => hasField(body, field))
       || variantsCarryInternalPricing(variants)
     ) {
       const pricingAdmin = await requireAdmin('pricing.write');
       if (pricingAdmin instanceof NextResponse) return pricingAdmin;
     }
-    if (Object.prototype.hasOwnProperty.call(body, 'stockQuantity')) {
+
+    let requestedStockQuantity: number | undefined;
+    if (hasField(body, 'stockQuantity')) {
       const inventoryAdmin = await requireAdmin('inventory.write');
       if (inventoryAdmin instanceof NextResponse) return inventoryAdmin;
+      const parsedStock = parseExplicitStockQuantity(body.stockQuantity);
+      if (parsedStock === null) {
+        return NextResponse.json({ error: STOCK_QUANTITY_ERROR }, { status: 400 });
+      }
+      requestedStockQuantity = parsedStock;
     }
-    const target = nullableString(body.target);
-    const host = nullableString(body.host);
-    const cloneNumber = nullableString(body.cloneNumber);
-    const purity = nullableString(body.purity);
-    const concentration = nullableString(body.concentration);
-    const cofaUrl = nullableString(body.cofaUrl);
-    const sdsUrl = nullableString(body.sdsUrl);
-
-    const data: Prisma.ProductUpdateInput = {
-      catalogNumber: String(body.catalogNumber ?? '').trim(),
-      name: String(body.name ?? '').trim(),
-      brand,
-      subBrand: nullableString(body.subBrand),
-      category,
-      subcategory,
-      type: nullableString(body.type),
-      spec: nullableString(body.spec),
-      target,
-      host,
-      price,
-      originalPrice,
-      promotionalPrice,
-      promotion: Boolean(body.promotion),
-      hazardous: Boolean(body.hazardous),
-      costPrice,
-      minimumSalePrice,
-      applications: JSON.stringify(applications),
-      reactivity: JSON.stringify(reactivity),
-      leadTime: nullableString(body.leadTime),
-      storageTemp: nullableString(body.storageTemp),
-      storageBuffer: nullableString(body.storageBuffer),
-      expiryDate: nullableString(body.expiryDate),
-      lotNumber: nullableString(body.lotNumber),
-      cloneNumber,
-      purity,
-      molecularWeight: nullableNumber(body.molecularWeight),
-      isoelectricPoint: nullableNumber(body.isoelectricPoint),
-      concentration,
-      cofaUrl,
-      sdsUrl,
-      pmids: JSON.stringify(stringList(body.pmids)),
-    };
-
-    if (!data.catalogNumber || !data.name || !data.brand) {
-      return NextResponse.json({ error: 'Catalog number, name and brand are required' }, { status: 400 });
+    let requestedInStock: boolean | undefined;
+    if (hasField(body, 'inStock')) {
+      if (typeof body.inStock !== 'boolean') {
+        return NextResponse.json({ error: '库存状态无效。请选择有货或缺货。' }, { status: 400 });
+      }
+      requestedInStock = body.inStock;
     }
+    if (requestedInStock === true && requestedStockQuantity === 0) {
+      return NextResponse.json({ error: STOCK_STATUS_ERROR }, { status: 400 });
+    }
+
+    const data: Prisma.ProductUpdateInput = {};
+    if (hasField(body, 'catalogNumber')) data.catalogNumber = String(body.catalogNumber ?? '').trim();
+    if (hasField(body, 'name')) data.name = String(body.name ?? '').trim();
+    if (hasField(body, 'brand')) data.brand = String(body.brand ?? '').trim();
+    if (hasField(body, 'subBrand')) data.subBrand = nullableString(body.subBrand);
+    if (hasField(body, 'category')) data.category = nullableString(body.category);
+    if (hasField(body, 'subcategory')) data.subcategory = nullableString(body.subcategory);
+    if (hasField(body, 'type')) data.type = nullableString(body.type);
+    if (hasField(body, 'spec')) data.spec = nullableString(body.spec);
+    if (hasField(body, 'target')) data.target = nullableString(body.target);
+    if (hasField(body, 'host')) data.host = nullableString(body.host);
+    if (hasField(body, 'price')) data.price = numberOrDefault(body.price, 0);
+    if (hasField(body, 'originalPrice')) data.originalPrice = nullableNumber(body.originalPrice);
+    if (hasField(body, 'promotionalPrice')) data.promotionalPrice = nullableNumber(body.promotionalPrice);
+    if (hasField(body, 'promotion')) data.promotion = Boolean(body.promotion);
+    if (hasField(body, 'hazardous')) data.hazardous = Boolean(body.hazardous);
+    if (hasField(body, 'costPrice')) data.costPrice = nullableNumber(body.costPrice);
+    if (hasField(body, 'minimumSalePrice')) data.minimumSalePrice = nullableNumber(body.minimumSalePrice);
+    if (hasField(body, 'applications')) data.applications = JSON.stringify(stringList(body.applications));
+    if (hasField(body, 'reactivity')) data.reactivity = JSON.stringify(stringList(body.reactivity));
+    if (hasField(body, 'filterTags')) data.filterTags = JSON.stringify(stringList(body.filterTags));
+    if (hasField(body, 'leadTime')) data.leadTime = nullableString(body.leadTime);
+    if (hasField(body, 'storageTemp')) data.storageTemp = nullableString(body.storageTemp);
+    if (hasField(body, 'storageBuffer')) data.storageBuffer = nullableString(body.storageBuffer);
+    if (hasField(body, 'expiryDate')) data.expiryDate = nullableString(body.expiryDate);
+    if (hasField(body, 'lotNumber')) data.lotNumber = nullableString(body.lotNumber);
+    if (hasField(body, 'cloneNumber')) data.cloneNumber = nullableString(body.cloneNumber);
+    if (hasField(body, 'purity')) data.purity = nullableString(body.purity);
+    if (hasField(body, 'molecularWeight')) data.molecularWeight = nullableNumber(body.molecularWeight);
+    if (hasField(body, 'isoelectricPoint')) data.isoelectricPoint = nullableNumber(body.isoelectricPoint);
+    if (hasField(body, 'concentration')) data.concentration = nullableString(body.concentration);
+    if (hasField(body, 'cofaUrl')) data.cofaUrl = nullableString(body.cofaUrl);
+    if (hasField(body, 'sdsUrl')) data.sdsUrl = nullableString(body.sdsUrl);
+    if (hasField(body, 'pmids')) data.pmids = JSON.stringify(stringList(body.pmids));
+
+    const generatedTouched = GENERATED_RECORD_FIELDS.some((field) => hasField(body, field));
+    const taxonomyTouched = hasField(body, 'brand') || hasField(body, 'category') || hasField(body, 'subcategory');
+    const priceTouched = ['price', 'originalPrice', 'promotionalPrice', 'costPrice', 'minimumSalePrice'].some((field) => hasField(body, field));
 
     const product = await prisma.$transaction(async (tx) => {
       const previous = await tx.product.findUnique({
         where: { id },
-        select: { price: true, originalPrice: true, promotionalPrice: true, costPrice: true, minimumSalePrice: true, stockQuantity: true },
-      });
-      if (!previous) throw new Error('Product not found');
-
-      const taxonomy = await ensureProductTaxonomy(tx, { brand, category, subcategory });
-      await tx.product.update({
-        where: { id },
-        data: {
-          ...data,
-          brandRecord: { connect: { id: taxonomy.brandId } },
-          categoryRecord: taxonomy.categoryId
-            ? { connect: { id: taxonomy.categoryId } }
-            : { disconnect: true },
-          subcategoryRecord: taxonomy.subcategoryId
-            ? { connect: { id: taxonomy.subcategoryId } }
-            : { disconnect: true },
+        select: {
+          deletedAt: true,
+          brand: true,
+          category: true,
+          subcategory: true,
+          target: true,
+          host: true,
+          cloneNumber: true,
+          purity: true,
+          concentration: true,
+          applications: true,
+          reactivity: true,
+          cofaUrl: true,
+          sdsUrl: true,
+          price: true,
+          originalPrice: true,
+          promotionalPrice: true,
+          costPrice: true,
+          minimumSalePrice: true,
+          stockQuantity: true,
         },
       });
+      if (!previous) throw new Error('Product not found');
+      if (previous.deletedAt) throw new Error('PRODUCT_DELETED');
+      if (requestedInStock === true && requestedStockQuantity === undefined && previous.stockQuantity === 0) {
+        throw new Error('STOCK_STATUS_CONFLICT');
+      }
 
-      await replaceGeneratedProductRecords(tx, id, {
-        target,
-        host,
-        cloneNumber,
-        purity,
-        concentration,
-        applications,
-        reactivity,
-        cofaUrl,
-        sdsUrl,
-      });
+      if (taxonomyTouched) {
+        const brandName = hasField(body, 'brand') ? String(body.brand ?? '').trim() : previous.brand;
+        const category = hasField(body, 'category') ? nullableString(body.category) : previous.category;
+        const subcategory = category
+          ? (hasField(body, 'subcategory') ? nullableString(body.subcategory) : previous.subcategory)
+          : null;
+        const taxonomy = await ensureProductTaxonomy(tx, { brand: brandName, category, subcategory });
+        data.brandRecord = { connect: { id: taxonomy.brandId } };
+        data.categoryRecord = taxonomy.categoryId
+          ? { connect: { id: taxonomy.categoryId } }
+          : { disconnect: true };
+        data.subcategoryRecord = taxonomy.subcategoryId
+          ? { connect: { id: taxonomy.subcategoryId } }
+          : { disconnect: true };
+      }
+
+      if (Object.keys(data).length > 0) {
+        await tx.product.update({ where: { id }, data });
+      }
+
+      if (generatedTouched) {
+        await replaceGeneratedProductRecords(tx, id, {
+          target: hasField(body, 'target') ? nullableString(body.target) : previous.target,
+          host: hasField(body, 'host') ? nullableString(body.host) : previous.host,
+          cloneNumber: hasField(body, 'cloneNumber') ? nullableString(body.cloneNumber) : previous.cloneNumber,
+          purity: hasField(body, 'purity') ? nullableString(body.purity) : previous.purity,
+          concentration: hasField(body, 'concentration') ? nullableString(body.concentration) : previous.concentration,
+          applications: hasField(body, 'applications') ? stringList(body.applications) : stringList(previous.applications),
+          reactivity: hasField(body, 'reactivity') ? stringList(body.reactivity) : stringList(previous.reactivity),
+          cofaUrl: hasField(body, 'cofaUrl') ? nullableString(body.cofaUrl) : previous.cofaUrl,
+          sdsUrl: hasField(body, 'sdsUrl') ? nullableString(body.sdsUrl) : previous.sdsUrl,
+        });
+      }
       if (variants) {
         const existing = await tx.productVariant.findMany({ where: { productId: id }, select: { id: true } });
         const existingIds = new Set(existing.map((item) => item.id));
@@ -291,23 +344,60 @@ export async function PUT(req: NextRequest) {
           }
         }
       }
-      await recordProductPriceChanges(
-        tx,
-        id,
-        previous,
-        { price, originalPrice, promotionalPrice, costPrice, minimumSalePrice },
-        admin.id,
-      );
-      if (requestedStockQuantity !== previous.stockQuantity) {
+      const nextPrices = {
+        price: hasField(body, 'price') ? numberOrDefault(body.price, 0) : previous.price,
+        originalPrice: hasField(body, 'originalPrice') ? nullableNumber(body.originalPrice) : previous.originalPrice,
+        promotionalPrice: hasField(body, 'promotionalPrice') ? nullableNumber(body.promotionalPrice) : previous.promotionalPrice,
+        costPrice: hasField(body, 'costPrice') ? nullableNumber(body.costPrice) : previous.costPrice,
+        minimumSalePrice: hasField(body, 'minimumSalePrice') ? nullableNumber(body.minimumSalePrice) : previous.minimumSalePrice,
+      };
+      if (priceTouched) {
+        await recordProductPriceChanges(tx, id, previous, nextPrices, admin.id);
+        const priceFieldsChanged = previous.price !== nextPrices.price
+          || previous.originalPrice !== nextPrices.originalPrice
+          || previous.promotionalPrice !== nextPrices.promotionalPrice
+          || previous.costPrice !== nextPrices.costPrice
+          || previous.minimumSalePrice !== nextPrices.minimumSalePrice;
+        if (priceFieldsChanged) {
+          await writeAuditLog({
+            actorId: admin.id,
+            actorEmail: admin.email,
+            action: 'product.price_changed',
+            resource: 'pricing',
+            targetType: 'Product',
+            targetId: id,
+            before: {
+              price: previous.price,
+              originalPrice: previous.originalPrice,
+              promotionalPrice: previous.promotionalPrice,
+              costPrice: previous.costPrice,
+              minimumSalePrice: previous.minimumSalePrice,
+            },
+            after: nextPrices,
+            reason: typeof body.reason === 'string' ? body.reason : '商品资料更新',
+          }, tx);
+        }
+      }
+      let quantity = previous.stockQuantity;
+      if (requestedStockQuantity !== undefined && requestedStockQuantity !== previous.stockQuantity) {
         await setActualInventory(tx, {
           productId: id,
           actualQuantity: requestedStockQuantity,
           reason: '商品管理人工调整库存',
           actorId: admin.id,
         });
+        const refreshed = await tx.product.findUniqueOrThrow({ where: { id }, select: { stockQuantity: true } });
+        quantity = refreshed.stockQuantity;
       }
-      const priceFieldsChanged = previous.price !== price || previous.originalPrice !== originalPrice || previous.promotionalPrice !== promotionalPrice || previous.costPrice !== costPrice || previous.minimumSalePrice !== minimumSalePrice;
-      if (priceFieldsChanged) await writeAuditLog({ actorId: admin.id, actorEmail: admin.email, action: 'product.price_changed', resource: 'pricing', targetType: 'Product', targetId: id, before: previous, after: { price, originalPrice, promotionalPrice, costPrice, minimumSalePrice }, reason: typeof body.reason === 'string' ? body.reason : '商品资料更新' }, tx);
+      if (requestedInStock !== undefined) {
+        if (requestedInStock && quantity === 0) throw new Error('STOCK_STATUS_CONFLICT');
+        // Apply after setActualInventory. That helper mirrors availability back onto
+        // inStock, and an explicit 缺货 choice has to win unless the quantity is 0.
+        await tx.product.update({
+          where: { id },
+          data: { inStock: quantity === 0 ? false : requestedInStock },
+        });
+      }
       return tx.product.findUniqueOrThrow({ where: { id }, select: { ...PRODUCT_ADMIN_LIST_SELECT, variants: { orderBy: { catalogNumber: 'asc' } } } });
     });
     invalidateProductFilters();
@@ -326,9 +416,12 @@ export async function PUT(req: NextRequest) {
   } catch (err) {
     console.error('[admin/products PUT] error:', err);
     const message = err instanceof Error ? err.message : '';
+    if (message === 'PRODUCT_DELETED') return NextResponse.json({ error: '该产品已删除，不能再修改。' }, { status: 409 });
+    if (message === 'STOCK_STATUS_CONFLICT') return NextResponse.json({ error: STOCK_STATUS_ERROR }, { status: 400 });
     if (message === 'INVENTORY_BELOW_RESERVED') return NextResponse.json({ error: message }, { status: 409 });
     if (message === 'INVALID_INVENTORY_QUANTITY') return NextResponse.json({ error: message }, { status: 400 });
     if (message === 'INVALID_VARIANTS' || message === 'DUPLICATE_VARIANT_CATALOG') return NextResponse.json({ error: message }, { status: 400 });
+    if (message === 'Product not found') return NextResponse.json({ error: '产品不存在或已删除' }, { status: 404 });
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }

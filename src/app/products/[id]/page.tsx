@@ -55,6 +55,7 @@ const productDetailSelect = {
   speciesPredicted: true,
   inStock: true,
   stockQuantity: true,
+  deletedAt: true,
   leadTime: true,
   imageUrl: true,
   casNumber: true,
@@ -87,13 +88,17 @@ async function findProductForDetail(id: string, brand?: string): Promise<{
     select: productDetailSelect,
   });
 
+  if (productById?.deletedAt) {
+    return { product: null, choices: [] };
+  }
+
   if (productById && !productById.hazardous && (!brand || productById.brand === brand)) {
     return { product: productById, choices: [] };
   }
 
   const products = await prisma.product.findMany({
     where: {
-      hazardous: false,
+      ...STOREFRONT_HIDDEN_HAZARDOUS,
       ...(brand ? { brand } : {}),
       catalogNumber: id,
     },

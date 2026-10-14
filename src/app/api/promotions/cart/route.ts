@@ -22,14 +22,15 @@ export async function POST(req: NextRequest) {
         const variantId = typeof item.variantId === 'string' ? item.variantId : null;
         type Product = { id: string; catalogNumber: string };
         if (variantId) {
-          const variant = db.prepare(`SELECT v.id, v.productId, p.catalogNumber FROM ProductVariant v JOIN Product p ON p.id=v.productId
-            WHERE v.id=? AND p.hazardous=0`).get(variantId) as { id: string; productId: string; catalogNumber: string } | undefined;
+          const variant = db.prepare(`SELECT v.id, v.productId, p.catalogNumber, p.deletedAt AS deletedAt FROM ProductVariant v JOIN Product p ON p.id=v.productId
+            WHERE v.id=? AND p.hazardous=0`).get(variantId) as { id: string; productId: string; catalogNumber: string; deletedAt: string | null } | undefined;
           if (!variant || (productId && productId !== variant.productId && productId !== variant.catalogNumber)) throw new Error('INVALID_PROMOTION_VARIANT');
+          if (variant.deletedAt) return { id: String(index), productId: '', variantId: null };
           return { id: String(index), productId: variant.productId, variantId: variant.id };
         }
-        let product = db.prepare('SELECT id,catalogNumber FROM Product WHERE id=? AND hazardous=0').get(productId) as Product | undefined;
+        let product = db.prepare('SELECT id,catalogNumber FROM Product WHERE id=? AND hazardous=0 AND deletedAt IS NULL').get(productId) as Product | undefined;
         if (!product) {
-          const matches = db.prepare('SELECT id,catalogNumber FROM Product WHERE catalogNumber=? AND brand=? AND hazardous=0 LIMIT 2').all(catalog || productId, brand) as Product[];
+          const matches = db.prepare('SELECT id,catalogNumber FROM Product WHERE catalogNumber=? AND brand=? AND hazardous=0 AND deletedAt IS NULL LIMIT 2').all(catalog || productId, brand) as Product[];
           if (matches.length === 1) product = matches[0];
         }
         return { id: String(index), productId: product?.id ?? '', variantId: null };

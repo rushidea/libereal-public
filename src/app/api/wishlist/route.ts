@@ -32,13 +32,14 @@ export async function GET() {
             spec: true,
             imageUrl: true,
             inStock: true,
+            deletedAt: true,
           },
         },
       },
     });
 
     // Reshape to flat structure matching previous SQL response
-    const flat = items.map((w) => ({
+    const flat = items.filter((w) => !w.product.deletedAt).map((w) => ({
       wishlistId: w.id,
       addedAt: w.createdAt,
       id: w.product.id,
@@ -82,9 +83,9 @@ export async function POST(req: NextRequest) {
     // Verify product exists
     const product = await prisma.product.findUnique({
       where: { id: productId },
-      select: { id: true },
+      select: { id: true, deletedAt: true },
     });
-    if (!product) {
+    if (!product || product.deletedAt) {
       return NextResponse.json({ error: 'Product not found' }, { status: 404 });
     }
 

@@ -1,11 +1,12 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useSession } from 'next-auth/react';
 import Link from 'next/link';
 
 import { Search, Eye, X, Plus, Trash2, SlidersHorizontal } from 'lucide-react';
 import { productCategories } from '@/data/categories';
+import { stockQuantityFromInput } from '@/lib/admin-product-stock';
 import { uiSurfaces } from '@/lib/ui-surfaces';
 
 interface AdminProduct {
@@ -100,6 +101,11 @@ function ProductsPanel() {
   const [editForm, setEditForm] = useState<Partial<AdminProduct>>({});
   const [loadingProducts, setLoadingProducts] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [detailStatus, setDetailStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
+  const [detailError, setDetailError] = useState('');
+  const [stockDraft, setStockDraft] = useState<string | null>(null);
+  const detailRequestRef = useRef(0);
   const [filteredTotal, setFilteredTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(80);
@@ -139,17 +145,35 @@ function ProductsPanel() {
   const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
 
   const handleEdit = async (product: AdminProduct) => {
+    const requestId = ++detailRequestRef.current;
     setSelectedProduct(product);
-    setEditForm({ ...product });
-    const response = await fetch(`/api/admin/products/${product.id}`);
-    if (response.ok) {
-      const data = await response.json();
-      setEditForm(data.product as AdminProduct);
+    setStockDraft(null);
+    setEditForm({ ...product, ...(product.stockQuantity === 0 ? { inStock: false } : {}) });
+    setDetailStatus('loading');
+    setDetailError('');
+    try {
+      const response = await fetch(`/api/admin/products/${product.id}`);
+      const data = await response.json().catch(() => ({}));
+      if (requestId !== detailRequestRef.current) return;
+      if (!response.ok || !data.product) {
+        setDetailStatus('error');
+        setDetailError('产品详情加载失败，请关闭后重试。详情加载完成前不能保存，以免清空未显示的资料。');
+        return;
+      }
+      const detail = data.product as AdminProduct;
+      if (detail.stockQuantity === 0) detail.inStock = false;
+      setStockDraft(null);
+      setEditForm(detail);
+      setDetailStatus('ready');
+    } catch {
+      if (requestId !== detailRequestRef.current) return;
+      setDetailStatus('error');
+      setDetailError('产品详情加载失败，请关闭后重试。详情加载完成前不能保存，以免清空未显示的资料。');
     }
   };
 
   const handleSave = async () => {
-    if (!selectedProduct) return;
+    if (!selectedProduct || detailStatus !== 'ready') return;
     setSaving(true);
     try {
       const res = await fetch('/api/admin/products', {
@@ -159,11 +183,12 @@ function ProductsPanel() {
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        throw new Error(data.error || '保存失败');
+        throw new Error(typeof data.error === 'string' ? data.error : '保存失败');
       }
       const saved = data.product as AdminProduct;
       setProducts((current) => current.map((p) => (p.id === saved.id ? saved : p)));
       setSelectedProduct(null);
+      setDetailStatus('idle');
       alert('产品信息已保存');
     } catch (err) {
       alert(err instanceof Error ? err.message : '保存失败');
@@ -172,12 +197,26 @@ function ProductsPanel() {
     }
   };
 
-  const handleDelete = (id: string) => {
-    if (!confirm('确定删除该产品？')) return;
-    const updated = products.filter(p => p.id !== id);
-    setProducts(updated);
-    (window as { __ADMIN_PRODUCTS__?: AdminProduct[] }).__ADMIN_PRODUCTS__ = updated;
-    if (selectedProduct?.id === id) setSelectedProduct(null);
+  const handleDelete = async (id: string) => {
+    if (!confirm('确定删除该产品？删除后前台和后台列表不再显示，已有订单、报价和库存记录会保留。')) return;
+    setDeleting(true);
+    try {
+      const res = await fetch(`/api/admin/products/${id}`, { method: 'DELETE' });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const error = typeof data.error === 'string' ? data.error : '';
+        throw new Error(error === 'Forbidden' ? '没有权限删除该产品。' : error || '删除失败，请稍后重试。');
+      }
+      setProducts((current) => current.filter((product) => product.id !== id));
+      if (selectedProduct?.id === id) {
+        setSelectedProduct(null);
+        setDetailStatus('idle');
+      }
+    } catch (err) {
+      alert(err instanceof Error ? err.message : '删除失败，请稍后重试。');
+    } finally {
+      setDeleting(false);
+    }
   };
 
   if (status === 'loading') {
@@ -337,6 +376,10 @@ function ProductsPanel() {
               <button onClick={() => setSelectedProduct(null)} className="p-1 text-gray-400 hover:text-gray-600"><X className="w-5 h-5" /></button>
             </div>
             <div className="px-5 py-4 space-y-4">
+              {detailStatus === 'loading' && <p className="text-sm text-gray-500">正在加载产品详情...</p>}
+              {detailStatus === 'error' && (
+                <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700" role="alert">{detailError}</p>
+              )}
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs text-gray-500 mb-1">货号</label>
@@ -446,9 +489,9 @@ function ProductsPanel() {
                   )}
                 </div>
                 <div>
-                  <label className="block text-xs text-gray-500 mb-1">库存</label>
-                  <select value={editForm.inStock ? 'true' : 'false'} onChange={e => setEditForm(editForm => ({...editForm, inStock: e.target.value === 'true'}))} className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white">
-                    <option value="true">有货</option>
+                  <label className="block text-xs text-gray-500 mb-1" htmlFor="admin-product-stock-status">库存</label>
+                  <select id="admin-product-stock-status" aria-label="库存状态" value={editForm.inStock ? 'true' : 'false'} onChange={e => setEditForm(editForm => ({...editForm, inStock: e.target.value === 'true'}))} className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white">
+                    <option value="true" disabled={(editForm.stockQuantity ?? -1) === 0}>有货</option>
                     <option value="false">缺货</option>
                   </select>
                 </div>
@@ -574,8 +617,31 @@ function ProductsPanel() {
                   <input value={editForm.concentration || ''} onChange={e => setEditForm(editForm => ({...editForm, concentration: e.target.value}))} className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm" />
                 </div>
                 <div>
-                  <label className="block text-xs text-gray-500 mb-1">库存数量 (-1=无限)</label>
-                  <input type="number" value={editForm.stockQuantity ?? -1} onChange={e => setEditForm(editForm => ({...editForm, stockQuantity: parseInt(e.target.value) || -1}))} className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm" />
+                  <label className="block text-xs text-gray-500 mb-1" htmlFor="admin-product-stock-quantity">库存数量 (-1=无限)</label>
+                  <input
+                    id="admin-product-stock-quantity"
+                    type="number"
+                    step={1}
+                    aria-label="库存数量"
+                    value={stockDraft ?? (editForm.stockQuantity ?? -1)}
+                    onBlur={() => setStockDraft(null)}
+                    onChange={e => {
+                      const raw = e.target.value;
+                      const parsed = stockQuantityFromInput(raw);
+                      if (parsed === undefined) {
+                        if (raw === '' || raw === '-' || raw === '+') setStockDraft(raw);
+                        return;
+                      }
+                      setStockDraft(null);
+                      setEditForm(editForm => ({
+                        ...editForm,
+                        stockQuantity: parsed,
+                        ...(parsed === 0 ? { inStock: false } : {}),
+                      }));
+                    }}
+                    className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm"
+                  />
+                  <p className="mt-1 text-xs text-gray-500">0 表示无库存。-1 表示不限库存，仍可标为缺货。</p>
                 </div>
                 <div>
                   <label className="block text-xs text-gray-500 mb-1">CoA 证书 URL</label>
@@ -591,11 +657,11 @@ function ProductsPanel() {
                 </div>
               </div>
               <div className="flex items-center justify-between pt-2">
-                <button onClick={() => editForm.id && handleDelete(editForm.id)} className="px-4 py-2 border border-red-200 text-red-600 rounded-lg text-sm hover:bg-red-50">删除产品</button>
+                <button type="button" onClick={() => editForm.id && handleDelete(editForm.id)} disabled={deleting} className="px-4 py-2 border border-red-200 text-red-600 rounded-lg text-sm hover:bg-red-50 disabled:opacity-60">{deleting ? '删除中...' : '删除产品'}</button>
                 <div className="flex gap-2">
-                  <button onClick={() => setSelectedProduct(null)} className="px-4 py-2 border border-gray-200 rounded-lg text-sm hover:bg-gray-50">取消</button>
-                  <button onClick={handleSave} disabled={saving} className="px-4 py-2 bg-brand-500 text-white rounded-lg text-sm hover:bg-brand-600 disabled:opacity-60">
-                    {saving ? '保存中...' : '保存'}
+                  <button type="button" onClick={() => { setSelectedProduct(null); setDetailStatus('idle'); }} className="px-4 py-2 border border-gray-200 rounded-lg text-sm hover:bg-gray-50">取消</button>
+                  <button type="button" onClick={handleSave} disabled={saving || detailStatus !== 'ready'} className="px-4 py-2 bg-brand-500 text-white rounded-lg text-sm hover:bg-brand-600 disabled:opacity-60">
+                    {saving ? '保存中...' : detailStatus === 'loading' ? '正在加载详情...' : '保存'}
                   </button>
                 </div>
               </div>

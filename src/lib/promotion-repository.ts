@@ -91,8 +91,8 @@ export class PromotionRepository {
       if (definition) validatePromotionBindings(definition, bindings);
       if (new Set(bindings.map(promotionSkuKey)).size !== bindings.length) throw new Error('DUPLICATE_PROMOTION_SKU');
       for (const binding of bindings) {
-        const product = this.db.prepare('SELECT id, hazardous FROM Product WHERE id = ?').get(binding.productId) as { id: string; hazardous: number } | undefined;
-        if (!product || product.hazardous) throw new Error('INVALID_PROMOTION_PRODUCT');
+        const product = this.db.prepare('SELECT id, hazardous, deletedAt FROM Product WHERE id = ?').get(binding.productId) as { id: string; hazardous: number; deletedAt: string | null } | undefined;
+        if (!product || product.hazardous || product.deletedAt) throw new Error('INVALID_PROMOTION_PRODUCT');
         if (binding.variantId && !this.db.prepare('SELECT id FROM ProductVariant WHERE id = ? AND productId = ?').get(binding.variantId, binding.productId)) throw new Error('INVALID_PROMOTION_VARIANT');
       }
       const key = id ?? randomUUID();
