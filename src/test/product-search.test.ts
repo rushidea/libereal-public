@@ -36,6 +36,12 @@ describe('ProductSearchService', () => {
     expect((await ProductSearchService.search({ keyword: '受限' }, { scope: 'admin' })).pagination.total).toBe(1);
   });
 
+  it('hides soft-deleted products from storefront and admin search', async () => {
+    getTestDb().prepare(`UPDATE Product SET deletedAt = datetime('now') WHERE id = 'p1'`).run();
+    expect((await ProductSearchService.search({ keyword: 'AKT1' })).pagination.total).toBe(0);
+    expect((await ProductSearchService.search({ keyword: 'AKT1' }, { scope: 'admin' })).pagination.total).toBe(0);
+  });
+
   it('normalizes fixed URL parameters and bounds pagination', async () => {
     const params = productSearchParamsFromUrl(new URLSearchParams('search=AKT&brand=Abcam,CST&target=AKT1&application=WB,IHC&catalogNumber=AB-100&page=-2&limit=5000'));
     expect(params).toMatchObject({ keyword: 'AKT', brands: ['Abcam', 'CST'], target: 'AKT1', applications: ['WB', 'IHC'], catalogNumbers: ['AB-100'] });
@@ -43,6 +49,6 @@ describe('ProductSearchService', () => {
   });
 
   it('builds a database query without external search dependencies', () => {
-    expect(buildProductSearchWhere({ keyword: 'AKT', category: '抗体' })).toMatchObject({ category: '抗体', hazardous: false });
+    expect(buildProductSearchWhere({ keyword: 'AKT', category: '抗体' })).toMatchObject({ category: '抗体', hazardous: false, deletedAt: null });
   });
 });

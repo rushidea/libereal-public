@@ -12,12 +12,12 @@ const input = {
 };
 beforeEach(() => {
   db = new Database(':memory:');
-  db.exec(`CREATE TABLE Product (id TEXT PRIMARY KEY, name TEXT, catalogNumber TEXT, hazardous INTEGER);
+  db.exec(`CREATE TABLE Product (id TEXT PRIMARY KEY, name TEXT, catalogNumber TEXT, hazardous INTEGER, deletedAt TEXT);
     CREATE TABLE ProductVariant (id TEXT PRIMARY KEY, productId TEXT, catalogNumber TEXT, spec TEXT);
     CREATE TABLE Promotion (id TEXT PRIMARY KEY,name TEXT,type TEXT,value REAL,status TEXT,startsAt INTEGER,endsAt INTEGER,priority INTEGER,exclusive INTEGER,createdBy TEXT,createdAt INTEGER,updatedAt INTEGER,ruleDefinition TEXT,ruleVersion INTEGER);
     CREATE TABLE PromotionProduct (id TEXT PRIMARY KEY,promotionId TEXT,productId TEXT,variantId TEXT,groupKey TEXT);
     CREATE TABLE AuditLog (id TEXT PRIMARY KEY,actorId TEXT,action TEXT,resource TEXT,targetType TEXT,targetId TEXT,beforeData TEXT,afterData TEXT,createdAt INTEGER);
-    INSERT INTO Product VALUES ('sample-main','凝胶','GEL',0),('sample-addon','膜','PVDF',0);
+    INSERT INTO Product VALUES ('sample-main','凝胶','GEL',0,NULL),('sample-addon','膜','PVDF',0,NULL);
     INSERT INTO ProductVariant VALUES ('roll','sample-addon','PVDF-ROLL','卷');`);
   repository = new PromotionRepository(db);
 });
@@ -55,6 +55,11 @@ it('有效活动需要先暂停再编辑，结束活动保留历史', () => {
 it('审计写入失败会回滚整个发布事务', () => {
   db.exec('DROP TABLE AuditLog');
   expect(() => repository.save(input, 'admin')).toThrow();
+  expect(repository.list()).toHaveLength(0);
+});
+it('已删除商品不能再绑定到活动', () => {
+  db.prepare('UPDATE Product SET deletedAt = ? WHERE id = ?').run('2026-10-13T00:00:00.000Z', 'sample-main');
+  expect(() => repository.save(input, 'admin')).toThrow('INVALID_PROMOTION_PRODUCT');
   expect(repository.list()).toHaveLength(0);
 });
 it('旧活动与新规则可以同时保留候选关系', () => {

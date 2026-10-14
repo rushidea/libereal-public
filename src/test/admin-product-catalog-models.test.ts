@@ -4,8 +4,10 @@ vi.mock('@/lib/auth', () => ({ auth: vi.fn() }));
 vi.mock('@/lib/product-filter-cache', () => ({ invalidateProductFilters: vi.fn() }));
 
 import { auth } from '@/lib/auth';
+import { parseExplicitStockQuantity, stockQuantityFromInput } from '@/lib/admin-product-stock';
 import { PUT as updateProduct } from '@/app/api/admin/products/route';
-import { GET as getProduct } from '@/app/api/admin/products/[id]/route';
+import { DELETE as deleteProduct, GET as getProduct } from '@/app/api/admin/products/[id]/route';
+import { ProductSearchService } from '@/lib/product-search';
 import { NextRequest } from 'next/server';
 import { clearAllTables, closeTestDb, getTestDb, seedAdmin } from './db-helpers';
 
@@ -23,6 +25,42 @@ function seedProduct() {
       '[]', -1, datetime('now'), datetime('now')
     )
   `).run();
+}
+
+function patchRequest(body: Record<string, unknown>) {
+  return new NextRequest('http://localhost/api/admin/products', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ id: 'product_1', ...body }),
+  });
+}
+
+function deleteRequest(id = 'product_1') {
+  return new NextRequest(`http://localhost/api/admin/products/${id}`, { method: 'DELETE' });
+}
+
+function productRow() {
+  return getTestDb().prepare(`
+    SELECT stockQuantity, inStock, pmids, cofaUrl, storageTemp, type, lotNumber, deletedAt
+    FROM Product WHERE id = 'product_1'
+  `).get() as {
+    stockQuantity: number;
+    inStock: number;
+    pmids: string;
+    cofaUrl: string | null;
+    storageTemp: string | null;
+    type: string | null;
+    lotNumber: string | null;
+    deletedAt: string | null;
+  };
+}
+
+function seedStoredDetails() {
+  getTestDb().prepare(`
+    UPDATE Product
+    SET pmids = ?, stockQuantity = 8, inStock = 1, cofaUrl = ?, storageTemp = ?, type = ?, lotNumber = ?
+    WHERE id = 'product_1'
+  `).run('["12345678"]', 'https://example.test/existing-coa.pdf', '-20°C', '单克隆抗体', 'LOT-9');
 }
 
 function updateRequest(body: Record<string, unknown>) {
@@ -128,5 +166,142 @@ describe('admin product catalog models', () => {
     expect(json.product.attributes.length).toBeGreaterThan(0);
     expect(json.product.documents).toHaveLength(2);
     expect(json.product.prices).toHaveLength(4);
+  });
+
+  it('parses an explicit zero stock quantity and ignores unfinished input', () => {
+    expect(parseExplicitStockQuantity(0)).toBe(0);
+    expect(parseExplicitStockQuantity('0')).toBe(0);
+    expect(parseExplicitStockQuantity(-1)).toBe(-1);
+    expect(parseExplicitStockQuantity(1.5)).toBeNull();
+    expect(parseExplicitStockQuantity(null)).toBeNull();
+    expect(stockQuantityFromInput('0')).toBe(0);
+    expect(stockQuantityFromInput('')).toBeUndefined();
+    expect(stockQuantityFromInput('-2')).toBeUndefined();
+  });
+
+  it('saves stock quantity 0 and does not reset omitted stock to unlimited', async () => {
+    seedStoredDetails();
+    const zeroed = await updateProduct(patchRequest({ stockQuantity: 0 }));
+    expect(zeroed.status).toBe(200);
+    expect(productRow()).toMatchObject({ stockQuantity: 0, inStock: 0, pmids: '["12345678"]' });
+
+    const renamed = await updateProduct(patchRequest({ name: '只改名称' }));
+    expect(renamed.status).toBe(200);
+    expect(productRow()).toMatchObject({
+      stockQuantity: 0,
+      inStock: 0,
+      pmids: '["12345678"]',
+      cofaUrl: 'https://example.test/existing-coa.pdf',
+      storageTemp: '-20°C',
+      type: '单克隆抗体',
+      lotNumber: 'LOT-9',
+    });
+    expect((getTestDb().prepare('SELECT name FROM Product WHERE id = ?').get('product_1') as { name: string }).name).toBe('只改名称');
+  });
+
+  it('rejects non-integer stock and only stores unlimited when -1 is explicit', async () => {
+    seedStoredDetails();
+    const invalid = await updateProduct(patchRequest({ stockQuantity: 1.5 }));
+    expect(invalid.status).toBe(400);
+    expect(productRow().stockQuantity).toBe(8);
+
+    const missing = await updateProduct(patchRequest({ stockQuantity: null }));
+    expect(missing.status).toBe(400);
+    expect(productRow().stockQuantity).toBe(8);
+
+    const unlimited = await updateProduct(patchRequest({ stockQuantity: -1 }));
+    expect(unlimited.status).toBe(200);
+    expect(productRow()).toMatchObject({ stockQuantity: -1, inStock: 1 });
+  });
+
+  it('persists 缺货 without clearing a counted or unlimited quantity', async () => {
+    seedStoredDetails();
+    const counted = await updateProduct(patchRequest({ stockQuantity: 6, inStock: false }));
+    expect(counted.status).toBe(200);
+    expect(productRow()).toMatchObject({ stockQuantity: 6, inStock: 0 });
+
+    const unlimited = await updateProduct(patchRequest({ stockQuantity: -1, inStock: false }));
+    expect(unlimited.status).toBe(200);
+    expect(productRow()).toMatchObject({ stockQuantity: -1, inStock: 0 });
+
+    const conflict = await updateProduct(patchRequest({ stockQuantity: 0, inStock: true }));
+    expect(conflict.status).toBe(400);
+    expect(productRow()).toMatchObject({ stockQuantity: -1, inStock: 0 });
+  });
+
+  it('does not clear detail fields that were not sent', async () => {
+    seedStoredDetails();
+    const fullSave = await updateProduct(updateRequest({}));
+    expect(fullSave.status).toBe(200);
+    expect(productRow()).toMatchObject({
+      stockQuantity: 8,
+      pmids: '["12345678"]',
+      storageTemp: '-20°C',
+      type: '单克隆抗体',
+      lotNumber: 'LOT-9',
+      cofaUrl: 'https://example.test/coa.pdf',
+    });
+    const before = getTestDb().prepare('SELECT COUNT(*) AS count FROM ProductAttribute WHERE productId = ?').get('product_1') as { count: number };
+    expect(before.count).toBeGreaterThan(0);
+
+    const response = await updateProduct(patchRequest({ name: '保留详情' }));
+    expect(response.status).toBe(200);
+    const row = productRow();
+    expect(row.pmids).toBe('["12345678"]');
+    expect(row.cofaUrl).toBe('https://example.test/coa.pdf');
+    expect(row.lotNumber).toBe('LOT-9');
+    expect(row.stockQuantity).toBe(8);
+    const after = getTestDb().prepare('SELECT COUNT(*) AS count FROM ProductAttribute WHERE productId = ?').get('product_1') as { count: number };
+    expect(after.count).toBe(before.count);
+    const documents = getTestDb().prepare('SELECT COUNT(*) AS count FROM ProductDocument WHERE productId = ?').get('product_1') as { count: number };
+    expect(documents.count).toBe(2);
+  });
+
+  it('soft-deletes a product for administrators and keeps the row', async () => {
+    const response = await deleteProduct(deleteRequest(), { params: Promise.resolve({ id: 'product_1' }) });
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.success).toBe(true);
+    expect(productRow().deletedAt).toBeTruthy();
+    expect((await ProductSearchService.search({ keyword: 'CAT-1' }, { scope: 'admin' })).pagination.total).toBe(0);
+    expect((await ProductSearchService.search({ keyword: 'CAT-1' })).pagination.total).toBe(0);
+
+    const audit = getTestDb().prepare(`SELECT action, resource, targetId, reason FROM AuditLog WHERE action = 'product.deleted'`).get() as {
+      action: string;
+      resource: string;
+      targetId: string;
+      reason: string;
+    };
+    expect(audit).toMatchObject({
+      action: 'product.deleted',
+      resource: 'products',
+      targetId: 'product_1',
+      reason: '后台删除产品',
+    });
+
+    const again = await deleteProduct(deleteRequest(), { params: Promise.resolve({ id: 'product_1' }) });
+    expect(again.status).toBe(200);
+    expect(await again.json()).toMatchObject({ success: true, alreadyDeleted: true });
+    expect(getTestDb().prepare(`SELECT COUNT(*) AS count FROM AuditLog WHERE action = 'product.deleted'`).get()).toEqual({ count: 1 });
+
+    const detail = await getProduct(new NextRequest('http://localhost/api/admin/products/product_1'), {
+      params: Promise.resolve({ id: 'product_1' }),
+    });
+    expect(detail.status).toBe(404);
+    const saved = await updateProduct(patchRequest({ name: '不应写回' }));
+    expect(saved.status).toBe(409);
+    expect((getTestDb().prepare('SELECT name FROM Product WHERE id = ?').get('product_1') as { name: string }).name).toBe('原产品');
+  });
+
+  it('requires products.write before deleting a product', async () => {
+    authMock.mockResolvedValue({ user: { id: 'customer_1', email: 'customer@test.com', role: 'customer', sessionId: 'session-1' } });
+    const customer = await deleteProduct(deleteRequest(), { params: Promise.resolve({ id: 'product_1' }) });
+    expect(customer.status).toBe(403);
+
+    authMock.mockResolvedValue({ user: { id: 'admin_test_id', email: 'admin@test.com', role: 'admin', sessionId: 'session-1' } });
+    getTestDb().prepare('DELETE FROM AdminUserRole').run();
+    const missingPermission = await deleteProduct(deleteRequest(), { params: Promise.resolve({ id: 'product_1' }) });
+    expect(missingPermission.status).toBe(403);
+    expect(productRow().deletedAt).toBeNull();
   });
 });

@@ -66,7 +66,7 @@ export function buildProductSearchWhere(
   const reactivities = normalizedList(params.reactivities);
   const speciesReactivities = normalizedList(params.speciesReactivities);
   const and: Prisma.ProductWhereInput[] = [];
-  const where: Prisma.ProductWhereInput = {};
+  const where: Prisma.ProductWhereInput = { deletedAt: null };
 
   if (keyword) {
     and.push({

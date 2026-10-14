@@ -1,4 +1,5 @@
 import { prisma } from '@/lib/prisma';
+import { STOREFRONT_HIDDEN_HAZARDOUS } from '@/lib/product-visibility';
 import {
   isVolumeMicroLiters,
   productQualifiesAs20UlAntibody,
@@ -45,7 +46,7 @@ export async function getFeaturedProductsForHome(limit: number = 10) {
 
   for (const slot of FEATURED_SLOTS) {
     const rows = await prisma.product.findMany({
-      where: { category: slot.category, hazardous: false },
+      where: { category: slot.category, ...STOREFRONT_HIDDEN_HAZARDOUS },
       take: sampleSize,
       select: {
         id: true,
@@ -81,7 +82,7 @@ export async function getFeaturedProductsForHome(limit: number = 10) {
     for (const cat of remainingCats) {
       if (results.length >= limit) break;
       const rows = await prisma.product.findMany({
-        where: { category: cat, hazardous: false },
+        where: { category: cat, ...STOREFRONT_HIDDEN_HAZARDOUS },
         take: sampleSize,
         select: {
           id: true,
@@ -137,7 +138,7 @@ export async function getFeaturedProductsForHome(limit: number = 10) {
 
 export async function countAntibody20UlProducts(): Promise<number> {
   const products = await prisma.product.findMany({
-    where: { category: '一抗' },
+    where: { category: '一抗', deletedAt: null },
     select: {
       brand: true,
       catalogNumber: true,
@@ -152,7 +153,7 @@ export async function countAntibody20UlProducts(): Promise<number> {
 
 export async function countAbcepta50UlAntibodies(): Promise<number> {
   const products = await prisma.product.findMany({
-    where: { brand: 'Abcepta', category: '一抗' },
+    where: { brand: 'Abcepta', category: '一抗', deletedAt: null },
     select: {
       brand: true,
       catalogNumber: true,
@@ -180,7 +181,10 @@ export async function countProductsWithVolumeUl(
   options?: { category?: string },
 ): Promise<number> {
   const products = await prisma.product.findMany({
-    where: options?.category ? { category: options.category } : undefined,
+    where: {
+      ...(options?.category ? { category: options.category } : {}),
+      deletedAt: null,
+    },
     select: {
       id: true,
       spec: true,

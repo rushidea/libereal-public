@@ -9,7 +9,7 @@ export async function GET(req: NextRequest) {
   if (query.length < 2 || query.length > 100) return NextResponse.json({ products: [] });
   try {
     const products = withPromotionRepository((_repository, db) => {
-      const rows = db.prepare(`SELECT id,name,catalogNumber FROM Product WHERE hazardous=0 AND
+      const rows = db.prepare(`SELECT id,name,catalogNumber FROM Product WHERE hazardous=0 AND deletedAt IS NULL AND
         (name LIKE ? OR catalogNumber LIKE ?) ORDER BY catalogNumber LIMIT 25`).all(`%${query}%`, `%${query}%`) as Array<{ id: string; name: string; catalogNumber: string }>;
       return rows.map((product) => ({ ...product, variants: db.prepare('SELECT id,catalogNumber,spec FROM ProductVariant WHERE productId=? ORDER BY catalogNumber LIMIT 100').all(product.id) }));
     });

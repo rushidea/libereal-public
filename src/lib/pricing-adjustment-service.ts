@@ -437,7 +437,7 @@ async function loadProducts(request: PriceAdjustmentRequest): Promise<{ products
       const params = request.brand ? [request.brand, ...keys, ...keys] : [...keys, ...keys];
       const idRows = await prisma.$queryRawUnsafe<Array<{ id: string }>>(
         `SELECT p.id AS id FROM Product p
-         WHERE 1 = 1 ${brandClause}
+         WHERE p.deletedAt IS NULL ${brandClause}
          AND (
            LOWER(p.catalogNumber) IN (${placeholders})
            OR EXISTS (
@@ -476,6 +476,7 @@ async function loadProducts(request: PriceAdjustmentRequest): Promise<{ products
   while (true) {
     const rows = await prisma.product.findMany({
       where: {
+        deletedAt: null,
         ...(request.brand ? { brand: request.brand } : {}),
         ...(request.category ? { category: request.category } : {}),
         ...(request.subcategory ? { subcategory: request.subcategory } : {}),

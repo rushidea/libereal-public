@@ -84,7 +84,7 @@ export async function POST(
       .map((item) => ({ catalogNumber: item.catalogNumber, ...(item.brand ? { brand: item.brand } : {}) })),
   ];
   const products = productConditions.length
-    ? await prisma.product.findMany({ where: { OR: productConditions }, select: PRODUCT_LIST_SELECT })
+    ? await prisma.product.findMany({ where: { deletedAt: null, OR: productConditions }, select: PRODUCT_LIST_SELECT })
     : [];
   const productById = new Map(products.map((product) => [product.id, product]));
   const productByCatalog = new Map(products.map((product) => [`${product.brand}:${product.catalogNumber}`, product]));

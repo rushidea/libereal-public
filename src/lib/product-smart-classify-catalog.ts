@@ -21,6 +21,7 @@ export async function loadProductClassifyIndex(options?: {
 }): Promise<ProductClassifyIndex> {
   const examples = await prisma.product.findMany({
     where: {
+      deletedAt: null,
       category: { not: null },
       ...(options?.brand ? { brand: options.brand } : {}),
     },

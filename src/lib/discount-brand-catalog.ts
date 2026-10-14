@@ -38,12 +38,13 @@ export async function loadCatalogBrandKeys(
   const [brands, pairs] = await Promise.all([
     db.product.findMany({
       distinct: ['brand'],
+      where: { deletedAt: null },
       select: { brand: true },
       orderBy: { brand: 'asc' },
     }),
     db.product.groupBy({
       by: ['brand', 'subBrand'],
-      where: { subBrand: { not: null } },
+      where: { deletedAt: null, subBrand: { not: null } },
       _count: { _all: true },
     }),
   ]);

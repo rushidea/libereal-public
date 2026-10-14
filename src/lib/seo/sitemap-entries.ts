@@ -20,6 +20,7 @@ async function countDistinctProductSitemapKeys(): Promise<number> {
       SELECT 1
       FROM Product
       WHERE hazardous = 0
+        AND deletedAt IS NULL
         AND catalogNumber != ''
         AND brand != ''
         AND name != ''
