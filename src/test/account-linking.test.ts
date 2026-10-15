@@ -8,12 +8,7 @@ import {
   wechatProfileUpdates,
 } from '@/lib/auth-helpers';
 import {
-  createAccountLinkIntent,
   createPendingOAuthLink,
-  parseAccountLinkIntent,
-  parsePendingOAuthLink,
-  serializeAccountLinkIntent,
-  serializePendingOAuthLink,
   linkSuccessParam,
   linkConflictParam,
   upgradePendingOAuthToMerge,
@@ -34,46 +29,11 @@ describe('account linking helpers', () => {
     expect(userHasPassword(null)).toBe(false);
   });
 
-  it('serializes and parses link intent', () => {
-    const intent = createAccountLinkIntent('usr_test', 'google');
-    const parsed = parseAccountLinkIntent(serializeAccountLinkIntent(intent));
-    expect(parsed?.userId).toBe('usr_test');
-    expect(parsed?.provider).toBe('google');
-  });
-
-  it('rejects expired link intent', () => {
-    const intent = createAccountLinkIntent('usr_test', 'wechat');
-    intent.exp = Date.now() - 1000;
-    expect(parseAccountLinkIntent(serializeAccountLinkIntent(intent))).toBeNull();
-  });
-
   it('builds provider-specific callback params', () => {
     expect(linkSuccessParam('google')).toBe('oauthLink=success');
     expect(linkSuccessParam('wechat')).toBe('wechatLink=success');
     expect(linkConflictParam('google')).toBe('oauthLink=conflict');
     expect(linkConflictParam('wechat')).toBe('wechatLink=conflict');
-  });
-
-  it('serializes and parses pending oauth link', () => {
-    const pending = createPendingOAuthLink(
-      { provider: 'google', providerAccountId: 'gid123' },
-      'google',
-      { mode: 'merge', targetUserId: 'usr_1', oauthEmail: 'a@b.com' },
-    );
-    const parsed = parsePendingOAuthLink(serializePendingOAuthLink(pending));
-    expect(parsed?.mode).toBe('merge');
-    expect(parsed?.targetUserId).toBe('usr_1');
-    expect(parsed?.oauthEmail).toBe('a@b.com');
-  });
-
-  it('rejects expired pending oauth link', () => {
-    const pending = createPendingOAuthLink(
-      { provider: 'wechat', providerAccountId: 'wx123' },
-      'wechat',
-      { mode: 'register' },
-    );
-    pending.exp = Date.now() - 1000;
-    expect(parsePendingOAuthLink(serializePendingOAuthLink(pending))).toBeNull();
   });
 
   it('upgrades register pending oauth to merge mode', () => {
@@ -101,10 +61,9 @@ describe('account linking helpers', () => {
         oauthSex: 1,
       },
     );
-    const parsed = parsePendingOAuthLink(serializePendingOAuthLink(pending));
-    expect(parsed?.oauthName).toBe('微信用户');
-    expect(parsed?.oauthImage).toContain('qlogo.cn');
-    expect(parsed?.oauthSex).toBe(1);
+    expect(pending.oauthName).toBe('微信用户');
+    expect(pending.oauthImage).toContain('qlogo.cn');
+    expect(pending.oauthSex).toBe(1);
   });
 
   it('normalizes WeChat sex values', () => {

@@ -8,6 +8,7 @@ import { rateLimitAsync } from "@/lib/rateLimit";
 import { reportError } from "@/lib/errorReporting";
 import {
   clearPendingOAuthLinkCookie,
+  consumePendingOAuthLinkCookie,
   readPendingOAuthLinkCookie,
   setPendingOAuthLinkCookie,
   upgradePendingOAuthToMerge,
@@ -251,6 +252,16 @@ export async function POST(req: NextRequest) {
           });
           if (!profileUpdate.ok) {
             return NextResponse.json({ error: profileUpdate.error }, { status: profileUpdate.status });
+          }
+
+          const consumed = await consumePendingOAuthLinkCookie();
+          if (
+            !consumed
+            || consumed.mode !== 'register'
+            || consumed.provider !== pending.provider
+            || consumed.providerAccountId !== pending.providerAccountId
+          ) {
+            return NextResponse.json({ error: '第三方登录已失效，请重新授权' }, { status: 400 });
           }
 
           const linked = await linkPendingOAuthToUser(pendingMerge, existing.id);

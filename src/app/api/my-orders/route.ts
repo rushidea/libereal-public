@@ -68,14 +68,18 @@ export async function GET() {
       : [];
     const countMap = new Map(orderCounts.map((c) => [c.inquiryId, c._count._all]));
 
-    const inquiriesWithOrderCount = inquiries.map((inq) => ({
-      ...inq,
-      items: inq.inquiryItems.map(inquiryItemView),
-      inquiryItems: undefined,
-      activeQuote: inq.quotes[0] ? quoteView(inq.quotes[0]) : null,
-      quotes: undefined,
-      orderCount: countMap.get(inq.id) || 0,
-    }));
+    const inquiriesWithOrderCount = inquiries.map((inq) => {
+      const { userId: creatorUserId, inquiryItems, quotes, ...publicInquiry } = inq;
+      void creatorUserId;
+      return {
+        ...publicInquiry,
+        items: inquiryItems.map(inquiryItemView),
+        inquiryItems: undefined,
+        activeQuote: quotes[0] ? quoteView(quotes[0]) : null,
+        quotes: undefined,
+        orderCount: countMap.get(inq.id) || 0,
+      };
+    });
 
     return NextResponse.json({
       inquiries: inquiriesWithOrderCount,

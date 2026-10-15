@@ -47,9 +47,10 @@ export async function GET(
   if (!allowed) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   }
 
-  const { inquiryItems, quotes, ...rest } = inquiry;
+  const { inquiryItems, quotes, userId: creatorUserId, ...publicInquiry } = inquiry;
+  void creatorUserId;
   return NextResponse.json({
-    ...rest,
+    ...publicInquiry,
     items: inquiryItems.map(inquiryItemView),
     activeQuote: quotes[0] ? quoteView(quotes[0]) : null,
   });

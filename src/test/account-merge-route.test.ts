@@ -31,6 +31,7 @@ vi.mock('@/lib/account-linking', async () => {
   return {
     ...actual,
     readPendingOAuthLinkCookie: vi.fn(async () => pendingMerge),
+    consumePendingOAuthLinkCookie: vi.fn(async () => pendingMerge),
     clearPendingOAuthLinkCookie: vi.fn(async () => {
       pendingMerge = null;
     }),

@@ -3,6 +3,7 @@ import { auth } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
 import {
   clearPendingOAuthLinkCookie,
+  consumePendingOAuthLinkCookie,
   providerLabel,
   readPendingOAuthLinkCookie,
 } from '@/lib/account-linking';
@@ -44,7 +45,17 @@ export async function POST() {
       }
     }
 
-    const linked = await linkPendingOAuthToUser(pending, user.id);
+    const consumed = await consumePendingOAuthLinkCookie();
+    if (
+      !consumed
+      || consumed.mode !== 'register'
+      || consumed.provider !== pending.provider
+      || consumed.providerAccountId !== pending.providerAccountId
+    ) {
+      return NextResponse.json({ error: '第三方登录已失效，请重新授权' }, { status: 400 });
+    }
+
+    const linked = await linkPendingOAuthToUser(consumed, user.id);
     if (!linked.ok) {
       return NextResponse.json({ error: linked.error }, { status: 409 });
     }

@@ -41,9 +41,15 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: '该登录方式已绑定' }, { status: 409 });
     }
 
-    await setAccountLinkIntentCookie(createAccountLinkIntent(userId, provider as LinkProvider));
+    const sessionId = session?.user?.sessionId;
+    if (!sessionId) {
+      return NextResponse.json({ error: '请重新登录后再绑定登录方式' }, { status: 401 });
+    }
 
     const callbackUrl = resolveCallbackUrl(provider as LinkProvider, source);
+    await setAccountLinkIntentCookie(
+      createAccountLinkIntent(userId, provider as LinkProvider, sessionId, callbackUrl),
+    );
 
     return NextResponse.json({ ok: true, provider, callbackUrl });
   } catch (err) {
