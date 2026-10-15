@@ -29,6 +29,7 @@ vi.mock('@/lib/account-linking', async () => {
   return {
     ...actual,
     readPendingOAuthLinkCookie: vi.fn(async () => null),
+    consumePendingOAuthLinkCookie: vi.fn(async () => null),
     setPendingOAuthLinkCookie: vi.fn(async () => undefined),
     clearPendingOAuthLinkCookie: vi.fn(async () => undefined),
   };
@@ -82,7 +83,7 @@ import { GET as roleGET } from '@/app/api/auth/role/route';
 import { GET as addressesGET, POST as addressesPOST } from '@/app/api/addresses/route';
 import { NextRequest } from 'next/server';
 import { MERGE_VERIFIED_COOKIE } from '@/lib/auth-helpers';
-import { readPendingOAuthLinkCookie } from '@/lib/account-linking';
+import { consumePendingOAuthLinkCookie, readPendingOAuthLinkCookie } from '@/lib/account-linking';
 import { getTestDb, closeTestDb, seedUser, seedUserWithPassword, clearAllTables } from './db-helpers';
 
 function makeReq(url: string, body: object): NextRequest {
@@ -219,15 +220,17 @@ describe('POST /api/auth/register', () => {
       passwordHash: bcrypt.hashSync('password123', 10),
     });
 
-    vi.mocked(readPendingOAuthLinkCookie).mockResolvedValueOnce({
-      provider: 'wechat',
+    const pending = {
+      provider: 'wechat' as const,
       providerAccountId: 'wx_union_1',
       type: 'oauth',
-      mode: 'register',
+      mode: 'register' as const,
       oauthName: '微信昵称',
       oauthImage: 'https://example.com/avatar.jpg',
       exp: Date.now() + 60000,
-    });
+    };
+    vi.mocked(readPendingOAuthLinkCookie).mockResolvedValueOnce(pending);
+    vi.mocked(consumePendingOAuthLinkCookie).mockResolvedValueOnce(pending);
 
     const res = await registerPOST(makeReq('http://localhost:3000/api/auth/register', registerBody({
       name: '合并后姓名',

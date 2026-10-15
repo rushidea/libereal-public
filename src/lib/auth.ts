@@ -12,10 +12,11 @@ import Database from "better-sqlite3";
 import { getDatabasePath } from "./databasePath";
 import {
   clearAccountLinkIntentCookie,
+  consumeAccountLinkIntentForSession,
   createPendingOAuthLink,
   linkConflictParam,
-  readAccountLinkIntentCookie,
   setPendingOAuthLinkCookie,
+  shouldIssueSessionForProviderLink,
 } from "./account-linking";
 import { isAdminEmail, isGoogleAuthConfigured, MERGE_VERIFIED_COOKIE, normalizeEmail, normalizeWeChatSex, resolveSessionRole, wechatProfileUpdates, WECHAT_EMAIL_DOMAIN } from "./auth-helpers";
 import {
@@ -59,7 +60,11 @@ function ensureAdminRoleInDb(db: Database.Database, userId: string, email: strin
 
 const AUTH_SECRET = process.env.AUTH_SECRET ?? "";
 
-async function maybeMfaRedirect(userId: string, provider: 'credentials' | 'google' | 'wechat' | 'wechat-mini') {
+async function maybeMfaRedirect(
+  userId: string,
+  provider: 'credentials' | 'google' | 'wechat' | 'wechat-mini',
+  callbackUrl?: string,
+) {
   try {
     if (!isMfaPhase1Enabled() || !isUserMfaEnabled(userId)) return true;
     const db = new Database(DB_PATH);
@@ -70,7 +75,14 @@ async function maybeMfaRedirect(userId: string, provider: 'credentials' | 'googl
     const ip = await getRequestIp();
     const challenge = await createMfaLoginChallenge(userId, provider, ip);
     await setMfaChallengeCookie(challenge.id, challenge.token);
-    return `/login/mfa?challengeId=${encodeURIComponent(challenge.id)}&provider=${encodeURIComponent(provider)}`;
+    const params = new URLSearchParams({
+      challengeId: challenge.id,
+      provider,
+    });
+    if (callbackUrl && callbackUrl.startsWith('/') && !callbackUrl.startsWith('//') && !/[\s\\]/.test(callbackUrl)) {
+      params.set('callbackUrl', callbackUrl);
+    }
+    return `/login/mfa?${params.toString()}`;
   } catch (error) {
     if (error instanceof Error && error.message === 'MFA_CHALLENGE_RATE_LIMITED') {
       return '/login?error=MfaRateLimited';
@@ -99,7 +111,7 @@ function recordLoginFailure(input: { userId?: string | null; reason: string }): 
   }
 }
 
-async function getCurrentAuthToken(): Promise<{ id?: string; email?: string } | null> {
+async function getCurrentAuthToken(): Promise<{ id?: string; email?: string; sessionId?: string } | null> {
   if (!AUTH_SECRET) return null;
   try {
     const cookieStore = await cookies();
@@ -108,7 +120,13 @@ async function getCurrentAuthToken(): Promise<{ id?: string; email?: string } | 
       const sessionToken = cookieStore.get(name)?.value;
       if (!sessionToken) continue;
       const token = await decode({ token: sessionToken, secret: AUTH_SECRET, salt: name });
-      if (token) return { id: token.id as string | undefined, email: token.email as string | undefined };
+      if (token) {
+        return {
+          id: typeof token.id === 'string' ? token.id : undefined,
+          email: typeof token.email === 'string' ? token.email : undefined,
+          sessionId: typeof token.sessionId === 'string' ? token.sessionId : undefined,
+        };
+      }
     }
   } catch {}
   return null;
@@ -141,23 +159,18 @@ function oauthEmailTakenByOtherUser(
 async function resolveLinkingUserId(
   db: Database.Database,
   provider: 'google' | 'wechat',
-): Promise<string | undefined> {
+): Promise<{ userId: string; callbackUrl?: string } | undefined> {
   const currentToken = await getCurrentAuthToken();
-  const currentUser = currentToken?.id
-    ? db.prepare('SELECT id, email FROM User WHERE id = ?').get(currentToken.id) as { id: string; email: string } | undefined
-    : currentToken?.email
-      ? db.prepare('SELECT id, email FROM User WHERE lower(email) = ?').get(normalizeEmail(currentToken.email)) as { id: string; email: string } | undefined
-      : undefined;
+  const session = currentToken?.id && currentToken.sessionId
+    ? { userId: currentToken.id, sessionId: currentToken.sessionId }
+    : null;
+  // Logged-out or forged cookies never select a user. The intent must match this session.
+  const linkIntent = await consumeAccountLinkIntentForSession(provider, session);
+  if (!linkIntent) return undefined;
 
-  if (currentUser) return currentUser.id;
-
-  const linkIntent = await readAccountLinkIntentCookie();
-  if (linkIntent?.provider === provider) {
-    const intentUser = db.prepare('SELECT id FROM User WHERE id = ?').get(linkIntent.userId) as { id: string } | undefined;
-    if (intentUser) return intentUser.id;
-  }
-
-  return undefined;
+  const intentUser = db.prepare('SELECT id FROM User WHERE id = ?').get(linkIntent.userId) as { id: string } | undefined;
+  if (!intentUser) return undefined;
+  return { userId: intentUser.id, callbackUrl: linkIntent.callbackUrl };
 }
 
 async function redirectWithPendingOAuth(
@@ -594,9 +607,9 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
             WHERE Account.provider = ? AND Account.providerAccountId = ?
           `).get('google', providerAccountId) as { id: string; email: string } | undefined;
 
-          const linkingUserId = await resolveLinkingUserId(db, 'google');
-          const currentUser = linkingUserId
-            ? db.prepare('SELECT id, email FROM User WHERE id = ?').get(linkingUserId) as { id: string; email: string } | undefined
+          const linkTarget = await resolveLinkingUserId(db, 'google');
+          const currentUser = linkTarget
+            ? db.prepare('SELECT id, email FROM User WHERE id = ?').get(linkTarget.userId) as { id: string; email: string } | undefined
             : undefined;
 
           if (currentUser) {
@@ -614,6 +627,8 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
             user.email = currentUser.email;
             user.id = currentUser.id;
             await clearAccountLinkIntentCookie();
+            const mfaRedirect = await maybeMfaRedirect(currentUser.id, 'google', linkTarget?.callbackUrl);
+            if (!shouldIssueSessionForProviderLink(mfaRedirect)) return mfaRedirect;
             return true;
           }
 
@@ -652,9 +667,9 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
           WHERE Account.provider = ? AND Account.providerAccountId = ?
         `).get('wechat', providerAccountId) as { id: string; email: string } | undefined;
 
-        const linkingUserId = await resolveLinkingUserId(db, 'wechat');
-        const currentUser = linkingUserId
-          ? db.prepare('SELECT id, email FROM User WHERE id = ?').get(linkingUserId) as { id: string; email: string } | undefined
+        const linkTarget = await resolveLinkingUserId(db, 'wechat');
+        const currentUser = linkTarget
+          ? db.prepare('SELECT id, email FROM User WHERE id = ?').get(linkTarget.userId) as { id: string; email: string } | undefined
           : undefined;
 
         if (currentUser) {
@@ -667,6 +682,8 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
           user.email = currentUser.email;
           user.id = currentUser.id;
           await clearAccountLinkIntentCookie();
+          const mfaRedirect = await maybeMfaRedirect(currentUser.id, 'wechat', linkTarget?.callbackUrl);
+          if (!shouldIssueSessionForProviderLink(mfaRedirect)) return mfaRedirect;
           return true;
         }
 
