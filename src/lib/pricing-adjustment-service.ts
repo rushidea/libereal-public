@@ -68,10 +68,20 @@ type LoadedProduct = PricedRecord & {
 
 type PricePatch = Partial<Record<FilePriceField, number>>;
 
-type PlannedChange = PriceAdjustmentSample & {
+export type PlannedChange = PriceAdjustmentSample & {
   minimumSalePrice: number | null;
   patch: PricePatch;
   before: PriceSnapshot;
+};
+
+export type FilePreviewDraft = {
+  unmatchedCatalogs: string[];
+  reviewItems: CatalogNameReviewItem[];
+  skippedInquiryCount: number;
+  skippedUnchangedCount: number;
+  skippedMissingCount: number;
+  matchedIds: string[];
+  changes: PlannedChange[];
 };
 
 export type PriceAdjustmentPreview = {
@@ -116,6 +126,50 @@ function chunk<T>(items: T[], size: number): T[][] {
   const groups: T[][] = [];
   for (let index = 0; index < items.length; index += size) groups.push(items.slice(index, index + size));
   return groups;
+}
+
+const CATALOG_LOOKUP_INDEXES = [
+  'CREATE INDEX IF NOT EXISTS "Product_catalog_lower_idx" ON "Product"(LOWER("catalogNumber")) WHERE "deletedAt" IS NULL',
+  'CREATE INDEX IF NOT EXISTS "Product_brand_catalog_lower_idx" ON "Product"("brand", LOWER("catalogNumber")) WHERE "deletedAt" IS NULL',
+  'CREATE INDEX IF NOT EXISTS "ProductVariant_catalog_lower_idx" ON "ProductVariant"(LOWER("catalogNumber"))',
+];
+
+let catalogLookupIndexesReady: Promise<void> | null = null;
+
+export function ensureCatalogLookupIndexes(): Promise<void> {
+  if (!catalogLookupIndexesReady) {
+    catalogLookupIndexesReady = (async () => {
+      for (const statement of CATALOG_LOOKUP_INDEXES) {
+        await prisma.$executeRawUnsafe(statement);
+      }
+    })().catch((error: unknown) => {
+      catalogLookupIndexesReady = null;
+      throw error;
+    });
+  }
+  return catalogLookupIndexesReady;
+}
+
+async function lookupCatalogProductIds(brand: string | undefined, keys: string[]): Promise<string[]> {
+  if (keys.length === 0) return [];
+  await ensureCatalogLookupIndexes();
+  const placeholders = keys.map(() => '?').join(', ');
+  const brandClause = brand ? 'AND p.brand = ?' : '';
+  const params = brand ? [brand, ...keys] : [...keys];
+  const productRows = await prisma.$queryRawUnsafe<Array<{ id: string }>>(
+    `SELECT p.id AS id FROM Product p
+     WHERE p.deletedAt IS NULL ${brandClause}
+     AND LOWER(p.catalogNumber) IN (${placeholders})`,
+    ...params,
+  );
+  const variantRows = await prisma.$queryRawUnsafe<Array<{ id: string }>>(
+    `SELECT DISTINCT v.productId AS id FROM ProductVariant v
+     INNER JOIN Product p ON p.id = v.productId
+     WHERE p.deletedAt IS NULL ${brandClause}
+     AND LOWER(v.catalogNumber) IN (${placeholders})`,
+    ...params,
+  );
+  return [...new Set([...productRows, ...variantRows].map((row) => row.id))];
 }
 
 function snapshotOf(record: PriceSnapshot): PriceSnapshot {
@@ -186,14 +240,36 @@ function brandMatches(filter: string | undefined, productBrand: string): boolean
   return key === productBrand.trim().toLocaleLowerCase();
 }
 
+type CatalogMatchIndex = Map<string, LoadedProduct[]>;
+
+function buildCatalogMatchIndex(products: LoadedProduct[]): CatalogMatchIndex {
+  const index: CatalogMatchIndex = new Map();
+  const add = (catalogNumber: string, product: LoadedProduct) => {
+    const key = normalizeCatalogNumber(catalogNumber);
+    if (!key) return;
+    const list = index.get(key);
+    if (!list) {
+      index.set(key, [product]);
+      return;
+    }
+    if (!list.some((item) => item.id === product.id)) list.push(product);
+  };
+  for (const product of products) {
+    add(product.catalogNumber, product);
+    for (const variant of product.variants) add(variant.catalogNumber, product);
+  }
+  return index;
+}
+
 type FileResolve =
   | { status: 'matched'; product: LoadedProduct; record: PricedRecord; variantId: string | null }
   | { status: 'missing' }
   | { status: 'ambiguous'; products: LoadedProduct[] };
 
-function resolveFileItem(products: LoadedProduct[], item: CatalogPriceItem): FileResolve {
+function resolveFileItem(index: CatalogMatchIndex, item: CatalogPriceItem): FileResolve {
   const parentKey = normalizeCatalogNumber(item.catalogNumber);
-  const matches = products.filter((product) => {
+  if (!parentKey) return { status: 'missing' };
+  const matches = (index.get(parentKey) ?? []).filter((product) => {
     if (!brandMatches(item.brand, product.brand)) return false;
     return normalizeCatalogNumber(product.catalogNumber) === parentKey
       || product.variants.some((variant) => normalizeCatalogNumber(variant.catalogNumber) === parentKey);
@@ -348,10 +424,27 @@ function toPlannedFileChange(
   };
 }
 
-function planFileChanges(products: LoadedProduct[], request: PriceAdjustmentRequest): {
-  preview: PriceAdjustmentPreview;
-  changes: PlannedChange[];
-} {
+function previewFromFileDraft(draft: FilePreviewDraft): PriceAdjustmentPreview {
+  const changes = draft.changes;
+  return {
+    matchedCount: new Set(draft.matchedIds).size,
+    changeCount: changes.length,
+    skippedInquiryCount: draft.skippedInquiryCount,
+    skippedUnchangedCount: draft.skippedUnchangedCount,
+    skippedMissingCount: draft.skippedMissingCount,
+    flooredCount: changes.filter((change) => change.floored).length,
+    unmatchedCatalogs: draft.unmatchedCatalogs.slice(0, 50),
+    reviewCount: draft.reviewItems.length,
+    reviewItems: draft.reviewItems.slice(0, REVIEW_ITEM_LIMIT),
+    samples: fieldSamples(changes),
+  };
+}
+
+function clonePlannedChange(change: PlannedChange): PlannedChange {
+  return { ...change, patch: { ...change.patch }, before: { ...change.before } };
+}
+
+export function mergeFilePreviewDrafts(drafts: FilePreviewDraft[]): { preview: PriceAdjustmentPreview; changes: PlannedChange[] } {
   const unmatchedCatalogs: string[] = [];
   const reviewItems: CatalogNameReviewItem[] = [];
   let skippedInquiryCount = 0;
@@ -359,9 +452,56 @@ function planFileChanges(products: LoadedProduct[], request: PriceAdjustmentRequ
   let skippedMissingCount = 0;
   const matchedIds = new Set<string>();
   const byRecord = new Map<string, PlannedChange>();
+  const changes: PlannedChange[] = [];
+
+  for (const draft of drafts) {
+    unmatchedCatalogs.push(...draft.unmatchedCatalogs);
+    reviewItems.push(...draft.reviewItems);
+    skippedInquiryCount += draft.skippedInquiryCount;
+    skippedUnchangedCount += draft.skippedUnchangedCount;
+    skippedMissingCount += draft.skippedMissingCount;
+    for (const id of draft.matchedIds) matchedIds.add(id);
+    for (const change of draft.changes) {
+      const key = recordKey(change.productId, change.variantId);
+      const existing = byRecord.get(key);
+      if (existing) {
+        existing.patch = { ...existing.patch, ...change.patch };
+        existing.floored = existing.floored || change.floored;
+        applyMergedPublicFloor(existing);
+        continue;
+      }
+      const copy = clonePlannedChange(change);
+      byRecord.set(key, copy);
+      changes.push(copy);
+    }
+  }
+
+  return {
+    changes,
+    preview: previewFromFileDraft({
+      unmatchedCatalogs,
+      reviewItems,
+      skippedInquiryCount,
+      skippedUnchangedCount,
+      skippedMissingCount,
+      matchedIds: [...matchedIds],
+      changes,
+    }),
+  };
+}
+
+function draftFileChanges(products: LoadedProduct[], request: PriceAdjustmentRequest): FilePreviewDraft {
+  const unmatchedCatalogs: string[] = [];
+  const reviewItems: CatalogNameReviewItem[] = [];
+  let skippedInquiryCount = 0;
+  let skippedUnchangedCount = 0;
+  let skippedMissingCount = 0;
+  const matchedIds = new Set<string>();
+  const byRecord = new Map<string, PlannedChange>();
+  const index = buildCatalogMatchIndex(products);
 
   for (const item of request.catalogItems ?? []) {
-    const resolved = resolveFileItem(products, item);
+    const resolved = resolveFileItem(index, item);
     if (resolved.status === 'missing') {
       unmatchedCatalogs.push(itemLabel(item));
       continue;
@@ -406,20 +546,22 @@ function planFileChanges(products: LoadedProduct[], request: PriceAdjustmentRequ
 
   const changes = [...byRecord.values()];
   return {
+    unmatchedCatalogs,
+    reviewItems,
+    skippedInquiryCount,
+    skippedUnchangedCount,
+    skippedMissingCount,
+    matchedIds: [...matchedIds],
     changes,
-    preview: {
-      matchedCount: matchedIds.size,
-      changeCount: changes.length,
-      skippedInquiryCount,
-      skippedUnchangedCount,
-      skippedMissingCount,
-      flooredCount: changes.filter((change) => change.floored).length,
-      unmatchedCatalogs: unmatchedCatalogs.slice(0, 50),
-      reviewCount: reviewItems.length,
-      reviewItems: reviewItems.slice(0, REVIEW_ITEM_LIMIT),
-      samples: fieldSamples(changes),
-    },
   };
+}
+
+function planFileChanges(products: LoadedProduct[], request: PriceAdjustmentRequest): {
+  preview: PriceAdjustmentPreview;
+  changes: PlannedChange[];
+} {
+  const draft = draftFileChanges(products, request);
+  return { changes: draft.changes, preview: previewFromFileDraft(draft) };
 }
 
 async function loadProducts(request: PriceAdjustmentRequest): Promise<{ products: LoadedProduct[]; unmatchedCatalogs: string[] }> {
@@ -432,23 +574,10 @@ async function loadProducts(request: PriceAdjustmentRequest): Promise<{ products
     for (const group of chunk(catalogNumbers, CATALOG_CHUNK)) {
       const keys = [...new Set(group.map(normalizeCatalogNumber).filter(Boolean))];
       if (keys.length === 0) continue;
-      const placeholders = keys.map(() => '?').join(', ');
-      const brandClause = request.brand ? 'AND p.brand = ?' : '';
-      const params = request.brand ? [request.brand, ...keys, ...keys] : [...keys, ...keys];
-      const idRows = await prisma.$queryRawUnsafe<Array<{ id: string }>>(
-        `SELECT p.id AS id FROM Product p
-         WHERE p.deletedAt IS NULL ${brandClause}
-         AND (
-           LOWER(p.catalogNumber) IN (${placeholders})
-           OR EXISTS (
-             SELECT 1 FROM ProductVariant v
-             WHERE v.productId = p.id AND LOWER(v.catalogNumber) IN (${placeholders})
-           )
-         )`,
-        ...params,
-      );
+      const idRows = await lookupCatalogProductIds(request.brand, keys);
+      if (idRows.length === 0) continue;
       const rows = await prisma.product.findMany({
-        where: { id: { in: idRows.map((row) => row.id) } },
+        where: { id: { in: idRows } },
         select: productSelect,
       });
       for (const row of rows) {
@@ -492,6 +621,11 @@ async function loadProducts(request: PriceAdjustmentRequest): Promise<{ products
     if (!cursor) break;
   }
   return { products, unmatchedCatalogs: [] };
+}
+
+export async function draftFilePreviewChunk(request: PriceAdjustmentRequest): Promise<FilePreviewDraft> {
+  const loaded = await loadProducts(request);
+  return draftFileChanges(loaded.products, request);
 }
 
 function planChanges(products: LoadedProduct[], request: PriceAdjustmentRequest, unmatchedCatalogs: string[]): {
@@ -624,6 +758,13 @@ async function writeFrozenPlan(request: PriceAdjustmentRequest, plan: { preview:
   await getEphemeralStore().set(planCacheKey(request), raw, PLAN_TTL_MS);
 }
 
+export async function commitPriceAdjustmentPlan(
+  request: PriceAdjustmentRequest,
+  plan: { preview: PriceAdjustmentPreview; changes: PlannedChange[] },
+): Promise<void> {
+  await writeFrozenPlan(request, plan);
+}
+
 export async function matchCatalogItems(brand: string, items: CatalogPriceItem[]): Promise<CatalogMatchResult[]> {
   const catalogNumbers: string[] = [];
   const seen = new Set<string>();
@@ -647,8 +788,9 @@ export async function matchCatalogItems(brand: string, items: CatalogPriceItem[]
     includeVariants: false,
     reason: 'match',
   });
+  const index = buildCatalogMatchIndex(loaded.products);
   return items.map((item) => {
-    const resolved = resolveFileItem(loaded.products, item);
+    const resolved = resolveFileItem(index, item);
     if (resolved.status === 'missing') {
       return { catalogNumber: item.catalogNumber, spec: item.spec ?? '', matched: false, name: null, productName: null };
     }

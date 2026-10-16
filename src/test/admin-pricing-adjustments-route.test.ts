@@ -27,6 +27,7 @@ import { requiresAdminMfaForPermission } from '@/lib/admin-mfa-settings';
 import { isMfaAdminRequired, isMfaPhase1Enabled } from '@/lib/security/mfa-config';
 import { readPricingAdjustmentTemplate } from '@/lib/pricing-adjustment-template';
 import { POST as previewPricing } from '@/app/api/admin/pricing-adjustments/preview/route';
+import { POST as previewChunk } from '@/app/api/admin/pricing-adjustments/preview/chunk/route';
 import { POST as applyPricing } from '@/app/api/admin/pricing-adjustments/apply/route';
 import { POST as matchPricing } from '@/app/api/admin/pricing-adjustments/match/route';
 import { POST as createMissingPricing } from '@/app/api/admin/pricing-adjustments/create-missing/route';
@@ -885,6 +886,247 @@ describe('admin pricing adjustment routes', () => {
         subcategory: 'HRP偶联二抗',
       }],
     });
+  });
+
+  it('previews a large file sheet in chunks and still applies the assembled plan', async () => {
+    getTestDb().prepare(`
+      INSERT INTO ProductVariant (id, productId, catalogNumber, spec, price, originalPrice, costPrice, minimumSalePrice)
+      VALUES ('variant_chunk', 'product_1', 'CAT-1-100', '100ul', 50, 60, 20, 40)
+    `).run();
+    const full = {
+      brand: 'CST',
+      scope: 'catalog',
+      mode: 'file',
+      includeVariants: false,
+      reason: '按表格调价',
+      catalogItems: [
+        { catalogNumber: 'CAT-1', spec: '100ul', price: 88 },
+        { catalogNumber: 'cat-1', spec: 'CAT-1-100', minimumSalePrice: 90 },
+      ],
+    };
+    const single = await previewPricing(new Request('http://localhost/api/admin/pricing-adjustments/preview', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(full),
+    }));
+    const singlePreview = (await single.json()).preview;
+    getTestDb().prepare(`DELETE FROM TransientEntry WHERE key LIKE 'price-adjustment-plan:%'`).run();
+
+    const first = await previewChunk(new Request('http://localhost/api/admin/pricing-adjustments/preview/chunk', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        ...full,
+        catalogItems: [full.catalogItems[0]],
+        chunkIndex: 0,
+        chunkCount: 2,
+      }),
+    }));
+    expect(first.status).toBe(200);
+    const firstBody = await first.json();
+    expect(firstBody.complete).toBe(false);
+    expect(firstBody.chunkPreview.changeCount).toBe(1);
+    expect(firstBody.preview).toBeNull();
+
+    const earlyApply = await applyPricing(new Request('http://localhost/api/admin/pricing-adjustments/apply', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(full),
+    }));
+    expect(earlyApply.status).toBe(409);
+
+    const second = await previewChunk(new Request('http://localhost/api/admin/pricing-adjustments/preview/chunk', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        ...full,
+        batchId: firstBody.batchId,
+        catalogItems: [full.catalogItems[1]],
+        chunkIndex: 1,
+        chunkCount: 2,
+      }),
+    }));
+    expect(second.status).toBe(200);
+    const secondBody = await second.json();
+    expect(secondBody.complete).toBe(true);
+    expect(secondBody.receivedCount).toBe(2);
+    expect(secondBody.preview).toEqual(singlePreview);
+
+    const apply = await applyPricing(new Request('http://localhost/api/admin/pricing-adjustments/apply', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(full),
+    }));
+    expect(apply.status).toBe(200);
+    expect((await apply.json()).result.updatedCount).toBe(1);
+    const variant = getTestDb().prepare('SELECT price, minimumSalePrice FROM ProductVariant WHERE id = ?').get('variant_chunk') as {
+      price: number;
+      minimumSalePrice: number;
+    };
+    expect(variant).toEqual({ price: 90, minimumSalePrice: 90 });
+  });
+
+  it('keeps percent catalog chunks on the same apply payload', async () => {
+    const full = {
+      brand: 'CST',
+      scope: 'catalog',
+      mode: 'percent',
+      direction: 'increase',
+      amount: 10,
+      includeVariants: false,
+      priceField: 'price',
+      reason: '供应商调价',
+      catalogNumbers: ['CAT-1', 'CAT-2'],
+    };
+    const single = await previewPricing(new Request('http://localhost/api/admin/pricing-adjustments/preview', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(full),
+    }));
+    const singlePreview = (await single.json()).preview;
+
+    const first = await previewChunk(new Request('http://localhost/api/admin/pricing-adjustments/preview/chunk', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...full, catalogNumbers: ['CAT-1'], chunkIndex: 0, chunkCount: 2 }),
+    }));
+    const firstBody = await first.json();
+    expect(first.status).toBe(200);
+    expect(firstBody.complete).toBe(false);
+    expect(firstBody.chunkPreview).toBeNull();
+
+    const second = await previewChunk(new Request('http://localhost/api/admin/pricing-adjustments/preview/chunk', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        ...full,
+        batchId: firstBody.batchId,
+        catalogNumbers: ['CAT-2'],
+        chunkIndex: 1,
+        chunkCount: 2,
+      }),
+    }));
+    expect(second.status).toBe(200);
+    expect((await second.json()).preview).toEqual(singlePreview);
+
+    const apply = await applyPricing(new Request('http://localhost/api/admin/pricing-adjustments/apply', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(full),
+    }));
+    expect(apply.status).toBe(200);
+    const row = getTestDb().prepare('SELECT price FROM Product WHERE id = ?').get('product_1') as { price: number };
+    expect(row.price).toBe(110);
+  });
+
+  it('rejects a preview chunk that changes the adjustment or exceeds the chunk size', async () => {
+    const first = await previewChunk(new Request('http://localhost/api/admin/pricing-adjustments/preview/chunk', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        brand: 'CST',
+        scope: 'catalog',
+        mode: 'file',
+        includeVariants: false,
+        reason: '按表格调价',
+        catalogItems: [{ catalogNumber: 'CAT-1', price: 80 }],
+        chunkIndex: 0,
+        chunkCount: 2,
+      }),
+    }));
+    const firstBody = await first.json();
+    const mismatched = await previewChunk(new Request('http://localhost/api/admin/pricing-adjustments/preview/chunk', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        brand: 'CST',
+        scope: 'catalog',
+        mode: 'file',
+        includeVariants: false,
+        reason: '另一条调价原因',
+        batchId: firstBody.batchId,
+        catalogItems: [{ catalogNumber: 'CAT-2', price: 70 }],
+        chunkIndex: 1,
+        chunkCount: 2,
+      }),
+    }));
+    expect(mismatched.status).toBe(409);
+
+    const oversized = await previewChunk(new Request('http://localhost/api/admin/pricing-adjustments/preview/chunk', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        brand: 'CST',
+        scope: 'catalog',
+        mode: 'file',
+        includeVariants: false,
+        reason: '按表格调价',
+        catalogItems: Array.from({ length: 401 }, (_, index) => ({ catalogNumber: `CAT-${index}`, price: 10 })),
+        chunkIndex: 0,
+        chunkCount: 1,
+      }),
+    }));
+    expect(oversized.status).toBe(400);
+    expect((await oversized.json()).error).toContain('400');
+  });
+
+  it('does not ask for step-up while uploading preview chunks', async () => {
+    mfaRequiredMock.mockResolvedValue(true);
+    adminMfaRequiredMock.mockReturnValue(true);
+    const response = await previewChunk(new Request('http://localhost/api/admin/pricing-adjustments/preview/chunk', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        brand: 'CST',
+        scope: 'catalog',
+        mode: 'file',
+        includeVariants: false,
+        reason: '按表格调价',
+        catalogItems: [{ catalogNumber: 'CAT-1', price: 80 }],
+        chunkIndex: 0,
+        chunkCount: 1,
+      }),
+    }));
+    expect(response.status).toBe(200);
+    const apply = await applyPricing(new Request('http://localhost/api/admin/pricing-adjustments/apply', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        brand: 'CST',
+        scope: 'catalog',
+        mode: 'file',
+        includeVariants: false,
+        reason: '按表格调价',
+        catalogItems: [{ catalogNumber: 'CAT-1', price: 80 }],
+      }),
+    }));
+    expect(apply.status).toBe(403);
+    expect((await apply.json()).error).toBe('Admin MFA required');
+  });
+
+  it('keeps a catalog lookup index for case-insensitive matching', async () => {
+    const response = await previewPricing(new Request('http://localhost/api/admin/pricing-adjustments/preview', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        brand: 'CST',
+        scope: 'catalog',
+        mode: 'file',
+        includeVariants: false,
+        reason: '按表格调价',
+        catalogItems: [{ catalogNumber: 'cat-1', price: 80 }],
+      }),
+    }));
+    expect(response.status).toBe(200);
+    expect((await response.json()).preview.changeCount).toBe(1);
+    const names = getTestDb().prepare(`
+      SELECT name FROM sqlite_master WHERE type = 'index' AND name LIKE '%catalog_lower%'
+    `).all() as Array<{ name: string }>;
+    expect(names.map((row) => row.name).sort()).toEqual([
+      'ProductVariant_catalog_lower_idx',
+      'Product_brand_catalog_lower_idx',
+      'Product_catalog_lower_idx',
+    ]);
   });
 
   it('rejects unauthenticated catalog matching', async () => {
