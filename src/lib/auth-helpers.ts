@@ -38,6 +38,15 @@ export function isPlaceholderOAuthEmail(email: string | null | undefined): boole
   return normalizeEmail(email).endsWith(`@${WECHAT_EMAIL_DOMAIN}`);
 }
 
+const DELIVERABLE_EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+/** A mailbox the user can prove they own. Placeholder OAuth addresses are not deliverable. */
+export function isDeliverableEmail(email: string | null | undefined): boolean {
+  if (!email) return false;
+  const normalized = normalizeEmail(email);
+  return DELIVERABLE_EMAIL_PATTERN.test(normalized) && !isPlaceholderOAuthEmail(normalized);
+}
+
 export function userHasPassword(password: string | null | undefined): boolean {
   return isBcryptHash(password);
 }

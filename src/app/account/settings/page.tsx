@@ -41,6 +41,7 @@ type ProfileState = {
   wechatLinked: boolean;
   hasPassword: boolean;
   placeholderEmail: boolean;
+  emailVerified: boolean;
   linkedProviders: string[];
   phoneVerified: boolean;
   phoneLastChangedAt: string | null;
@@ -72,6 +73,7 @@ const emptyProfile: ProfileState = {
   wechatLinked: false,
   hasPassword: false,
   placeholderEmail: false,
+  emailVerified: false,
   linkedProviders: [],
   phoneVerified: false,
   phoneLastChangedAt: null,
@@ -95,10 +97,17 @@ export default function AccountSettingsPage() {
   const [passwordMsg, setPasswordMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [passwordSaving, setPasswordSaving] = useState(false);
 
-  const [credentialForm, setCredentialForm] = useState({ email: '', password: '', confirmPassword: '' });
+  const [credentialForm, setCredentialForm] = useState({ email: '', emailCode: '', password: '', confirmPassword: '' });
   const [showCredentialPassword, setShowCredentialPassword] = useState(false);
   const [credentialMsg, setCredentialMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [credentialSaving, setCredentialSaving] = useState(false);
+  const [credentialEmailSending, setCredentialEmailSending] = useState(false);
+  const [credentialEmailCountdown, setCredentialEmailCountdown] = useState(0);
+  const [currentEmailCode, setCurrentEmailCode] = useState('');
+  const [currentEmailMsg, setCurrentEmailMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [currentEmailSending, setCurrentEmailSending] = useState(false);
+  const [currentEmailConfirming, setCurrentEmailConfirming] = useState(false);
+  const [currentEmailCountdown, setCurrentEmailCountdown] = useState(0);
   const [stepUpAction, setStepUpAction] = useState<'password_change' | 'password_setup' | null>(null);
   const institutionLabels = getInstitutionLabels(profile.institutionType);
 
@@ -131,6 +140,7 @@ export default function AccountSettingsPage() {
           wechatLinked: !!data.profile.wechatLinked,
           hasPassword: !!data.profile.hasPassword,
           placeholderEmail: !!data.profile.placeholderEmail,
+          emailVerified: !!data.profile.emailVerified,
           linkedProviders: data.profile.linkedProviders || [],
           phoneVerified: !!data.profile.phoneVerified,
           phoneLastChangedAt: data.profile.phoneLastChangedAt || null,
@@ -159,6 +169,18 @@ export default function AccountSettingsPage() {
     const timer = window.setTimeout(() => setPhoneSmsCountdown((value) => Math.max(0, value - 1)), 1000);
     return () => window.clearTimeout(timer);
   }, [phoneSmsCountdown]);
+
+  useEffect(() => {
+    if (credentialEmailCountdown <= 0) return;
+    const timer = window.setTimeout(() => setCredentialEmailCountdown((value) => Math.max(0, value - 1)), 1000);
+    return () => window.clearTimeout(timer);
+  }, [credentialEmailCountdown]);
+
+  useEffect(() => {
+    if (currentEmailCountdown <= 0) return;
+    const timer = window.setTimeout(() => setCurrentEmailCountdown((value) => Math.max(0, value - 1)), 1000);
+    return () => window.clearTimeout(timer);
+  }, [currentEmailCountdown]);
 
   const phoneChanged = profile.tel.trim() !== originalPhone;
   const currentAvatar = profile.displayAvatarUrl || profile.avatar;
@@ -277,6 +299,10 @@ export default function AccountSettingsPage() {
       setCredentialMsg({ type: 'error', text: '请填写邮箱' });
       return;
     }
+    if (profile.placeholderEmail && !/^\d{6}$/.test(credentialForm.emailCode.trim())) {
+      setCredentialMsg({ type: 'error', text: '请先完成新邮箱验证' });
+      return;
+    }
     if (!stepUpToken) {
       setStepUpAction('password_setup');
       return;
@@ -290,6 +316,7 @@ export default function AccountSettingsPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           email: profile.placeholderEmail ? credentialForm.email : undefined,
+          emailCode: profile.placeholderEmail ? credentialForm.emailCode : undefined,
           password: credentialForm.password,
           confirmPassword: credentialForm.confirmPassword,
           stepUpToken,
@@ -298,7 +325,7 @@ export default function AccountSettingsPage() {
       const data = await res.json();
       if (res.ok) {
         setCredentialMsg({ type: 'success', text: data.message || '邮箱与密码设置成功' });
-        setCredentialForm({ email: '', password: '', confirmPassword: '' });
+        setCredentialForm({ email: '', emailCode: '', password: '', confirmPassword: '' });
         loadProfile();
       } else {
         setCredentialMsg({ type: 'error', text: data.error || '设置失败' });
@@ -307,6 +334,84 @@ export default function AccountSettingsPage() {
       setCredentialMsg({ type: 'error', text: '网络错误' });
     } finally {
       setCredentialSaving(false);
+    }
+  };
+
+  const handleSendCredentialEmail = async () => {
+    setCredentialMsg(null);
+    if (!credentialForm.email.trim()) {
+      setCredentialMsg({ type: 'error', text: '请先填写邮箱' });
+      return;
+    }
+    setCredentialEmailSending(true);
+    try {
+      const res = await fetch('/api/account/email/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: credentialForm.email }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setCredentialMsg({ type: 'error', text: data.error || '邮箱验证码发送失败，请稍后重试' });
+        return;
+      }
+      setCredentialEmailCountdown(60);
+      setCredentialMsg({ type: 'success', text: '验证码已发送到新邮箱，验证通过后才会生效' });
+    } catch {
+      setCredentialMsg({ type: 'error', text: '邮箱验证码发送失败，请稍后重试' });
+    } finally {
+      setCredentialEmailSending(false);
+    }
+  };
+
+  const handleSendCurrentEmailCode = async () => {
+    setCurrentEmailMsg(null);
+    setCurrentEmailSending(true);
+    try {
+      const res = await fetch('/api/account/email/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setCurrentEmailMsg({ type: 'error', text: data.error || '邮箱验证码发送失败，请稍后重试' });
+        return;
+      }
+      setCurrentEmailCountdown(60);
+      setCurrentEmailMsg({ type: 'success', text: '验证码已发送到当前邮箱' });
+    } catch {
+      setCurrentEmailMsg({ type: 'error', text: '邮箱验证码发送失败，请稍后重试' });
+    } finally {
+      setCurrentEmailSending(false);
+    }
+  };
+
+  const handleConfirmCurrentEmail = async () => {
+    if (!/^\d{6}$/.test(currentEmailCode.trim())) {
+      setCurrentEmailMsg({ type: 'error', text: '请先完成邮箱验证' });
+      return;
+    }
+    setCurrentEmailConfirming(true);
+    setCurrentEmailMsg(null);
+    try {
+      const res = await fetch('/api/account/email/confirm', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ emailCode: currentEmailCode }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setCurrentEmailMsg({ type: 'error', text: data.error || '邮箱验证失败' });
+        return;
+      }
+      setCurrentEmailCode('');
+      setCurrentEmailMsg({ type: 'success', text: data.message || '邮箱验证成功' });
+      loadProfile();
+    } catch {
+      setCurrentEmailMsg({ type: 'error', text: '网络错误' });
+    } finally {
+      setCurrentEmailConfirming(false);
     }
   };
 
@@ -428,6 +533,40 @@ export default function AccountSettingsPage() {
                     className="w-full pl-10 pr-4 py-2.5 border border-gray-100 dark:border-slate-400 rounded-xl text-sm text-gray-400 dark:text-gray-500 bg-gray-50 dark:bg-slate-700/50"
                   />
                 </div>
+                {!profile.placeholderEmail && !profile.emailVerified && (
+                  <div className="mt-2 rounded-xl border border-amber-100 bg-amber-50/70 p-3">
+                    <p className="text-xs text-amber-700">邮箱尚未验证。验证通过前，不能查看或确认使用该邮箱提交的询价和报价。</p>
+                    <div className="mt-2 flex gap-2">
+                      <input
+                        value={currentEmailCode}
+                        onChange={e => setCurrentEmailCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                        inputMode="numeric"
+                        maxLength={6}
+                        placeholder="邮箱验证码"
+                        className="min-w-0 flex-1 rounded-lg border border-amber-200 bg-white px-3 py-2 text-sm text-gray-900 focus:outline-none focus:border-brand-400"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => void handleSendCurrentEmailCode()}
+                        disabled={currentEmailSending || currentEmailCountdown > 0}
+                        className="flex-shrink-0 rounded-lg border border-amber-200 bg-white px-3 text-sm font-medium text-amber-700 disabled:text-gray-400"
+                      >
+                        {currentEmailSending ? '发送中' : currentEmailCountdown > 0 ? `${currentEmailCountdown}s` : '获取验证码'}
+                      </button>
+                    </div>
+                    {currentEmailMsg && (
+                      <p className={`mt-2 text-xs ${currentEmailMsg.type === 'success' ? 'text-green-600' : 'text-red-600'}`}>{currentEmailMsg.text}</p>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => void handleConfirmCurrentEmail()}
+                      disabled={currentEmailConfirming || currentEmailCode.length !== 6}
+                      className="mt-2 w-full rounded-lg bg-brand-600 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50"
+                    >
+                      {currentEmailConfirming ? '验证中...' : '验证邮箱'}
+                    </button>
+                  </div>
+                )}
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-slate-900 mb-1">
@@ -684,7 +823,7 @@ export default function AccountSettingsPage() {
               </h2>
               <p className="text-xs text-gray-500 dark:text-gray-500 mb-4">
                 {profile.placeholderEmail
-                  ? '您当前使用第三方登录，请设置真实邮箱和独立密码以便邮箱登录。'
+                  ? '您当前使用第三方登录。请先验证真实邮箱，验证通过后邮箱才会生效，然后即可使用邮箱密码登录。'
                   : '设置独立密码后，除第三方登录外也可使用邮箱密码登录。'}
               </p>
               <div className="space-y-4">
@@ -701,6 +840,25 @@ export default function AccountSettingsPage() {
                         className="w-full pl-10 pr-4 py-2.5 border border-gray-200 dark:border-slate-400 rounded-xl text-sm text-gray-900 dark:text-slate-900 focus:outline-none focus:border-brand-400"
                       />
                     </div>
+                    <div className="mt-2 flex gap-2">
+                      <input
+                        value={credentialForm.emailCode}
+                        onChange={e => setCredentialForm(form => ({ ...form, emailCode: e.target.value.replace(/\D/g, '').slice(0, 6) }))}
+                        inputMode="numeric"
+                        maxLength={6}
+                        placeholder="邮箱验证码"
+                        className="min-w-0 flex-1 rounded-xl border border-gray-200 px-3 py-2.5 text-sm text-gray-900 focus:outline-none focus:border-brand-400 dark:border-slate-400 dark:text-slate-900"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => void handleSendCredentialEmail()}
+                        disabled={credentialEmailSending || credentialEmailCountdown > 0 || !credentialForm.email}
+                        className="flex-shrink-0 rounded-xl border border-gray-200 px-3 text-sm font-medium text-gray-700 disabled:text-gray-400 dark:border-slate-400 dark:text-slate-900"
+                      >
+                        {credentialEmailSending ? '发送中' : credentialEmailCountdown > 0 ? `${credentialEmailCountdown}s` : '获取验证码'}
+                      </button>
+                    </div>
+                    <p className="mt-1.5 text-xs text-gray-500">验证码会发到新邮箱。验证通过前，邮箱不会更改。</p>
                   </div>
                 )}
                 <div>
@@ -739,7 +897,7 @@ export default function AccountSettingsPage() {
               )}
               <button
                 onClick={() => void handleSetPassword()}
-                disabled={credentialSaving || !credentialForm.password || !credentialForm.confirmPassword || (profile.placeholderEmail && !credentialForm.email)}
+                disabled={credentialSaving || !credentialForm.password || !credentialForm.confirmPassword || (profile.placeholderEmail && (!credentialForm.email || credentialForm.emailCode.length !== 6))}
                 className="mt-6 w-full flex items-center justify-center gap-2 py-2.5 bg-brand-600 text-white rounded-xl text-sm font-medium hover:bg-brand-700 disabled:opacity-50 transition-colors"
               >
                 {credentialSaving ? '设置中...' : '设置邮箱与密码'}

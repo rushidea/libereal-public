@@ -7,6 +7,7 @@ import {
   NOTIFICATION_SCOPE_PERSONAL,
 } from '@/lib/notification-ack';
 import { ensurePendingOrganizationApprovalNotifications } from '@/lib/organization-service';
+import { verifiedStoredEmail } from '@/lib/verified-email-access';
 
 type NotificationRow = {
   id: string;
@@ -59,11 +60,12 @@ export async function GET(_req: NextRequest) {
   try {
     const user = await prisma.user.findUnique({
       where: { id: session.user.id as string },
-      select: { id: true, email: true, role: true },
+      select: { id: true, email: true, emailVerified: true, role: true },
     });
     if (!user) {
       return NextResponse.json({ error: 'User not found' }, { status: 404 });
     }
+    const mailbox = verifiedStoredEmail(user);
 
     if (user.role === 'admin') {
       await ensurePendingOrganizationApprovalNotifications();
@@ -78,15 +80,17 @@ export async function GET(_req: NextRequest) {
     }
 
     const [personal, broadcasts] = await Promise.all([
-      prisma.notification.findMany({
-        where: {
-          email: user.email,
-          scope: NOTIFICATION_SCOPE_PERSONAL,
-          deletedAt: null,
-        },
-        orderBy: { createdAt: 'desc' },
-        take: 50,
-      }),
+      mailbox
+        ? prisma.notification.findMany({
+          where: {
+            email: mailbox,
+            scope: NOTIFICATION_SCOPE_PERSONAL,
+            deletedAt: null,
+          },
+          orderBy: { createdAt: 'desc' },
+          take: 50,
+        })
+        : Promise.resolve([]),
       prisma.notification.findMany({
         where: {
           scope: NOTIFICATION_SCOPE_BROADCAST,
@@ -124,11 +128,12 @@ export async function PATCH(req: NextRequest) {
   try {
     const user = await prisma.user.findUnique({
       where: { id: session.user.id as string },
-      select: { id: true, email: true, role: true },
+      select: { id: true, email: true, emailVerified: true, role: true },
     });
     if (!user) {
       return NextResponse.json({ error: 'User not found' }, { status: 404 });
     }
+    const mailbox = verifiedStoredEmail(user);
 
     const body = await req.json();
     const { ids, markAll } = body;
@@ -151,15 +156,17 @@ export async function PATCH(req: NextRequest) {
     }
 
     if (markAll) {
-      await prisma.notification.updateMany({
-        where: {
-          email: user.email,
-          scope: NOTIFICATION_SCOPE_PERSONAL,
-          isRead: false,
-          deletedAt: null,
-        },
-        data: { isRead: true },
-      });
+      if (mailbox) {
+        await prisma.notification.updateMany({
+          where: {
+            email: mailbox,
+            scope: NOTIFICATION_SCOPE_PERSONAL,
+            isRead: false,
+            deletedAt: null,
+          },
+          data: { isRead: true },
+        });
+      }
       const broadcastIds = (
         await prisma.notification.findMany({
           where: { scope: NOTIFICATION_SCOPE_BROADCAST, deletedAt: null },
@@ -170,15 +177,17 @@ export async function PATCH(req: NextRequest) {
       await markBroadcastReceiptsRead(user.id, broadcastIds);
     } else if (ids && Array.isArray(ids) && ids.length > 0) {
       const idList = ids.filter((id: unknown): id is string => typeof id === 'string');
-      await prisma.notification.updateMany({
-        where: {
-          id: { in: idList },
-          email: user.email,
-          scope: NOTIFICATION_SCOPE_PERSONAL,
-          deletedAt: null,
-        },
-        data: { isRead: true },
-      });
+      if (mailbox) {
+        await prisma.notification.updateMany({
+          where: {
+            id: { in: idList },
+            email: mailbox,
+            scope: NOTIFICATION_SCOPE_PERSONAL,
+            deletedAt: null,
+          },
+          data: { isRead: true },
+        });
+      }
       await markBroadcastReceiptsRead(user.id, idList);
     } else {
       return NextResponse.json({ error: 'ids or markAll is required' }, { status: 400 });

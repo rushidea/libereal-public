@@ -6,6 +6,7 @@ import { writeAuditLog } from '@/lib/audit';
 import { canPayOrderWithAlipay, getAlipayPaymentExpiresAt } from '@/data/alipay-payment';
 import { normalizeOrderPaymentMethod } from '@/data/payment-methods';
 import { OrganizationRbacError, requireOrganizationPermission } from '@/lib/organization-service';
+import { emailKeyedAccess } from '@/lib/verified-email-access';
 import { ACTIVE_PAYMENT_ATTEMPT_STATUSES, isUniqueConstraintError } from '@/lib/payment-concurrency';
 
 function amountsEqualInCents(left: number, right: number): boolean {
@@ -56,7 +57,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     }
   } else if (order.ownerScope === 'organization') {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
-  } else if (order.email !== user.email) {
+  } else if (order.customerId !== user.id && !(await emailKeyedAccess(user.id, order.email))) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   }
   if (normalizeOrderPaymentMethod(order.paymentMethod) !== 'alipay') return NextResponse.json({ error: '订单付款方式不匹配' }, { status: 409 });

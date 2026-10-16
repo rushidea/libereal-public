@@ -5,6 +5,7 @@ import type { Prisma } from '@prisma/client';
 import { inquiryItemView, toInquiryItemCreates } from '@/lib/commerce-records';
 import { quoteView } from '@/lib/quote-records';
 import { canAccessOrganizationRecord } from '@/lib/organization-record-access';
+import { emailKeyedAccess } from '@/lib/verified-email-access';
 
 interface LogItem {
   name: string;
@@ -43,7 +44,7 @@ export async function GET(
   if (user.role !== 'admin') {
     const allowed = inquiry.ownerScope === 'organization'
       ? Boolean(inquiry.organizationId) && await canAccessOrganizationRecord(user.id, inquiry.organizationId as string)
-      : inquiry.email === user.email;
+      : inquiry.userId === user.id || await emailKeyedAccess(user.id, inquiry.email);
   if (!allowed) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   }
 

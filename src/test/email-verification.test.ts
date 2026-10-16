@@ -1,6 +1,6 @@
 import { createHash } from 'crypto';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { consumeRegistrationEmailCode } from '@/lib/email-verification';
+import { consumeAccountEmailCode, consumeRegistrationEmailCode } from '@/lib/email-verification';
 import { clearAllTables, closeTestDb, getTestDb } from './db-helpers';
 
 function tokenFor(email: string, code: string): string {
@@ -34,5 +34,16 @@ describe('registration email verification', () => {
     ).run(`registration-email:${email}`, tokenFor(email, code), new Date(Date.now() - 60_000).toISOString());
 
     await expect(consumeRegistrationEmailCode(email, code)).resolves.toBe(false);
+  });
+
+  it('does not accept a registration code as an account email code', async () => {
+    const email = 'researcher@example.com';
+    const code = '123456';
+    getTestDb().prepare(
+      'INSERT INTO VerificationToken (identifier, token, expires) VALUES (?, ?, ?)',
+    ).run(`registration-email:${email}`, tokenFor(email, code), new Date(Date.now() + 60_000).toISOString());
+
+    await expect(consumeAccountEmailCode(email, code)).resolves.toBe(false);
+    await expect(consumeRegistrationEmailCode(email, code)).resolves.toBe(true);
   });
 });

@@ -7,6 +7,7 @@ import { requireOrganizationPermission } from '@/lib/organization-service';
 import { orderAutoCloseAt } from '@/lib/order-auto-close';
 import { initialOrderStatus } from '@/lib/order-domain';
 import { buildCheckoutRequestFingerprint, isUniqueConstraintError, validCheckoutAttemptId } from '@/lib/checkout-idempotency';
+import { verifiedEmailMatches } from '@/lib/verified-email-access';
 
 interface OrderItem {
   productId?: string | null;
@@ -51,7 +52,7 @@ export async function POST(
 
     const user = await prisma.user.findUnique({
       where: { id: session.user.id as string },
-      select: { id: true, role: true, email: true },
+      select: { id: true, role: true, email: true, emailVerified: true },
     });
     if (!user) {
       return NextResponse.json({ error: 'User not found' }, { status: 404 });
@@ -81,7 +82,7 @@ export async function POST(
         } catch {
           return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
         }
-      } else if (inquiry.email !== user.email) {
+      } else if (inquiry.userId !== user.id && !verifiedEmailMatches(user, inquiry.email)) {
         return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
       }
     }
@@ -274,7 +275,7 @@ export async function GET(
   try {
     const user = await prisma.user.findUnique({
       where: { id: session.user.id as string },
-      select: { id: true, role: true, email: true },
+      select: { id: true, role: true, email: true, emailVerified: true },
     });
     if (!user) {
       return NextResponse.json({ error: 'User not found' }, { status: 404 });
@@ -291,7 +292,7 @@ export async function GET(
     if (!isAdmin) {
       const allowed = inquiry.ownerScope === 'organization'
         ? Boolean(inquiry.organizationId) && await canAccessOrganizationRecord(user.id, inquiry.organizationId as string)
-        : inquiry.email === user.email;
+        : inquiry.userId === user.id || verifiedEmailMatches(user, inquiry.email);
       if (!allowed) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
 

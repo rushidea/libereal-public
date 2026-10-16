@@ -11,6 +11,7 @@ import { getAlipayPaymentSummary } from '@/data/alipay-payment';
 import { refundOrderPointsProportionally } from '@/lib/points-checkout-service';
 import { canAccessOrganizationRecord } from '@/lib/organization-record-access';
 import { requireOrganizationPermission } from '@/lib/organization-service';
+import { emailKeyedAccess } from '@/lib/verified-email-access';
 
 export async function GET(
   _req: NextRequest,
@@ -23,7 +24,6 @@ export async function GET(
     const admin = await requireAdmin('orders.read');
     if (admin instanceof NextResponse) return admin;
   }
-  const callerEmail = user.email;
   const isAdmin = user.role === 'admin';
 
   try {
@@ -45,7 +45,7 @@ export async function GET(
     if (!isAdmin) {
       let allowed = order.ownerScope === 'organization'
         ? Boolean(order.organizationId) && await canAccessOrganizationRecord(user.id, order.organizationId as string)
-        : order.email === callerEmail;
+        : order.customerId === user.id || await emailKeyedAccess(user.id, order.email);
       if (!allowed && order.ownerScope === 'organization' && order.organizationId && order.customerId === user.id) {
         try {
           await requireOrganizationPermission(user.id, order.organizationId, 'organization.orders.create');
@@ -123,7 +123,7 @@ export async function PATCH(
         }
       } else {
         const ownsPersonalOrder = order.ownerScope === 'personal'
-          && (order.customerId === user.id || order.email === user.email);
+          && (order.customerId === user.id || await emailKeyedAccess(user.id, order.email));
         if (!ownsPersonalOrder || body.status !== 'cancelled' || body.items !== undefined || body.paymentMethod !== undefined) {
           return NextResponse.json({ error: '个人订单仅支持本人取消' }, { status: 403 });
         }
