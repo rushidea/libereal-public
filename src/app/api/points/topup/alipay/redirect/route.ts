@@ -3,8 +3,12 @@ import { prisma } from '@/lib/prisma';
 import { formatAlipayAmount, getAlipaySdk } from '@/lib/alipay';
 import { getPublicSiteOrigin, isPublicHttpOrigin } from '@/lib/site-url';
 import { reportError } from '@/lib/errorReporting';
+import { requireActiveSession } from '@/lib/session';
 
 export async function GET(req: NextRequest) {
+  const user = await requireActiveSession();
+  if (user instanceof NextResponse) return user;
+
   const outTradeNo = req.nextUrl.searchParams.get('outTradeNo');
   if (!outTradeNo) return NextResponse.json({ error: '缺少 outTradeNo' }, { status: 400 });
 
@@ -12,7 +16,13 @@ export async function GET(req: NextRequest) {
   if (!client) return NextResponse.json({ error: '支付宝支付暂未配置' }, { status: 503 });
 
   const topup = await prisma.pointsTopup.findUnique({ where: { outTradeNo } });
-  if (!topup || topup.status !== 'pending' || !topup.outTradeNo) {
+  if (!topup || !topup.outTradeNo) {
+    return NextResponse.json({ error: '充值单无效' }, { status: 404 });
+  }
+  if (topup.userId !== user.id) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+  }
+  if (topup.status !== 'pending') {
     return NextResponse.json({ error: '充值单无效' }, { status: 404 });
   }
 
@@ -35,6 +45,7 @@ export async function GET(req: NextRequest) {
     reportError(error, {
       tags: { integration: 'alipay', operation: 'points_topup_redirect' },
       extra: { topupId: topup.id, outTradeNo: topup.outTradeNo },
+      user: { id: user.id, email: user.email },
     });
     return NextResponse.json({ error: '支付宝付款签名失败' }, { status: 503 });
   }
