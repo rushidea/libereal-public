@@ -293,7 +293,8 @@
   --brand-color-link: #f8fafc;
   --brand-color-link-hover: #cbd5e1;
   --brand-color-link-active: #f8fafc;
-  --brand-color-text: #f8fafc;
+  /* Night body text matches the site nav: color-mix(#a7f3d0 28%, #ffffff) = #e6fcf2 */
+  --brand-color-text: var(--brand-color-header-nav);
   --brand-color-text-secondary: #cbd5e1;
   --brand-color-text-tertiary: #cbd5e1;
   --brand-color-text-quaternary: #94a3b8;
