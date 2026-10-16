@@ -24,7 +24,7 @@ import { PATCH as archivePATCH } from '@/app/api/admin/orders/archive/route';
 import { GET as archivedGET } from '@/app/api/admin/orders/archived/route';
 import { NextRequest, NextResponse } from 'next/server';
 import { isAdminMfaScenarioEnabled, requiresAdminMfaForPermission } from '@/lib/admin-mfa-settings';
-import { getTestDb, closeTestDb, seedAdmin, clearAllTables } from './db-helpers';
+import { getTestDb, closeTestDb, seedAdmin, seedUser, clearAllTables } from './db-helpers';
 
 function seedOrder(db: ReturnType<typeof getTestDb>, order: {
   id: string;
@@ -200,6 +200,9 @@ describe('PATCH /api/admin/orders/archive', () => {
     seedAdmin(db);
     seedOrder(db, { id: 'o1', email: 'u1@test.com' });
     seedOrder(db, { id: 'o2', email: 'u2@test.com' });
+    vi.mocked(isAdminMfaScenarioEnabled).mockReset();
+    vi.mocked(isAdminMfaScenarioEnabled).mockResolvedValue(false);
+    sessionMocks.requireAdminStepUp.mockReset();
   });
 
   function makeReq(body: object): NextRequest {
@@ -234,13 +237,199 @@ describe('PATCH /api/admin/orders/archive', () => {
     expect(o1.archivedAt).toBeNull();
   });
 
-  it('deletes orders', async () => {
+  it('cancels and archives an order instead of deleting it', async () => {
+    const res = await archivePATCH(makeReq({ orderIds: ['o1'], action: 'delete' }) as NextRequest);
+    const json = await res.json();
+    expect(res.status).toBe(200);
+    expect(json.count).toBe(1);
+
+    const db = getTestDb();
+    const orders = db.prepare('SELECT id, status, archivedAt FROM "Order" ORDER BY id').all() as Array<{ id: string; status: string; archivedAt: string | null }>;
+    expect(orders).toEqual([
+      expect.objectContaining({ id: 'o1', status: 'cancelled', archivedAt: expect.any(String) }),
+      expect.objectContaining({ id: 'o2', status: 'pending', archivedAt: null }),
+    ]);
+    expect(db.prepare('SELECT COUNT(*) AS count FROM OrderItem').get()).toEqual({ count: 2 });
+    expect(db.prepare('SELECT toStatus, reason FROM OrderStatusHistory WHERE orderId = ?').get('o1')).toEqual({
+      toStatus: 'cancelled',
+      reason: 'admin_withdraw',
+    });
+  });
+
+  it('releases reserved stock, credit, and deducted points before archiving', async () => {
+    const db = getTestDb();
+    seedUser(db, { id: 'buyer_1', email: 'buyer@test.com', points: 80 });
+    db.prepare(`
+      UPDATE "Order"
+      SET email = 'buyer@test.com', customerId = 'buyer_1', status = 'confirmed', paymentMethod = 'bank_transfer',
+          subtotal = 200, total = 180, pointsPersonal = 20, pointsDiscount = 20, pointsApplied = 1
+      WHERE id = 'o1'
+    `).run();
+    db.prepare(`UPDATE Product SET stockQuantity = 10, inStock = 1 WHERE id = 'p1'`).run();
+    db.prepare(`
+      INSERT INTO InventoryAccount (
+        id, productId, actualQuantity, availableQuantity, reservedQuantity, shippedQuantity, inboundQuantity, createdAt, updatedAt
+      ) VALUES ('ia1', 'p1', 10, 8, 2, 0, 0, datetime('now'), datetime('now'))
+    `).run();
+    db.prepare(`
+      INSERT INTO InventoryReservation (
+        id, inventoryAccountId, orderId, orderItemId, quantity, fulfilledQuantity, status, createdAt, updatedAt
+      ) VALUES ('ir1', 'ia1', 'o1', 'o1_item_0', 2, 0, 'active', datetime('now'), datetime('now'))
+    `).run();
+    db.prepare(`
+      INSERT INTO CreditAccount (id, userId, baseLimit, usedAmount, status, paymentTermDays, createdAt, updatedAt)
+      VALUES ('ca1', 'buyer_1', 20000, 180, 'active', 30, datetime('now'), datetime('now'))
+    `).run();
+    db.prepare(`
+      INSERT INTO AccountReceivable (
+        id, orderId, userId, amount, status, confirmedAt, paymentTermDaysSnapshot, createdAt, updatedAt
+      ) VALUES ('ar1', 'o1', 'buyer_1', 180, 'open', datetime('now'), 30, datetime('now'), datetime('now'))
+    `).run();
+    db.prepare(`
+      INSERT INTO PaymentAttempt (id, orderId, provider, outTradeNo, amount, status, createdAt, updatedAt)
+      VALUES ('pa1', 'o1', 'bank_transfer', 'out-o1', 180, 'created', datetime('now'), datetime('now'))
+    `).run();
+
     const res = await archivePATCH(makeReq({ orderIds: ['o1'], action: 'delete' }) as NextRequest);
     expect(res.status).toBe(200);
 
+    expect(db.prepare('SELECT status, archivedAt FROM "Order" WHERE id = ?').get('o1')).toMatchObject({
+      status: 'cancelled',
+    });
+    expect(db.prepare('SELECT reservedQuantity, availableQuantity FROM InventoryAccount WHERE id = ?').get('ia1')).toEqual({
+      reservedQuantity: 0,
+      availableQuantity: 10,
+    });
+    expect(db.prepare('SELECT status FROM InventoryReservation WHERE id = ?').get('ir1')).toEqual({ status: 'released' });
+    expect(db.prepare('SELECT stockQuantity FROM Product WHERE id = ?').get('p1')).toEqual({ stockQuantity: 10 });
+    expect(db.prepare('SELECT usedAmount FROM CreditAccount WHERE id = ?').get('ca1')).toEqual({ usedAmount: 0 });
+    expect(db.prepare('SELECT status FROM AccountReceivable WHERE id = ?').get('ar1')).toEqual({ status: 'cancelled' });
+    expect(db.prepare('SELECT points FROM User WHERE id = ?').get('buyer_1')).toEqual({ points: 100 });
+    expect(db.prepare('SELECT pointsRefundedPersonal FROM "Order" WHERE id = ?').get('o1')).toEqual({ pointsRefundedPersonal: 20 });
+    expect(db.prepare('SELECT COUNT(*) AS count FROM PaymentAttempt').get()).toEqual({ count: 1 });
+    expect(db.prepare('SELECT COUNT(*) AS count FROM "Order"').get()).toEqual({ count: 2 });
+    expect(db.prepare("SELECT action FROM AuditLog WHERE targetId = 'o1'").get()).toEqual({ action: 'order.withdrawn' });
+  });
+
+  it('releases a leftover reservation when archiving an already cancelled order', async () => {
     const db = getTestDb();
-    const remaining = db.prepare('SELECT id FROM "Order"').all() as Array<{ id: string }>;
-    expect(remaining.map(o => o.id)).toEqual(['o2']);
+    db.prepare(`UPDATE "Order" SET status = 'cancelled' WHERE id = 'o1'`).run();
+    db.prepare(`UPDATE Product SET stockQuantity = 8 WHERE id = 'p1'`).run();
+    db.prepare(`
+      INSERT INTO InventoryAccount (
+        id, productId, actualQuantity, availableQuantity, reservedQuantity, shippedQuantity, inboundQuantity, createdAt, updatedAt
+      ) VALUES ('ia1', 'p1', 10, 8, 2, 0, 0, datetime('now'), datetime('now'))
+    `).run();
+    db.prepare(`
+      INSERT INTO InventoryReservation (
+        id, inventoryAccountId, orderId, orderItemId, quantity, fulfilledQuantity, status, createdAt, updatedAt
+      ) VALUES ('ir1', 'ia1', 'o1', 'o1_item_0', 2, 0, 'active', datetime('now'), datetime('now'))
+    `).run();
+
+    const res = await archivePATCH(makeReq({ orderIds: ['o1'], action: 'delete' }) as NextRequest);
+    expect(res.status).toBe(200);
+    expect(db.prepare('SELECT status, archivedAt IS NOT NULL AS archived FROM "Order" WHERE id = ?').get('o1')).toEqual({
+      status: 'cancelled',
+      archived: 1,
+    });
+    expect(db.prepare('SELECT reservedQuantity, availableQuantity FROM InventoryAccount WHERE id = ?').get('ia1')).toEqual({
+      reservedQuantity: 0,
+      availableQuantity: 10,
+    });
+    expect(db.prepare('SELECT COUNT(*) AS count FROM OrderStatusHistory WHERE orderId = ?').get('o1')).toEqual({ count: 0 });
+  });
+
+  it('rejects shipped or paid orders and leaves the batch unchanged', async () => {
+    const db = getTestDb();
+    db.prepare(`UPDATE "Order" SET status = 'confirmed' WHERE id = 'o1'`).run();
+    db.prepare(`UPDATE "Order" SET status = 'shipped' WHERE id = 'o2'`).run();
+    db.prepare(`
+      INSERT INTO InventoryAccount (
+        id, productId, actualQuantity, availableQuantity, reservedQuantity, shippedQuantity, inboundQuantity, createdAt, updatedAt
+      ) VALUES ('ia1', 'p1', 10, 8, 2, 0, 0, datetime('now'), datetime('now'))
+    `).run();
+    db.prepare(`
+      INSERT INTO InventoryReservation (
+        id, inventoryAccountId, orderId, orderItemId, quantity, fulfilledQuantity, status, createdAt, updatedAt
+      ) VALUES ('ir1', 'ia1', 'o1', 'o1_item_0', 2, 0, 'active', datetime('now'), datetime('now'))
+    `).run();
+
+    const blocked = await archivePATCH(makeReq({ orderIds: ['o1', 'o2'], action: 'delete' }) as NextRequest);
+    expect(blocked.status).toBe(409);
+    await expect(blocked.json()).resolves.toEqual({ error: 'ORDER_DELETE_BLOCKED', orderId: 'o2' });
+    expect(db.prepare('SELECT status, archivedAt FROM "Order" WHERE id = ?').get('o1')).toEqual({ status: 'confirmed', archivedAt: null });
+    expect(db.prepare('SELECT reservedQuantity FROM InventoryAccount WHERE id = ?').get('ia1')).toEqual({ reservedQuantity: 2 });
+    expect(db.prepare('SELECT status FROM InventoryReservation WHERE id = ?').get('ir1')).toEqual({ status: 'active' });
+
+    db.prepare(`UPDATE "Order" SET status = 'confirmed', paymentMethod = 'alipay', paidAt = datetime('now') WHERE id = 'o2'`).run();
+    const paid = await archivePATCH(makeReq({ orderIds: ['o2'], action: 'delete' }) as NextRequest);
+    expect(paid.status).toBe(409);
+    await expect(paid.json()).resolves.toEqual({ error: 'PAID_ORDER_REFUND_REQUIRED', orderId: 'o2' });
+    expect(db.prepare('SELECT status FROM "Order" WHERE id = ?').get('o2')).toEqual({ status: 'confirmed' });
+  });
+
+  it('rejects a paid receivable and keeps the order open', async () => {
+    const db = getTestDb();
+    seedUser(db, { id: 'buyer_1', email: 'buyer@test.com' });
+    db.prepare(`
+      UPDATE "Order"
+      SET email = 'buyer@test.com', customerId = 'buyer_1', status = 'confirmed', paymentMethod = 'bank_transfer', total = 180
+      WHERE id = 'o1'
+    `).run();
+    db.prepare(`
+      INSERT INTO CreditAccount (id, userId, baseLimit, usedAmount, status, paymentTermDays, createdAt, updatedAt)
+      VALUES ('ca1', 'buyer_1', 20000, 0, 'active', 30, datetime('now'), datetime('now'))
+    `).run();
+    db.prepare(`
+      INSERT INTO AccountReceivable (
+        id, orderId, userId, amount, status, confirmedAt, paymentTermDaysSnapshot, paidAt, createdAt, updatedAt
+      ) VALUES ('ar1', 'o1', 'buyer_1', 180, 'paid', datetime('now'), 30, datetime('now'), datetime('now'), datetime('now'))
+    `).run();
+
+    const res = await archivePATCH(makeReq({ orderIds: ['o1'], action: 'delete' }) as NextRequest);
+    expect(res.status).toBe(409);
+    await expect(res.json()).resolves.toEqual({ error: 'PAID_ORDER_REFUND_REQUIRED', orderId: 'o1' });
+    expect(db.prepare('SELECT status, archivedAt FROM "Order" WHERE id = ?').get('o1')).toEqual({
+      status: 'confirmed',
+      archivedAt: null,
+    });
+    expect(db.prepare('SELECT status FROM AccountReceivable WHERE id = ?').get('ar1')).toEqual({ status: 'paid' });
+    expect(db.prepare('SELECT usedAmount FROM CreditAccount WHERE id = ?').get('ca1')).toEqual({ usedAmount: 0 });
+  });
+
+  it('does not archive an order when deducted points cannot be refunded', async () => {
+    const db = getTestDb();
+    db.prepare(`UPDATE "Order" SET pointsApplied = 1, pointsPersonal = 10, customerId = NULL WHERE id = 'o1'`).run();
+
+    const res = await archivePATCH(makeReq({ orderIds: ['o1'], action: 'delete' }) as NextRequest);
+    expect(res.status).toBe(409);
+    await expect(res.json()).resolves.toEqual({ error: 'POINTS_REFUND_FAILED', orderId: 'o1' });
+    expect(db.prepare('SELECT status, archivedAt FROM "Order" WHERE id = ?').get('o1')).toEqual({ status: 'pending', archivedAt: null });
+  });
+
+  it('returns 404 and changes nothing when an order id is missing', async () => {
+    const res = await archivePATCH(makeReq({ orderIds: ['o1', 'missing'], action: 'delete' }) as NextRequest);
+    expect(res.status).toBe(404);
+    await expect(res.json()).resolves.toEqual({ error: 'ORDER_NOT_FOUND' });
+    expect(getTestDb().prepare('SELECT status, archivedAt FROM "Order" WHERE id = ?').get('o1')).toEqual({
+      status: 'pending',
+      archivedAt: null,
+    });
+  });
+
+  it('requires finance step-up before withdrawing orders when that scenario is enabled', async () => {
+    vi.mocked(isAdminMfaScenarioEnabled).mockImplementation(async (id) => id === 'finance.write');
+    sessionMocks.requireAdminStepUp.mockResolvedValue(
+      NextResponse.json({ error: 'Admin MFA required' }, { status: 403 }),
+    );
+
+    const res = await archivePATCH(makeReq({ orderIds: ['o1'], action: 'delete' }) as NextRequest);
+    expect(res.status).toBe(403);
+    expect(sessionMocks.requireAdminStepUp).toHaveBeenCalledWith(expect.objectContaining({ id: 'admin_test_id' }));
+    expect(getTestDb().prepare('SELECT status, archivedAt FROM "Order" WHERE id = ?').get('o1')).toEqual({
+      status: 'pending',
+      archivedAt: null,
+    });
   });
 
   it('returns 400 for empty orderIds', async () => {
