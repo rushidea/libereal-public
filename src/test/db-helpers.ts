@@ -808,6 +808,9 @@ export function getTestDb(): Database.Database {
     CREATE INDEX IF NOT EXISTS CouponInstance_code_idx ON CouponInstance(code);
     CREATE INDEX IF NOT EXISTS CouponInstance_couponId_idx ON CouponInstance(couponId);
     CREATE INDEX IF NOT EXISTS CouponInstance_redeemedOrderId_idx ON CouponInstance(redeemedOrderId);
+    CREATE INDEX IF NOT EXISTS "Product_catalog_lower_idx" ON "Product"(LOWER("catalogNumber")) WHERE "deletedAt" IS NULL;
+    CREATE INDEX IF NOT EXISTS "Product_brand_catalog_lower_idx" ON "Product"("brand", LOWER("catalogNumber")) WHERE "deletedAt" IS NULL;
+    CREATE INDEX IF NOT EXISTS "ProductVariant_catalog_lower_idx" ON "ProductVariant"(LOWER("catalogNumber"));
   `);
   ensureColumn(_db, 'Order', 'pointsRefundedCash', 'pointsRefundedCash REAL NOT NULL DEFAULT 0');
   ensureColumn(_db, 'PointsRedemption', 'pointsReturned', 'pointsReturned INTEGER NOT NULL DEFAULT 0');

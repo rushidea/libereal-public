@@ -42,6 +42,7 @@ import {
   toCatalogPriceItem,
   type ImportedAdjustmentRow,
 } from '@/lib/pricing-adjustment-import';
+import { buildPreviewChunkBody, splitPreviewUpload } from '@/lib/pricing-adjustment-preview-chunks';
 import type { CatalogMatchResult, CatalogNameReviewItem } from '@/lib/pricing-adjustment-rules';
 
 type ScopeMode = 'category' | 'catalog';
@@ -77,6 +78,29 @@ type PreviewResult = {
 
 const REVIEW_LIST_LIMIT = 200;
 
+async function postPricingJson(url: string, body: Record<string, unknown>) {
+  const response = await fetch(url, {
+    method: 'POST',
+    cache: 'no-store',
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    body: JSON.stringify(body),
+  });
+  const text = await response.text();
+  let data: {
+    error?: string;
+    preview?: PreviewResult;
+    complete?: boolean;
+    batchId?: string;
+    chunkPreview?: PreviewResult;
+  } = {};
+  try {
+    data = text ? JSON.parse(text) as typeof data : {};
+  } catch {
+    data = {};
+  }
+  return { response, text, data };
+}
+
 function pricingActionError(error: unknown, fallback: string): string {
   if (error === 'Admin MFA required' || error === 'Recent MFA verification required' || error === '安全验证已失效，请重新验证') {
     return '身份确认已失效，请再次点确认并完成验证。';
@@ -94,6 +118,36 @@ const PRICE_FIELDS: Array<{ value: PriceField; label: string; description: strin
 const PAGE_SIZE = 20;
 const MAX_IMPORT_ROWS = 50000;
 const MAX_FILE_SIZE = 20 * 1024 * 1024;
+
+type SheetProgress = {
+  label: string;
+  completed: number;
+  total: number;
+  detail?: string;
+};
+
+function SheetProgressBar({ progress }: { progress: SheetProgress }) {
+  const pct = progress.total > 0 ? Math.min(100, Math.round((progress.completed / progress.total) * 100)) : 0;
+  return (
+    <div
+      className="mt-3 max-w-xl"
+      role="progressbar"
+      aria-valuemin={0}
+      aria-valuemax={progress.total}
+      aria-valuenow={progress.completed}
+      aria-label={progress.label}
+    >
+      <div className="mb-1 flex items-center justify-between gap-3 text-xs text-gray-500">
+        <span>{progress.label}</span>
+        <span className="tabular-nums">{progress.completed}/{progress.total}</span>
+      </div>
+      <div className="h-1.5 overflow-hidden rounded-full bg-gray-100">
+        <div className="h-full bg-brand-600" style={{ width: `${pct}%` }} />
+      </div>
+      {progress.detail ? <p className="mt-1 text-xs text-gray-500">{progress.detail}</p> : null}
+    </div>
+  );
+}
 
 function formatPrice(value: number | null): string {
   if (value === null) return '—';
@@ -241,12 +295,14 @@ export default function PricingAdjustmentsPage() {
   const [classifySuggestions, setClassifySuggestions] = useState<Record<string, string>>({});
   const [reviewBrandChoices, setReviewBrandChoices] = useState<Record<string, string>>({});
   const [appliedCatalogKeys, setAppliedCatalogKeys] = useState<string[]>([]);
+  const [sheetProgress, setSheetProgress] = useState<SheetProgress | null>(null);
   const previewPayloadRef = useRef<Record<string, unknown> | null>(null);
   const previewGenerationRef = useRef(0);
 
   function invalidatePreview() {
     previewGenerationRef.current += 1;
     previewPayloadRef.current = null;
+    setSheetProgress(null);
     setPreviewLoading(false);
     setPreviewVisible(false);
     setPreviewResult(null);
@@ -370,22 +426,44 @@ export default function PricingAdjustmentsPage() {
     || ((previewResult.skippedUnchangedCount ?? 0) > 0 && (previewResult.matchedCount ?? 0) > 0)
   );
 
-  async function rematchImportedRows(rows: ImportedAdjustmentRow[]): Promise<ImportedAdjustmentRow[]> {
+  async function rematchImportedRows(
+    rows: ImportedAdjustmentRow[],
+    onProgress?: (progress: SheetProgress) => void,
+  ): Promise<ImportedAdjustmentRow[]> {
     const matchable = rows.filter((row) => row.status === 'ready' || row.status === 'warning' || importedRowIsMissing(row));
     if (matchable.length === 0) return rows;
-    const response = await fetch('/api/admin/pricing-adjustments/match', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        ...(selectedBrand ? { brand: selectedBrand } : {}),
-        catalogItems: matchable.map(toCatalogMatchItem),
-      }),
-    });
-    const data = await response.json().catch(() => ({})) as { error?: string; matches?: CatalogMatchResult[] };
-    if (!response.ok || !Array.isArray(data.matches)) {
-      throw new Error(typeof data.error === 'string' ? data.error : '商品匹配失败，预览时会再次核对货号。');
+    const slices = splitPreviewUpload({ catalogItems: matchable.map(toCatalogMatchItem) });
+    const matches: CatalogMatchResult[] = [];
+    for (let index = 0; index < slices.length; index += 1) {
+      if (slices.length > 1) {
+        onProgress?.({
+          completed: index,
+          total: slices.length,
+          label: `正在核对货号（${index + 1}/${slices.length}）`,
+        });
+      }
+      const response = await fetch('/api/admin/pricing-adjustments/match', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...(selectedBrand ? { brand: selectedBrand } : {}),
+          catalogItems: slices[index]?.catalogItems ?? [],
+        }),
+      });
+      const data = await response.json().catch(() => ({})) as { error?: string; matches?: CatalogMatchResult[] };
+      if (!response.ok || !Array.isArray(data.matches)) {
+        throw new Error(typeof data.error === 'string' ? data.error : '商品匹配失败，预览时会再次核对货号。');
+      }
+      matches.push(...data.matches);
     }
-    return applyCatalogMatchResults(rows, data.matches);
+    if (slices.length > 1) {
+      onProgress?.({
+        completed: slices.length,
+        total: slices.length,
+        label: `正在核对货号（${slices.length}/${slices.length}）`,
+      });
+    }
+    return applyCatalogMatchResults(rows, matches);
   }
 
   function decideReviewRow(row: ImportedAdjustmentRow, decision: { action: 'confirm'; brand?: string } | { action: 'skip' }) {
@@ -449,7 +527,9 @@ export default function PricingAdjustmentsPage() {
       let rows = importedRows;
       if (scopeMode === 'catalog' && importedRowsNeedCatalogRematch(rows)) {
         try {
-          rows = await rematchImportedRows(rows);
+          rows = await rematchImportedRows(rows, (progress) => {
+            if (previewStillCurrent()) setSheetProgress(progress);
+          });
           if (!previewStillCurrent()) return;
           setImportedRows(rows);
         } catch (error) {
@@ -481,18 +561,73 @@ export default function PricingAdjustmentsPage() {
       }
 
       const payload = adjustmentPayload(token, rows, readiness.effectiveReason);
-      const response = await fetch('/api/admin/pricing-adjustments/preview', {
-        method: 'POST',
-        cache: 'no-store',
-        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-        body: JSON.stringify(payload),
+      const slices = splitPreviewUpload({
+        catalogItems: Array.isArray(payload.catalogItems) ? payload.catalogItems : undefined,
+        catalogNumbers: Array.isArray(payload.catalogNumbers) ? payload.catalogNumbers : undefined,
       });
-      const text = await response.text();
-      let data: { error?: string; preview?: PreviewResult } = {};
-      try {
-        data = text ? JSON.parse(text) as { error?: string; preview?: PreviewResult } : {};
-      } catch {
-        data = {};
+      let response: Response;
+      let text: string;
+      let data: { error?: string; preview?: PreviewResult; complete?: boolean; batchId?: string; chunkPreview?: PreviewResult };
+      if (slices.length > 1) {
+        let batchId: string | undefined;
+        let last: { response: Response; text: string; data: typeof data } | null = null;
+        for (let index = 0; index < slices.length; index += 1) {
+          if (!previewStillCurrent()) return;
+          const slice = slices[index];
+          if (!slice) continue;
+          setSheetProgress({
+            completed: index,
+            total: slices.length,
+            label: `正在生成预览（${index + 1}/${slices.length}）`,
+          });
+          let attempt = 0;
+          let posted: { response: Response; text: string; data: typeof data } | null = null;
+          while (attempt < 2) {
+            attempt += 1;
+            try {
+              posted = await postPricingJson('/api/admin/pricing-adjustments/preview/chunk', buildPreviewChunkBody(payload as Record<string, unknown>, slice, {
+                batchId,
+                chunkIndex: index,
+                chunkCount: slices.length,
+              }));
+              if (posted.response.ok || posted.response.status < 500) break;
+            } catch (error) {
+              if (attempt >= 2) throw error;
+            }
+          }
+          if (!posted) return;
+          last = posted;
+          if (!previewStillCurrent()) return;
+          if (allowMfaStepUp && isAdminMfaStepUpResponse(posted.response.status, posted.data.error)) {
+            await beginMfaStepUp(async (grantToken) => {
+              await generatePreview(grantToken, false);
+            });
+            return;
+          }
+          if (!posted.response.ok) {
+            setPreviewError(pricingActionError(posted.data.error, '生成调价预览失败'));
+            return;
+          }
+          batchId = posted.data.batchId || batchId;
+          const chunkChanges = posted.data.chunkPreview?.changeCount;
+          setSheetProgress({
+            completed: index + 1,
+            total: slices.length,
+            label: `正在生成预览（${index + 1}/${slices.length}）`,
+            ...(typeof chunkChanges === 'number' && posted.data.complete !== true
+              ? { detail: `这一块有 ${chunkChanges.toLocaleString('zh-CN')} 条价格变化` }
+              : {}),
+          });
+        }
+        if (!last || !previewStillCurrent()) return;
+        response = last.response;
+        text = last.text;
+        data = last.data;
+      } else {
+        const posted = await postPricingJson('/api/admin/pricing-adjustments/preview', payload as Record<string, unknown>);
+        response = posted.response;
+        text = posted.text;
+        data = posted.data;
       }
       if (!previewStillCurrent()) return;
       if (allowMfaStepUp && isAdminMfaStepUpResponse(response.status, data.error)) {
@@ -528,7 +663,10 @@ export default function PricingAdjustmentsPage() {
       setPreviewResult(null);
       setPreviewError('生成调价预览失败，请稍后重试');
     } finally {
-      if (previewStillCurrent()) setPreviewLoading(false);
+      if (previewStillCurrent()) {
+        setPreviewLoading(false);
+        setSheetProgress(null);
+      }
     }
   }
 
@@ -621,7 +759,7 @@ export default function PricingAdjustmentsPage() {
         return;
       }
       const reopened = reopenMissingCatalogRows(importedRows, data.result.createdCatalogs);
-      const rematched = await rematchImportedRows(reopened);
+      const rematched = await rematchImportedRows(reopened, setSheetProgress);
       setImportedRows(rematched);
       invalidatePreview();
       setCreateMessage(`已导入 ${data.result.createdCount.toLocaleString('zh-CN')} 个商品${data.result.classifiedCount ? `，其中 ${data.result.classifiedCount.toLocaleString('zh-CN')} 个按名称归入现有分类` : ''}${data.result.fallbackCount ? `，${data.result.fallbackCount.toLocaleString('zh-CN')} 个使用备用分类` : ''}${data.result.skippedCount > 0 ? `，跳过 ${data.result.skippedCount.toLocaleString('zh-CN')} 个` : ''}。`);
@@ -629,6 +767,7 @@ export default function PricingAdjustmentsPage() {
       setImportError('导入商品失败，请稍后重试。');
     } finally {
       setCreateLoading(false);
+      setSheetProgress(null);
     }
   }
 
@@ -668,7 +807,7 @@ export default function PricingAdjustmentsPage() {
       setReviewBrandChoices({});
       let rows = parsed.rows;
       try {
-        rows = await rematchImportedRows(rows);
+        rows = await rematchImportedRows(rows, setSheetProgress);
       } catch (error) {
         setImportError(error instanceof Error ? error.message : '商品匹配失败，预览时会再次核对货号。');
       }
@@ -688,6 +827,7 @@ export default function PricingAdjustmentsPage() {
       setImportError(error instanceof Error ? error.message : '表格读取失败，请检查文件格式。');
     } finally {
       setImporting(false);
+      setSheetProgress(null);
     }
   }
 
@@ -881,6 +1021,7 @@ export default function PricingAdjustmentsPage() {
               </div>
 
               {importError && <div className="flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2.5 text-sm text-red-800" role="alert"><AlertCircle size={17} className="mt-0.5 shrink-0" />{importError}</div>}
+              {sheetProgress && !previewLoading ? <SheetProgressBar progress={sheetProgress} /> : null}
 
               {fileName && (
                 <div className="rounded-xl border border-gray-200 bg-white">
@@ -1166,10 +1307,11 @@ export default function PricingAdjustmentsPage() {
                       : `还需：${missingPreviewRequirements.join('、')}`}
                 </p>
               )}
+              {previewLoading && sheetProgress ? <SheetProgressBar progress={sheetProgress} /> : null}
             </div>
             <button type="button" disabled={!canOpenPreview || previewLoading} onClick={() => void generatePreview()} className={`inline-flex min-h-11 shrink-0 items-center justify-center gap-2 px-5 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-50 ${uiSurfaces.buttonPrimary}`}>
               {previewLoading ? <Loader2 size={17} className="animate-spin" /> : <PackageSearch size={17} />}
-              {previewLoading ? '正在生成预览' : '生成调价预览'}
+              {previewLoading ? (sheetProgress?.label ?? '正在生成预览') : '生成调价预览'}
             </button>
           </div>
         </div>
@@ -1257,7 +1399,7 @@ export default function PricingAdjustmentsPage() {
                       className={`mt-2 inline-flex min-h-10 items-center gap-2 px-4 text-sm font-medium disabled:opacity-50 ${uiSurfaces.buttonPrimary}`}
                     >
                       {previewLoading ? <Loader2 size={15} className="animate-spin" /> : <PackageSearch size={15} />}
-                      为已确认货号生成预览
+                      {previewLoading ? (sheetProgress?.label ?? '正在生成预览') : '为已确认货号生成预览'}
                     </button>
                   </div>
                 )}
