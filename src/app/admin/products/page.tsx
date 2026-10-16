@@ -7,6 +7,7 @@ import Link from 'next/link';
 import { Search, Eye, X, Plus, Trash2, SlidersHorizontal } from 'lucide-react';
 import { productCategories } from '@/data/categories';
 import { stockQuantityFromInput } from '@/lib/admin-product-stock';
+import { canReadProductCostPrice } from '@/lib/admin-permissions';
 import { uiSurfaces } from '@/lib/ui-surfaces';
 
 interface AdminProduct {
@@ -109,6 +110,22 @@ function ProductsPanel() {
   const [filteredTotal, setFilteredTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(80);
+  const [canSeeCostPrice, setCanSeeCostPrice] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch('/api/admin/access?view=current')
+      .then((response) => response.ok ? response.json() : null)
+      .then((data) => {
+        if (cancelled) return;
+        const permissions = Array.isArray(data?.permissions) ? data.permissions : [];
+        setCanSeeCostPrice(canReadProductCostPrice(permissions));
+      })
+      .catch(() => {
+        if (!cancelled) setCanSeeCostPrice(false);
+      });
+    return () => { cancelled = true; };
+  }, []);
 
   const categories = productCategories.map((category) => category.name);
   const brands = ['贤至生物', 'Fisher BioReagents', 'Thermo Fisher', 'Abcam', 'Sigma-Aldrich', 'Fisher', 'CST'];
@@ -294,7 +311,7 @@ function ProductsPanel() {
                 <th className="text-left px-3 py-2 font-semibold text-gray-700">目录价</th>
                 <th className="text-left px-3 py-2 font-semibold text-gray-700">市场价</th>
                 <th className="text-left px-3 py-2 font-semibold text-gray-700">促销价</th>
-                <th className="text-left px-3 py-2 font-semibold text-purple-700">进货价</th>
+                {canSeeCostPrice && <th className="text-left px-3 py-2 font-semibold text-purple-700">进货价</th>}
                 <th className="text-left px-3 py-2 font-semibold text-red-700">最低成交价</th>
                 <th className="text-left px-3 py-2 font-semibold text-gray-700">库存</th>
                 <th className="text-left px-3 py-2 font-semibold text-gray-700">促销</th>
@@ -319,9 +336,11 @@ function ProductsPanel() {
                   <td className="px-3 py-2 font-semibold text-brand-700">
                     {product.promotionalPrice ? `¥${product.promotionalPrice.toLocaleString()}` : '-'}
                   </td>
-                  <td className="px-3 py-2 font-semibold text-purple-700">
-                    {product.costPrice ? `¥${product.costPrice.toLocaleString()}` : <span className="text-gray-400">-</span>}
-                  </td>
+                  {canSeeCostPrice && (
+                    <td className="px-3 py-2 font-semibold text-purple-700">
+                      {product.costPrice ? `¥${product.costPrice.toLocaleString()}` : <span className="text-gray-400">-</span>}
+                    </td>
+                  )}
                   <td className="px-3 py-2 font-semibold text-red-700">
                     {product.minimumSalePrice != null ? `¥${product.minimumSalePrice.toLocaleString()}` : <span className="text-gray-400">-</span>}
                   </td>
@@ -438,18 +457,24 @@ function ProductsPanel() {
                       <label className="block text-xs text-gray-500 mb-1">促销价</label>
                       <input type="number" min="0" step="0.01" value={editForm.promotionalPrice ?? ''} onChange={e => setEditForm(editForm => ({...editForm, promotionalPrice: e.target.value ? parseFloat(e.target.value) : undefined}))} className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white" />
 
-                      <label className="block text-xs text-purple-700 font-semibold mb-1 mt-2">
-                        进货价
-                      </label>
-                      <input
-                        type="number"
-                        min="0"
-                        step="0.01"
-                        value={editForm.costPrice ?? ''}
-                        onChange={e => setEditForm(editForm => ({...editForm, costPrice: e.target.value ? parseFloat(e.target.value) : undefined}))}
-                        className="w-full px-3 py-2 border border-purple-200 rounded-lg text-sm bg-purple-50/30 focus:ring-2 focus:ring-purple-500"
-                        placeholder="经销商结算价"
-                      />
+                      {canSeeCostPrice && (
+                        <>
+                          <label className="block text-xs text-purple-700 font-semibold mb-1 mt-2" htmlFor="admin-product-cost-price">
+                            进货价
+                          </label>
+                          <input
+                            id="admin-product-cost-price"
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            aria-label="进货价"
+                            value={editForm.costPrice ?? ''}
+                            onChange={e => setEditForm(editForm => ({...editForm, costPrice: e.target.value ? parseFloat(e.target.value) : undefined}))}
+                            className="w-full px-3 py-2 border border-purple-200 rounded-lg text-sm bg-purple-50/30 focus:ring-2 focus:ring-purple-500"
+                            placeholder="经销商结算价"
+                          />
+                        </>
+                      )}
                       <label className="block text-xs text-red-700 font-semibold mb-1 mt-2">最低成交价</label>
                       <input
                         type="number" min="0" step="0.01" value={editForm.minimumSalePrice ?? ''}
@@ -479,7 +504,7 @@ function ProductsPanel() {
                       危险化学品（前端下架）
                     </label>
                   </div>
-                  {editForm.prices?.find((item) => item.kind === 'cost' && item.source?.includes('供货协议'))?.source && (
+                  {canSeeCostPrice && editForm.prices?.find((item) => item.kind === 'cost' && item.source?.includes('供货协议'))?.source && (
                     <div className="mt-3 rounded-lg border border-purple-200 bg-purple-50/60 px-3 py-2.5">
                       <p className="text-xs font-semibold text-purple-800">供货条款（内部）</p>
                       <p className="mt-1 text-xs leading-5 text-purple-700">
@@ -558,9 +583,11 @@ function ProductsPanel() {
                               <label className="block text-xs text-gray-500">促销价
                                 <input type="number" min="0" step="0.01" value={variant.promotionalPrice ?? ''} onChange={(event) => patchVariant({ promotionalPrice: numberOrNull(event.target.value) })} aria-label="包装促销价" className="mt-1 w-full rounded-lg border border-gray-200 px-2 py-1.5 text-sm" />
                               </label>
-                              <label className="block text-xs text-purple-700">进货价（内部）
-                                <input type="number" min="0" step="0.01" value={variant.costPrice ?? ''} onChange={(event) => patchVariant({ costPrice: numberOrNull(event.target.value) })} aria-label="包装进货价" className="mt-1 w-full rounded-lg border border-purple-200 bg-purple-50/30 px-2 py-1.5 text-sm" />
-                              </label>
+                              {canSeeCostPrice && (
+                                <label className="block text-xs text-purple-700">进货价（内部）
+                                  <input type="number" min="0" step="0.01" value={variant.costPrice ?? ''} onChange={(event) => patchVariant({ costPrice: numberOrNull(event.target.value) })} aria-label="包装进货价" className="mt-1 w-full rounded-lg border border-purple-200 bg-purple-50/30 px-2 py-1.5 text-sm" />
+                                </label>
+                              )}
                               <label className="block text-xs text-red-700">最低成交价（内部）
                                 <input type="number" min="0" step="0.01" value={variant.minimumSalePrice ?? ''} onChange={(event) => patchVariant({ minimumSalePrice: numberOrNull(event.target.value) })} aria-label="包装最低成交价" className="mt-1 w-full rounded-lg border border-red-200 bg-red-50/30 px-2 py-1.5 text-sm" />
                               </label>

@@ -12,7 +12,9 @@ import {
 } from '@/lib/product-catalog-records';
 import { setActualInventory } from '@/lib/inventory';
 import { parseExplicitStockQuantity } from '@/lib/admin-product-stock';
-import { requireAdmin } from '@/lib/session';
+import { canReadProductCostPrice } from '@/lib/admin-permissions';
+import { redactProductCostPrice } from '@/lib/product-cost-price';
+import { getAdminPermissions, requireAdmin } from '@/lib/session';
 import { writeAuditLog } from '@/lib/audit';
 import { ProductSearchService } from '@/lib/product-search';
 
@@ -68,7 +70,12 @@ export async function GET(req: NextRequest) {
       topBrands: brands.slice(0, 10).map(b => b.brand),
     };
 
-    return NextResponse.json({ stats, products: searchResult.products, pagination: searchResult.pagination });
+    const includeCostPrice = canReadProductCostPrice(await getAdminPermissions(admin));
+    const products = includeCostPrice
+      ? searchResult.products
+      : searchResult.products.map((product) => redactProductCostPrice(product));
+
+    return NextResponse.json({ stats, products, pagination: searchResult.pagination });
   } catch (err) {
     console.error('[admin/products GET] error:', err);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
@@ -186,6 +193,7 @@ export async function PUT(req: NextRequest) {
       return NextResponse.json({ error: 'Catalog number, name and brand are required' }, { status: 400 });
     }
 
+    const includeCostPrice = canReadProductCostPrice(await getAdminPermissions(admin));
     const variants = variantList(body.variants);
     if (
       ['price', 'originalPrice', 'promotionalPrice', 'costPrice', 'minimumSalePrice'].some((field) => hasField(body, field))
@@ -320,8 +328,9 @@ export async function PUT(req: NextRequest) {
         });
       }
       if (variants) {
-        const existing = await tx.productVariant.findMany({ where: { productId: id }, select: { id: true } });
+        const existing = await tx.productVariant.findMany({ where: { productId: id }, select: { id: true, costPrice: true } });
         const existingIds = new Set(existing.map((item) => item.id));
+        const existingCostById = new Map(existing.map((item) => [item.id, item.costPrice]));
         const retainedIds = variants.flatMap((item) => item.id && existingIds.has(item.id) ? [item.id] : []);
         await tx.productVariant.deleteMany({ where: { productId: id, id: { notIn: retainedIds } } });
         for (const variant of variants) {
@@ -331,7 +340,7 @@ export async function PUT(req: NextRequest) {
             price: variant.price,
             originalPrice: variant.originalPrice,
             promotionalPrice: variant.promotionalPrice,
-            costPrice: variant.costPrice,
+            costPrice: includeCostPrice ? variant.costPrice : (variant.id ? existingCostById.get(variant.id) ?? null : null),
             minimumSalePrice: variant.minimumSalePrice,
             packageType: variant.packageType,
             salesUnit: variant.salesUnit,
@@ -398,7 +407,8 @@ export async function PUT(req: NextRequest) {
           data: { inStock: quantity === 0 ? false : requestedInStock },
         });
       }
-      return tx.product.findUniqueOrThrow({ where: { id }, select: { ...PRODUCT_ADMIN_LIST_SELECT, variants: { orderBy: { catalogNumber: 'asc' } } } });
+      const saved = await tx.product.findUniqueOrThrow({ where: { id }, select: { ...PRODUCT_ADMIN_LIST_SELECT, variants: { orderBy: { catalogNumber: 'asc' } } } });
+      return includeCostPrice ? saved : redactProductCostPrice(saved);
     });
     invalidateProductFilters();
     await enqueueBackgroundTask('search.index_update', { source: 'admin-product-update' }, {

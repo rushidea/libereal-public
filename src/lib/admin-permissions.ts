@@ -75,3 +75,10 @@ export type AdminRoleKey = keyof typeof ADMIN_ROLE_DEFINITIONS;
 export function hasAdminPermission(permissions: readonly string[], permission: AdminPermissionKey): boolean {
   return permissions.includes(permission);
 }
+
+/** 进货价属于内部采购价，商品读权限不够，定价或财务权限才可以看。 */
+const PRODUCT_COST_PRICE_PERMISSIONS = ['pricing.read', 'pricing.write', 'finance.read', 'finance.write'] as const satisfies readonly AdminPermissionKey[];
+
+export function canReadProductCostPrice(permissions: readonly string[]): boolean {
+  return PRODUCT_COST_PRICE_PERMISSIONS.some((permission) => permissions.includes(permission));
+}

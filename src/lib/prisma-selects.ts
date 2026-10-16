@@ -40,7 +40,7 @@ export const PRODUCT_ADMIN_LIST_SELECT = {
   ...PRODUCT_LIST_SELECT,
   createdAt: true,
   updatedAt: true,
-  costPrice: true, // 进货价 — admin only
+  costPrice: true, // 进货价。商品接口按定价或财务权限再裁剪
   minimumSalePrice: true,
 } satisfies Prisma.ProductSelect;
 
