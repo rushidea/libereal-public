@@ -699,7 +699,8 @@ export function getTestDb(): Database.Database {
     CREATE TABLE IF NOT EXISTS CreditAccount (
       id TEXT PRIMARY KEY, userId TEXT UNIQUE NOT NULL, baseLimit REAL NOT NULL, overrideLimit REAL,
       temporaryLimit REAL NOT NULL DEFAULT 0, temporaryUntil DATETIME, usedAmount REAL NOT NULL DEFAULT 0,
-      status TEXT NOT NULL DEFAULT 'active', paymentTermDays INTEGER NOT NULL DEFAULT 30,
+      status TEXT NOT NULL DEFAULT 'active', statusSource TEXT NOT NULL DEFAULT 'system',
+      paymentTermDays INTEGER NOT NULL DEFAULT 30,
       manuallyUnlockedAt DATETIME, createdAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, updatedAt DATETIME NOT NULL
     );
     CREATE TABLE IF NOT EXISTS CreditTransaction (
@@ -725,6 +726,15 @@ export function getTestDb(): Database.Database {
       organizationCreationEnabled INTEGER NOT NULL DEFAULT 0,
       createdAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
       updatedAt DATETIME NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS organizations (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      pending_name TEXT,
+      status TEXT NOT NULL DEFAULT 'pending',
+      owner_user_id TEXT NOT NULL,
+      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
     CREATE TABLE IF NOT EXISTS organization_creation_grants (
       id TEXT PRIMARY KEY,
@@ -921,6 +931,7 @@ export function clearAllTables(db: Database.Database) {
     DELETE FROM Brand;
     DELETE FROM "Order";
     DELETE FROM Inquiry;
+    DELETE FROM organizations;
     DELETE FROM Address;
     DELETE FROM NotificationReceipt;
     DELETE FROM Notification;

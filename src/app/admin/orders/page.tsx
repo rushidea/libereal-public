@@ -10,7 +10,9 @@ import {
   Plus, Check, Clock, ClipboardList, Wallet,
 } from 'lucide-react';
 import ProductSearchOverlayForOrder from '@/components/admin/ProductSearchOverlayForOrder';
-import { normalizeOrderPaymentMethod, ORDER_PAYMENT_METHODS } from '@/data/payment-methods';
+import { adminPermissionErrorMessage } from '@/data/admin-permission-message';
+import { isPostDeliveryPaymentMethod, normalizeOrderPaymentMethod, ORDER_PAYMENT_METHODS } from '@/data/payment-methods';
+import { orderStatusRequiresFinanceWrite } from '@/lib/order-finance-access';
 import AlipayPaymentStatusView from '@/components/payment/AlipayPaymentStatus';
 import type { AlipayPaymentSummary } from '@/data/alipay-payment';
 import { canTransitionOrder, displayedOrderStatus, isOrderStatus } from '@/lib/order-domain';
@@ -82,7 +84,28 @@ const ORDER_STATUS_CONFIG: Record<string, { label: string; color: string; icon: 
   closed: { label: '关闭', color: 'bg-gray-100 text-gray-600', icon: Archive },
 };
 
-function orderActionErrorMessage(error: string): string {
+function inferOpenReceivable(order: Order): boolean {
+  if (order.receivable) return order.receivable.status === 'open' || order.receivable.status === 'overdue';
+  if (order.receivable === null) return false;
+  return isPostDeliveryPaymentMethod(order.paymentMethod)
+    && ['confirmed', 'partially_shipped', 'shipped'].includes(order.status);
+}
+
+function canApplyOrderStatus(permissions: string[] | null, order: Order, nextStatus: string): boolean {
+  if (!permissions) return true;
+  const needsFinance = orderStatusRequiresFinanceWrite({
+    currentStatus: order.status,
+    nextStatus,
+    paymentMethod: order.paymentMethod,
+    hasOpenReceivable: inferOpenReceivable(order),
+  });
+  return permissions.includes(needsFinance ? 'finance.write' : 'orders.write');
+}
+
+function orderActionErrorMessage(data: { error?: string; requiredPermission?: string }): string {
+  if (data.requiredPermission || data.error === 'Forbidden') {
+    return adminPermissionErrorMessage(data.error, data.requiredPermission);
+  }
   const messages: Record<string, string> = {
     ALIPAY_PAYMENT_REQUIRED: '支付宝订单尚未付款，不能确认订单。',
     PAID_ORDER_REFUND_REQUIRED: '支付宝订单已经付款，取消或关闭前需要先办理退款。',
@@ -93,7 +116,7 @@ function orderActionErrorMessage(error: string): string {
     INVALID_STATUS_TRANSITION: '当前订单状态不允许执行该操作。',
     POINTS_REFUND_FAILED: '积分没有退回，订单状态未更改。请稍后重试。',
   };
-  return messages[error] || error || '操作失败';
+  return messages[data.error || ''] || data.error || '操作失败';
 }
 
 export default function AdminOrdersPage() {
@@ -132,6 +155,18 @@ function OrdersPanel() {
   const [selectedOrders, setSelectedOrders] = useState<Set<string>>(new Set());
   const [addProductSearch, setAddProductSearch] = useState('');
   const [addingToOrder, setAddingToOrder] = useState(false);
+  const [permissions, setPermissions] = useState<string[] | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    fetch('/api/admin/access?view=current', { cache: 'no-store' })
+      .then((response) => response.ok ? response.json() : null)
+      .then((data: { permissions?: unknown } | null) => {
+        if (active) setPermissions(Array.isArray(data?.permissions) ? data.permissions.filter((item): item is string => typeof item === 'string') : null);
+      })
+      .catch(() => { if (active) setPermissions(null); });
+    return () => { active = false; };
+  }, []);
 
   const fetchData = async () => {
     setLoading(true);
@@ -181,7 +216,7 @@ function OrdersPanel() {
       body: JSON.stringify({ status: newStatus }),
     });
     const data = await response.json().catch(() => ({}));
-    if (!response.ok) return orderActionErrorMessage(data.error);
+    if (!response.ok) return orderActionErrorMessage(data);
     fetchData();
     if (selectedOrder?.id === orderId) {
       setSelectedOrder(prev => prev ? { ...prev, status: newStatus } : null);
@@ -376,6 +411,7 @@ function OrdersPanel() {
             session={session}
             formatPrice={formatPrice}
             fetchData={fetchData}
+            permissions={permissions}
           />
         ))}
         {paginatedOrders.length === 0 && (
@@ -425,6 +461,7 @@ function OrdersPanel() {
                   session={session}
                   formatPrice={formatPrice}
                   fetchData={fetchData}
+                  permissions={permissions}
                 />
               ))}
               {paginatedOrders.length === 0 && (
@@ -465,7 +502,7 @@ function OrdersRow({
   order, selectedOrder, setSelectedOrder, selectedOrders, setSelectedOrders,
   orderItems, setOrderItems, addingToOrder, setAddingToOrder, addProductSearch, setAddProductSearch,
   updateOrderStatus, archiveOrders, deleteOrders, handleAddProductToOrder,
-  session, formatPrice, fetchData,
+  session, formatPrice, fetchData, permissions,
 }: {
   order: Order;
   selectedOrder: Order | null;
@@ -485,6 +522,7 @@ function OrdersRow({
   session: Session | null;
   formatPrice: (p: number) => string;
   fetchData: () => Promise<void>;
+  permissions: string[] | null;
 }) {
   const isExpanded = selectedOrder?.id === order.id;
 
@@ -560,6 +598,7 @@ function OrdersRow({
                 session={session}
                 formatPrice={formatPrice}
                 fetchData={fetchData}
+                permissions={permissions}
               />
             </div>
           </td>
@@ -573,7 +612,7 @@ function MobileOrderCard({
   order, selectedOrder, setSelectedOrder,
   orderItems, setOrderItems, addingToOrder, setAddingToOrder, addProductSearch, setAddProductSearch,
   updateOrderStatus, archiveOrders, deleteOrders, handleAddProductToOrder,
-  session, formatPrice, fetchData,
+  session, formatPrice, fetchData, permissions,
 }: {
   order: Order;
   selectedOrder: Order | null;
@@ -591,6 +630,7 @@ function MobileOrderCard({
   session: Session | null;
   formatPrice: (p: number) => string;
   fetchData: () => Promise<void>;
+  permissions: string[] | null;
 }) {
   const isExpanded = selectedOrder?.id === order.id;
   const status = ORDER_STATUS_CONFIG[displayedOrderStatus(order)];
@@ -656,6 +696,7 @@ function MobileOrderCard({
             session={session}
             formatPrice={formatPrice}
             fetchData={fetchData}
+            permissions={permissions}
           />
         </div>
       )}
@@ -666,7 +707,7 @@ function MobileOrderCard({
 function OrderDetailPanel({
   order, orderItems, setOrderItems, addingToOrder, setAddingToOrder,
   addProductSearch, setAddProductSearch, updateOrderStatus, handleAddProductToOrder,
-  session, formatPrice, fetchData,
+  session, formatPrice, fetchData, permissions,
 }: {
   order: Order;
   orderItems: OrderItem[];
@@ -680,7 +721,10 @@ function OrderDetailPanel({
   session: Session | null;
   formatPrice: (p: number) => string;
   fetchData: () => Promise<void>;
+  permissions: string[] | null;
 }) {
+  const canWriteOrders = !permissions || permissions.includes('orders.write');
+  const canWriteFinance = !permissions || permissions.includes('finance.write');
   const [actionError, setActionError] = useState('');
   const [pointsRefundYuan, setPointsRefundYuan] = useState('');
   const [pointsRefundMsg, setPointsRefundMsg] = useState('');
@@ -703,7 +747,7 @@ function OrderDetailPanel({
       });
       const data = await res.json();
       if (!res.ok) {
-        setPointsRefundMsg(data.error || '退积分失败');
+        setPointsRefundMsg(adminPermissionErrorMessage(data.error, data.requiredPermission));
         return;
       }
       setPointsRefundMsg(`已退个人 ${data.personal} 分、课题组 ${data.group} 分`);
@@ -745,7 +789,7 @@ function OrderDetailPanel({
                   setActionError('');
                   fetchData();
                 } else {
-                  setActionError(orderActionErrorMessage(data.error));
+                  setActionError(orderActionErrorMessage(data));
                 }
               }}
               className="text-sm px-2 py-1 border border-gray-200 rounded w-full text-gray-900 disabled:cursor-not-allowed disabled:bg-gray-100 disabled:text-gray-500">
@@ -775,7 +819,7 @@ function OrderDetailPanel({
               已退回 个人 {order.pointsRefundedPersonal || 0} · 课题组 {order.pointsRefundedGroup || 0}
             </p>
           )}
-          {order.pointsApplied && (
+          {order.pointsApplied && canWriteFinance && (
             <div className="flex flex-col sm:flex-row gap-2 max-w-md">
               <input
                 type="number"
@@ -806,6 +850,7 @@ function OrderDetailPanel({
           {Object.keys(ORDER_STATUS_CONFIG).filter((s) => (
             order.status === s
             || (isOrderStatus(order.status) && isOrderStatus(s) && canTransitionOrder(order.status, s)
+              && canApplyOrderStatus(permissions, order, s)
               && !(s === 'closed' && normalizeOrderPaymentMethod(order.paymentMethod) === 'alipay' && order.paidAt))
           )).map(s => (
             <button key={s} onClick={async () => setActionError(await updateOrderStatus(order.id, s) || '')}
@@ -818,10 +863,12 @@ function OrderDetailPanel({
       <div>
         <div className="flex items-center justify-between mb-2">
           <p className="text-xs text-gray-600">订单产品</p>
-          <button onClick={() => setAddingToOrder(!addingToOrder)}
-            className="flex items-center gap-1 px-3 py-1.5 bg-brand-600 text-white text-xs rounded-lg hover:bg-brand-700">
-            <Plus className="w-3.5 h-3.5" /> 添加产品
-          </button>
+          {canWriteOrders && (
+            <button onClick={() => setAddingToOrder(!addingToOrder)}
+              className="flex items-center gap-1 px-3 py-1.5 bg-brand-600 text-white text-xs rounded-lg hover:bg-brand-700">
+              <Plus className="w-3.5 h-3.5" /> 添加产品
+            </button>
+          )}
         </div>
         {addingToOrder && (
           <div className="mb-3 p-3 bg-gray-50 rounded-lg border border-gray-200 min-w-0">
@@ -931,7 +978,7 @@ function OrderDetailPanel({
           })()}
         </div>
       </div>
-      <ShipmentPanel order={order} orderItems={orderItems} fetchData={fetchData} />
+      <ShipmentPanel order={order} orderItems={orderItems} fetchData={fetchData} canWriteOrders={canWriteOrders} />
       <div className="flex flex-wrap justify-between items-center gap-2 pt-4 border-t border-gray-200">
         <span className="text-gray-700 font-medium">订单总计</span>
         <span className="text-xl font-bold text-brand-600">¥{orderItems.reduce((s, it) => s + (it.price||0)*(it.quantity||1), 0).toLocaleString('zh-CN', { minimumFractionDigits: 2 })}</span>
@@ -942,7 +989,7 @@ function OrderDetailPanel({
             <Check className="w-5 h-5" />
             <div><p className="text-sm font-medium">订单已确认</p>{order.quoteSentAt && <p className="text-xs text-green-600/70">确认时间：{new Date(order.quoteSentAt).toLocaleString('zh-CN')}</p>}</div>
           </div>
-        ) : (
+        ) : canWriteOrders ? (
           <button onClick={async () => {
             if (!confirm('确定确认订单并通知客户吗？')) return;
             const patchRes = await fetch(`/api/orders/${order.id}`, {
@@ -964,7 +1011,7 @@ function OrderDetailPanel({
           }} className="w-full py-3 bg-brand-600 text-white rounded-lg font-medium hover:bg-brand-700">
             确认订单
           </button>
-        )}
+        ) : null}
       </div>
       <OrderEvents events={order.events} />
       {order.notes && <div><p className="text-xs text-gray-600 mb-1">备注</p><p className="text-sm text-gray-700 bg-gray-50 p-3 rounded-lg">{order.notes}</p></div>}
@@ -972,12 +1019,12 @@ function OrderDetailPanel({
     </div>
   );
 
-function ShipmentPanel({ order, orderItems, fetchData }: { order: Order; orderItems: OrderItem[]; fetchData: () => Promise<void> }) {
+function ShipmentPanel({ order, orderItems, fetchData, canWriteOrders }: { order: Order; orderItems: OrderItem[]; fetchData: () => Promise<void>; canWriteOrders: boolean }) {
   const [carrier, setCarrier] = useState('');
   const [trackingNumber, setTrackingNumber] = useState('');
   const [quantities, setQuantities] = useState<Record<string, number>>({});
   const [submitting, setSubmitting] = useState(false);
-  const canShip = ['confirmed', 'partially_shipped'].includes(order.status);
+  const canShip = canWriteOrders && ['confirmed', 'partially_shipped'].includes(order.status);
 
   const submit = async () => {
     const items = orderItems

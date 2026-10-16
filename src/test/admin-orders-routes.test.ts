@@ -298,29 +298,35 @@ describe('finance.write MFA scenario gating', () => {
     sessionMocks.requireAdminStepUp.mockImplementation(async (user) => user);
   });
 
-  it('requires admin step-up when cancelling an order with finance.write enabled', async () => {
-    vi.mocked(isAdminMfaScenarioEnabled).mockImplementation(async (id) => id === 'finance.write');
+  it('does not apply finance step-up when cancelling an order that has not used credit', async () => {
+    vi.mocked(requiresAdminMfaForPermission).mockImplementation(async (permission) => permission === 'finance.write');
 
     const res = await orderPATCH(makePatch('o1', { status: 'cancelled' }) as NextRequest, {
       params: Promise.resolve({ id: 'o1' }),
     });
 
-    expect(sessionMocks.requireAdminStepUp).toHaveBeenCalledWith(expect.objectContaining({ id: 'admin_test_id' }));
+    expect(sessionMocks.requireAdminStepUp).not.toHaveBeenCalled();
     expect(res.status).toBe(200);
   });
 
-  it('blocks cancellation when the finance step-up is rejected', async () => {
-    vi.mocked(isAdminMfaScenarioEnabled).mockImplementation(async (id) => id === 'finance.write');
-    sessionMocks.requireAdminStepUp.mockResolvedValue(
-      NextResponse.json({ error: 'Admin MFA required' }, { status: 403 }),
-    );
+  it('blocks postpaid settlement when the finance step-up is rejected', async () => {
+    vi.mocked(requiresAdminMfaForPermission).mockImplementation(async (permission) => permission === 'finance.write');
+    const previousMfa = process.env.MFA_ADMIN_REQUIRED;
+    process.env.MFA_ADMIN_REQUIRED = 'true';
+    getTestDb().prepare(`UPDATE "Order" SET status = 'confirmed', paymentMethod = 'bank_transfer' WHERE id = 'o1'`).run();
 
-    const res = await orderPATCH(makePatch('o1', { status: 'cancelled' }) as NextRequest, {
-      params: Promise.resolve({ id: 'o1' }),
-    });
+    try {
+      const res = await orderPATCH(makePatch('o1', { status: 'completed' }) as NextRequest, {
+        params: Promise.resolve({ id: 'o1' }),
+      });
 
-    expect(res.status).toBe(403);
-    expect(getTestDb().prepare('SELECT status FROM "Order" WHERE id = ?').get('o1')).toEqual({ status: 'pending' });
+      expect(res.status).toBe(403);
+      await expect(res.json()).resolves.toMatchObject({ error: 'Admin MFA required' });
+      expect(getTestDb().prepare('SELECT status FROM "Order" WHERE id = ?').get('o1')).toEqual({ status: 'confirmed' });
+    } finally {
+      if (previousMfa === undefined) delete process.env.MFA_ADMIN_REQUIRED;
+      else process.env.MFA_ADMIN_REQUIRED = previousMfa;
+    }
   });
 
   it('skips finance step-up when finance.write is disabled', async () => {
@@ -333,7 +339,7 @@ describe('finance.write MFA scenario gating', () => {
   });
 
   it('does not apply finance step-up to a confirming transition even when enabled', async () => {
-    vi.mocked(isAdminMfaScenarioEnabled).mockImplementation(async (id) => id === 'finance.write');
+    vi.mocked(requiresAdminMfaForPermission).mockImplementation(async (permission) => permission === 'finance.write');
 
     const res = await orderPATCH(makePatch('o1', { status: 'confirmed' }) as NextRequest, {
       params: Promise.resolve({ id: 'o1' }),
@@ -344,20 +350,24 @@ describe('finance.write MFA scenario gating', () => {
   });
 
   it('requires admin step-up for points refund with finance.write enabled', async () => {
-    vi.mocked(isAdminMfaScenarioEnabled).mockImplementation(async (id) => id === 'finance.write');
-    sessionMocks.requireAdminStepUp.mockResolvedValue(
-      NextResponse.json({ error: 'Admin MFA required' }, { status: 403 }),
-    );
+    vi.mocked(requiresAdminMfaForPermission).mockImplementation(async (permission) => permission === 'finance.write');
+    const previousMfa = process.env.MFA_ADMIN_REQUIRED;
+    process.env.MFA_ADMIN_REQUIRED = 'true';
 
-    const req = new NextRequest('http://localhost:3000/api/admin/orders/o1/points-refund', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ refundYuan: 100 }),
-    });
-    const res = await pointsRefundPOST(req, { params: Promise.resolve({ id: 'o1' }) });
+    try {
+      const req = new NextRequest('http://localhost:3000/api/admin/orders/o1/points-refund', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ refundYuan: 100 }),
+      });
+      const res = await pointsRefundPOST(req, { params: Promise.resolve({ id: 'o1' }) });
 
-    expect(sessionMocks.requireAdminStepUp).toHaveBeenCalled();
-    expect(res.status).toBe(403);
+      expect(res.status).toBe(403);
+      await expect(res.json()).resolves.toMatchObject({ error: 'Admin MFA required' });
+    } finally {
+      if (previousMfa === undefined) delete process.env.MFA_ADMIN_REQUIRED;
+      else process.env.MFA_ADMIN_REQUIRED = previousMfa;
+    }
   });
 
   it('skips finance step-up for points refund when disabled and keeps order validation', async () => {

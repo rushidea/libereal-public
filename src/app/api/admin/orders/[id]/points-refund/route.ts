@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { requireAdmin, requireAdminStepUp } from '@/lib/session';
-import { isAdminMfaScenarioEnabled } from '@/lib/admin-mfa-settings';
+import { requireAdmin } from '@/lib/session';
 import { calculateCumulativePointsRefund } from '@/lib/points-checkout';
 import { POINTS_REFUND_FAILED, refundOrderPointsProportionally, requirePointsRefund } from '@/lib/points-checkout-service';
 import { writeAuditLog } from '@/lib/audit';
@@ -11,12 +10,8 @@ import { writeAuditLog } from '@/lib/audit';
  * originalPaidYuan = 现金应付 + 积分抵扣额。
  */
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const admin = await requireAdmin('orders.write');
+  const admin = await requireAdmin('finance.write');
   if (admin instanceof NextResponse) return admin;
-  if (await isAdminMfaScenarioEnabled('finance.write')) {
-    const financeAdmin = await requireAdminStepUp(admin);
-    if (financeAdmin instanceof NextResponse) return financeAdmin;
-  }
 
   const { id } = await params;
   let body: { refundYuan?: number; reason?: string };

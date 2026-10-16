@@ -56,6 +56,7 @@ export default function AdminUsersPage() {
   const [templates, setTemplates] = useState<{ id: string; name: string }[]>([]);
   const [createOpen, setCreateOpen] = useState(false);
   const [actionMessage, setActionMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [permissions, setPermissions] = useState<string[] | null>(null);
   const filteredUsers = filterAdminUsersBySearch(users, search);
   const visibleSelectedIds = visibleSelectedUserIds(filteredUsers, selectedUserIds);
   const visibleSelectedUsers = filteredUsers.filter((user) => selectedUserIds.has(user.id));
@@ -65,6 +66,17 @@ export default function AdminUsersPage() {
     fetchData();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [status, session]);
+
+  useEffect(() => {
+    let active = true;
+    fetch('/api/admin/access?view=current', { cache: 'no-store' })
+      .then((response) => response.ok ? response.json() : null)
+      .then((data: { permissions?: unknown } | null) => {
+        if (active) setPermissions(Array.isArray(data?.permissions) ? data.permissions.filter((item): item is string => typeof item === 'string') : []);
+      })
+      .catch(() => { if (active) setPermissions([]); });
+    return () => { active = false; };
+  }, []);
 
   async function fetchData() {
     setLoading(true);
@@ -162,7 +174,7 @@ export default function AdminUsersPage() {
         setSelectedUserIds(new Set());
       } else {
         const data = await res.json().catch(() => ({}));
-        setActionMessage({ type: 'error', text: data.error || '操作失败' });
+        setActionMessage({ type: 'error', text: data.requiredPermission === 'pricing.write' ? '修改客户等级需要价格权限。' : (data.error || '操作失败') });
       }
     } catch (e) {
       console.error(e);
@@ -319,6 +331,9 @@ export default function AdminUsersPage() {
               }}
               showEditButton={user.role !== 'admin'}
               templates={templates}
+              canWriteCustomers={Boolean(permissions?.includes('customers.write'))}
+              canWriteTier={Boolean(permissions?.includes('pricing.write'))}
+              canWriteCredit={Boolean(permissions?.includes('finance.write'))}
             />
           ))}
         </div>
@@ -350,6 +365,7 @@ export default function AdminUsersPage() {
                 <Check className="w-4 h-4" /> 审核通过 ({visibleSelectedUsers.filter(u => u.isNewUser).length})
               </button>
             )}
+            {permissions?.includes('pricing.write') && (
             <select
               onChange={(e) => {
                 if (e.target.value) setUserTier(visibleSelectedIds, e.target.value);
@@ -360,6 +376,7 @@ export default function AdminUsersPage() {
               <option value="" disabled>设置等级</option>
               <option value="standard">standard</option>
             </select>
+            )}
             <button
               onClick={() => freezeUsers(visibleSelectedIds, true)}
               className="px-3 py-1.5 bg-slate-700 hover:bg-slate-800 text-white rounded-lg text-sm font-medium transition-colors flex items-center gap-1.5"

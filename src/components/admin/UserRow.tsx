@@ -2,6 +2,7 @@
 
 import React, { useState } from 'react';
 import { Check, X, Edit2, Save, Shield, LockKeyhole } from 'lucide-react';
+import { adminPermissionErrorMessage } from '@/data/admin-permission-message';
 import { saveUserProfileThenCredit } from '@/lib/admin-user-row-save';
 import { getInstitutionLabels } from '@/data/institution-profile';
 import { PASSWORD_MIN_LENGTH, validateNewPasswordLength } from '@/lib/password-policy';
@@ -86,11 +87,14 @@ interface UserRowProps {
   onSelectChange?: (selected: boolean) => void;
   showEditButton?: boolean;
   templates?: DiscountTemplateLite[];
+  canWriteCustomers?: boolean;
+  canWriteTier?: boolean;
+  canWriteCredit?: boolean;
 }
 
 const CUSTOMER_TIERS = [{ value: 'standard', label: 'standard' }];
 
-export default function UserRow({ user, onUpdate, selected, onSelectChange, showEditButton, templates = [] }: UserRowProps) {
+export default function UserRow({ user, onUpdate, selected, onSelectChange, showEditButton, templates = [], canWriteCustomers = false, canWriteTier = false, canWriteCredit = false }: UserRowProps) {
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(user.name ?? '');
   const [email, setEmail] = useState(user.email ?? '');
@@ -124,6 +128,36 @@ export default function UserRow({ user, onUpdate, selected, onSelectChange, show
     catch { return null; }
   })();
 
+  const creditDirty = () => {
+    const account = user.creditAccount;
+    const nextOverride = creditOverride === '' ? null : Number(creditOverride);
+    const currentOverride = account?.overrideLimit ?? null;
+    const nextUntil = temporaryUntil || null;
+    const currentUntil = account?.temporaryUntil ? account.temporaryUntil.slice(0, 10) : null;
+    return nextOverride !== currentOverride
+      || Number(temporaryLimit || 0) !== (account?.temporaryLimit ?? 0)
+      || nextUntil !== currentUntil
+      || Number(paymentTermDays || 30) !== (account?.paymentTermDays ?? 30)
+      || creditStatus !== (account?.status ?? 'active');
+  };
+
+  const profileDirty = () => name !== (user.name ?? '')
+    || email !== (user.email ?? '')
+    || password.length > 0
+    || (user.role !== 'admin' && role !== (user.role ?? 'customer'))
+    || phone !== (user.phone ?? '')
+    || identity !== (user.identity ?? '')
+    || institutionType !== (user.institutionType ?? (user.school ? '高校' : '待补充'))
+    || institutionName !== (user.institutionName ?? user.school ?? user.institution ?? '')
+    || institutionUnit !== (user.institutionUnit ?? user.college ?? '')
+    || department !== (user.department ?? user.major ?? '')
+    || institutionFacility !== (user.institutionFacility ?? user.building ?? '')
+    || piLab !== (user.piLab ?? '')
+    || affiliatedLab !== (user.affiliatedLab ?? '')
+    || approvalStatus !== (user.approvalStatus ?? (user.isNewUser ? 'pending' : 'approved'))
+    || isBlacklisted !== Boolean(user.isBlacklisted)
+    || isFrozen !== Boolean(user.isFrozen);
+
   const handleSave = async () => {
     setSaving(true);
     setFeedback(null);
@@ -135,38 +169,56 @@ export default function UserRow({ user, onUpdate, selected, onSelectChange, show
           return;
         }
       }
-      const payload: Record<string, unknown> = {
-        userId: user.id,
-        name,
-        email,
-        password: password || undefined,
-        role: user.role === 'admin' ? undefined : role,
-        institutionType,
-        institutionName,
-        institutionUnit,
-        institutionDepartment: department,
-        institutionFacility,
-        piLab,
-        affiliatedLab,
-        tier,
-        phone,
-        identity,
-        approvalStatus,
-        isBlacklisted,
-        isFrozen,
-      };
+      const tierChanged = tier !== (user.tier ?? '');
+      if (profileDirty() && !canWriteCustomers) {
+        setFeedback({ type: 'error', text: '修改客户资料需要客户管理权限。' });
+        return;
+      }
+      if (tierChanged && !canWriteTier) {
+        setFeedback({ type: 'error', text: '修改客户等级需要价格权限。' });
+        return;
+      }
+      if (creditDirty() && !canWriteCredit) {
+        setFeedback({ type: 'error', text: '修改授信需要财务权限。' });
+        return;
+      }
+      const payload: Record<string, unknown> | null = canWriteCustomers
+        ? {
+          userId: user.id,
+          name,
+          email,
+          password: password || undefined,
+          role: user.role === 'admin' ? undefined : role,
+          institutionType,
+          institutionName,
+          institutionUnit,
+          institutionDepartment: department,
+          institutionFacility,
+          piLab,
+          affiliatedLab,
+          tier,
+          phone,
+          identity,
+          approvalStatus,
+          isBlacklisted,
+          isFrozen,
+        }
+        : tierChanged
+          ? { userId: user.id, tier }
+          : null;
 
       const result = await saveUserProfileThenCredit({
         saveProfile: async () => {
+          if (!payload) return { ok: true };
           const res = await fetch('/api/admin/users/update', {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload),
           });
           const data = await res.json().catch(() => ({}));
-          return { ok: res.ok, error: data.error };
+          return { ok: res.ok, error: adminPermissionErrorMessage(data.error, data.requiredPermission) };
         },
-        saveCredit: user.role === 'admin'
+        saveCredit: user.role === 'admin' || !creditDirty() || !canWriteCredit
           ? null
           : async () => {
             const creditRes = await fetch(`/api/admin/users/${user.id}/credit`, {
@@ -182,7 +234,7 @@ export default function UserRow({ user, onUpdate, selected, onSelectChange, show
               }),
             });
             const creditData = await creditRes.json().catch(() => ({}));
-            return { ok: creditRes.ok, error: creditData.error };
+            return { ok: creditRes.ok, error: adminPermissionErrorMessage(creditData.error, creditData.requiredPermission) };
           },
       });
 
@@ -502,7 +554,9 @@ export default function UserRow({ user, onUpdate, selected, onSelectChange, show
                     <select
                       value={tier}
                       onChange={e => setTier(e.target.value)}
-                      className="w-full mt-1 px-2 py-1.5 border border-gray-200 rounded text-sm text-gray-800 focus:outline-none focus:ring-2 focus:ring-brand-500"
+                      disabled={!canWriteTier}
+                      title={canWriteTier ? undefined : '修改客户等级需要价格权限'}
+                      className="w-full mt-1 px-2 py-1.5 border border-gray-200 rounded text-sm text-gray-800 focus:outline-none focus:ring-2 focus:ring-brand-500 disabled:bg-gray-50 disabled:text-gray-500"
                     >
                       {!CUSTOMER_TIERS.some(item => item.value === tier) && tier && (
                         <option value={tier}>{tier}（当前值）</option>
@@ -543,23 +597,23 @@ export default function UserRow({ user, onUpdate, selected, onSelectChange, show
                   </div>
                   <div>
                     <label className="text-xs font-medium text-gray-700">人工额度</label>
-                    <input type="number" min="0" value={creditOverride} onChange={e => setCreditOverride(e.target.value)} className="mt-1 w-full rounded border border-gray-200 px-2 py-1.5 text-sm" placeholder="使用默认额度" />
+                    <input type="number" min="0" value={creditOverride} onChange={e => setCreditOverride(e.target.value)} disabled={!canWriteCredit} title={canWriteCredit ? undefined : '修改授信需要财务权限'} className="mt-1 w-full rounded border border-gray-200 px-2 py-1.5 text-sm disabled:bg-gray-50 disabled:text-gray-500" placeholder="使用默认额度" />
                   </div>
                   <div>
                     <label className="text-xs font-medium text-gray-700">临时额度</label>
-                    <input type="number" min="0" value={temporaryLimit} onChange={e => setTemporaryLimit(e.target.value)} className="mt-1 w-full rounded border border-gray-200 px-2 py-1.5 text-sm" />
+                    <input type="number" min="0" value={temporaryLimit} onChange={e => setTemporaryLimit(e.target.value)} disabled={!canWriteCredit} className="mt-1 w-full rounded border border-gray-200 px-2 py-1.5 text-sm disabled:bg-gray-50 disabled:text-gray-500" />
                   </div>
                   <div>
                     <label className="text-xs font-medium text-gray-700">临时额度到期</label>
-                    <input type="date" value={temporaryUntil} onChange={e => setTemporaryUntil(e.target.value)} className="mt-1 w-full rounded border border-gray-200 px-2 py-1.5 text-sm" />
+                    <input type="date" value={temporaryUntil} onChange={e => setTemporaryUntil(e.target.value)} disabled={!canWriteCredit} className="mt-1 w-full rounded border border-gray-200 px-2 py-1.5 text-sm disabled:bg-gray-50 disabled:text-gray-500" />
                   </div>
                   <div>
                     <label className="text-xs font-medium text-gray-700">账期</label>
-                    <input type="number" min="1" max="365" value={paymentTermDays} onChange={e => setPaymentTermDays(e.target.value)} className="mt-1 w-full rounded border border-gray-200 px-2 py-1.5 text-sm" />
+                    <input type="number" min="1" max="365" value={paymentTermDays} onChange={e => setPaymentTermDays(e.target.value)} disabled={!canWriteCredit} className="mt-1 w-full rounded border border-gray-200 px-2 py-1.5 text-sm disabled:bg-gray-50 disabled:text-gray-500" />
                   </div>
                   <div>
                     <label className="text-xs font-medium text-gray-700">授信状态</label>
-                    <select value={creditStatus} onChange={e => setCreditStatus(e.target.value)} className="mt-1 w-full rounded border border-gray-200 bg-white px-2 py-1.5 text-sm">
+                    <select value={creditStatus} onChange={e => setCreditStatus(e.target.value)} disabled={!canWriteCredit} title={canWriteCredit ? undefined : '修改授信需要财务权限'} className="mt-1 w-full rounded border border-gray-200 bg-white px-2 py-1.5 text-sm disabled:bg-gray-50 disabled:text-gray-500">
                       <option value="active">正常</option>
                       <option value="credit_limited">限额下单</option>
                       <option value="paused">暂停授信</option>

@@ -5,8 +5,8 @@ import { orderItemView } from '@/lib/commerce-records';
 import { releaseOrderReceivableOnCancellation, reserveOrderCredit, settleOrderReceivable } from '@/lib/customer-credit';
 import { assertOrderTransition, isAutoCloseableOrderStatus, isInactiveOrderStatus, requiresPaidAlipayRefund } from '@/lib/order-domain';
 import { releaseOrderInventory, reserveOrderInventory } from '@/lib/inventory';
-import { requireAdmin, requireAdminStepUp } from '@/lib/session';
-import { isAdminMfaScenarioEnabled } from '@/lib/admin-mfa-settings';
+import { orderStatusRequiresFinanceWrite, receivableOccupiesCredit } from '@/lib/order-finance-access';
+import { requireAdmin } from '@/lib/session';
 import { writeAuditLog } from '@/lib/audit';
 import { isPostDeliveryPaymentMethod, normalizeOrderPaymentMethod } from '@/data/payment-methods';
 import { refundOrderPointsProportionally, requirePointsRefund, POINTS_REFUND_FAILED } from '@/lib/points-checkout-service';
@@ -40,8 +40,8 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
 }
 
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const admin = await requireAdmin('orders.write');
-  if (admin instanceof NextResponse) return admin;
+  const reader = await requireAdmin('orders.read');
+  if (reader instanceof NextResponse) return reader;
 
   try {
     const { id } = await params;
@@ -62,6 +62,20 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       return NextResponse.json({ error: 'Order not found' }, { status: 404 });
     }
 
+    const hasOpenReceivable = typeof status === 'string'
+      && isPostDeliveryPaymentMethod(existing.paymentMethod)
+      && (status === 'cancelled' || status === 'closed')
+      && status !== existing.status
+      ? receivableOccupiesCredit((await prisma.accountReceivable.findUnique({ where: { orderId: id }, select: { status: true } }))?.status)
+      : false;
+    const admin = await requireAdmin(orderStatusRequiresFinanceWrite({
+      currentStatus: existing.status,
+      nextStatus: status,
+      paymentMethod: existing.paymentMethod,
+      hasOpenReceivable,
+    }) ? 'finance.write' : 'orders.write');
+    if (admin instanceof NextResponse) return admin;
+
     const updateData: Prisma.OrderUpdateInput = {};
     const normalizedPaymentMethod = normalizeOrderPaymentMethod(existing.paymentMethod);
     if (status === 'confirmed' && normalizedPaymentMethod === 'alipay' && !existing.paidAt) {
@@ -74,10 +88,6 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       assertOrderTransition(existing.status, status);
       updateData.status = status;
       if (!isAutoCloseableOrderStatus(status)) updateData.autoCloseAt = null;
-    }
-    if ((isInactiveOrderStatus(status) || status === 'completed') && await isAdminMfaScenarioEnabled('finance.write')) {
-      const financeAdmin = await requireAdminStepUp(admin);
-      if (financeAdmin instanceof NextResponse) return financeAdmin;
     }
 
     const updated = await prisma.$transaction(async (tx) => {

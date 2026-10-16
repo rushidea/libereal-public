@@ -55,7 +55,7 @@ export const ADMIN_ROLE_DEFINITIONS = {
   },
   customer_admin: {
     name: '客户管理员',
-    description: '用户审核、等级、积分和账户限制',
+    description: '用户审核、积分和账户限制',
     permissions: ['admin.access', 'customers.read', 'customers.write', 'points.read', 'points.write'],
   },
   content_admin: {
@@ -65,7 +65,7 @@ export const ADMIN_ROLE_DEFINITIONS = {
   },
   finance_staff: {
     name: '财务人员',
-    description: '成交价、付款、退款和报表',
+    description: '成交价、付款、退款、授信和报表',
     permissions: ['admin.access', 'finance.read', 'finance.write', 'pricing.read', 'pricing.write', 'orders.read', 'customers.read', 'points.read', 'audit.read', 'tasks.read'],
   },
 } as const satisfies Record<string, { name: string; description: string; permissions: readonly AdminPermissionKey[] }>;

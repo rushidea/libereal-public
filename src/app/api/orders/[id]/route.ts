@@ -4,6 +4,7 @@ import { requireActiveSession, requireAdmin } from '@/lib/session';
 import type { Prisma } from '@prisma/client';
 import { orderItemView, toOrderItemCreates } from '@/lib/commerce-records';
 import { releaseOrderReceivableOnCancellation, reserveOrderCredit, settleOrderReceivable } from '@/lib/customer-credit';
+import { orderStatusRequiresFinanceWrite, receivableOccupiesCredit } from '@/lib/order-finance-access';
 import { assertOrderTransition, calculateOrderAmounts, isAutoCloseableOrderStatus, isInactiveOrderStatus, ORDER_STATUS_LABELS, requiresPaidAlipayRefund } from '@/lib/order-domain';
 import { releaseOrderInventory, reserveOrderInventory } from '@/lib/inventory';
 import { isPostDeliveryPaymentMethod, normalizeOrderPaymentMethod } from '@/data/payment-methods';
@@ -90,9 +91,8 @@ export async function PATCH(
   let user = sessionUser;
   const isPlatformAdmin = sessionUser.role === 'admin';
   if (isPlatformAdmin) {
-    const admin = await requireAdmin('orders.write');
-    if (admin instanceof NextResponse) return admin;
-    user = admin;
+    const reader = await requireAdmin('orders.read');
+    if (reader instanceof NextResponse) return reader;
   }
 
   try {
@@ -106,6 +106,23 @@ export async function PATCH(
     });
     if (!order) {
       return NextResponse.json({ error: 'Order not found' }, { status: 404 });
+    }
+
+    if (isPlatformAdmin) {
+      const hasOpenReceivable = typeof body.status === 'string'
+        && isPostDeliveryPaymentMethod(order.paymentMethod)
+        && (body.status === 'cancelled' || body.status === 'closed')
+        && body.status !== order.status
+        ? receivableOccupiesCredit((await prisma.accountReceivable.findUnique({ where: { orderId: id }, select: { status: true } }))?.status)
+        : false;
+      const admin = await requireAdmin(orderStatusRequiresFinanceWrite({
+        currentStatus: order.status,
+        nextStatus: body.status,
+        paymentMethod: order.paymentMethod,
+        hasOpenReceivable,
+      }) ? 'finance.write' : 'orders.write');
+      if (admin instanceof NextResponse) return admin;
+      user = admin;
     }
 
     if (!isPlatformAdmin) {
