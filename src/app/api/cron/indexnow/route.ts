@@ -1,30 +1,20 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { cronUnauthorizedResponse, isCronRequestAuthorized } from '@/lib/cron-auth';
+import { submitBaiduPushUrls } from '@/lib/seo/baidu-push';
 import {
   listRecentlyUpdatedStorefrontUrls,
   pingBingSitemap,
   submitIndexNowUrls,
 } from '@/lib/seo/indexnow';
-import { submitBaiduPushUrls } from '@/lib/seo/baidu-push';
 
 export const dynamic = 'force-dynamic';
 
 const LOOKBACK_MS = 26 * 60 * 60 * 1000;
 
-function authorizeCron(req: NextRequest): boolean {
-  const secret = process.env.CRON_SECRET;
-  if (secret) {
-    return (req.headers.get('x-cron-secret') ?? '') === secret;
-  }
-  const ip = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ?? '';
-  const raw = req.headers.get('x-real-ip') ?? '';
-  const candidate = raw || ip;
-  return candidate === '127.0.0.1' || candidate === '::1' || candidate === 'localhost';
-}
-
-export async function GET(req: NextRequest) {
-  if (!authorizeCron(req)) {
-    return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
-  }
+// 生产每日推送仍由 scripts/cron-indexnow.py 直接执行，不经过本路由。
+// 若改用本入口，GET 或 POST 都要带 x-cron-secret，且 CRON_SECRET 必须已配置。
+async function handle(req: NextRequest) {
+  if (!isCronRequestAuthorized(req)) return cronUnauthorizedResponse();
 
   try {
     const since = new Date(Date.now() - LOOKBACK_MS);
@@ -45,3 +35,6 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
+
+export const GET = handle;
+export const POST = handle;
