@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { closeStalePendingOrders, orderAutoCloseAt } from '@/lib/order-auto-close';
-import { clearAllTables, closeTestDb, getTestDb } from './db-helpers';
+import { clearAllTables, closeTestDb, getTestDb, seedUser } from './db-helpers';
 
 function insertOrder(db: ReturnType<typeof getTestDb>, order: {
   id: string;
@@ -84,5 +84,57 @@ describe('closeStalePendingOrders', () => {
 
     expect(result.closed).toBe(0);
     expect(db.prepare('SELECT status FROM "Order" WHERE id = ?').get('paid-alipay')).toEqual({ status: 'pending' });
+  });
+
+  it('returns deducted points once when an expired order closes', async () => {
+    const db = getTestDb();
+    seedUser(db, { id: 'buyer-1', email: 'buyer@example.com', points: 40 });
+    insertOrder(db, {
+      id: 'points-order',
+      status: 'pending',
+      paymentMethod: 'bank_transfer',
+      autoCloseAt: '2020-01-01T00:00:00.000Z',
+    });
+    db.prepare(`
+      UPDATE "Order"
+      SET customerId = 'buyer-1', total = 90, pointsDiscount = 10, pointsPersonal = 10, pointsApplied = 1
+      WHERE id = 'points-order'
+    `).run();
+
+    const first = await closeStalePendingOrders(new Date('2026-08-19T00:00:00.000Z'));
+    const second = await closeStalePendingOrders(new Date('2026-08-19T00:00:00.000Z'));
+
+    expect(first).toEqual({ closed: 1, skipped: 0 });
+    expect(second).toEqual({ closed: 0, skipped: 0 });
+    expect(db.prepare('SELECT status FROM "Order" WHERE id = ?').get('points-order')).toEqual({ status: 'closed' });
+    expect(db.prepare('SELECT pointsRefundedPersonal, pointsRefundedCash FROM "Order" WHERE id = ?').get('points-order')).toEqual({
+      pointsRefundedPersonal: 10,
+      pointsRefundedCash: 100,
+    });
+    expect(db.prepare('SELECT points FROM User WHERE id = ?').get('buyer-1')).toEqual({ points: 50 });
+    expect(db.prepare('SELECT COUNT(*) AS count FROM PointsLog WHERE relatedId = ? AND type = ?').get('points-order', 'order_redeem_refund')).toEqual({ count: 1 });
+  });
+
+  it('does not close an order when deducted points cannot be returned', async () => {
+    const db = getTestDb();
+    seedUser(db, { id: 'buyer-1', email: 'buyer@example.com', points: 40 });
+    insertOrder(db, {
+      id: 'broken-points',
+      status: 'pending',
+      paymentMethod: 'bank_transfer',
+      autoCloseAt: '2020-01-01T00:00:00.000Z',
+    });
+    db.prepare(`
+      UPDATE "Order"
+      SET customerId = 'buyer-1', pointsGroup = 10, pointsApplied = 1
+      WHERE id = 'broken-points'
+    `).run();
+
+    const result = await closeStalePendingOrders(new Date('2026-08-19T00:00:00.000Z'));
+
+    expect(result).toEqual({ closed: 0, skipped: 1 });
+    expect(db.prepare('SELECT status FROM "Order" WHERE id = ?').get('broken-points')).toEqual({ status: 'pending' });
+    expect(db.prepare('SELECT points FROM User WHERE id = ?').get('buyer-1')).toEqual({ points: 40 });
+    expect(db.prepare('SELECT COUNT(*) AS count FROM PointsLog').get()).toEqual({ count: 0 });
   });
 });

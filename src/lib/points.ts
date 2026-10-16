@@ -4,6 +4,7 @@ export type PointsLogType =
   | 'admin_adjust'
   | 'order_credit'
   | 'redemption'
+  | 'redemption_refund'
   | 'admin_undo'
   | 'order_redeem'
   | 'order_redeem_refund'
@@ -14,6 +15,7 @@ export const POINTS_LOG_TYPE_LABELS: Record<PointsLogType, string> = {
   admin_adjust: '管理员调整',
   order_credit: '订单获得',
   redemption: '商品兑换',
+  redemption_refund: '兑换退回',
   admin_undo: '撤销调整',
   order_redeem: '订单抵扣',
   order_redeem_refund: '抵扣退回',
@@ -25,6 +27,7 @@ export const POINTS_LOG_TYPE_COLORS: Record<PointsLogType, string> = {
   admin_adjust: 'bg-amber-100 text-amber-700',
   order_credit: 'bg-green-100 text-green-700',
   redemption: 'bg-purple-100 text-purple-700',
+  redemption_refund: 'bg-fuchsia-100 text-fuchsia-700',
   admin_undo: 'bg-rose-100 text-rose-700',
   order_redeem: 'bg-blue-100 text-blue-700',
   order_redeem_refund: 'bg-sky-100 text-sky-700',

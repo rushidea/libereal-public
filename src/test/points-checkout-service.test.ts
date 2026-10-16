@@ -135,4 +135,50 @@ describe('points checkout service organization context', () => {
     })).resolves.toEqual({ ok: false, error: '退款状态已改变，请刷新后重试' });
     expect(tx.researchGroup.update).not.toHaveBeenCalled();
   });
+
+  it('refunds the remaining original points on the second partial cash refund', async () => {
+    const order = {
+      id: 'order-1',
+      customerId: 'user-1',
+      pointsPersonal: 10,
+      pointsGroup: 0,
+      pointsGroupId: null,
+      pointsApplied: true,
+      pointsRefundedPersonal: 0,
+      pointsRefundedGroup: 0,
+      pointsRefundedCash: 0,
+    };
+    const tx = {
+      order: {
+        findUnique: vi.fn(async () => ({ ...order })),
+        updateMany: vi.fn(async ({ data }: { data: {
+          pointsRefundedPersonal: { increment: number };
+          pointsRefundedGroup: { increment: number };
+          pointsRefundedCash: number;
+        } }) => {
+          order.pointsRefundedPersonal += data.pointsRefundedPersonal.increment;
+          order.pointsRefundedGroup += data.pointsRefundedGroup.increment;
+          order.pointsRefundedCash = data.pointsRefundedCash;
+          return { count: 1 };
+        }),
+      },
+      user: { update: vi.fn() },
+      pointsLog: { create: vi.fn() },
+    };
+
+    await expect(refundOrderPointsProportionally(tx as never, {
+      orderId: 'order-1',
+      refundYuan: 50,
+      originalPaidYuan: 100,
+    })).resolves.toMatchObject({ ok: true, personal: 5, group: 0 });
+    await expect(refundOrderPointsProportionally(tx as never, {
+      orderId: 'order-1',
+      refundYuan: 50,
+      originalPaidYuan: 100,
+    })).resolves.toMatchObject({ ok: true, personal: 5, group: 0 });
+
+    expect(order.pointsRefundedPersonal).toBe(10);
+    expect(order.pointsRefundedCash).toBe(100);
+    expect(tx.pointsLog.create).toHaveBeenCalledTimes(2);
+  });
 });

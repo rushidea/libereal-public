@@ -91,6 +91,7 @@ function orderActionErrorMessage(error: string): string {
     PAYMENT_METHOD_LOCKED: '该订单已经产生支付记录，付款方式不能修改。',
     INVALID_ORDER_TRANSITION: '当前订单状态不允许执行该操作。',
     INVALID_STATUS_TRANSITION: '当前订单状态不允许执行该操作。',
+    POINTS_REFUND_FAILED: '积分没有退回，订单状态未更改。请稍后重试。',
   };
   return messages[error] || error || '操作失败';
 }

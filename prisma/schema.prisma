@@ -575,6 +575,7 @@ model Order {
   pointsAppliedAt     DateTime?
   pointsRefundedPersonal Int   @default(0)
   pointsRefundedGroup Int      @default(0)
+  pointsRefundedCash   Float    @default(0) // 已计入积分退款比例的现金（元）
   researchGroup       ResearchGroup? @relation(fields: [pointsGroupId], references: [id], onDelete: SetNull)
 
   @@index([email])
@@ -1490,7 +1491,7 @@ model PointsLog {
   id         String   @id @default(cuid())
   userId     String
   delta      Int      // 正数=收入，负数=支出
-  type       String   // admin_adjust | order_credit | redemption | admin_undo | order_redeem | order_redeem_refund | topup_alipay | admin_inject
+  type       String   // admin_adjust | order_credit | redemption | redemption_refund | admin_undo | order_redeem | order_redeem_refund | topup_alipay | admin_inject
   reason     String?  // 管理员备注
   relatedId  String?  // 关联订单/兑换 ID
   undoOfId   String?  @unique // admin_undo 唯一对应的原始管理员调整记录
@@ -1531,6 +1532,7 @@ model PointsRedemption {
   productName    String   // 冗余存储（商品可能被下架）
   pointsCost     Int
   status         String   @default("pending")  // pending | shipped | completed | cancelled
+  pointsReturned Boolean  @default(false) // 取消时退回积分并回库存，只做一次
   shippingInfo   String?  // JSON 收货地址（实物）
   trackingNumber String?
   adminNote      String?

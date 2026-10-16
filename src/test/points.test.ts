@@ -112,6 +112,7 @@ describe('POINTS_LOG_TYPE_LABELS completeness', () => {
         'order_redeem',
         'order_redeem_refund',
         'redemption',
+        'redemption_refund',
         'topup_alipay',
       ],
     );

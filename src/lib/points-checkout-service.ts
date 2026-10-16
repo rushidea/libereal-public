@@ -1,8 +1,8 @@
 import type { Prisma, PrismaClient } from '@prisma/client';
 import {
   buildPointsRedeemBreakdown,
+  calculateCumulativePointsRefund,
   normalizePointsIntent,
-  splitProportionalRefund,
   type PointsRedeemBreakdown,
   type PointsRedeemIntent,
 } from '@/lib/points-checkout';
@@ -238,9 +238,18 @@ export async function applyOrderPointsDeduction(
   return { ok: true };
 }
 
+export const POINTS_REFUND_FAILED = 'POINTS_REFUND_FAILED';
+
+export function requirePointsRefund(
+  result: { ok: true; personal: number; group: number } | { ok: false; error: string },
+) {
+  if (!result.ok) throw new Error(POINTS_REFUND_FAILED, { cause: result.error });
+  return result;
+}
+
 /**
- * 按退款金额比例退回积分（原路：个人 / 课题组）。
- * refundYuan / originalPaidYuan 决定比例；可多次调用，累计不超过原抵扣。
+ * 按累计已退现金占原应付的比例退回积分（原路：个人 / 课题组）。
+ * 多次部分退款用原抵扣减去已退积分，现金退满时退光剩余。失败返回 ok: false，调用方必须中止事务。
  */
 export async function refundOrderPointsProportionally(
   tx: Tx,
@@ -263,6 +272,7 @@ export async function refundOrderPointsProportionally(
       pointsApplied: true,
       pointsRefundedPersonal: true,
       pointsRefundedGroup: true,
+      pointsRefundedCash: true,
     },
   });
   if (!order) return { ok: false, error: '订单不存在' };
@@ -272,27 +282,36 @@ export async function refundOrderPointsProportionally(
 
   const remainingPersonal = Math.max(0, order.pointsPersonal - order.pointsRefundedPersonal);
   const remainingGroup = Math.max(0, order.pointsGroup - order.pointsRefundedGroup);
-  const split = splitProportionalRefund({
-    personalPoints: remainingPersonal,
-    groupPoints: remainingGroup,
+  if (remainingPersonal + remainingGroup <= 0) return { ok: true, personal: 0, group: 0 };
+
+  const refundedCashYuan = order.pointsRefundedCash ?? 0;
+  const plan = calculateCumulativePointsRefund({
+    originalPersonal: order.pointsPersonal,
+    originalGroup: order.pointsGroup,
+    refundedPersonal: order.pointsRefundedPersonal,
+    refundedGroup: order.pointsRefundedGroup,
+    refundedCashYuan,
     refundYuan: args.refundYuan,
     originalPaidYuan: args.originalPaidYuan,
   });
+  if (!plan.ok) return plan;
 
-  // 若整单取消，退回全部剩余
-  const isFull = args.refundYuan >= args.originalPaidYuan - 1e-6;
-  const personal = isFull ? remainingPersonal : split.personal;
-  const group = isFull ? remainingGroup : split.group;
+  const personal = plan.personal;
+  const group = plan.group;
+  const cashUnchanged = Math.round(plan.nextCashYuan * 100) === Math.round(refundedCashYuan * 100);
+  if (personal === 0 && group === 0 && cashUnchanged) return { ok: true, personal: 0, group: 0 };
 
   const claimed = await tx.order.updateMany({
     where: {
       id: order.id,
       pointsRefundedPersonal: order.pointsRefundedPersonal,
       pointsRefundedGroup: order.pointsRefundedGroup,
+      pointsRefundedCash: order.pointsRefundedCash,
     },
     data: {
       pointsRefundedPersonal: { increment: personal },
       pointsRefundedGroup: { increment: group },
+      pointsRefundedCash: plan.nextCashYuan,
     },
   });
   if (claimed.count !== 1) return { ok: false, error: '退款状态已改变，请刷新后重试' };

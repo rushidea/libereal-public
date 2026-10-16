@@ -104,6 +104,7 @@ function canReorderOrder(order: Order): boolean {
 function orderActionErrorMessage(error: string | undefined): string {
   if (error === 'PAID_ORDER_REFUND_REQUIRED') return '已付款订单需要退款审核，暂时不能自助取消。';
   if (error === 'INVALID_ORDER_TRANSITION') return '订单当前状态不能取消。';
+  if (error === 'POINTS_REFUND_FAILED') return '积分没有退回，订单没有取消。请稍后重试。';
   if (error === 'REORDER_PRODUCT_UNAVAILABLE') return '订单中的部分商品已下架，暂时无法再次下单。';
   return error || '操作失败，请稍后重试。';
 }
