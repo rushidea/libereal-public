@@ -110,8 +110,86 @@ describe('POST /api/admin/orders (admin create order)', () => {
     expect(json.order.total).toBe(365);
 
     const db = getTestDb();
-    const o = db.prepare('SELECT subtotal, adjustmentTotal, total FROM "Order" WHERE id = ?').get(json.orderId) as { subtotal: number; adjustmentTotal: number; total: number };
-    expect(o).toEqual({ subtotal: 350, adjustmentTotal: 15, total: 365 });
+    const o = db.prepare('SELECT email, customerId, subtotal, adjustmentTotal, total FROM "Order" WHERE id = ?').get(json.orderId) as { email: string; customerId: string | null; subtotal: number; adjustmentTotal: number; total: number };
+    expect(o).toEqual({ email: 'cust@test.com', customerId: null, subtotal: 350, adjustmentTotal: 15, total: 365 });
+  });
+
+  it('attributes the order to the customer and stores the selected address', async () => {
+    const db = getTestDb();
+    seedUser(db, { id: 'cust_1', email: 'buyer@lab.test', name: '李老师' });
+    db.prepare(`INSERT INTO Address (id, userId, name, phone, address, institution, isDefault, createdAt, updatedAt)
+      VALUES ('addr_1', 'cust_1', '李老师', '13800001111', '北京市海淀区学院路1号', '清华大学', 1, datetime('now'), datetime('now'))`).run();
+
+    const res = await ordersPOST(makeReq({
+      customerEmail: 'buyer@lab.test',
+      addressId: 'addr_1',
+      items: [{ name: '抗体A', productId: 'p1', catalogNumber: 'CST-1', price: 100, quantity: 2 }],
+      paymentMethod: 'bank_transfer',
+    }) as NextRequest);
+    const json = await res.json();
+    expect(res.status).toBe(200);
+
+    const order = db.prepare('SELECT email, customerId FROM "Order" WHERE id = ?').get(json.orderId) as { email: string; customerId: string | null };
+    expect(order).toEqual({ email: 'buyer@lab.test', customerId: 'cust_1' });
+    expect(order.customerId).not.toBe('admin_test_id');
+    const snapshot = db.prepare('SELECT sourceAddressId, name, phone, address, institution FROM OrderAddressSnapshot WHERE orderId = ?').get(json.orderId) as {
+      sourceAddressId: string;
+      name: string;
+      phone: string;
+      address: string;
+      institution: string;
+    };
+    expect(snapshot).toEqual({
+      sourceAddressId: 'addr_1',
+      name: '李老师',
+      phone: '13800001111',
+      address: '北京市海淀区学院路1号',
+      institution: '清华大学',
+    });
+  });
+
+  it('rejects an address that belongs to another customer and does not create an order', async () => {
+    const db = getTestDb();
+    seedUser(db, { id: 'cust_1', email: 'buyer@lab.test', name: '李老师' });
+    seedUser(db, { id: 'cust_2', email: 'other@lab.test', name: '王老师' });
+    db.prepare(`INSERT INTO Address (id, userId, name, phone, address, isDefault, createdAt, updatedAt)
+      VALUES ('addr_2', 'cust_2', '王老师', '13900002222', '上海市杨浦区', 1, datetime('now'), datetime('now'))`).run();
+
+    const res = await ordersPOST(makeReq({
+      customerEmail: 'buyer@lab.test',
+      addressId: 'addr_2',
+      items: [{ name: '抗体A', price: 100, quantity: 1 }],
+      paymentMethod: 'bank_transfer',
+    }) as NextRequest);
+    const json = await res.json();
+    expect(res.status).toBe(400);
+    expect(json.error).toBe('所选地址不属于该客户，请重新选择');
+    const count = db.prepare('SELECT COUNT(*) AS count FROM "Order"').get() as { count: number };
+    expect(count.count).toBe(0);
+  });
+
+  it('stores a typed address snapshot when no saved address is selected', async () => {
+    const db = getTestDb();
+    seedUser(db, { id: 'cust_1', email: 'buyer@lab.test', name: '李老师' });
+    const res = await ordersPOST(makeReq({
+      customerEmail: 'buyer@lab.test',
+      addressName: '收货人',
+      addressPhone: '13700003333',
+      addressText: '广州市天河区',
+      addressInstitution: '中山大学',
+      items: [{ name: '抗体A', price: 80, quantity: 1 }],
+      paymentMethod: 'alipay',
+    }) as NextRequest);
+    const json = await res.json();
+    expect(res.status).toBe(200);
+    const snapshot = db.prepare('SELECT sourceAddressId, name, phone, address, institution FROM OrderAddressSnapshot WHERE orderId = ?').get(json.orderId);
+    expect(snapshot).toEqual({
+      sourceAddressId: null,
+      name: '收货人',
+      phone: '13700003333',
+      address: '广州市天河区',
+      institution: '中山大学',
+    });
   });
 
   it('increments daily sequence (ORD-DATE-001 → ORD-DATE-002)', async () => {
