@@ -3,7 +3,7 @@
 import React, { useEffect, useState } from 'react';
 
 import {
-  Package, Search, Eye, RotateCcw, Trash2
+  Package, Search, Eye, RotateCcw
 } from 'lucide-react';
 import AlipayPaymentStatusView from '@/components/payment/AlipayPaymentStatus';
 import type { AlipayPaymentSummary } from '@/data/alipay-payment';
@@ -102,23 +102,6 @@ export default function ArchivedOrdersPage() {
     }
   }
 
-  async function handleDelete(orderIds: string[]) {
-    if (!confirm(`确定要永久删除 ${orderIds.length} 个订单吗？此操作不可恢复！`)) return;
-    try {
-      const res = await fetch('/api/admin/orders/archive', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ orderIds, action: 'delete' }),
-      });
-      if (res.ok) {
-        fetchArchivedOrders();
-        setSelectedOrder(null);
-      }
-    } catch (e) {
-      console.error(e);
-    }
-  }
-
   const filteredOrders = orders.filter(o =>
     !search ||
     (o.name && o.name.includes(search)) ||
@@ -199,13 +182,6 @@ export default function ArchivedOrdersPage() {
                             >
                               <Eye className="w-3.5 h-3.5" /> 详情
                             </button>
-                            <button
-                              onClick={() => handleDelete([order.id])}
-                              className="text-red-600 hover:text-red-700 font-medium text-xs flex items-center gap-1"
-                              title="永久删除"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
                           </div>
                         </td>
                       </tr>
@@ -270,12 +246,6 @@ export default function ArchivedOrdersPage() {
                                   className="flex-1 py-3 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors flex items-center justify-center gap-2"
                                 >
                                   <RotateCcw className="w-4 h-4" /> 还原此订单
-                                </button>
-                                <button
-                                  onClick={() => handleDelete([selectedOrder.id])}
-                                  className="px-6 py-3 bg-red-600 text-white rounded-lg font-medium hover:bg-red-700 transition-colors flex items-center justify-center gap-2"
-                                >
-                                  <Trash2 className="w-4 h-4" /> 删除
                                 </button>
                               </div>
                               <div className="text-xs text-gray-500 text-center">

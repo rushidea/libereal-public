@@ -6,7 +6,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { useSession } from 'next-auth/react';
 import type { Session } from 'next-auth';
 import {
-  Search, Package, Archive, Trash2, ChevronLeft, ChevronRight,
+  Search, Package, Archive, Ban, ChevronLeft, ChevronRight,
   Plus, Check, Clock, ClipboardList, Wallet,
 } from 'lucide-react';
 import ProductSearchOverlayForOrder from '@/components/admin/ProductSearchOverlayForOrder';
@@ -119,6 +119,22 @@ function orderActionErrorMessage(data: { error?: string; requiredPermission?: st
   return messages[data.error || ''] || data.error || '操作失败';
 }
 
+function withdrawOrderErrorMessage(error: unknown, orderId: unknown): string {
+  const code = typeof error === 'string' ? error : '';
+  const target = typeof orderId === 'string' && orderId ? `订单 ${orderId}` : '所选订单';
+  const messages: Record<string, string> = {
+    PAID_ORDER_REFUND_REQUIRED: `${target}已经付款，需要先办理退款。本次没有改动任何订单。`,
+    ORDER_DELETE_BLOCKED: `${target}已发货或已完成，不能移除。请保留订单记录。本次没有改动任何订单。`,
+    ORDER_NOT_FOUND: '有订单不存在或已被处理，请刷新后重试。本次没有改动任何订单。',
+    POINTS_REFUND_FAILED: '积分未能退回，订单未移除。请刷新后重试。',
+    CREDIT_ACCOUNT_NOT_FOUND: '找不到对应的授信账户，订单未移除。请先核对客户授信。',
+    'Admin MFA required': '请先完成再次确认身份，然后再取消并归档订单。',
+    'Admin authenticator policy required': '请先完成再次确认身份，然后再取消并归档订单。',
+    'Admin MFA state unavailable': '暂时无法确认身份，请稍后重试。订单未改动。',
+  };
+  return messages[code] || '取消并归档失败，请稍后重试。';
+}
+
 export default function AdminOrdersPage() {
   return (
     <div className="space-y-4">
@@ -155,6 +171,7 @@ function OrdersPanel() {
   const [selectedOrders, setSelectedOrders] = useState<Set<string>>(new Set());
   const [addProductSearch, setAddProductSearch] = useState('');
   const [addingToOrder, setAddingToOrder] = useState(false);
+  const [listError, setListError] = useState('');
   const [permissions, setPermissions] = useState<string[] | null>(null);
 
   useEffect(() => {
@@ -240,19 +257,26 @@ function OrdersPanel() {
   }
 
   async function deleteOrders(orderIds: string[]) {
-    if (!confirm(`确定要删除 ${orderIds.length} 个订单吗？此操作不可恢复！`)) return;
+    if (!confirm(`确定取消并归档 ${orderIds.length} 个订单吗？未发货的订单会取消，并释放预占库存、授信和已扣积分。已发货、已完成或已付款的订单不会移除。`)) return;
+    setListError('');
     try {
       const res = await fetch('/api/admin/orders/archive', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ orderIds, action: 'delete' }),
       });
-      if (res.ok) {
-        fetchData();
-        setSelectedOrder(null);
-        setSelectedOrders(new Set());
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setListError(withdrawOrderErrorMessage(data.error, data.orderId));
+        return;
       }
-    } catch (e) { console.error(e); }
+      await fetchData();
+      setSelectedOrder(null);
+      setSelectedOrders(new Set());
+    } catch (e) {
+      console.error(e);
+      setListError('取消并归档失败，请稍后重试。');
+    }
   }
 
   async function handleAddProductToOrder(product: { name: string; brand: string; catalogNumber: string; price?: number; promotionalPrice?: number }) {
@@ -331,7 +355,7 @@ function OrdersPanel() {
               </button>
               <button onClick={() => deleteOrders(Array.from(selectedOrders))}
                 className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg text-sm font-medium flex items-center gap-1.5">
-                <Trash2 className="w-4 h-4" /> 批量删除 ({selectedOrders.size})
+                <Ban className="w-4 h-4" /> 取消并归档 ({selectedOrders.size})
               </button>
             </>
           )}
@@ -390,6 +414,8 @@ function OrdersPanel() {
           )}
         </div>
       </div>
+
+      {listError && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{listError}</p>}
 
       <div className="lg:hidden space-y-3">
         {paginatedOrders.map(order => (
@@ -575,8 +601,8 @@ function OrdersRow({
               <Archive className="w-3.5 h-3.5" />
             </button>
             <button onClick={() => deleteOrders([order.id])}
-              className="text-red-600 hover:text-red-700 text-xs flex items-center gap-1" title="删除">
-              <Trash2 className="w-3.5 h-3.5" />
+              className="text-red-600 hover:text-red-700 text-xs flex items-center gap-1" title="取消并归档" aria-label="取消并归档">
+              <Ban className="w-3.5 h-3.5" />
             </button>
           </div>
         </td>
@@ -677,7 +703,7 @@ function MobileOrderCard({
         </button>
         <button onClick={() => deleteOrders([order.id])}
           className="text-red-600 text-sm font-medium flex items-center gap-1">
-          <Trash2 className="w-4 h-4" /> 删除
+          <Ban className="w-4 h-4" /> 取消并归档
         </button>
       </div>
 
