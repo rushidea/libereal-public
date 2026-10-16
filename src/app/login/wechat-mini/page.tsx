@@ -66,6 +66,7 @@ function WeChatMiniLoginContent() {
     const response = await fetch('/api/auth/wechat-mini/challenge', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
     });
     const data = (await response.json()) as ChallengeResponse & { error?: string };
     if (!response.ok) throw new Error(data.error || '创建登录请求失败');
@@ -85,6 +86,7 @@ function WeChatMiniLoginContent() {
     const response = await fetch('/api/auth/wechat-mini/complete', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
       body: JSON.stringify({ challengeId, callbackUrl }),
     });
     const data = (await response.json()) as CompleteResponse;

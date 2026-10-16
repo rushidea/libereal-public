@@ -1,8 +1,12 @@
 import { NextResponse } from 'next/server';
 import {
+  createWechatMiniBrowserSecret,
   createWechatMiniLoginChallenge,
   generateWechatMiniScheme,
   getPublicWeChatMiniAppId,
+  getWechatMiniBrowserSecretCookieName,
+  hashWechatMiniBrowserSecret,
+  wechatMiniBrowserSecretCookieOptions,
 } from '@/lib/wechat-mini-auth';
 
 function getWechatMiniSchemeDisplayError(error: unknown): string {
@@ -18,7 +22,8 @@ function getWechatMiniSchemeDisplayError(error: unknown): string {
 
 export async function POST() {
   try {
-    const challenge = await createWechatMiniLoginChallenge();
+    const browserSecret = createWechatMiniBrowserSecret();
+    const challenge = await createWechatMiniLoginChallenge(hashWechatMiniBrowserSecret(browserSecret));
     const appId = getPublicWeChatMiniAppId();
     let scheme: string | null = null;
     let schemeError: string | null = null;
@@ -30,7 +35,7 @@ export async function POST() {
       console.error('[wechat-mini/challenge.scheme]', error);
     }
 
-    return NextResponse.json({
+    const response = NextResponse.json({
       challengeId: challenge.id,
       expiresAt: challenge.expiresAt.toISOString(),
       miniProgram: {
@@ -41,6 +46,12 @@ export async function POST() {
         schemeError,
       },
     });
+    response.cookies.set(
+      getWechatMiniBrowserSecretCookieName(challenge.id),
+      browserSecret,
+      wechatMiniBrowserSecretCookieOptions(),
+    );
+    return response;
   } catch (error) {
     console.error('[wechat-mini/challenge]', error);
     return NextResponse.json({ error: '无法创建微信小程序登录请求' }, { status: 500 });
