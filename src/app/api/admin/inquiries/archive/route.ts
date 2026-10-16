@@ -15,7 +15,8 @@ export async function PATCH(req: NextRequest) {
 
     const now = new Date();
 
-    if (action === 'archive') {
+    if (action === 'archive' || action === 'delete') {
+      // 后台「删除」只归档。硬删除会级联拆掉报价和明细；已转订单的询价会丢掉关联，外键收紧时还会失败。
       await prisma.inquiry.updateMany({
         where: { id: { in: inquiryIds } },
         data: { archivedAt: now },
@@ -25,8 +26,6 @@ export async function PATCH(req: NextRequest) {
         where: { id: { in: inquiryIds } },
         data: { archivedAt: null },
       });
-    } else if (action === 'delete') {
-      await prisma.inquiry.deleteMany({ where: { id: { in: inquiryIds } } });
     } else {
       return NextResponse.json({ error: "无效操作" }, { status: 400 });
     }

@@ -381,13 +381,41 @@ describe('PATCH /api/admin/inquiries/archive', () => {
     expect(i1.archivedAt).toBeNull();
   });
 
-  it('deletes inquiries', async () => {
+  it('archives instead of deleting, and keeps quotes and linked orders', async () => {
+    const db = getTestDb();
+    db.prepare(`
+      INSERT INTO Quote (id, inquiryId, version, status, subtotal, currency, createdAt, updatedAt)
+      VALUES ('q1', 'i1', 1, 'accepted', 100, 'CNY', datetime('now'), datetime('now'))
+    `).run();
+    db.prepare(`
+      INSERT INTO "Order" (id, inquiryId, email, subtotal, total, status, shippingMethod, operationLogs, createdAt, updatedAt)
+      VALUES ('o1', 'i1', 'a@test.com', 100, 100, 'confirmed', 'logistics', '[]', datetime('now'), datetime('now'))
+    `).run();
+
     const res = await archivePATCH(makeReq({ inquiryIds: ['i1'], action: 'delete' }) as NextRequest);
     expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json).toEqual({ success: true, count: 1 });
 
-    const db = getTestDb();
-    const remaining = db.prepare('SELECT id FROM Inquiry').all() as Array<{ id: string }>;
-    expect(remaining.map(i => i.id)).toEqual(['i2']);
+    const inquiry = db.prepare('SELECT id, archivedAt FROM Inquiry WHERE id = ?').get('i1') as { id: string; archivedAt: string | null };
+    expect(inquiry.id).toBe('i1');
+    expect(inquiry.archivedAt).not.toBeNull();
+    expect(db.prepare('SELECT id FROM InquiryItem WHERE inquiryId = ?').all('i1')).toHaveLength(1);
+    expect(db.prepare('SELECT id, inquiryId, status FROM Quote WHERE id = ?').get('q1')).toEqual({
+      id: 'q1',
+      inquiryId: 'i1',
+      status: 'accepted',
+    });
+    expect(db.prepare('SELECT id, inquiryId FROM "Order" WHERE id = ?').get('o1')).toEqual({
+      id: 'o1',
+      inquiryId: 'i1',
+    });
+    const sibling = db.prepare('SELECT archivedAt FROM Inquiry WHERE id = ?').get('i2') as { archivedAt: string | null };
+    expect(sibling.archivedAt).toBeNull();
+
+    const list = await inquiriesGET(new NextRequest('http://localhost:3000/api/inquiries') as NextRequest);
+    const active = await list.json() as Array<{ id: string }>;
+    expect(active.map((inquiry) => inquiry.id)).toEqual(['i2']);
   });
 
   it('returns 400 for empty inquiryIds', async () => {

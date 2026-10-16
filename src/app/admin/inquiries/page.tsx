@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation';
 import { useSession } from 'next-auth/react';
 import type { Session } from 'next-auth';
 import {
-  Search, Package, Archive, Trash2,  Check, Clock, XCircle, ChevronRight, MessageSquare,
+  Search, Package, Archive, Check, Clock, XCircle, ChevronRight, MessageSquare,
 } from 'lucide-react';
 
 interface Inquiry {
@@ -124,26 +124,25 @@ function InquiriesPanel() {
         body: JSON.stringify({ inquiryIds, action: 'archive' }),
       });
       if (res.ok) {
+        setSelectedInquiries((current) => {
+          const next = new Set(current);
+          for (const id of inquiryIds) next.delete(id);
+          return next;
+        });
         fetchData();
         setSelectedInquiry(null);
       }
     } catch (e) { console.error(e); }
   }
 
-  async function deleteInquiries(inquiryIds: string[]) {
-    if (!confirm(`确定要删除 ${inquiryIds.length} 个询价单吗？此操作不可恢复！`)) return;
-    try {
-      const res = await fetch('/api/admin/inquiries/archive', {
-        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ inquiryIds, action: 'delete' }),
-      });
-      if (res.ok) {
-        fetchData();
-        setSelectedInquiry(null);
-        setSelectedInquiries(new Set());
-      }
-    } catch (e) { console.error(e); }
-  }
+  const filteredInquiries = inquiries.filter(i => {
+    const matchSearch = !search || i.name.includes(search) || i.email.includes(search) || (i.institution && i.institution.includes(search)) || i.id.includes(search);
+    const inquiryDate = new Date(i.createdAt);
+    const matchDateFrom = !inquiryDateFrom || inquiryDate >= new Date(inquiryDateFrom);
+    const matchDateTo = !inquiryDateTo || inquiryDate <= new Date(inquiryDateTo + 'T23:59:59');
+    return matchSearch && matchDateFrom && matchDateTo;
+  });
+  const visibleSelectedIds = filteredInquiries.map(i => i.id).filter(id => selectedInquiries.has(id));
 
   if (loading) {
     return (
@@ -178,17 +177,11 @@ function InquiriesPanel() {
           className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg text-sm font-medium flex items-center gap-1.5">
           <Package className="w-4 h-4" /> 已归档
         </button>
-        {selectedInquiries.size > 0 && (
-          <>
-            <button onClick={() => archiveInquiries(Array.from(selectedInquiries))}
-              className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg text-sm font-medium flex items-center gap-1.5">
-              <Archive className="w-4 h-4" /> 批量归档 ({selectedInquiries.size})
-            </button>
-            <button onClick={() => deleteInquiries(Array.from(selectedInquiries))}
-              className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg text-sm font-medium flex items-center gap-1.5">
-              <Trash2 className="w-4 h-4" /> 批量删除 ({selectedInquiries.size})
-            </button>
-          </>
+        {visibleSelectedIds.length > 0 && (
+          <button onClick={() => archiveInquiries(visibleSelectedIds)}
+            className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg text-sm font-medium flex items-center gap-1.5">
+            <Archive className="w-4 h-4" /> 批量归档 ({visibleSelectedIds.length})
+          </button>
         )}
       </div>
 
@@ -199,8 +192,9 @@ function InquiriesPanel() {
               <tr className="bg-gray-50/80 border-b border-gray-200">
                 <th className="text-left px-4 py-3 font-semibold text-gray-700">
                   <input type="checkbox"
-                    checked={selectedInquiries.size === inquiries.length && inquiries.length > 0}
-                    onChange={e => { setSelectedInquiries(e.target.checked ? new Set(inquiries.map(i => i.id)) : new Set()); }}
+                    aria-label="全选当前筛选结果"
+                    checked={filteredInquiries.length > 0 && visibleSelectedIds.length === filteredInquiries.length}
+                    onChange={e => { setSelectedInquiries(e.target.checked ? new Set(filteredInquiries.map(i => i.id)) : new Set()); }}
                     className="w-4 h-4 text-brand-600 rounded border-gray-300" />
                 </th>
                 <th className="text-left px-4 py-3 font-semibold text-gray-700">编号</th>
@@ -213,37 +207,26 @@ function InquiriesPanel() {
               </tr>
             </thead>
             <tbody>
-              {(() => {
-                const filtered = inquiries.filter(i => {
-                  const matchSearch = !search || i.name.includes(search) || i.email.includes(search) || (i.institution && i.institution.includes(search)) || i.id.includes(search);
-                  const inquiryDate = new Date(i.createdAt);
-                  const matchDateFrom = !inquiryDateFrom || inquiryDate >= new Date(inquiryDateFrom);
-                  const matchDateTo = !inquiryDateTo || inquiryDate <= new Date(inquiryDateTo + 'T23:59:59');
-                  return matchSearch && matchDateFrom && matchDateTo;
-                });
-                if (filtered.length === 0) {
-                  return <tr><td colSpan={8} className="px-4 py-12 text-center text-gray-600">暂无询价单</td></tr>;
-                }
-                return filtered.map(inquiry => (
-                  <InquiryRow
-                    key={inquiry.id}
-                    inquiry={inquiry}
-                    selectedInquiry={selectedInquiry}
-                    setSelectedInquiry={setSelectedInquiry}
-                    selectedInquiries={selectedInquiries}
-                    setSelectedInquiries={setSelectedInquiries}
-                    inquiryItems={inquiryItems}
-                    setInquiryItems={setInquiryItems}
-                    inquiryLogsExpanded={inquiryLogsExpanded}
-                    setInquiryLogsExpanded={setInquiryLogsExpanded}
-                    session={session}
-                    inquiryTotal={inquiryTotal}
-                    fetchData={fetchData}
-                    archiveInquiries={archiveInquiries}
-                    deleteInquiries={deleteInquiries}
-                  />
-                ));
-              })()}
+              {filteredInquiries.length === 0 ? (
+                <tr><td colSpan={8} className="px-4 py-12 text-center text-gray-600">暂无询价单</td></tr>
+              ) : filteredInquiries.map(inquiry => (
+                <InquiryRow
+                  key={inquiry.id}
+                  inquiry={inquiry}
+                  selectedInquiry={selectedInquiry}
+                  setSelectedInquiry={setSelectedInquiry}
+                  selectedInquiries={selectedInquiries}
+                  setSelectedInquiries={setSelectedInquiries}
+                  inquiryItems={inquiryItems}
+                  setInquiryItems={setInquiryItems}
+                  inquiryLogsExpanded={inquiryLogsExpanded}
+                  setInquiryLogsExpanded={setInquiryLogsExpanded}
+                  session={session}
+                  inquiryTotal={inquiryTotal}
+                  fetchData={fetchData}
+                  archiveInquiries={archiveInquiries}
+                />
+              ))}
             </tbody>
           </table>
         </div>
@@ -255,7 +238,7 @@ function InquiriesPanel() {
 function InquiryRow({
   inquiry, selectedInquiry, setSelectedInquiry, selectedInquiries, setSelectedInquiries,
   inquiryItems, setInquiryItems, inquiryLogsExpanded, setInquiryLogsExpanded,
-  session, inquiryTotal, fetchData, archiveInquiries, deleteInquiries,
+  session, inquiryTotal, fetchData, archiveInquiries,
 }: {
   inquiry: Inquiry;
   selectedInquiry: Inquiry | null;
@@ -270,7 +253,6 @@ function InquiryRow({
   inquiryTotal: number;
   fetchData: () => Promise<void>;
   archiveInquiries: (ids: string[]) => Promise<void>;
-  deleteInquiries: (ids: string[]) => Promise<void>;
 }) {
   const isExpanded = selectedInquiry?.id === inquiry.id;
 
@@ -315,10 +297,6 @@ function InquiryRow({
             <button onClick={() => archiveInquiries([inquiry.id])}
               className="text-purple-600 hover:text-purple-700 text-xs flex items-center gap-1" title="归档">
               <Archive className="w-3.5 h-3.5" />
-            </button>
-            <button onClick={() => deleteInquiries([inquiry.id])}
-              className="text-red-600 hover:text-red-700 text-xs flex items-center gap-1" title="删除">
-              <Trash2 className="w-3.5 h-3.5" />
             </button>
           </div>
         </td>
