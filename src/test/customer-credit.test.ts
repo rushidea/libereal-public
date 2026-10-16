@@ -11,6 +11,7 @@ import {
   reserveOrderCredit,
   settleOrderReceivable,
   startOrderReceivableTerm,
+  syncUnsettledReceivableAmount,
 } from '@/lib/customer-credit';
 import { getTierByRollingSpend } from '@/lib/discount';
 const tierFixture = vi.hoisted(() => [{ level: 1, min: 0, name: 'Sample tier', creditLimit: 5000, discountRate: 0.9 }, { level: 2, min: 1000, name: 'Sample plus', creditLimit: 8000, discountRate: 0.85 }]);
@@ -113,6 +114,91 @@ describe('membership and customer credit', () => {
     seedOrder('order_1', 'buyer@test.com', 600);
     await expect(prisma.$transaction((tx) => reserveOrderCredit(tx, 'order_1'))).rejects.toThrow('CREDIT_LIMIT_EXCEEDED');
     expect(await prisma.accountReceivable.count()).toBe(0);
+  });
+
+  it('keeps later settlement on the adjusted receivable instead of the original total', async () => {
+    seedOrder('order_1', 'buyer@test.com', 4000);
+    await prisma.$transaction((tx) => reserveOrderCredit(tx, 'order_1', 'admin_1'));
+    await prisma.creditAccount.update({ where: { userId: 'user_1' }, data: { usedAmount: 4500 } });
+
+    await prisma.$transaction((tx) => syncUnsettledReceivableAmount(tx, 'order_1', 3000, 'admin_1'));
+    expect(await prisma.accountReceivable.findUnique({ where: { orderId: 'order_1' } })).toMatchObject({
+      status: 'open',
+      amount: 3000,
+    });
+    expect(await prisma.creditAccount.findUnique({ where: { userId: 'user_1' } })).toMatchObject({ usedAmount: 3500 });
+    expect(await prisma.creditTransaction.findFirst({ where: { orderId: 'order_1', type: 'amount_adjust' } })).toMatchObject({
+      amount: -1000,
+      balanceAfter: 3500,
+      reason: '订单改价同步应收',
+      actorId: 'admin_1',
+    });
+
+    await prisma.$transaction((tx) => settleOrderReceivable(tx, 'order_1', 'finance_1'));
+    expect(await prisma.creditAccount.findUnique({ where: { userId: 'user_1' } })).toMatchObject({ usedAmount: 500 });
+    expect(await prisma.creditTransaction.findFirst({
+      where: { orderId: 'order_1', type: 'release' },
+      orderBy: { createdAt: 'desc' },
+    })).toMatchObject({ amount: -3000 });
+    expect(await prisma.user.findUnique({ where: { id: 'user_1' }, select: { points: true } })).toEqual({ points: 3 });
+  });
+
+  it('rejects a price increase that would exceed available credit and leaves the receivable unchanged', async () => {
+    seedOrder('order_1', 'buyer@test.com', 4000);
+    await prisma.$transaction((tx) => reserveOrderCredit(tx, 'order_1', 'admin_1'));
+    await expect(prisma.$transaction((tx) => syncUnsettledReceivableAmount(tx, 'order_1', 5600, 'admin_1')))
+      .rejects.toThrow('CREDIT_LIMIT_EXCEEDED');
+    expect(await prisma.accountReceivable.findUnique({ where: { orderId: 'order_1' } })).toMatchObject({ amount: 4000, status: 'open' });
+    expect(await prisma.creditAccount.findUnique({ where: { userId: 'user_1' } })).toMatchObject({ usedAmount: 4000 });
+    expect(await prisma.creditTransaction.count({ where: { type: 'amount_adjust' } })).toBe(0);
+  });
+
+  it('syncs an overdue receivable without clearing the overdue status', async () => {
+    seedOrder('order_1', 'buyer@test.com', 4000);
+    await prisma.$transaction((tx) => reserveOrderCredit(tx, 'order_1', 'admin_1'));
+    await prisma.accountReceivable.update({ where: { orderId: 'order_1' }, data: { status: 'overdue' } });
+    await prisma.$transaction((tx) => syncUnsettledReceivableAmount(tx, 'order_1', 5000, 'admin_1'));
+    expect(await prisma.accountReceivable.findUnique({ where: { orderId: 'order_1' } })).toMatchObject({
+      status: 'overdue',
+      amount: 5000,
+    });
+    expect(await prisma.creditAccount.findUnique({ where: { userId: 'user_1' } })).toMatchObject({ usedAmount: 5000 });
+  });
+
+  it('refuses to change a paid receivable and releases the adjusted amount on cancellation', async () => {
+    seedOrder('order_1', 'buyer@test.com', 4000);
+    await prisma.$transaction((tx) => reserveOrderCredit(tx, 'order_1', 'admin_1'));
+    await prisma.$transaction((tx) => syncUnsettledReceivableAmount(tx, 'order_1', 2500, 'admin_1'));
+    await prisma.$transaction((tx) => releaseOrderReceivableOnCancellation(tx, 'order_1', 'admin_1'));
+    expect(await prisma.creditAccount.findUnique({ where: { userId: 'user_1' } })).toMatchObject({ usedAmount: 0 });
+    expect(await prisma.creditTransaction.findFirst({ where: { orderId: 'order_1', type: 'release' } })).toMatchObject({ amount: -2500 });
+
+    seedOrder('order_2', 'buyer@test.com', 1000);
+    await prisma.$transaction((tx) => reserveOrderCredit(tx, 'order_2', 'admin_1'));
+    await prisma.$transaction((tx) => settleOrderReceivable(tx, 'order_2', 'finance_1'));
+    await expect(prisma.$transaction((tx) => syncUnsettledReceivableAmount(tx, 'order_2', 800, 'admin_1')))
+      .rejects.toThrow('ORDER_AMOUNT_LOCKED');
+    expect(await prisma.accountReceivable.findUnique({ where: { orderId: 'order_2' } })).toMatchObject({ status: 'paid', amount: 1000 });
+  });
+
+  it('rejects an increase on a held account and a decrease that would make occupied credit negative', async () => {
+    seedOrder('order_1', 'buyer@test.com', 4000);
+    await prisma.$transaction((tx) => reserveOrderCredit(tx, 'order_1', 'admin_1'));
+    await prisma.creditAccount.update({ where: { userId: 'user_1' }, data: { status: 'overdue_hold' } });
+    await expect(prisma.$transaction((tx) => syncUnsettledReceivableAmount(tx, 'order_1', 4500, 'admin_1')))
+      .rejects.toThrow('CREDIT_ACCOUNT_SUSPENDED');
+    await prisma.$transaction((tx) => syncUnsettledReceivableAmount(tx, 'order_1', 3500, 'admin_1'));
+    expect(await prisma.accountReceivable.findUnique({ where: { orderId: 'order_1' } })).toMatchObject({ amount: 3500, status: 'open' });
+    expect(await prisma.creditAccount.findUnique({ where: { userId: 'user_1' } })).toMatchObject({
+      usedAmount: 3500,
+      status: 'overdue_hold',
+    });
+
+    await prisma.creditAccount.update({ where: { userId: 'user_1' }, data: { usedAmount: 100, status: 'active' } });
+    await expect(prisma.$transaction((tx) => syncUnsettledReceivableAmount(tx, 'order_1', 3000, 'admin_1')))
+      .rejects.toThrow('CREDIT_USED_INVALID');
+    expect(await prisma.accountReceivable.findUnique({ where: { orderId: 'order_1' } })).toMatchObject({ amount: 3500 });
+    expect(await prisma.creditAccount.findUnique({ where: { userId: 'user_1' } })).toMatchObject({ usedAmount: 100 });
   });
 
   it('credits one point per completed thousand yuan', () => {
