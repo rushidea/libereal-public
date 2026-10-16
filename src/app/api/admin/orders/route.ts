@@ -1,12 +1,47 @@
 import { NextRequest, NextResponse } from 'next/server';
+import type { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { AMBIGUOUS_PRODUCT_CATALOG_NUMBER, verifyAndPriceItems } from '@/lib/pricing';
-import { orderItemView, toOrderItemCreates } from '@/lib/commerce-records';
+import { toOrderItemCreates } from '@/lib/commerce-records';
 import { requireAdmin } from '@/lib/session';
 import { normalizeOrderPaymentMethod } from '@/data/payment-methods';
 import { orderAutoCloseAt } from '@/lib/order-auto-close';
 import { initialOrderStatus } from '@/lib/order-domain';
 import { getAlipayPaymentSummary } from '@/data/alipay-payment';
+import {
+  adminOrderStatusCounts,
+  buildAdminActiveOrderCountWhere,
+  buildAdminActiveOrderWhere,
+  parseAdminOrderListQuery,
+  pendingUnpaidAlipayWhere,
+} from '@/data/admin-order-list-query';
+
+const orderListSelect = {
+  id: true,
+  email: true,
+  subtotal: true,
+  adjustmentTotal: true,
+  total: true,
+  status: true,
+  paymentMethod: true,
+  paidAt: true,
+  createdAt: true,
+  addressSnapshot: { select: { name: true, phone: true, institution: true } },
+  paymentAttempts: {
+    where: { provider: 'alipay' },
+    orderBy: { createdAt: 'desc' },
+    take: 1,
+    select: { status: true, outTradeNo: true, tradeNo: true, notifiedAt: true, paidAt: true },
+  },
+} satisfies Prisma.OrderSelect;
+
+const receivableSelect = {
+  id: true,
+  amount: true,
+  status: true,
+  dueAt: true,
+  paidAt: true,
+} satisfies Prisma.AccountReceivableSelect;
 
 type AdminOrderAddressSnapshot = {
   sourceAddressId: string | null;
@@ -64,44 +99,74 @@ export async function GET(req: NextRequest) {
   if (denied instanceof NextResponse) return denied;
 
   try {
-    const { searchParams } = new URL(req.url);
-    const status = searchParams.get('status');
-    const receivable = searchParams.get('receivable') === 'open';
+    const parsed = parseAdminOrderListQuery(new URL(req.url).searchParams);
+    if (!parsed.ok) {
+      return NextResponse.json({ error: parsed.error }, { status: 400 });
+    }
+    const { query } = parsed;
+    const where = buildAdminActiveOrderWhere(query) as Prisma.OrderWhereInput;
+    const countWhere = buildAdminActiveOrderCountWhere(query.receivableOpen) as Prisma.OrderWhereInput;
+    const select = query.receivableOpen
+      ? { ...orderListSelect, receivable: { select: receivableSelect } }
+      : orderListSelect;
 
-    const where: { archivedAt: null; status?: string; receivable?: { is: { status: string } } } = { archivedAt: null };
-    if (status) where.status = status;
-    // 待收款视图：仅显示已建应收款且未收款的订单（对公转账/锐竞/喀斯玛确认后自动建应收款）
-    if (receivable) where.receivable = { is: { status: 'open' } };
+    const [orders, total, statusGroups, pendingAlipayUnpaid, receivableAggregate] = await Promise.all([
+      prisma.order.findMany({
+        where,
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        skip: (query.page - 1) * query.pageSize,
+        take: query.pageSize,
+        select,
+      }),
+      prisma.order.count({ where }),
+      prisma.order.groupBy({
+        by: ['status'],
+        where: countWhere,
+        _count: { _all: true },
+      }),
+      prisma.order.count({
+        where: {
+          AND: [countWhere, pendingUnpaidAlipayWhere() as Prisma.OrderWhereInput],
+        },
+      }),
+      query.receivableOpen
+        ? prisma.accountReceivable.aggregate({
+            where: { status: 'open', order: { is: { archivedAt: null } } },
+            _count: { _all: true },
+            _sum: { amount: true },
+          })
+        : Promise.resolve(null),
+    ]);
 
-    const orders = await prisma.order.findMany({
-      where,
-      orderBy: { createdAt: 'desc' },
-      include: {
-        orderItems: { orderBy: { position: 'asc' } },
-        addressSnapshot: true,
-        adjustments: { orderBy: { createdAt: 'asc' } },
-        shipments: { orderBy: { createdAt: 'desc' }, include: { items: true } },
-        events: { orderBy: { createdAt: 'asc' } },
-        paymentAttempts: { where: { provider: 'alipay' }, orderBy: { createdAt: 'desc' }, take: 1 },
-        // 待收款视图携带应收款金额，供页面汇总（与 analytics 口径一致）
-        ...(receivable ? { receivable: { select: { id: true, amount: true, status: true, dueAt: true, paidAt: true } } } : {}),
-      },
+    const enriched = orders.map((order) => {
+      const { paymentAttempts, addressSnapshot, ...rest } = order;
+      const receivable = 'receivable' in rest ? rest.receivable ?? null : null;
+      const summary = { ...rest };
+      if ('receivable' in summary) delete summary.receivable;
+      return {
+        ...summary,
+        receivable,
+        name: addressSnapshot?.name || order.email.split('@')[0],
+        institution: addressSnapshot?.institution || null,
+        department: null,
+        phone: addressSnapshot?.phone || null,
+        payment: getAlipayPaymentSummary(order, paymentAttempts[0]),
+      };
     });
 
-    // Add derived display fields
-    const enriched = orders.map(({ paymentAttempts, receivable: recv, ...o }) => ({
-      ...o,
-      receivable: recv ?? null,
-      items: o.orderItems.map(orderItemView),
-      orderItems: undefined,
-      name: o.addressSnapshot?.name || o.email.split('@')[0],
-      institution: o.addressSnapshot?.institution || null,
-      department: null,
-      phone: o.addressSnapshot?.phone || null,
-      payment: getAlipayPaymentSummary(o, paymentAttempts[0]),
-    }));
-
-    return NextResponse.json({ orders: enriched });
+    return NextResponse.json({
+      orders: enriched,
+      page: query.page,
+      pageSize: query.pageSize,
+      total,
+      statusCounts: adminOrderStatusCounts(
+        statusGroups.map((group) => ({ status: group.status, count: group._count._all })),
+        pendingAlipayUnpaid,
+      ),
+      receivableSummary: receivableAggregate
+        ? { count: receivableAggregate._count._all, amount: receivableAggregate._sum.amount ?? 0 }
+        : null,
+    });
   } catch (err) {
     console.error('[admin/orders GET] error:', err);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });

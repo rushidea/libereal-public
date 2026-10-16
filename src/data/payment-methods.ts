@@ -64,3 +64,15 @@ export function isPostDeliveryPaymentMethod(value: unknown): boolean {
 export function isAlipayPaymentMethod(value: unknown): boolean {
   return normalizeOrderPaymentMethod(value) === 'alipay';
 }
+
+/** Stored payment-method strings that normalize to Alipay, including ASCII case variants. */
+export function alipayPaymentMethodStoredValues(): string[] {
+  const keys = Object.entries(PAYMENT_METHOD_ALIASES)
+    .filter(([, value]) => value === 'alipay')
+    .map(([key]) => key);
+  const variants = keys.flatMap((key) => {
+    if (/[^\u0000-\u007f]/.test(key)) return [key];
+    return [key, key.toUpperCase(), key.charAt(0).toUpperCase() + key.slice(1)];
+  });
+  return [...new Set(variants)];
+}

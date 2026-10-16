@@ -46,17 +46,30 @@ describe('GET /api/admin/orders (list)', () => {
     seedOrder(db, { id: 'o4', email: 'u4@test.com', archivedAt: new Date().toISOString() });
   });
 
-  it('returns all non-archived orders, newest first', async () => {
+  it('returns the first page of non-archived orders, newest first', async () => {
+    const db = getTestDb();
+    db.prepare(`UPDATE "Order" SET createdAt = ? WHERE id = 'o1'`).run('2026-03-01T00:00:00.000Z');
+    db.prepare(`UPDATE "Order" SET createdAt = ? WHERE id = 'o2'`).run('2026-03-02T00:00:00.000Z');
+    db.prepare(`UPDATE "Order" SET createdAt = ? WHERE id = 'o3'`).run('2026-03-03T00:00:00.000Z');
     const res = await ordersGET(new NextRequest('http://localhost:3000/api/admin/orders') as NextRequest);
     const json = await res.json();
     expect(res.status).toBe(200);
     expect(json.orders).toHaveLength(3); // o4 archived excluded
+    expect(json.page).toBe(1);
+    expect(json.pageSize).toBe(20);
+    expect(json.total).toBe(3);
+    expect(json.orders.map((order: { id: string }) => order.id)).toEqual(['o3', 'o2', 'o1']);
+    expect(json.orders[0]).not.toHaveProperty('items');
+    expect(json.orders[0]).not.toHaveProperty('orderItems');
+    expect(json.orders[0]).not.toHaveProperty('events');
+    expect(json.orders[0]).not.toHaveProperty('shipments');
   });
 
   it('filters by status', async () => {
     const res = await ordersGET(new NextRequest('http://localhost:3000/api/admin/orders?status=shipped') as NextRequest);
     const json = await res.json();
     expect(json.orders).toHaveLength(2);
+    expect(json.total).toBe(2);
     expect(json.orders.every((o: { status: string }) => o.status === 'shipped')).toBe(true);
   });
 
@@ -71,6 +84,114 @@ describe('GET /api/admin/orders (list)', () => {
     expect(o1.name).toBe('收货张三');
     expect(o1.institution).toBe('清华大学');
     expect(o1.phone).toBe('13800001111');
+    expect(o1).not.toHaveProperty('addressSnapshot');
+  });
+
+  it('paginates and keeps archived orders out of later pages', async () => {
+    const db = getTestDb();
+    const insert = db.prepare(`
+      INSERT INTO "Order" (id, email, subtotal, status, shippingMethod, operationLogs, createdAt, updatedAt, archivedAt)
+      VALUES (?, ?, 100, 'pending', 'logistics', '[]', ?, datetime('now'), NULL)
+    `);
+    for (let index = 0; index < 22; index += 1) {
+      const createdAt = `2026-02-${String((index % 27) + 1).padStart(2, '0')}T00:00:00.000Z`;
+      insert.run(`extra-${index}`, `extra-${index}@test.com`, createdAt);
+    }
+
+    const first = await ordersGET(new NextRequest('http://localhost:3000/api/admin/orders?page=1&pageSize=20') as NextRequest);
+    const firstJson = await first.json();
+    expect(firstJson.orders).toHaveLength(20);
+    expect(firstJson.total).toBe(25);
+    expect(firstJson.orders.some((order: { id: string }) => order.id === 'o4')).toBe(false);
+
+    const second = await ordersGET(new NextRequest('http://localhost:3000/api/admin/orders?page=2&pageSize=20') as NextRequest);
+    const secondJson = await second.json();
+    expect(secondJson.orders).toHaveLength(5);
+    expect(secondJson.page).toBe(2);
+    const seen = new Set([
+      ...firstJson.orders.map((order: { id: string }) => order.id),
+      ...secondJson.orders.map((order: { id: string }) => order.id),
+    ]);
+    expect(seen.size).toBe(25);
+  });
+
+  it('searches by order id, email, recipient name, and institution without changing status counts', async () => {
+    const db = getTestDb();
+    db.prepare(`INSERT INTO OrderAddressSnapshot (id, orderId, name, institution, phone, address) VALUES (?, ?, ?, ?, ?, ?)`)
+      .run('snapshot_search', 'o2', '李四', '北京大学', '13900002222', '北京市海淀区');
+
+    const byName = await ordersGET(new NextRequest('http://localhost:3000/api/admin/orders?q=李四') as NextRequest);
+    const byNameJson = await byName.json();
+    expect(byNameJson.orders.map((order: { id: string }) => order.id)).toEqual(['o2']);
+    expect(byNameJson.total).toBe(1);
+    expect(byNameJson.statusCounts.shipped).toBe(2);
+    expect(byNameJson.statusCounts.pending).toBe(1);
+
+    const byInstitution = await ordersGET(new NextRequest('http://localhost:3000/api/admin/orders?q=北京大学') as NextRequest);
+    expect((await byInstitution.json()).orders.map((order: { id: string }) => order.id)).toEqual(['o2']);
+
+    const byEmail = await ordersGET(new NextRequest('http://localhost:3000/api/admin/orders?q=u1@test.com') as NextRequest);
+    expect((await byEmail.json()).orders.map((order: { id: string }) => order.id)).toEqual(['o1']);
+
+    const byId = await ordersGET(new NextRequest('http://localhost:3000/api/admin/orders?q=o3') as NextRequest);
+    expect((await byId.json()).orders.map((order: { id: string }) => order.id)).toEqual(['o3']);
+  });
+
+  it('filters by Shanghai calendar dates', async () => {
+    const db = getTestDb();
+    db.prepare(`UPDATE "Order" SET createdAt = ? WHERE id = 'o1'`).run('2024-01-15T04:00:00.000Z');
+    db.prepare(`UPDATE "Order" SET createdAt = ? WHERE id = 'o2'`).run('2024-01-15T16:00:00.000Z');
+
+    const res = await ordersGET(new NextRequest('http://localhost:3000/api/admin/orders?dateFrom=2024-01-15&dateTo=2024-01-15') as NextRequest);
+    const json = await res.json();
+    expect(json.orders.map((order: { id: string }) => order.id)).toEqual(['o1']);
+    expect(json.total).toBe(1);
+  });
+
+  it('treats unpaid Alipay orders that are still pending as unpaid', async () => {
+    const db = getTestDb();
+    db.prepare(`UPDATE "Order" SET status = 'pending', paymentMethod = '支付宝', paidAt = NULL WHERE id = 'o1'`).run();
+    db.prepare(`UPDATE "Order" SET status = 'pending', paymentMethod = 'bank_transfer', paidAt = NULL WHERE id = 'o2'`).run();
+
+    const unpaid = await ordersGET(new NextRequest('http://localhost:3000/api/admin/orders?status=unpaid') as NextRequest);
+    const unpaidJson = await unpaid.json();
+    expect(unpaidJson.orders.map((order: { id: string }) => order.id)).toEqual(['o1']);
+
+    const pending = await ordersGET(new NextRequest('http://localhost:3000/api/admin/orders?status=pending') as NextRequest);
+    const pendingJson = await pending.json();
+    expect(pendingJson.orders.map((order: { id: string }) => order.id)).toEqual(['o2']);
+    expect(pendingJson.statusCounts.unpaid).toBe(1);
+    expect(pendingJson.statusCounts.pending).toBe(1);
+    expect(pendingJson.statusCounts.shipped).toBe(1);
+  });
+
+  it('limits the open-receivable view and summarizes every open receivable', async () => {
+    const db = getTestDb();
+    db.prepare(`
+      INSERT INTO AccountReceivable (id, orderId, userId, amount, status, confirmedAt, createdAt, updatedAt)
+      VALUES (?, ?, 'admin_test_id', ?, ?, datetime('now'), datetime('now'), datetime('now'))
+    `).run('ar-o1', 'o1', 120.5, 'open');
+    db.prepare(`
+      INSERT INTO AccountReceivable (id, orderId, userId, amount, status, confirmedAt, createdAt, updatedAt)
+      VALUES (?, ?, 'admin_test_id', ?, ?, datetime('now'), datetime('now'), datetime('now'))
+    `).run('ar-o2', 'o2', 30, 'paid');
+    db.prepare(`
+      INSERT INTO AccountReceivable (id, orderId, userId, amount, status, confirmedAt, createdAt, updatedAt)
+      VALUES (?, ?, 'admin_test_id', ?, ?, datetime('now'), datetime('now'), datetime('now'))
+    `).run('ar-o4', 'o4', 999, 'open');
+
+    const res = await ordersGET(new NextRequest('http://localhost:3000/api/admin/orders?receivable=open&q=does-not-match') as NextRequest);
+    const json = await res.json();
+    expect(json.orders).toEqual([]);
+    expect(json.total).toBe(0);
+    expect(json.receivableSummary).toEqual({ count: 1, amount: 120.5 });
+  });
+
+  it('rejects invalid page, page size, and status', async () => {
+    expect((await ordersGET(new NextRequest('http://localhost:3000/api/admin/orders?status=nope') as NextRequest)).status).toBe(400);
+    expect((await ordersGET(new NextRequest('http://localhost:3000/api/admin/orders?page=0') as NextRequest)).status).toBe(400);
+    expect((await ordersGET(new NextRequest('http://localhost:3000/api/admin/orders?pageSize=100') as NextRequest)).status).toBe(400);
+    expect((await ordersGET(new NextRequest('http://localhost:3000/api/admin/orders?dateFrom=2024/01/01') as NextRequest)).status).toBe(400);
   });
 });
 

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, Suspense } from 'react';
+import { useState, useEffect, useRef, useCallback, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 
 import { useSession } from 'next-auth/react';
@@ -16,6 +16,7 @@ import { orderStatusRequiresFinanceWrite } from '@/lib/order-finance-access';
 import AlipayPaymentStatusView from '@/components/payment/AlipayPaymentStatus';
 import type { AlipayPaymentSummary } from '@/data/alipay-payment';
 import { canTransitionOrder, displayedOrderStatus, isOrderStatus } from '@/lib/order-domain';
+import { ADMIN_ORDER_LIST_PAGE_SIZE, toAdminOrderListSearchParams } from '@/data/admin-order-list-query';
 
 interface Order {
   id: string;
@@ -47,6 +48,7 @@ interface Order {
   pointsApplied?: boolean;
   pointsRefundedPersonal?: number;
   pointsRefundedGroup?: number;
+  detailLoaded?: boolean;
 }
 
 interface OrderItem {
@@ -119,6 +121,10 @@ function orderActionErrorMessage(data: { error?: string; requiredPermission?: st
   return messages[data.error || ''] || data.error || '操作失败';
 }
 
+function chineseOrFallback(error: unknown, fallback: string): string {
+  return typeof error === 'string' && /[\u4e00-\u9fff]/.test(error) ? error : fallback;
+}
+
 function withdrawOrderErrorMessage(error: unknown, orderId: unknown): string {
   const code = typeof error === 'string' ? error : '';
   const target = typeof orderId === 'string' && orderId ? `订单 ${orderId}` : '所选订单';
@@ -133,6 +139,52 @@ function withdrawOrderErrorMessage(error: unknown, orderId: unknown): string {
     'Admin MFA state unavailable': '暂时无法确认身份，请稍后重试。订单未改动。',
   };
   return messages[code] || '取消并归档失败，请稍后重试。';
+}
+
+function withOrderDetail(summary: Order, detail: {
+  items?: OrderItem[];
+  events?: Order['events'];
+  shipments?: Order['shipments'];
+  payment?: Order['payment'];
+  status?: string;
+  paidAt?: string | null;
+  paymentMethod?: string | null;
+  subtotal?: number;
+  total?: number;
+  quoteSent?: boolean;
+  quoteSentAt?: string | null;
+  pointsPersonal?: number;
+  pointsGroup?: number;
+  pointsDiscount?: number;
+  pointsApplied?: boolean;
+  pointsRefundedPersonal?: number;
+  pointsRefundedGroup?: number;
+  addressSnapshot?: { name?: string | null; phone?: string | null; institution?: string | null } | null;
+}): Order {
+  return {
+    ...summary,
+    status: detail.status ?? summary.status,
+    paidAt: detail.paidAt === undefined ? summary.paidAt : detail.paidAt,
+    paymentMethod: detail.paymentMethod ?? summary.paymentMethod,
+    subtotal: detail.subtotal ?? summary.subtotal,
+    total: detail.total ?? summary.total,
+    quoteSent: detail.quoteSent ?? summary.quoteSent,
+    quoteSentAt: detail.quoteSentAt ?? summary.quoteSentAt,
+    pointsPersonal: detail.pointsPersonal ?? summary.pointsPersonal,
+    pointsGroup: detail.pointsGroup ?? summary.pointsGroup,
+    pointsDiscount: detail.pointsDiscount ?? summary.pointsDiscount,
+    pointsApplied: detail.pointsApplied ?? summary.pointsApplied,
+    pointsRefundedPersonal: detail.pointsRefundedPersonal ?? summary.pointsRefundedPersonal,
+    pointsRefundedGroup: detail.pointsRefundedGroup ?? summary.pointsRefundedGroup,
+    items: detail.items ?? [],
+    events: detail.events ?? [],
+    shipments: detail.shipments ?? [],
+    payment: detail.payment === undefined ? summary.payment : detail.payment,
+    name: detail.addressSnapshot?.name || summary.name,
+    phone: detail.addressSnapshot?.phone || summary.phone,
+    institution: detail.addressSnapshot?.institution || summary.institution,
+    detailLoaded: true,
+  };
 }
 
 export default function AdminOrdersPage() {
@@ -159,11 +211,16 @@ function OrdersPanel() {
   const receivableView = searchParams.get('view') === 'receivable';
 
   const [orders, setOrders] = useState<Order[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [total, setTotal] = useState(0);
+  const [statusCounts, setStatusCounts] = useState<Record<string, number>>({});
+  const [receivableSummary, setReceivableSummary] = useState<{ count: number; amount: number } | null>(null);
+  const [initialLoading, setInitialLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
   const [search, setSearch] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [page, setPage] = useState(1);
-  const pageSize = 20;
+  const pageSize = ADMIN_ORDER_LIST_PAGE_SIZE;
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
@@ -171,8 +228,12 @@ function OrdersPanel() {
   const [selectedOrders, setSelectedOrders] = useState<Set<string>>(new Set());
   const [addProductSearch, setAddProductSearch] = useState('');
   const [addingToOrder, setAddingToOrder] = useState(false);
+  const [detailError, setDetailError] = useState('');
   const [listError, setListError] = useState('');
   const [permissions, setPermissions] = useState<string[] | null>(null);
+  const selectedIdRef = useRef<string | null>(null);
+  const listRequestRef = useRef(0);
+  const detailRequestRef = useRef(0);
 
   useEffect(() => {
     let active = true;
@@ -185,46 +246,100 @@ function OrdersPanel() {
     return () => { active = false; };
   }, []);
 
-  const fetchData = async () => {
-    setLoading(true);
-    try {
-      const params = new URLSearchParams();
-      if (receivableView) params.set('receivable', 'open');
-      const qs = params.toString();
-      const res = await fetch(`/api/admin/orders${qs ? `?${qs}` : ''}`, { cache: 'no-store' });
-      const data = await res.json();
-      setOrders(Array.isArray(data) ? data : (data.orders || []));
-    } catch (e) {
-      console.error(e);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => { fetchData(); }, [receivableView]);
-
   useEffect(() => {
-    if (selectedOrder) {
-      setOrderItems(selectedOrder.items);
-    } else {
-      setOrderItems([]);
-    }
+    selectedIdRef.current = selectedOrder?.id ?? null;
   }, [selectedOrder]);
 
-  const filteredOrders = orders.filter(o => {
-    const matchSearch = !search ||
-      (o.name && o.name.includes(search)) ||
-      o.email.includes(search) ||
-      (o.institution && o.institution.includes(search)) ||
-      o.id.includes(search);
-    const orderDate = new Date(o.createdAt);
-    const matchDateFrom = !dateFrom || orderDate >= new Date(dateFrom);
-    const matchDateTo = !dateTo || orderDate <= new Date(dateTo + 'T23:59:59');
-    const matchStatus = !statusFilter || displayedOrderStatus(o) === statusFilter;
-    return matchSearch && matchDateFrom && matchDateTo && matchStatus;
-  });
-  const paginatedOrders = filteredOrders.slice((page - 1) * pageSize, page * pageSize);
-  const totalPages = Math.ceil(filteredOrders.length / pageSize);
+  useEffect(() => {
+    const handle = window.setTimeout(() => setDebouncedSearch(search.trim()), 300);
+    return () => window.clearTimeout(handle);
+  }, [search]);
+
+  const loadOrderDetail = useCallback(async (orderId: string, summary?: Order) => {
+    const seq = ++detailRequestRef.current;
+    setDetailError('');
+    if (summary) setSelectedOrder({ ...summary, items: [], detailLoaded: false });
+    try {
+      const res = await fetch(`/api/admin/orders/${orderId}`, { cache: 'no-store' });
+      const data = await res.json().catch(() => ({}));
+      if (seq !== detailRequestRef.current) return;
+      if (!res.ok) {
+        setDetailError(chineseOrFallback(data.error, '订单详情加载失败，请重试'));
+        return;
+      }
+      setSelectedOrder((current) => {
+        if (current?.id !== orderId) return current;
+        return withOrderDetail(current, data.order ?? {});
+      });
+    } catch (e) {
+      console.error(e);
+      if (seq === detailRequestRef.current) setDetailError('订单详情加载失败，请重试');
+    }
+  }, []);
+
+  const openOrder = (order: Order) => {
+    if (selectedOrder?.id === order.id) {
+      detailRequestRef.current += 1;
+      setSelectedOrder(null);
+      setDetailError('');
+      return;
+    }
+    void loadOrderDetail(order.id, order);
+  };
+
+  const fetchData = useCallback(async () => {
+    const seq = ++listRequestRef.current;
+    const params = toAdminOrderListSearchParams({
+      page,
+      pageSize,
+      search: debouncedSearch,
+      status: statusFilter,
+      dateFrom,
+      dateTo,
+      receivableOpen: receivableView,
+    });
+    try {
+      const res = await fetch(`/api/admin/orders?${params.toString()}`, { cache: 'no-store' });
+      const data = await res.json().catch(() => ({}));
+      if (seq !== listRequestRef.current) return;
+      if (!res.ok) {
+        setLoadError(chineseOrFallback(data.error, '订单加载失败，请重试'));
+        return;
+      }
+      setLoadError('');
+      setOrders(Array.isArray(data.orders) ? data.orders : []);
+      setTotal(typeof data.total === 'number' ? data.total : 0);
+      setStatusCounts(data.statusCounts && typeof data.statusCounts === 'object' ? data.statusCounts : {});
+      setReceivableSummary(data.receivableSummary ?? null);
+      const openId = selectedIdRef.current;
+      if (openId) await loadOrderDetail(openId);
+    } catch (e) {
+      console.error(e);
+      if (seq === listRequestRef.current) setLoadError('订单加载失败，请重试');
+    } finally {
+      if (seq === listRequestRef.current) setInitialLoading(false);
+    }
+  }, [dateFrom, dateTo, debouncedSearch, loadOrderDetail, page, pageSize, receivableView, statusFilter]);
+
+  useEffect(() => {
+    void fetchData();
+  }, [fetchData]);
+
+  useEffect(() => {
+    if (selectedOrder?.detailLoaded) setOrderItems(selectedOrder.items || []);
+    else if (!selectedOrder) setOrderItems([]);
+  }, [selectedOrder]);
+
+  const paginatedOrders = orders;
+  const totalPages = Math.max(0, Math.ceil(total / pageSize));
+
+  useEffect(() => {
+    if (totalPages > 0 && page > totalPages) setPage(totalPages);
+  }, [page, totalPages]);
+
+  useEffect(() => {
+    setPage(1);
+  }, [receivableView]);
 
   async function updateOrderStatus(orderId: string, newStatus: string): Promise<string | null> {
     const response = await fetch(`/api/orders/${orderId}`, {
@@ -311,7 +426,7 @@ function OrdersPanel() {
   const formatPrice = (price: number) =>
     new Intl.NumberFormat('zh-CN', { style: 'currency', currency: 'CNY' }).format(price);
 
-  if (loading) {
+  if (initialLoading) {
     return (
       <div className="flex items-center justify-center py-20">
         <div className="animate-spin w-8 h-8 border-2 border-brand-500 border-t-transparent rounded-full" />
@@ -366,10 +481,10 @@ function OrdersPanel() {
               <Wallet className="w-4 h-4 text-brand-600" /> 待收款视图
             </span>
             <span className="text-sm text-gray-600">
-              共 <b className="text-gray-900">{orders.length}</b> 笔待回款
+              共 <b className="text-gray-900">{receivableSummary?.count ?? 0}</b> 笔待回款
             </span>
             <span className="text-sm text-gray-600">
-              金额 <b className="text-gray-900">¥{orders.reduce((s, o) => s + (o.receivable?.amount ?? 0), 0).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b>
+              金额 <b className="text-gray-900">¥{(receivableSummary?.amount ?? 0).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</b>
             </span>
             <button
               onClick={() => { router.push('/admin/orders'); }}
@@ -381,7 +496,7 @@ function OrdersPanel() {
         )}
         <div className="flex gap-2 text-sm w-full overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           {(Object.keys(ORDER_STATUS_CONFIG)).map(s => {
-            const count = orders.filter(o => displayedOrderStatus(o) === s).length;
+            const count = statusCounts[s] ?? 0;
             const active = statusFilter === s;
             return (
               <button
@@ -415,6 +530,12 @@ function OrdersPanel() {
         </div>
       </div>
 
+      {loadError && (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+          <span>{loadError}</span>
+          <button type="button" onClick={() => { void fetchData(); }} className="font-medium text-red-800 hover:text-red-900">重试</button>
+        </div>
+      )}
       {listError && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{listError}</p>}
 
       <div className="lg:hidden space-y-3">
@@ -423,7 +544,9 @@ function OrdersPanel() {
             key={order.id}
             order={order}
             selectedOrder={selectedOrder}
-            setSelectedOrder={setSelectedOrder}
+            openOrder={openOrder}
+            detailError={detailError}
+            retryDetail={() => { if (selectedOrder) void loadOrderDetail(selectedOrder.id); }}
             orderItems={orderItems}
             setOrderItems={setOrderItems}
             addingToOrder={addingToOrder}
@@ -481,7 +604,9 @@ function OrdersPanel() {
                   key={order.id}
                   order={order}
                   selectedOrder={selectedOrder}
-                  setSelectedOrder={setSelectedOrder}
+                  openOrder={openOrder}
+                  detailError={detailError}
+                  retryDetail={() => { if (selectedOrder) void loadOrderDetail(selectedOrder.id); }}
                   selectedOrders={selectedOrders}
                   setSelectedOrders={setSelectedOrders}
                   orderItems={orderItems}
@@ -506,43 +631,45 @@ function OrdersPanel() {
             </tbody>
           </table>
         </div>
-        {totalPages > 1 && (
-          <div className="flex items-center justify-between px-4 py-3 border-t border-gray-100">
-            <span className="text-sm text-gray-600">
-              显示 {(page - 1) * pageSize + 1}-{Math.min(page * pageSize, filteredOrders.length)} / {filteredOrders.length}
-            </span>
-            <div className="flex gap-1">
-              <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1}
-                className="p-1.5 rounded hover:bg-gray-100 disabled:opacity-40"><ChevronLeft className="w-4 h-4" /></button>
-              {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
-                const p = page <= 3 ? i + 1 : page + i - 2;
-                if (p < 1 || p > totalPages) return null;
-                return (
-                  <button key={p} onClick={() => setPage(p)}
-                    className={`w-8 h-8 rounded text-sm ${p === page ? 'bg-brand-500 text-white' : 'hover:bg-gray-100 text-gray-700'}`}>
-                    {p}
-                  </button>
-                );
-              })}
-              <button onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page === totalPages}
-                className="p-1.5 rounded hover:bg-gray-100 disabled:opacity-40"><ChevronRight className="w-4 h-4" /></button>
-            </div>
-          </div>
-        )}
       </div>
+      {totalPages > 1 && (
+        <div className="flex items-center justify-between px-4 py-3 border-t border-gray-100 bg-white/70 rounded-xl">
+          <span className="text-sm text-gray-600">
+            显示 {(page - 1) * pageSize + 1}-{Math.min(page * pageSize, total)} / {total}
+          </span>
+          <div className="flex gap-1">
+            <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1}
+              className="p-1.5 rounded hover:bg-gray-100 disabled:opacity-40"><ChevronLeft className="w-4 h-4" /></button>
+            {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
+              const p = page <= 3 ? i + 1 : page + i - 2;
+              if (p < 1 || p > totalPages) return null;
+              return (
+                <button key={p} onClick={() => setPage(p)}
+                  className={`w-8 h-8 rounded text-sm ${p === page ? 'bg-brand-500 text-white' : 'hover:bg-gray-100 text-gray-700'}`}>
+                  {p}
+                </button>
+              );
+            })}
+            <button onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page === totalPages}
+              className="p-1.5 rounded hover:bg-gray-100 disabled:opacity-40"><ChevronRight className="w-4 h-4" /></button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
 
 function OrdersRow({
-  order, selectedOrder, setSelectedOrder, selectedOrders, setSelectedOrders,
+  order, selectedOrder, openOrder, detailError, retryDetail, selectedOrders, setSelectedOrders,
   orderItems, setOrderItems, addingToOrder, setAddingToOrder, addProductSearch, setAddProductSearch,
   updateOrderStatus, archiveOrders, deleteOrders, handleAddProductToOrder,
   session, formatPrice, fetchData, permissions,
 }: {
   order: Order;
   selectedOrder: Order | null;
-  setSelectedOrder: (o: Order | null) => void;
+  openOrder: (order: Order) => void;
+  detailError: string;
+  retryDetail: () => void;
   selectedOrders: Set<string>;
   setSelectedOrders: (s: Set<string>) => void;
   orderItems: OrderItem[];
@@ -565,7 +692,7 @@ function OrdersRow({
   return (
     <>
       <tr className={`border-b border-gray-100 cursor-pointer ${isExpanded ? 'bg-brand-50/50' : 'hover:bg-gray-50/50'}`}
-        onClick={() => setSelectedOrder(isExpanded ? null : order)}>
+        onClick={() => openOrder(order)}>
         <td className="px-3 py-3 align-top" onClick={e => e.stopPropagation()}>
           <input type="checkbox" checked={selectedOrders.has(order.id)}
             onChange={e => {
@@ -619,8 +746,10 @@ function OrdersRow({
         <tr>
           <td colSpan={8} className="bg-brand-50/70 p-3 border-b border-brand-200">
             <div className="w-full min-w-0 overflow-hidden">
-              <OrderDetailPanel
-                order={order}
+              <OrderDetailSlot
+                selectedOrder={selectedOrder}
+                detailError={detailError}
+                retryDetail={retryDetail}
                 orderItems={orderItems}
                 setOrderItems={setOrderItems}
                 addingToOrder={addingToOrder}
@@ -643,14 +772,16 @@ function OrdersRow({
 }
 
 function MobileOrderCard({
-  order, selectedOrder, setSelectedOrder,
+  order, selectedOrder, openOrder, detailError, retryDetail,
   orderItems, setOrderItems, addingToOrder, setAddingToOrder, addProductSearch, setAddProductSearch,
   updateOrderStatus, archiveOrders, deleteOrders, handleAddProductToOrder,
   session, formatPrice, fetchData, permissions,
 }: {
   order: Order;
   selectedOrder: Order | null;
-  setSelectedOrder: (o: Order | null) => void;
+  openOrder: (order: Order) => void;
+  detailError: string;
+  retryDetail: () => void;
   orderItems: OrderItem[];
   setOrderItems: (i: OrderItem[]) => void;
   addingToOrder: boolean;
@@ -673,7 +804,7 @@ function MobileOrderCard({
   return (
     <div className={`bg-white/85 backdrop-blur-md rounded-xl border shadow-sm overflow-hidden ${isExpanded ? 'border-brand-200' : 'border-white/80'}`}>
       <button
-        onClick={() => setSelectedOrder(isExpanded ? null : order)}
+        onClick={() => openOrder(order)}
         className="w-full text-left p-4"
       >
         <div className="flex items-start justify-between gap-3">
@@ -717,8 +848,10 @@ function MobileOrderCard({
 
       {isExpanded && (
         <div className="p-3 border-t border-brand-100 bg-brand-50/50">
-          <OrderDetailPanel
-            order={order}
+          <OrderDetailSlot
+            selectedOrder={selectedOrder}
+            detailError={detailError}
+            retryDetail={retryDetail}
             orderItems={orderItems}
             setOrderItems={setOrderItems}
             addingToOrder={addingToOrder}
@@ -735,6 +868,58 @@ function MobileOrderCard({
         </div>
       )}
     </div>
+  );
+}
+
+function OrderDetailSlot({
+  selectedOrder, detailError, retryDetail, orderItems, setOrderItems, addingToOrder, setAddingToOrder,
+  addProductSearch, setAddProductSearch, updateOrderStatus, handleAddProductToOrder,
+  session, formatPrice, fetchData, permissions,
+}: {
+  selectedOrder: Order | null;
+  detailError: string;
+  retryDetail: () => void;
+  orderItems: OrderItem[];
+  setOrderItems: (i: OrderItem[]) => void;
+  addingToOrder: boolean;
+  setAddingToOrder: (b: boolean) => void;
+  addProductSearch: string;
+  setAddProductSearch: (s: string) => void;
+  updateOrderStatus: (id: string, s: string) => Promise<string | null>;
+  handleAddProductToOrder: (p: { name: string; brand: string; catalogNumber: string; price?: number; promotionalPrice?: number }) => Promise<void>;
+  session: Session | null;
+  formatPrice: (p: number) => string;
+  fetchData: () => Promise<void>;
+  permissions: string[] | null;
+}) {
+  if (!selectedOrder) return null;
+  if (detailError) {
+    return (
+      <div className="rounded-lg bg-white px-3 py-4 text-sm text-red-700">
+        {detailError}
+        <button type="button" onClick={retryDetail} className="ml-3 font-medium text-red-800">重试</button>
+      </div>
+    );
+  }
+  if (!selectedOrder.detailLoaded) {
+    return <div className="px-3 py-6 text-sm text-gray-600">正在加载订单详情</div>;
+  }
+  return (
+    <OrderDetailPanel
+      order={selectedOrder}
+      orderItems={orderItems}
+      setOrderItems={setOrderItems}
+      addingToOrder={addingToOrder}
+      setAddingToOrder={setAddingToOrder}
+      addProductSearch={addProductSearch}
+      setAddProductSearch={setAddProductSearch}
+      updateOrderStatus={updateOrderStatus}
+      handleAddProductToOrder={handleAddProductToOrder}
+      session={session}
+      formatPrice={formatPrice}
+      fetchData={fetchData}
+      permissions={permissions}
+    />
   );
 }
 
