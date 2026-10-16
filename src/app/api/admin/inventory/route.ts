@@ -3,22 +3,43 @@ import { prisma } from '@/lib/prisma';
 import { requireAdmin } from '@/lib/session';
 import { receiveInventoryBatch, setActualInventory, setInboundInventory } from '@/lib/inventory';
 
+const productSelect = { select: { id: true, catalogNumber: true, name: true, brand: true } } as const;
+const variantSelect = { select: { id: true, catalogNumber: true, spec: true } } as const;
+const batchOrder = [{ expiryDate: 'asc' as const }, { receivedAt: 'asc' as const }];
+
 export async function GET(req: NextRequest) {
   const admin = await requireAdmin('inventory.read');
   if (admin instanceof NextResponse) return admin;
-  const search = new URL(req.url).searchParams.get('search')?.trim() || '';
+  const params = new URL(req.url).searchParams;
+  const accountId = params.get('accountId')?.trim() || '';
+  if (accountId) {
+    const account = await prisma.inventoryAccount.findUnique({
+      where: { id: accountId },
+      include: {
+        product: productSelect,
+        variant: variantSelect,
+        batches: { orderBy: batchOrder },
+        transactions: { orderBy: { createdAt: 'desc' }, take: 20 },
+      },
+    });
+    if (!account) return NextResponse.json({ error: '库存账户不存在' }, { status: 404 });
+    return NextResponse.json({ account });
+  }
+
+  const search = params.get('search')?.trim() || '';
   const accounts = await prisma.inventoryAccount.findMany({
     where: search ? { product: { OR: [{ name: { contains: search } }, { catalogNumber: { contains: search } }, { brand: { contains: search } }] } } : {},
     take: 200,
     orderBy: { updatedAt: 'desc' },
     include: {
-      product: { select: { id: true, catalogNumber: true, name: true, brand: true } },
-      variant: { select: { id: true, catalogNumber: true, spec: true } },
-      batches: { orderBy: [{ expiryDate: 'asc' }, { receivedAt: 'asc' }] },
-      transactions: { orderBy: { createdAt: 'desc' }, take: 20 },
+      product: productSelect,
+      variant: variantSelect,
+      _count: { select: { batches: true } },
     },
   });
-  return NextResponse.json({ accounts });
+  return NextResponse.json({
+    accounts: accounts.map(({ _count, ...account }) => ({ ...account, batchCount: _count.batches })),
+  });
 }
 
 export async function PATCH(req: NextRequest) {
