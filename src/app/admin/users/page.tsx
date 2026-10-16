@@ -4,11 +4,12 @@ import { useState, useEffect } from 'react';
 import { useSession } from 'next-auth/react';
 import { notFound } from 'next/navigation';
 import Link from 'next/link';
-import { Search, Shield, Check, Trash2, AlertTriangle, Plus, LockKeyhole } from 'lucide-react';
+import { Search, Shield, Check, UserX, AlertTriangle, Plus, LockKeyhole } from 'lucide-react';
 import UserRow from '@/components/admin/UserRow';
 import CreateUserModal from '@/components/admin/CreateUserModal';
 import UserDiscountTemplateSection from '@/components/admin/UserDiscountTemplateSection';
 import { parseAdminUsersResponse } from '@/data/admin-users-response';
+import { filterAdminUsersBySearch, retainVisibleSelection, visibleSelectedUserIds } from '@/data/admin-user-list';
 
 interface User {
   id: string;
@@ -55,6 +56,9 @@ export default function AdminUsersPage() {
   const [templates, setTemplates] = useState<{ id: string; name: string }[]>([]);
   const [createOpen, setCreateOpen] = useState(false);
   const [actionMessage, setActionMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const filteredUsers = filterAdminUsersBySearch(users, search);
+  const visibleSelectedIds = visibleSelectedUserIds(filteredUsers, selectedUserIds);
+  const visibleSelectedUsers = filteredUsers.filter((user) => selectedUserIds.has(user.id));
 
   useEffect(() => {
     if (status !== 'authenticated' || (session?.user as User)?.role !== 'admin') return;
@@ -99,20 +103,22 @@ export default function AdminUsersPage() {
   }
 
   async function deleteUsers(userIds: string[]) {
-    if (!confirm(`确定要删除 ${userIds.length} 个用户吗？此操作不可恢复！`)) return;
+    const ids = visibleSelectedUserIds(filterAdminUsersBySearch(users, search), new Set(userIds));
+    if (ids.length === 0) return;
+    if (!confirm(`停用选中的 ${ids.length} 个用户？账号会被冻结，仍可登录，但不能下单或询价。订单、积分和授信会保留，之后可以解冻。`)) return;
     try {
       const res = await fetch('/api/admin/users', {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userIds }),
+        body: JSON.stringify({ userIds: ids }),
       });
       if (res.ok) {
-        setActionMessage({ type: 'success', text: `已删除 ${userIds.length} 个用户` });
+        setActionMessage({ type: 'success', text: `已停用 ${ids.length} 个用户，订单、积分和授信已保留` });
         fetchData();
         setSelectedUserIds(new Set());
       } else {
         const data = await res.json().catch(() => ({}));
-        setActionMessage({ type: 'error', text: data.error || '删除失败' });
+        setActionMessage({ type: 'error', text: data.error || '停用失败' });
       }
     } catch (e) {
       console.error(e);
@@ -187,8 +193,6 @@ export default function AdminUsersPage() {
       setActionMessage({ type: 'error', text: '网络错误' });
     }
   }
-
-  const selectedUsers = users.filter(u => selectedUserIds.has(u.id));
 
   if (status === 'unauthenticated' || missing) notFound();
   if (status === 'authenticated' && (session?.user as User)?.role !== 'admin') notFound();
@@ -273,7 +277,15 @@ export default function AdminUsersPage() {
             type="text"
             placeholder="搜索用户名称、邮箱或机构..."
             value={search}
-            onChange={e => setSearch(e.target.value)}
+            onChange={e => {
+              const nextSearch = e.target.value;
+              setSearch(nextSearch);
+              const visible = filterAdminUsersBySearch(users, nextSearch);
+              setSelectedUserIds((current) => {
+                const retained = retainVisibleSelection(current, visible);
+                return retained.length === current.size ? current : new Set(retained);
+              });
+            }}
             className="pl-9 pr-4 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent w-full text-gray-900 bg-white/70"
           />
         </div>
@@ -285,34 +297,15 @@ export default function AdminUsersPage() {
           <input
             type="checkbox"
             className="rounded border-gray-300 text-brand-500 focus:ring-brand-500"
-            checked={selectedUserIds.size === users.length && users.length > 0}
+            checked={filteredUsers.length > 0 && visibleSelectedIds.length === filteredUsers.length}
             onChange={e => {
-              if (e.target.checked) {
-                setSelectedUserIds(new Set(users.map(u => u.id)));
-              } else {
-                setSelectedUserIds(new Set());
-              }
+              setSelectedUserIds(new Set(e.target.checked ? filteredUsers.map(user => user.id) : []));
             }}
           />
-          全选用户
+          全选当前结果
         </label>
         <div className="grid min-w-0 gap-3 md:grid-cols-2 xl:grid-cols-3">
-          {users.filter(u =>
-            (!search ||
-              u.name?.includes(search) ||
-              u.email.includes(search) ||
-              u.institution?.includes(search) ||
-              u.department?.includes(search) ||
-              u.institutionType?.includes(search) ||
-              u.institutionName?.includes(search) ||
-              u.institutionUnit?.includes(search) ||
-              u.institutionFacility?.includes(search) ||
-              u.school?.includes(search) ||
-              u.college?.includes(search) ||
-              u.major?.includes(search) ||
-              u.piLab?.includes(search) ||
-              u.affiliatedLab?.includes(search))
-          ).map(user => (
+          {filteredUsers.map(user => (
             <UserRow
               key={user.id}
               user={user}
@@ -329,16 +322,18 @@ export default function AdminUsersPage() {
             />
           ))}
         </div>
-        {users.length === 0 && (
-          <div className="px-4 py-12 text-center text-sm text-gray-600">暂无用户</div>
+        {filteredUsers.length === 0 && (
+          <div className="px-4 py-12 text-center text-sm text-gray-600">
+            {users.length === 0 ? '暂无用户' : '没有匹配的用户'}
+          </div>
         )}
       </div>
 
       {/* Selected users actions */}
-      {selectedUserIds.size > 0 && (
+      {visibleSelectedIds.length > 0 && (
         <div className="bg-brand-50 border border-brand-200 rounded-xl px-4 py-3 flex items-center gap-3 flex-wrap">
           <span className="text-sm text-brand-700 font-medium">
-            已选择 {selectedUserIds.size} 个用户
+            已选择 {visibleSelectedIds.length} 个用户
           </span>
           <div className="flex items-center gap-2 ml-auto flex-wrap">
             <button
@@ -347,17 +342,17 @@ export default function AdminUsersPage() {
             >
               取消选择
             </button>
-            {users.filter(u => u.isNewUser && selectedUserIds.has(u.id)).length > 0 && (
+            {visibleSelectedUsers.filter(u => u.isNewUser).length > 0 && (
               <button
-                onClick={() => approveUsers(Array.from(selectedUserIds))}
+                onClick={() => approveUsers(visibleSelectedIds)}
                 className="px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white rounded-lg text-sm font-medium transition-colors flex items-center gap-1.5"
               >
-                <Check className="w-4 h-4" /> 审核通过 ({users.filter(u => u.isNewUser && selectedUserIds.has(u.id)).length})
+                <Check className="w-4 h-4" /> 审核通过 ({visibleSelectedUsers.filter(u => u.isNewUser).length})
               </button>
             )}
             <select
               onChange={(e) => {
-                if (e.target.value) setUserTier(Array.from(selectedUserIds), e.target.value);
+                if (e.target.value) setUserTier(visibleSelectedIds, e.target.value);
               }}
               defaultValue=""
               className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-medium border-0 cursor-pointer"
@@ -366,29 +361,29 @@ export default function AdminUsersPage() {
               <option value="standard">standard</option>
             </select>
             <button
-              onClick={() => freezeUsers(Array.from(selectedUserIds), true)}
+              onClick={() => freezeUsers(visibleSelectedIds, true)}
               className="px-3 py-1.5 bg-slate-700 hover:bg-slate-800 text-white rounded-lg text-sm font-medium transition-colors flex items-center gap-1.5"
             >
               <LockKeyhole className="w-4 h-4" /> 批量冻结
             </button>
             <button
-              onClick={() => freezeUsers(Array.from(selectedUserIds), false)}
+              onClick={() => freezeUsers(visibleSelectedIds, false)}
               className="px-3 py-1.5 bg-slate-500 hover:bg-slate-600 text-white rounded-lg text-sm font-medium transition-colors"
             >
               批量解冻
             </button>
             <button
-              onClick={() => deleteUsers(Array.from(selectedUserIds))}
+              onClick={() => deleteUsers(visibleSelectedIds)}
               className="px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded-lg text-sm font-medium transition-colors flex items-center gap-1.5"
             >
-              <Trash2 className="w-4 h-4" /> 批量删除 ({selectedUserIds.size})
+              <UserX className="w-4 h-4" /> 停用账号 ({visibleSelectedIds.length})
             </button>
           </div>
         </div>
       )}
 
       <UserDiscountTemplateSection
-        selectedUsers={selectedUsers}
+        selectedUsers={visibleSelectedUsers}
         onApplied={() => {
           setSelectedUserIds(new Set());
           setActionMessage({ type: 'success', text: '折扣模板已应用' });

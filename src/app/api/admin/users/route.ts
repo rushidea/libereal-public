@@ -7,6 +7,11 @@ import { requireAdmin } from '@/lib/session';
 import { writeAuditLog } from '@/lib/audit';
 import { normalizeEmail } from '@/lib/auth-helpers';
 import { buildLegacyInstitution, buildLegacySchoolFields, type InstitutionProfileInput } from '@/data/institution-profile';
+import {
+  ADMIN_USER_DELETE_ERRORS,
+  adminUserDeleteBlockMessage,
+  parseAdminUserDeleteIds,
+} from '@/data/admin-user-delete';
 import { validateNewPasswordLength } from '@/lib/password-policy';
 
 function generateUserId() {
@@ -139,22 +144,75 @@ export async function POST(req: Request) {
   }
 }
 
+/**
+ * 停用客户，不物理删除。
+ * 积分流水、授信账户、应收、兑换和后台角色都挂在用户上并级联删除；
+ * 订单 customerId 只是 SetNull。硬删除会拆掉财务记录，订单还在但客户主体没了。
+ * 这里只把账号标为冻结，并逐个写审计。管理员、当前登录账号和组织负责人整批拒绝。
+ */
 export async function DELETE(req: Request) {
-  const denied = await requireAdmin('customers.write');
-  if (denied instanceof NextResponse) return denied;
+  const admin = await requireAdmin('customers.write');
+  if (admin instanceof NextResponse) return admin;
 
   try {
-    const { userIds } = await req.json();
-    if (!Array.isArray(userIds) || userIds.length === 0) {
-      return NextResponse.json({ error: 'userIds is required' }, { status: 400 });
+    const body = await req.json().catch(() => null) as { userIds?: unknown } | null;
+    const parsed = parseAdminUserDeleteIds(body?.userIds);
+    if ('error' in parsed) {
+      return NextResponse.json({ error: parsed.error }, { status: 400 });
+    }
+    const { ids: userIds } = parsed;
+
+    const targets = await prisma.user.findMany({
+      where: { id: { in: userIds } },
+      select: { id: true, email: true, role: true, isFrozen: true, points: true },
+    });
+    if (targets.length !== userIds.length) {
+      return NextResponse.json({ error: ADMIN_USER_DELETE_ERRORS.missing }, { status: 404 });
     }
 
-    await prisma.user.deleteMany({ where: { id: { in: userIds } } });
+    const protectedMessage = adminUserDeleteBlockMessage(targets, admin.id, []);
+    if (protectedMessage) {
+      return NextResponse.json({ error: protectedMessage }, { status: 403 });
+    }
 
-    return NextResponse.json({ success: true });
+    const owner = await prisma.organization.findFirst({
+      where: { ownerUserId: { in: userIds } },
+      select: { ownerUserId: true },
+    });
+    if (owner) {
+      return NextResponse.json({ error: ADMIN_USER_DELETE_ERRORS.owner }, { status: 403 });
+    }
+
+    await prisma.$transaction(async (tx) => {
+      await tx.user.updateMany({
+        where: { id: { in: userIds } },
+        data: { isFrozen: true },
+      });
+      for (const target of targets) {
+        await writeAuditLog({
+          actorId: admin.id,
+          actorEmail: admin.email,
+          action: 'customer.deactivated',
+          resource: 'customers',
+          targetType: 'User',
+          targetId: target.id,
+          before: {
+            email: target.email,
+            role: target.role,
+            isFrozen: target.isFrozen,
+            points: target.points,
+          },
+          after: { isFrozen: true, points: target.points, hardDeleted: false },
+          reason: '后台停用用户，保留积分流水、授信和订单',
+          metadata: { hardDelete: false },
+        }, tx);
+      }
+    });
+
+    return NextResponse.json({ success: true, deactivated: userIds.length });
   } catch (err) {
     reportError(err, { tags: { route: 'admin/users' }, extra: { method: 'DELETE' } });
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    return NextResponse.json({ error: ADMIN_USER_DELETE_ERRORS.failed }, { status: 500 });
   }
 }
 
