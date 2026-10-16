@@ -447,22 +447,32 @@ function OrdersPanel() {
 
       <div className="hidden lg:block bg-white/70 backdrop-blur-md rounded-2xl border border-white/70 overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[1000px] text-sm table-fixed">
+          <table className="w-full min-w-[52rem] table-fixed text-sm">
+            <colgroup>
+              <col className="w-10" />
+              <col className="w-[9rem]" />
+              <col className="w-auto" />
+              <col className="w-auto" />
+              <col className="w-[8.5rem]" />
+              <col className="w-[8rem]" />
+              <col className="w-[6rem]" />
+              <col className="w-[4rem]" />
+            </colgroup>
             <thead>
               <tr className="bg-gray-50/80 border-b border-gray-200">
-                <th className="text-left px-3 py-3 font-semibold text-gray-700 w-10">
+                <th className="text-left px-3 py-3 font-semibold text-gray-700">
                   <input type="checkbox"
                     checked={selectedOrders.size === paginatedOrders.length && paginatedOrders.length > 0}
                     onChange={e => { setSelectedOrders(e.target.checked ? new Set(paginatedOrders.map(o => o.id)) : new Set()); }}
                     className="w-4 h-4 text-brand-600 rounded border-gray-300" />
                 </th>
-                <th className="text-left px-3 py-3 font-semibold text-gray-700 w-[16%]">订单号</th>
-                <th className="text-left px-3 py-3 font-semibold text-gray-700 w-[22%]">客户</th>
-                <th className="text-left px-3 py-3 font-semibold text-gray-700 w-[20%]">机构</th>
-                <th className="text-left px-3 py-3 font-semibold text-gray-700 w-[13%]">金额</th>
-                <th className="text-left px-3 py-3 font-semibold text-gray-700 w-[12%]">状态</th>
-                <th className="text-left px-3 py-3 font-semibold text-gray-700 w-[11%]">时间</th>
-                <th className="text-left px-3 py-3 font-semibold text-gray-700 w-[6%]">操作</th>
+                <th className="whitespace-nowrap px-3 py-3 text-left font-semibold text-gray-700">订单号</th>
+                <th className="px-3 py-3 text-left font-semibold text-gray-700">客户</th>
+                <th className="px-3 py-3 text-left font-semibold text-gray-700">机构</th>
+                <th className="whitespace-nowrap px-3 py-3 text-left font-semibold text-gray-700">金额</th>
+                <th className="whitespace-nowrap px-3 py-3 text-left font-semibold text-gray-700">状态</th>
+                <th className="whitespace-nowrap px-3 py-3 text-left font-semibold text-gray-700">时间</th>
+                <th className="whitespace-nowrap px-3 py-3 text-left font-semibold text-gray-700">操作</th>
               </tr>
             </thead>
             <tbody>
@@ -556,7 +566,7 @@ function OrdersRow({
     <>
       <tr className={`border-b border-gray-100 cursor-pointer ${isExpanded ? 'bg-brand-50/50' : 'hover:bg-gray-50/50'}`}
         onClick={() => setSelectedOrder(isExpanded ? null : order)}>
-        <td className="px-3 py-3" onClick={e => e.stopPropagation()}>
+        <td className="px-3 py-3 align-top" onClick={e => e.stopPropagation()}>
           <input type="checkbox" checked={selectedOrders.has(order.id)}
             onChange={e => {
               const newSelected = new Set(selectedOrders);
@@ -566,25 +576,23 @@ function OrdersRow({
             }}
             className="w-4 h-4 text-brand-600 rounded border-gray-300" />
         </td>
-        <td className="px-3 py-3 min-w-0">
-          <div className="font-mono text-xs text-gray-700 truncate" title={order.id}>{order.id}</div>
+        <td className="px-3 py-3 align-top">
+          <div className="break-all font-mono text-xs text-gray-700" title={order.id}>{order.id}</div>
         </td>
-        <td className="px-3 py-3 min-w-0">
-          <div className="min-w-0">
-            <div className="font-medium text-gray-900 truncate" title={order.name || order.email}>{order.name || order.email}</div>
-            <div className="text-xs text-gray-600 truncate" title={order.email}>{order.email}</div>
-          </div>
+        <td className="min-w-0 px-3 py-3 align-top">
+          <div className="break-words font-medium text-gray-900" title={order.name || order.email}>{order.name || order.email}</div>
+          <div className="break-all text-xs text-gray-600" title={order.email}>{order.email}</div>
         </td>
-        <td className="px-3 py-3 min-w-0">
-          <div className="text-gray-700 truncate" title={order.institution || '-'}>{order.institution || '-'}</div>
+        <td className="min-w-0 px-3 py-3 align-top">
+          <div className="break-words text-gray-700" title={order.institution || undefined}>{order.institution || '-'}</div>
           {(order.userDepartment || order.department) && (
-            <div className="text-xs text-gray-500 truncate" title={order.userDepartment || order.department}>
+            <div className="break-words text-xs text-gray-500" title={order.userDepartment || order.department}>
               {order.userDepartment || order.department}
             </div>
           )}
         </td>
-        <td className="px-3 py-3 font-semibold text-gray-900 whitespace-nowrap">¥{order.total.toLocaleString('zh-CN', { minimumFractionDigits: 2 })}</td>
-        <td className="px-3 py-3">
+        <td className="whitespace-nowrap px-3 py-3 align-top font-semibold text-gray-900">¥{order.total.toLocaleString('zh-CN', { minimumFractionDigits: 2 })}</td>
+        <td className="px-3 py-3 align-top">
           <div className="flex flex-col items-start gap-1.5">
             <span className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium ${ORDER_STATUS_CONFIG[displayedOrderStatus(order)]?.color || 'bg-gray-100 text-gray-700'}`}>
               {(() => { const Ic = ORDER_STATUS_CONFIG[displayedOrderStatus(order)]?.icon; return Ic ? <Ic className="w-3 h-3" /> : null; })()}
@@ -593,8 +601,8 @@ function OrdersRow({
             {order.payment && <AlipayPaymentStatusView payment={order.payment} compact />}
           </div>
         </td>
-        <td className="px-3 py-3 text-gray-600 text-xs">{new Date(order.createdAt).toLocaleDateString('zh-CN')}</td>
-        <td className="px-3 py-3" onClick={e => e.stopPropagation()}>
+        <td className="whitespace-nowrap px-3 py-3 align-top text-xs text-gray-600">{new Date(order.createdAt).toLocaleDateString('zh-CN')}</td>
+        <td className="whitespace-nowrap px-3 py-3 align-top" onClick={e => e.stopPropagation()}>
           <div className="flex items-center gap-2">
             <button onClick={() => archiveOrders([order.id])}
               className="text-purple-600 hover:text-purple-700 text-xs flex items-center gap-1" title="归档">
