@@ -152,6 +152,6 @@ describe('IndexNow cron', () => {
     const response = await indexNowCronGET(
       new Request('https://libereal.cn/api/cron/indexnow') as never,
     );
-    expect(response.status).toBe(403);
+    expect(response.status).toBe(401);
   });
 });

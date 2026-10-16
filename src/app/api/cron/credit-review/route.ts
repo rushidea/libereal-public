@@ -6,14 +6,17 @@ import {
   overdueDaysFromDueAt,
   runDailyTierReview,
 } from '@/lib/customer-credit';
-import { getEphemeralStore } from '@/lib/ephemeral-store';
 import { enqueueBackgroundTask } from '@/lib/background-tasks';
+import { cronUnauthorizedResponse, isCronRequestAuthorized } from '@/lib/cron-auth';
+import { getEphemeralStore } from '@/lib/ephemeral-store';
 
-export async function POST(req: NextRequest) {
-  const secret = process.env.CRON_SECRET;
-  if (!secret || req.headers.get('authorization') !== `Bearer ${secret}`) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  }
+export const dynamic = 'force-dynamic';
+
+// 与 /api/cron/auto-close、/api/cron/indexnow 相同：只认 x-cron-secret。
+// 仓库内没有本任务的 crontab。服务器上若仍按旧实现发送 Authorization: Bearer，需要改成：
+//   curl -fsS -H "x-cron-secret: $CRON_SECRET" http://localhost:3000/api/cron/credit-review
+async function handle(req: NextRequest) {
+  if (!isCronRequestAuthorized(req)) return cronUnauthorizedResponse();
   const store = getEphemeralStore();
   const lockKey = 'task-lock:credit-review';
   const lockToken = await store.acquireLock(lockKey, 15 * 60 * 1000);
@@ -136,3 +139,6 @@ export async function POST(req: NextRequest) {
     await store.releaseLock(lockKey, lockToken).catch((error) => console.error('[credit review lock release]', error));
   }
 }
+
+export const GET = handle;
+export const POST = handle;
