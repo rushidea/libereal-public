@@ -6,6 +6,7 @@ import { orderItemView, toOrderItemCreates } from '@/lib/commerce-records';
 import { releaseOrderReceivableOnCancellation, reserveOrderCredit, settleOrderReceivable } from '@/lib/customer-credit';
 import { orderStatusRequiresFinanceWrite, receivableOccupiesCredit } from '@/lib/order-finance-access';
 import { assertOrderTransition, calculateOrderAmounts, isAutoCloseableOrderStatus, isInactiveOrderStatus, ORDER_STATUS_LABELS, requiresPaidAlipayRefund } from '@/lib/order-domain';
+import { restoreRedeemedOrderCoupons } from '@/lib/coupon-service';
 import { releaseOrderInventory, reserveOrderInventory } from '@/lib/inventory';
 import { isPostDeliveryPaymentMethod, normalizeOrderPaymentMethod } from '@/data/payment-methods';
 import { getAlipayPaymentSummary } from '@/data/alipay-payment';
@@ -236,6 +237,7 @@ export async function PATCH(
         if (isInactiveOrderStatus(body.status) && !isInactiveOrderStatus(order.status)) {
           if (isPostDeliveryPaymentMethod(effectivePaymentMethod)) await releaseOrderReceivableOnCancellation(tx, id, user.id);
           await releaseOrderInventory(tx, id, user.id);
+          await restoreRedeemedOrderCoupons(tx, id);
           const originalPaidYuan = Math.round((order.total + (order.pointsDiscount || 0)) * 100) / 100;
           requirePointsRefund(await refundOrderPointsProportionally(tx, {
             orderId: id,

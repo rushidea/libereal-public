@@ -5,6 +5,7 @@
  * - getUsableCoupons(userId)：列出用户可用券（active、未过期、二次授权通过、未使用）；
  * - redeemCoupon(tx, code, userId, orderId, subtotal)：下单事务内核销——
  *   校验券有效/授权/未用/未过期 → 生成订单级 coupon 调整 → 标记实例 used + 模板 usedCount+1。
+ * - restoreRedeemedOrderCoupons(tx, orderId)：取消或超时关单时退回该订单核销的券，同一实例只退一次。
  *
  * 二次授权（无门槛券安全红线）：
  * - 模板级：Coupon.requiresApproval=true 时 approvalStatus 须 approved 才可发放/核销；
@@ -162,6 +163,32 @@ export async function redeemCoupon(
       reason: `券码 ${instance.code}${instance.coupon.stackable ? '（可叠加）' : ''}`,
     },
   };
+}
+
+/**
+ * 取消、关闭或超时自动关单时退回该订单已核销的券。
+ * 以「实例仍为 used 且仍绑定本订单」作为一次性认领；并发取消只会有一次把 usedCount 减 1。
+ * 返回实际退回的实例数。未绑定订单的券不会被退回。
+ */
+export async function restoreRedeemedOrderCoupons(tx: Tx, orderId: string): Promise<number> {
+  const instances = await tx.couponInstance.findMany({
+    where: { redeemedOrderId: orderId, status: 'used' },
+    select: { id: true, couponId: true },
+  });
+  let restored = 0;
+  for (const instance of instances) {
+    const claimed = await tx.couponInstance.updateMany({
+      where: { id: instance.id, status: 'used', redeemedOrderId: orderId },
+      data: { status: 'active', redeemedAt: null, redeemedOrderId: null },
+    });
+    if (claimed.count !== 1) continue;
+    await tx.coupon.updateMany({
+      where: { id: instance.couponId, usedCount: { gt: 0 } },
+      data: { usedCount: { decrement: 1 } },
+    });
+    restored += 1;
+  }
+  return restored;
 }
 
 /** 供服务端构建促销引擎 CouponRuleConfig（下单重评估用）。
