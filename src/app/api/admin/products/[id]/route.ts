@@ -3,7 +3,9 @@ import { prisma } from '@/lib/prisma';
 import { enqueueBackgroundTask } from '@/lib/background-tasks';
 import { writeAuditLog } from '@/lib/audit';
 import { invalidateProductFilters } from '@/lib/product-filter-cache';
-import { requireAdmin } from '@/lib/session';
+import { canReadProductCostPrice } from '@/lib/admin-permissions';
+import { redactProductCostPrice } from '@/lib/product-cost-price';
+import { getAdminPermissions, requireAdmin } from '@/lib/session';
 
 export async function GET(
   _req: NextRequest,
@@ -27,9 +29,12 @@ export async function GET(
   });
   if (!product || product.deletedAt) return NextResponse.json({ error: '产品不存在或已删除' }, { status: 404 });
 
+  const includeCostPrice = canReadProductCostPrice(await getAdminPermissions(user));
+  const visible = includeCostPrice ? product : redactProductCostPrice(product);
+
   return NextResponse.json({
     product: {
-      ...product,
+      ...visible,
       applications: JSON.parse(product.applications),
       reactivity: JSON.parse(product.reactivity),
       pmids: JSON.parse(product.pmids),

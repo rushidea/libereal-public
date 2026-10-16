@@ -116,4 +116,69 @@ describe('admin products page', () => {
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/admin/products/product_1', expect.objectContaining({ method: 'DELETE' })));
     await waitFor(() => expect(screen.queryByText('CAT-1')).not.toBeInTheDocument());
   });
+
+  it('hides purchase cost from roles that only have product read permission', async () => {
+    const pricedProduct = {
+      ...listProduct,
+      costPrice: 321.75,
+      minimumSalePrice: 80,
+    };
+    const pricedDetail = {
+      ...detailProduct,
+      costPrice: 321.75,
+      minimumSalePrice: 80,
+      variants: [{
+        id: 'variant_1',
+        catalogNumber: 'CAT-1-50',
+        spec: '50 µL',
+        price: 120,
+        costPrice: 77.25,
+        minimumSalePrice: 90,
+      }],
+      prices: [{ id: 'price_cost', kind: 'cost', amount: 321.75, source: '供货协议 内部结算', createdAt: '2026-01-01T00:00:00.000Z' }],
+    };
+    vi.stubGlobal('fetch', vi.fn((url: string) => {
+      if (String(url).includes('/api/admin/access')) {
+        return Promise.resolve({ ok: true, json: async () => ({ permissions: ['admin.access', 'products.read', 'products.write'] }) });
+      }
+      if (String(url).includes('/api/admin/products/product_1')) {
+        return Promise.resolve({ ok: true, json: async () => ({ product: pricedDetail }) });
+      }
+      return Promise.resolve({ ok: true, json: async () => ({ products: [pricedProduct], stats: { filteredProducts: 1 } }) });
+    }));
+
+    render(<AdminProductsPage />);
+    expect(await screen.findByText('CAT-1')).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByText('最低成交价')).toBeInTheDocument());
+    expect(screen.queryByText('进货价')).not.toBeInTheDocument();
+    expect(screen.queryByText(/321\.75/)).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: '编辑' }));
+    expect(await screen.findByRole('spinbutton', { name: '包装最低成交价' })).toBeInTheDocument();
+    expect(screen.queryByRole('spinbutton', { name: '进货价' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('spinbutton', { name: '包装进货价' })).not.toBeInTheDocument();
+    expect(screen.queryByText('供货协议 内部结算')).not.toBeInTheDocument();
+    expect(screen.queryByText(/77\.25/)).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ['pricing.read'],
+    ['finance.read'],
+  ])('shows purchase cost when the role has %s', async (permission) => {
+    const pricedProduct = {
+      ...listProduct,
+      costPrice: 321.75,
+      minimumSalePrice: 80,
+    };
+    vi.stubGlobal('fetch', vi.fn((url: string) => {
+      if (String(url).includes('/api/admin/access')) {
+        return Promise.resolve({ ok: true, json: async () => ({ permissions: ['admin.access', 'products.read', permission] }) });
+      }
+      return Promise.resolve({ ok: true, json: async () => ({ products: [pricedProduct], stats: { filteredProducts: 1 } }) });
+    }));
+
+    render(<AdminProductsPage />);
+    expect(await screen.findByRole('columnheader', { name: '进货价' })).toBeInTheDocument();
+    expect(screen.getByText(/321\.75/)).toBeInTheDocument();
+  });
 });
