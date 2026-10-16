@@ -205,6 +205,7 @@ export function getTestDb(): Database.Database {
       productName TEXT NOT NULL,
       pointsCost INTEGER NOT NULL,
       status TEXT NOT NULL DEFAULT 'pending',
+      pointsReturned INTEGER NOT NULL DEFAULT 0,
       shippingInfo TEXT,
       trackingNumber TEXT,
       adminNote TEXT,
@@ -321,6 +322,7 @@ export function getTestDb(): Database.Database {
       pointsAppliedAt DATETIME,
       pointsRefundedPersonal INTEGER NOT NULL DEFAULT 0,
       pointsRefundedGroup INTEGER NOT NULL DEFAULT 0,
+      pointsRefundedCash REAL NOT NULL DEFAULT 0,
       auto_close_at DATETIME
     );
     CREATE TABLE IF NOT EXISTS user_devices (
@@ -730,7 +732,15 @@ export function getTestDb(): Database.Database {
       PRIMARY KEY (ip, window_start)
     );
   `);
+  ensureColumn(_db, 'Order', 'pointsRefundedCash', 'pointsRefundedCash REAL NOT NULL DEFAULT 0');
+  ensureColumn(_db, 'PointsRedemption', 'pointsReturned', 'pointsReturned INTEGER NOT NULL DEFAULT 0');
   return _db;
+}
+
+function ensureColumn(db: Database.Database, table: string, column: string, definition: string) {
+  const columns = db.prepare(`PRAGMA table_info("${table}")`).all() as Array<{ name: string }>;
+  if (columns.some((item) => item.name === column)) return;
+  db.exec(`ALTER TABLE "${table}" ADD COLUMN ${definition}`);
 }
 
 export function closeTestDb(): void {

@@ -9,7 +9,7 @@ import { requireAdmin, requireAdminStepUp } from '@/lib/session';
 import { isAdminMfaScenarioEnabled } from '@/lib/admin-mfa-settings';
 import { writeAuditLog } from '@/lib/audit';
 import { isPostDeliveryPaymentMethod, normalizeOrderPaymentMethod } from '@/data/payment-methods';
-import { refundOrderPointsProportionally } from '@/lib/points-checkout-service';
+import { refundOrderPointsProportionally, requirePointsRefund, POINTS_REFUND_FAILED } from '@/lib/points-checkout-service';
 
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const admin = await requireAdmin('orders.read');
@@ -110,13 +110,13 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
         if (isPostDeliveryPaymentMethod(existing.paymentMethod)) await releaseOrderReceivableOnCancellation(tx, id, admin.id);
         await releaseOrderInventory(tx, id, admin.id);
         const originalPaidYuan = Math.round((existing.total + existing.pointsDiscount) * 100) / 100;
-        await refundOrderPointsProportionally(tx, {
+        requirePointsRefund(await refundOrderPointsProportionally(tx, {
           orderId: id,
           refundYuan: originalPaidYuan,
           originalPaidYuan,
           actorUserId: admin.id,
           reason: status === 'closed' ? '管理员关闭订单退回积分' : '管理员取消订单退回积分',
-        });
+        }));
       }
       if (status === 'completed' && existing.status !== 'completed' && isPostDeliveryPaymentMethod(existing.paymentMethod)) await settleOrderReceivable(tx, id, admin.id);
       if (status && status !== existing.status) await writeAuditLog({ actorId: admin.id, actorEmail: admin.email, action: 'order.status_changed', resource: 'orders', targetType: 'Order', targetId: id, before: { status: existing.status }, after: { status }, reason }, tx);
@@ -126,6 +126,9 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   } catch (err) {
     console.error('[admin/orders/[id] PATCH] error:', err);
     const message = err instanceof Error ? err.message : '';
+    if (message === POINTS_REFUND_FAILED) {
+      return NextResponse.json({ error: POINTS_REFUND_FAILED }, { status: 409 });
+    }
     if (['CREDIT_LIMIT_EXCEEDED', 'CREDIT_ACCOUNT_SUSPENDED', 'RECEIVABLE_NOT_FOUND', 'INVALID_ORDER_TRANSITION', 'INSUFFICIENT_AVAILABLE_INVENTORY', 'ALIPAY_PAYMENT_REQUIRED', 'PAID_ORDER_REFUND_REQUIRED'].includes(message)) {
       return NextResponse.json({ error: message }, { status: 409 });
     }

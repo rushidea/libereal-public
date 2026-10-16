@@ -44,9 +44,13 @@ vi.mock('@/lib/customer-credit', () => ({
   reserveOrderCredit: vi.fn(),
   settleOrderReceivable: vi.fn(),
 }));
-vi.mock('@/lib/points-checkout-service', () => ({
-  refundOrderPointsProportionally: mocks.refundOrderPointsProportionally,
-}));
+vi.mock('@/lib/points-checkout-service', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/points-checkout-service')>();
+  return {
+    ...actual,
+    refundOrderPointsProportionally: mocks.refundOrderPointsProportionally,
+  };
+});
 vi.mock('@/lib/organization-service', () => ({
   requireOrganizationPermission: mocks.requireOrganizationPermission,
 }));
@@ -91,7 +95,7 @@ describe('customer order actions', () => {
     mocks.transactionOrderUpdate.mockResolvedValue({});
     mocks.notificationCreate.mockResolvedValue({});
     mocks.releaseOrderInventory.mockResolvedValue(undefined);
-    mocks.refundOrderPointsProportionally.mockResolvedValue(undefined);
+    mocks.refundOrderPointsProportionally.mockResolvedValue({ ok: true, personal: 0, group: 0 });
     mocks.releaseOrderReceivableOnCancellation.mockResolvedValue(undefined);
     mocks.productFindMany.mockResolvedValue([{
       id: 'product-1', catalogNumber: 'CAT-1', brand: '测试品牌', subBrand: null, name: '产品A',
@@ -118,6 +122,18 @@ describe('customer order actions', () => {
     expect(mocks.notificationCreate).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({ title: '订单状态更新' }),
     }));
+  });
+
+  it('keeps the cancellation from succeeding when points are not returned', async () => {
+    mocks.refundOrderPointsProportionally.mockResolvedValue({ ok: false, error: '订单缺少课题组' });
+
+    const response = await PATCH(patchRequest({ status: 'cancelled', reason: '用户取消订单' }), {
+      params: Promise.resolve({ id: 'order-1' }),
+    });
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({ error: 'POINTS_REFUND_FAILED' });
+    expect(mocks.notificationCreate).not.toHaveBeenCalled();
   });
 
   it('allows the owner to cancel a pending personal transfer order', async () => {

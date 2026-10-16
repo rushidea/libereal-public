@@ -49,7 +49,10 @@ vi.mock('@/lib/inventory', () => ({
   reserveOrderInventory: mocks.reserveOrderInventory,
   releaseOrderInventory: mocks.releaseOrderInventory,
 }));
-vi.mock('@/lib/points-checkout-service', () => ({ refundOrderPointsProportionally: mocks.refundOrderPointsProportionally }));
+vi.mock('@/lib/points-checkout-service', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/points-checkout-service')>();
+  return { ...actual, refundOrderPointsProportionally: mocks.refundOrderPointsProportionally };
+});
 vi.mock('@/data/payment-methods', () => ({
   isPostDeliveryPaymentMethod: mocks.isPostDeliveryPaymentMethod,
   normalizeOrderPaymentMethod: mocks.normalizeOrderPaymentMethod,

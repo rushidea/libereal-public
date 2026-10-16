@@ -8,7 +8,7 @@ import { assertOrderTransition, calculateOrderAmounts, isAutoCloseableOrderStatu
 import { releaseOrderInventory, reserveOrderInventory } from '@/lib/inventory';
 import { isPostDeliveryPaymentMethod, normalizeOrderPaymentMethod } from '@/data/payment-methods';
 import { getAlipayPaymentSummary } from '@/data/alipay-payment';
-import { refundOrderPointsProportionally } from '@/lib/points-checkout-service';
+import { refundOrderPointsProportionally, requirePointsRefund, POINTS_REFUND_FAILED } from '@/lib/points-checkout-service';
 import { canAccessOrganizationRecord } from '@/lib/organization-record-access';
 import { requireOrganizationPermission } from '@/lib/organization-service';
 import { emailKeyedAccess } from '@/lib/verified-email-access';
@@ -220,13 +220,13 @@ export async function PATCH(
           if (isPostDeliveryPaymentMethod(effectivePaymentMethod)) await releaseOrderReceivableOnCancellation(tx, id, user.id);
           await releaseOrderInventory(tx, id, user.id);
           const originalPaidYuan = Math.round((order.total + (order.pointsDiscount || 0)) * 100) / 100;
-          await refundOrderPointsProportionally(tx, {
+          requirePointsRefund(await refundOrderPointsProportionally(tx, {
             orderId: id,
             refundYuan: originalPaidYuan,
             originalPaidYuan,
             actorUserId: user.id,
             reason: body.status === 'closed' ? '订单关闭退回积分' : '订单取消退回积分',
-          });
+          }));
         }
         if (body.status === 'completed' && order.status !== 'completed') {
           if (isPostDeliveryPaymentMethod(effectivePaymentMethod)) await settleOrderReceivable(tx, id, user.id);
@@ -272,6 +272,9 @@ export async function PATCH(
   } catch (err) {
     console.error('[order PATCH] error:', err);
     const message = err instanceof Error ? err.message : '';
+    if (message === POINTS_REFUND_FAILED) {
+      return NextResponse.json({ error: POINTS_REFUND_FAILED }, { status: 409 });
+    }
     if (['CREDIT_LIMIT_EXCEEDED', 'CREDIT_ACCOUNT_SUSPENDED', 'RECEIVABLE_NOT_FOUND', 'INVALID_ORDER_TRANSITION', 'INSUFFICIENT_AVAILABLE_INVENTORY', 'ALIPAY_PAYMENT_REQUIRED', 'PAID_ORDER_REFUND_REQUIRED'].includes(message)) {
       return NextResponse.json({ error: message }, { status: 409 });
     }

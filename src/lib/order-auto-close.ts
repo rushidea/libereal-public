@@ -9,11 +9,10 @@
 import { prisma } from '@/lib/prisma';
 import { releaseOrderReceivableOnCancellation } from '@/lib/customer-credit';
 import { releaseOrderInventory } from '@/lib/inventory';
-import { refundOrderPointsProportionally } from '@/lib/points-checkout-service';
+import { applyOrderPointsDeduction, refundOrderPointsProportionally, requirePointsRefund } from '@/lib/points-checkout-service';
 import { isAlipayPaymentMethod, isPostDeliveryPaymentMethod } from '@/data/payment-methods';
 import { ALIPAY_PAYMENT_WINDOW_MS } from '@/data/alipay-payment';
 import { writeAuditLog } from '@/lib/audit';
-import { applyOrderPointsDeduction } from '@/lib/points-checkout-service';
 import { AUTO_CLOSEABLE_ORDER_STATUSES, assertOrderTransition, INACTIVE_ORDER_STATUSES, isAutoCloseableOrderStatus } from '@/lib/order-domain';
 
 export const AUTO_CLOSE_HOURS = 48;
@@ -142,13 +141,13 @@ export async function closeStalePendingOrders(now = new Date(), batchLimit = 100
         if (isPostDeliveryPaymentMethod(order.paymentMethod)) await releaseOrderReceivableOnCancellation(tx, order.id, null);
         await releaseOrderInventory(tx, order.id, null, '超时未付款自动关闭释放库存');
         const originalPaidYuan = Math.round((order.total + order.pointsDiscount) * 100) / 100;
-        await refundOrderPointsProportionally(tx, {
+        requirePointsRefund(await refundOrderPointsProportionally(tx, {
           orderId: order.id,
           refundYuan: originalPaidYuan,
           originalPaidYuan,
           actorUserId: null,
           reason: '超时未付款自动关闭退回积分',
-        });
+        }));
         await writeAuditLog(
           { actorId: null, actorEmail: 'system', action: 'order.auto_closed', resource: 'orders', targetType: 'Order', targetId: order.id, before: { status: fresh.status }, after: { status: 'closed' }, reason: 'auto_close_timeout' },
           tx,
@@ -158,7 +157,10 @@ export async function closeStalePendingOrders(now = new Date(), batchLimit = 100
       if (didClose) closed += 1;
     } catch (err) {
       failed += 1;
-      console.error('[order-auto-close] close order failed:', order.id, err instanceof Error ? err.message : err);
+      const detail = err instanceof Error
+        ? `${err.message}${typeof err.cause === 'string' ? `: ${err.cause}` : ''}`
+        : err;
+      console.error('[order-auto-close] close order failed:', order.id, detail);
     }
   }
 
