@@ -5,7 +5,7 @@ import React, { useEffect, useState } from 'react';
 
 import {
   Package, Search, Eye, Check, Clock, XCircle,
-  RotateCcw, Trash2
+  RotateCcw,
 } from 'lucide-react';
 
 
@@ -92,23 +92,6 @@ const [loading, setLoading] = useState(true);
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ inquiryIds, action: 'unarchive' }),
-      });
-      if (res.ok) {
-        fetchArchivedInquiries();
-        setSelectedInquiry(null);
-      }
-    } catch (e) {
-      console.error(e);
-    }
-  }
-
-  async function handleDelete(inquiryIds: string[]) {
-    if (!confirm(`确定要永久删除 ${inquiryIds.length} 个询价单吗？此操作不可恢复！`)) return;
-    try {
-      const res = await fetch('/api/admin/inquiries/archive', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ inquiryIds, action: 'delete' }),
       });
       if (res.ok) {
         fetchArchivedInquiries();
@@ -208,13 +191,6 @@ const [loading, setLoading] = useState(true);
                             >
                               <Eye className="w-3.5 h-3.5" /> 详情
                             </button>
-                            <button
-                              onClick={() => handleDelete([inquiry.id])}
-                              className="text-red-600 hover:text-red-700 font-medium text-xs flex items-center gap-1"
-                              title="永久删除"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
                           </div>
                         </td>
                       </tr>
@@ -278,18 +254,12 @@ const [loading, setLoading] = useState(true);
                                   <p className="text-sm text-gray-700 bg-gray-50 p-3 rounded-lg">{selectedInquiry.notes}</p>
                                 </div>
                               )}
-                              <div className="flex gap-2 pt-4 border-t border-gray-200">
+                              <div className="pt-4 border-t border-gray-200">
                                 <button
                                   onClick={() => handleUnarchive([selectedInquiry.id])}
-                                  className="flex-1 py-3 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors flex items-center justify-center gap-2"
+                                  className="w-full py-3 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors flex items-center justify-center gap-2"
                                 >
                                   <RotateCcw className="w-4 h-4" /> 还原此询价单
-                                </button>
-                                <button
-                                  onClick={() => handleDelete([selectedInquiry.id])}
-                                  className="px-6 py-3 bg-red-600 text-white rounded-lg font-medium hover:bg-red-700 transition-colors flex items-center justify-center gap-2"
-                                >
-                                  <Trash2 className="w-4 h-4" /> 删除
                                 </button>
                               </div>
                               <div className="text-xs text-gray-500 text-center">
