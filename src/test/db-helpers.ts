@@ -348,6 +348,8 @@ export function getTestDb(): Database.Database {
       pointsRefundedCash REAL NOT NULL DEFAULT 0,
       auto_close_at DATETIME
     );
+    CREATE INDEX IF NOT EXISTS Order_archivedAt_createdAt_idx ON "Order"(archivedAt, createdAt);
+    CREATE INDEX IF NOT EXISTS Order_archivedAt_status_createdAt_idx ON "Order"(archivedAt, status, createdAt);
     CREATE TABLE IF NOT EXISTS user_devices (
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL,

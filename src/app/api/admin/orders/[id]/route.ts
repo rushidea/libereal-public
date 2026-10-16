@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import type { Prisma } from '@prisma/client';
 import { orderItemView } from '@/lib/commerce-records';
+import { getAlipayPaymentSummary } from '@/data/alipay-payment';
 import { releaseOrderReceivableOnCancellation, reserveOrderCredit, settleOrderReceivable } from '@/lib/customer-credit';
 import { assertOrderTransition, isAutoCloseableOrderStatus, isInactiveOrderStatus, requiresPaidAlipayRefund } from '@/lib/order-domain';
 import { restoreRedeemedOrderCoupons } from '@/lib/coupon-service';
@@ -27,13 +28,20 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
         adjustments: { orderBy: { createdAt: 'asc' } },
         shipments: { orderBy: { createdAt: 'desc' }, include: { items: true } },
         events: { orderBy: { createdAt: 'asc' } },
+        paymentAttempts: { where: { provider: 'alipay' }, orderBy: { createdAt: 'desc' }, take: 1 },
       },
     });
     if (!order) {
       return NextResponse.json({ error: 'Order not found' }, { status: 404 });
     }
-    const { orderItems, ...rest } = order;
-    return NextResponse.json({ order: { ...rest, items: orderItems.map(orderItemView) } });
+    const { orderItems, paymentAttempts, ...rest } = order;
+    return NextResponse.json({
+      order: {
+        ...rest,
+        items: orderItems.map(orderItemView),
+        payment: getAlipayPaymentSummary(rest, paymentAttempts[0]),
+      },
+    });
   } catch (err) {
     console.error('[admin/orders/[id] GET] error:', err);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });

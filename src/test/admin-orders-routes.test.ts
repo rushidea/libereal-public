@@ -76,6 +76,8 @@ describe('GET /api/admin/orders/[id]', () => {
     expect(json.order.items).toEqual([
       expect.objectContaining({ productId: 'p1', name: '产品A', price: 100, quantity: 2 }),
     ]);
+    expect(json.order.payment).toBeNull();
+    expect(json.order).not.toHaveProperty('paymentAttempts');
   });
 
   it('returns 404 for non-existent order', async () => {

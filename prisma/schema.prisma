@@ -584,6 +584,9 @@ model Order {
   @@index([status])
   @@index([archivedAt])
   @@index([customerId])
+  // 活跃订单列表：未归档按创建时间倒序，以及按状态筛选
+  @@index([archivedAt, createdAt])
+  @@index([archivedAt, status, createdAt])
   @@index([paidAt])
   @@index([status, autoCloseAt])
   @@index([pointsGroupId])
