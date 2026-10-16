@@ -184,6 +184,29 @@ export function getTestDb(): Database.Database {
       adminEmail TEXT,
       createdAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
+    CREATE TABLE IF NOT EXISTS ResearchGroup (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      points INTEGER NOT NULL DEFAULT 0,
+      status TEXT NOT NULL DEFAULT 'pending',
+      locked INTEGER NOT NULL DEFAULT 0,
+      lockedAt DATETIME,
+      reviewedAt DATETIME,
+      reviewedByEmail TEXT,
+      createdAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updatedAt DATETIME NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS GroupPointsLog (
+      id TEXT PRIMARY KEY,
+      groupId TEXT NOT NULL,
+      delta INTEGER NOT NULL,
+      type TEXT NOT NULL,
+      reason TEXT,
+      relatedId TEXT,
+      actorUserId TEXT,
+      adminEmail TEXT,
+      createdAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
     CREATE TABLE IF NOT EXISTS PointsProduct (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
@@ -862,6 +885,8 @@ export function clearAllTables(db: Database.Database) {
     DELETE FROM Account;
     DELETE FROM VerificationToken;
     DELETE FROM PointsRedemption;
+    DELETE FROM GroupPointsLog;
+    DELETE FROM ResearchGroup;
     DELETE FROM PointsLog;
     DELETE FROM ShipmentItem;
     DELETE FROM Shipment;

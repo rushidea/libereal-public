@@ -3,6 +3,7 @@ import { prisma } from '@/lib/prisma';
 import { alipayAmountToCents, getAlipaySdk, parseAlipayAmountCents } from '@/lib/alipay';
 import { writeAuditLog } from '@/lib/audit';
 import { settlePaymentPoints } from '@/lib/payment-concurrency';
+import { POINTS_SETTLEMENT_BUSY_ERROR } from '@/lib/points-checkout-service';
 import { AUTO_CLOSEABLE_ORDER_STATUSES, isInactiveOrderStatus } from '@/lib/order-domain';
 
 const SUCCESS_STATUSES = new Set(['TRADE_SUCCESS', 'TRADE_FINISHED']);
@@ -204,7 +205,13 @@ export async function POST(req: Request) {
         let pointsSettlementError: string | null = null;
         const applied = await settlePaymentPoints(tx, latestAttempt.order.id);
         if (applied.ok) return;
+        // 另一笔结算占着订单时不要记成永久失败，等下次通知再试。
+        if (applied.error === POINTS_SETTLEMENT_BUSY_ERROR) return;
         pointsSettlementError = applied.error;
+        const settlement = await tx.order.findUnique({
+          where: { id: latestAttempt.order.id },
+          select: { pointsApplied: true },
+        });
         await tx.order.update({
           where: { id: latestAttempt.order.id },
           data: {
@@ -227,7 +234,7 @@ export async function POST(req: Request) {
           targetId: latestAttempt.order.id,
           after: {
             outTradeNo: latestAttempt.outTradeNo,
-            pointsApplied: false,
+            pointsApplied: settlement?.pointsApplied === true,
             reason: pointsSettlementError,
           },
         }, tx);
@@ -326,10 +333,12 @@ export async function POST(req: Request) {
       });
       if (isPaid && (firstPayment || !latestAttempt.order.pointsApplied)) {
         if (!latestAttempt.order.pointsApplied && (latestAttempt.order.pointsPersonal > 0 || latestAttempt.order.pointsGroup > 0)) {
+          // 可重试的扣减失败由 applyOrderPointsDeduction 放开占用标记后返回。
+          // 非预期异常继续抛出，让本次付款更新一起回滚，支付宝会重试通知。
           const applied = await settlePaymentPoints(tx, latestAttempt.order.id);
           if (applied.ok) {
             pointsSettlement = 'applied';
-          } else {
+          } else if (applied.error !== POINTS_SETTLEMENT_BUSY_ERROR) {
             pointsSettlement = 'pending';
             pointsSettlementError = applied.error;
           }
@@ -372,6 +381,10 @@ export async function POST(req: Request) {
         }, tx);
       }
       if (isPaid && pointsSettlement === 'pending') {
+        const settlement = await tx.order.findUnique({
+          where: { id: latestAttempt.order.id },
+          select: { pointsApplied: true },
+        });
         await tx.order.update({
           where: { id: latestAttempt.order.id },
           data: {
@@ -394,7 +407,7 @@ export async function POST(req: Request) {
           targetId: latestAttempt.order.id,
           after: {
             outTradeNo: latestAttempt.outTradeNo,
-            pointsApplied: false,
+            pointsApplied: settlement?.pointsApplied === true,
             reason: pointsSettlementError,
           },
         }, tx);

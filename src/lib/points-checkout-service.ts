@@ -169,9 +169,123 @@ async function creditGroupPoints(
   });
 }
 
+/** 扣减失败时写回的流水原因。补偿任务用它把失败回滚从真实退款里区分出来。 */
+export const POINTS_DEDUCTION_ROLLBACK_REASON = '课题组扣减失败回滚';
+
+/** 另一笔结算已经占住订单。调用方应稍后重试，不要把它记成永久失败。 */
+export const POINTS_SETTLEMENT_BUSY_ERROR = '积分结算进行中，请稍后重试';
+
+type PointsSettlementOrder = {
+  id: string;
+  customerId: string | null;
+  pointsPersonal: number;
+  pointsGroup: number;
+  pointsGroupId: string | null;
+  pointsApplied: boolean;
+};
+
+async function heldOrderRedeemPoints(tx: Tx, order: PointsSettlementOrder) {
+  let personal = 0;
+  if (order.pointsPersonal > 0 && order.customerId) {
+    const logs = await tx.pointsLog.findMany({
+      where: {
+        relatedId: order.id,
+        userId: order.customerId,
+        OR: [
+          { type: 'order_redeem' },
+          { type: 'order_redeem_refund', reason: POINTS_DEDUCTION_ROLLBACK_REASON },
+        ],
+      },
+      select: { delta: true },
+    });
+    personal = Math.max(0, -logs.reduce((sum, log) => sum + log.delta, 0));
+  }
+
+  let group = 0;
+  if (order.pointsGroup > 0 && order.pointsGroupId) {
+    const logs = await tx.groupPointsLog.findMany({
+      where: {
+        relatedId: order.id,
+        groupId: order.pointsGroupId,
+        OR: [
+          { type: 'order_redeem' },
+          { type: 'order_redeem_refund', reason: POINTS_DEDUCTION_ROLLBACK_REASON },
+        ],
+      },
+      select: { delta: true },
+    });
+    group = Math.max(0, -logs.reduce((sum, log) => sum + log.delta, 0));
+  }
+
+  return { personal, group };
+}
+
+function sqliteTimestamp(date: Date) {
+  return date.toISOString().replace('Z', '+00:00');
+}
+
+async function claimOrderPointsSettlement(tx: Tx, order: PointsSettlementOrder) {
+  if (!order.pointsApplied) {
+    const claimed = await tx.order.updateMany({
+      where: { id: order.id, pointsApplied: false },
+      data: { pointsApplied: true, pointsAppliedAt: new Date() },
+    });
+    return claimed.count === 1;
+  }
+
+  // Prisma 写入的时间文本是 +00:00，历史或测试数据可能是 Z。按文本比较才能锁住同一行。
+  const rows = await tx.$queryRaw<Array<{ stamp: string | null }>>`
+    SELECT CAST(pointsAppliedAt AS TEXT) AS stamp
+    FROM "Order"
+    WHERE id = ${order.id}
+  `;
+  const stamp = rows[0]?.stamp ?? null;
+  const claimed = await tx.$executeRaw`
+    UPDATE "Order"
+    SET pointsAppliedAt = ${sqliteTimestamp(new Date())}
+    WHERE id = ${order.id}
+      AND pointsApplied = 1
+      AND (
+        (${stamp} IS NULL AND pointsAppliedAt IS NULL)
+        OR CAST(pointsAppliedAt AS TEXT) = ${stamp}
+      )
+  `;
+  return Number(claimed) === 1;
+}
+
+async function personalPointsAvailable(tx: Tx, userId: string, points: number) {
+  if (points <= 0) return true;
+  const user = await tx.user.findUnique({ where: { id: userId }, select: { points: true } });
+  return !!user && user.points >= points;
+}
+
+async function groupPointsAvailable(tx: Tx, groupId: string, points: number) {
+  if (points <= 0) return true;
+  const group = await tx.researchGroup.findUnique({
+    where: { id: groupId },
+    select: { points: true, status: true },
+  });
+  if (!group || group.points < points) return false;
+  return group.status === 'active' || group.status === 'archived';
+}
+
+/** 没有任何已生效扣减时，失败必须把占用标记放开，补偿任务才能再次选中。 */
+async function releasePointsClaimIfUnheld(
+  tx: Tx,
+  orderId: string,
+  held: { personal: number; group: number },
+) {
+  if (held.personal > 0 || held.group > 0) return;
+  await tx.order.updateMany({
+    where: { id: orderId },
+    data: { pointsApplied: false, pointsAppliedAt: null },
+  });
+}
+
 /**
- * 对订单执行积分扣减（幂等：已 applied 则跳过）。
- * 下单时调用并记录积分占用；历史支付宝订单在到账通知中继续调用以完成补偿结算。
+ * 对订单执行积分扣减。
+ * 没有任何已生效扣减时，失败会把 `pointsApplied` 改回 false，调用方即使提交事务，补偿任务仍能扫到。
+ * 已经扣过一部分时保留标记，只补差额，避免把已扣积分再扣一次，也避免退款漏掉已扣部分。
  */
 export async function applyOrderPointsDeduction(
   tx: Tx,
@@ -191,47 +305,81 @@ export async function applyOrderPointsDeduction(
     },
   });
   if (!order) return { ok: false, error: '订单不存在' };
-  if (order.pointsApplied) return { ok: true };
   if (!order.customerId) return { ok: false, error: '订单缺少客户' };
   if (isInactiveOrderStatus(order.status)) return { ok: false, error: '订单已取消' };
 
-  const claimed = await tx.order.updateMany({
-    where: { id: orderId, pointsApplied: false },
-    data: { pointsApplied: true, pointsAppliedAt: new Date() },
-  });
-  if (claimed.count !== 1) return { ok: true };
-  if (order.pointsPersonal <= 0 && order.pointsGroup <= 0) return { ok: true };
-
-  if (order.pointsPersonal > 0) {
-    const ok = await deductPersonalPoints(tx, {
-      userId: order.customerId,
-      points: order.pointsPersonal,
-      relatedId: order.id,
-    });
-    if (!ok) throw new Error('POINTS_APPLY:个人积分不足');
+  if (order.pointsPersonal <= 0 && order.pointsGroup <= 0) {
+    if (!order.pointsApplied) {
+      await tx.order.updateMany({
+        where: { id: orderId, pointsApplied: false },
+        data: { pointsApplied: true, pointsAppliedAt: new Date() },
+      });
+    }
+    return { ok: true };
   }
 
-  if (order.pointsGroup > 0) {
-    if (!order.pointsGroupId) throw new Error('POINTS_APPLY:缺少课题组');
+  const held = await heldOrderRedeemPoints(tx, order);
+  const personalShort = Math.max(0, order.pointsPersonal - held.personal);
+  const groupShort = Math.max(0, order.pointsGroup - held.group);
+  if (personalShort === 0 && groupShort === 0) {
+    if (!order.pointsApplied) {
+      await tx.order.updateMany({
+        where: { id: orderId, pointsApplied: false },
+        data: { pointsApplied: true, pointsAppliedAt: new Date() },
+      });
+    }
+    return { ok: true };
+  }
+
+  const claimed = await claimOrderPointsSettlement(tx, order);
+  if (!claimed) return { ok: false, error: POINTS_SETTLEMENT_BUSY_ERROR };
+
+  // 先看余额。长期不足时不要扣下一边再写回滚流水，否则补偿任务会每轮留下一对流水。
+  if (!(await personalPointsAvailable(tx, order.customerId, personalShort))) {
+    await releasePointsClaimIfUnheld(tx, order.id, held);
+    return { ok: false, error: '个人积分不足' };
+  }
+  if (groupShort > 0 && !order.pointsGroupId) {
+    await releasePointsClaimIfUnheld(tx, order.id, held);
+    return { ok: false, error: '缺少课题组' };
+  }
+  if (groupShort > 0 && order.pointsGroupId && !(await groupPointsAvailable(tx, order.pointsGroupId, groupShort))) {
+    await releasePointsClaimIfUnheld(tx, order.id, held);
+    return { ok: false, error: '课题组积分不足' };
+  }
+
+  if (personalShort > 0) {
+    const ok = await deductPersonalPoints(tx, {
+      userId: order.customerId,
+      points: personalShort,
+      relatedId: order.id,
+    });
+    if (!ok) {
+      await releasePointsClaimIfUnheld(tx, order.id, held);
+      return { ok: false, error: '个人积分不足' };
+    }
+  }
+
+  if (groupShort > 0 && order.pointsGroupId) {
     const ok = await deductGroupPoints(tx, {
       groupId: order.pointsGroupId,
-      points: order.pointsGroup,
+      points: groupShort,
       relatedId: order.id,
       actorUserId: order.customerId,
       // 订单创建时已校验下单人是该课题组成员；到账阶段按订单保存的积分意图结算，成员后续退出不改变已接受的订单。
       allowArchived: true,
     });
     if (!ok) {
-      // 回滚已扣个人分
-      if (order.pointsPersonal > 0) {
+      if (personalShort > 0) {
         await creditPersonalPoints(tx, {
           userId: order.customerId,
-          points: order.pointsPersonal,
+          points: personalShort,
           relatedId: order.id,
-          reason: '课题组扣减失败回滚',
+          reason: POINTS_DEDUCTION_ROLLBACK_REASON,
         });
       }
-      throw new Error('POINTS_APPLY:课题组积分不足');
+      await releasePointsClaimIfUnheld(tx, order.id, held);
+      return { ok: false, error: '课题组积分不足' };
     }
   }
 

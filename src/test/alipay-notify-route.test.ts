@@ -50,7 +50,10 @@ vi.mock('@/lib/prisma', () => ({
 }));
 
 vi.mock('@/lib/audit', () => ({ writeAuditLog: mocks.writeAuditLog }));
-vi.mock('@/lib/points-checkout-service', () => ({ applyOrderPointsDeduction: mocks.applyOrderPointsDeduction }));
+vi.mock('@/lib/points-checkout-service', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/points-checkout-service')>();
+  return { ...actual, applyOrderPointsDeduction: mocks.applyOrderPointsDeduction };
+});
 
 import { POST } from '@/app/api/payments/alipay/notify/route';
 
@@ -245,6 +248,26 @@ describe('Alipay payment notify route', () => {
     expect(mocks.orderUpdateMany).toHaveBeenCalled();
     expect(mocks.applyOrderPointsDeduction).toHaveBeenCalledWith(expect.anything(), 'order-1');
     expect(mocks.writeAuditLog).toHaveBeenCalledWith(expect.objectContaining({ action: 'payment.alipay_points_pending' }), expect.anything());
+  });
+
+  it('rolls the payment update back when points settlement throws', async () => {
+    mocks.paymentAttemptFindUnique.mockResolvedValue({
+      id: 'attempt-1',
+      outTradeNo: 'LPTEST001',
+      amount: 0.3,
+      paidAt: null,
+      order: {
+        id: 'order-1', total: 0.3, paidAt: null, status: 'unpaid',
+        pointsApplied: false, pointsPersonal: 10, pointsGroup: 0,
+      },
+    });
+    mocks.applyOrderPointsDeduction.mockRejectedValue(new Error('database unavailable'));
+
+    const response = await POST(notifyRequest());
+
+    expect(response.status).toBe(500);
+    await expect(response.text()).resolves.toBe('fail');
+    expect(mocks.writeAuditLog).not.toHaveBeenCalled();
   });
 
   it('rechecks a concurrently superseded attempt before claiming the order', async () => {
