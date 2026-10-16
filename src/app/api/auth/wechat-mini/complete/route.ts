@@ -1,10 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { signIn } from '@/lib/auth';
 import { createPendingOAuthLink, setPendingOAuthLinkCookie } from '@/lib/account-linking';
-import { prisma } from '@/lib/prisma';
 import {
+  authorizeWechatMiniCompletion,
+  getWechatMiniBrowserSecretCookieName,
+  releaseWechatMiniBrowserClaim,
+  restoreWechatMiniUnlinkedClaim,
   WECHAT_MINI_CHALLENGE_STATUSES,
   WECHAT_MINI_LOGIN_PROVIDER_ID,
+  wechatMiniBrowserSecretCookieOptions,
 } from '@/lib/wechat-mini-auth';
 
 type CompletePayload = {
@@ -18,84 +22,99 @@ function normalizeCallbackUrl(callbackUrl: string | undefined): string {
   return callbackUrl;
 }
 
+function clearBrowserSecretCookie(response: NextResponse, challengeId: string) {
+  response.cookies.set(getWechatMiniBrowserSecretCookieName(challengeId), '', {
+    ...wechatMiniBrowserSecretCookieOptions(),
+    maxAge: 0,
+  });
+}
+
+function readBrowserSecret(req: NextRequest, challengeId: string): string | null {
+  return req.cookies.get(getWechatMiniBrowserSecretCookieName(challengeId))?.value ?? null;
+}
+
 export async function POST(req: NextRequest) {
   try {
     const payload = (await req.json()) as CompletePayload;
-    const challengeId = payload.challengeId?.trim();
+    const challengeId = payload.challengeId?.trim() ?? '';
     const callbackUrl = normalizeCallbackUrl(payload.callbackUrl);
 
     if (!challengeId) {
       return NextResponse.json({ error: '缺少 challengeId' }, { status: 400 });
     }
 
-    const challenge = await prisma.wechatMiniLoginChallenge.findUnique({
-      where: { id: challengeId },
-      select: {
-        id: true,
-        status: true,
-        providerAccountId: true,
-        userId: true,
-        loginToken: true,
-        oauthName: true,
-        oauthImage: true,
-        oauthSex: true,
-        expiresAt: true,
-      },
-    });
-
-    if (!challenge) {
-      return NextResponse.json({ error: '登录请求不存在' }, { status: 404 });
-    }
-    if (challenge.expiresAt <= new Date()) {
-      await prisma.wechatMiniLoginChallenge.update({
-        where: { id: challenge.id },
-        data: { status: WECHAT_MINI_CHALLENGE_STATUSES.expired, loginToken: null },
-      });
-      return NextResponse.json({ error: '登录请求已过期，请重新尝试' }, { status: 410 });
+    let presentedSecret: string | null = null;
+    try {
+      presentedSecret = readBrowserSecret(req, challengeId);
+    } catch {
+      return NextResponse.json({ error: '登录请求无效' }, { status: 400 });
     }
 
-    if (challenge.status === WECHAT_MINI_CHALLENGE_STATUSES.linked && challenge.loginToken) {
-      const authRedirect = await signIn(WECHAT_MINI_LOGIN_PROVIDER_ID, {
-        loginToken: challenge.loginToken,
-        redirect: false,
-        redirectTo: callbackUrl,
-      });
-      let redirectUrl = typeof authRedirect === 'string' ? authRedirect : callbackUrl;
-      const parsedRedirect = new URL(redirectUrl, req.nextUrl.origin);
-      if (parsedRedirect.pathname === '/login/mfa') {
-        parsedRedirect.searchParams.set('callbackUrl', callbackUrl);
-        redirectUrl = `${parsedRedirect.pathname}${parsedRedirect.search}`;
+    const decision = await authorizeWechatMiniCompletion(challengeId, presentedSecret);
+    if (!decision.ok) {
+      return NextResponse.json({ error: decision.error }, { status: decision.httpStatus });
+    }
+
+    if (decision.kind === 'linked') {
+      const loginToken = decision.challenge.loginToken;
+      if (!loginToken) {
+        return NextResponse.json({ error: '微信授权尚未完成' }, { status: 409 });
       }
-      return NextResponse.json({ ok: true, status: WECHAT_MINI_CHALLENGE_STATUSES.linked, redirectUrl });
+      try {
+        const authRedirect = await signIn(WECHAT_MINI_LOGIN_PROVIDER_ID, {
+          loginToken,
+          redirect: false,
+          redirectTo: callbackUrl,
+        });
+        let redirectUrl = typeof authRedirect === 'string' ? authRedirect : callbackUrl;
+        const parsedRedirect = new URL(redirectUrl, req.nextUrl.origin);
+        if (parsedRedirect.pathname === '/login/mfa') {
+          parsedRedirect.searchParams.set('callbackUrl', callbackUrl);
+          redirectUrl = `${parsedRedirect.pathname}${parsedRedirect.search}`;
+        }
+        const response = NextResponse.json({
+          ok: true,
+          status: WECHAT_MINI_CHALLENGE_STATUSES.linked,
+          redirectUrl,
+        });
+        clearBrowserSecretCookie(response, decision.challenge.id);
+        return response;
+      } catch (error) {
+        await releaseWechatMiniBrowserClaim(decision.challenge.id, decision.browserSecretHash, loginToken);
+        throw error;
+      }
     }
 
-    if (challenge.status === WECHAT_MINI_CHALLENGE_STATUSES.unlinked && challenge.providerAccountId) {
+    const providerAccountId = decision.challenge.providerAccountId;
+    if (!providerAccountId) {
+      return NextResponse.json({ error: '微信授权尚未完成' }, { status: 409 });
+    }
+    try {
       await setPendingOAuthLinkCookie(createPendingOAuthLink(
         {
           provider: 'wechat',
-          providerAccountId: challenge.providerAccountId,
+          providerAccountId,
           type: 'oauth',
         },
         'wechat',
         {
           mode: 'register',
-          oauthName: challenge.oauthName ?? undefined,
-          oauthImage: challenge.oauthImage ?? undefined,
-          oauthSex: challenge.oauthSex ?? undefined,
+          oauthName: decision.challenge.oauthName ?? undefined,
+          oauthImage: decision.challenge.oauthImage ?? undefined,
+          oauthSex: decision.challenge.oauthSex ?? undefined,
         },
       ));
-      await prisma.wechatMiniLoginChallenge.update({
-        where: { id: challenge.id },
-        data: { status: WECHAT_MINI_CHALLENGE_STATUSES.consumed, completedAt: new Date() },
-      });
-      return NextResponse.json({
-        ok: true,
-        status: WECHAT_MINI_CHALLENGE_STATUSES.unlinked,
-        redirectUrl: '/register?wechat=unlinked',
-      });
+    } catch (error) {
+      await restoreWechatMiniUnlinkedClaim(decision.challenge.id, decision.browserSecretHash);
+      throw error;
     }
-
-    return NextResponse.json({ error: '微信授权尚未完成' }, { status: 409 });
+    const response = NextResponse.json({
+      ok: true,
+      status: WECHAT_MINI_CHALLENGE_STATUSES.unlinked,
+      redirectUrl: '/register?wechat=unlinked',
+    });
+    clearBrowserSecretCookie(response, decision.challenge.id);
+    return response;
   } catch (error) {
     console.error('[wechat-mini/complete]', error);
     return NextResponse.json({ error: '无法完成微信小程序登录' }, { status: 500 });

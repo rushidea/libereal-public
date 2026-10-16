@@ -714,6 +714,7 @@ export function getTestDb(): Database.Database {
       providerAccountId TEXT,
       userId TEXT,
       loginToken TEXT UNIQUE,
+      browserSecretHash TEXT,
       oauthName TEXT,
       oauthImage TEXT,
       oauthSex INTEGER,

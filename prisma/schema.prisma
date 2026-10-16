@@ -469,6 +469,8 @@ model WechatMiniLoginChallenge {
   providerAccountId String?
   userId            String?
   loginToken        String?   @unique
+  /// SHA-256 of the httpOnly browser secret. The raw secret is never stored.
+  browserSecretHash String?
   oauthName         String?
   oauthImage        String?
   oauthSex          Int?
