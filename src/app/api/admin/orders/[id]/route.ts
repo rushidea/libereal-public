@@ -4,6 +4,7 @@ import type { Prisma } from '@prisma/client';
 import { orderItemView } from '@/lib/commerce-records';
 import { releaseOrderReceivableOnCancellation, reserveOrderCredit, settleOrderReceivable } from '@/lib/customer-credit';
 import { assertOrderTransition, isAutoCloseableOrderStatus, isInactiveOrderStatus, requiresPaidAlipayRefund } from '@/lib/order-domain';
+import { restoreRedeemedOrderCoupons } from '@/lib/coupon-service';
 import { releaseOrderInventory, reserveOrderInventory } from '@/lib/inventory';
 import { orderStatusRequiresFinanceWrite, receivableOccupiesCredit } from '@/lib/order-finance-access';
 import { requireAdmin } from '@/lib/session';
@@ -119,6 +120,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       if (isInactiveOrderStatus(status) && !isInactiveOrderStatus(existing.status)) {
         if (isPostDeliveryPaymentMethod(existing.paymentMethod)) await releaseOrderReceivableOnCancellation(tx, id, admin.id);
         await releaseOrderInventory(tx, id, admin.id);
+        await restoreRedeemedOrderCoupons(tx, id);
         const originalPaidYuan = Math.round((existing.total + existing.pointsDiscount) * 100) / 100;
         requirePointsRefund(await refundOrderPointsProportionally(tx, {
           orderId: id,

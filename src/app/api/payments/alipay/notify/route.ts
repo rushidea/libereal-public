@@ -2,16 +2,30 @@ import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { alipayAmountToCents, getAlipaySdk, parseAlipayAmountCents } from '@/lib/alipay';
 import { writeAuditLog } from '@/lib/audit';
+import { releaseOrderInventory, reserveOrderInventory } from '@/lib/inventory';
 import { settlePaymentPoints } from '@/lib/payment-concurrency';
 import { POINTS_SETTLEMENT_BUSY_ERROR } from '@/lib/points-checkout-service';
 import { AUTO_CLOSEABLE_ORDER_STATUSES, isInactiveOrderStatus } from '@/lib/order-domain';
 
 const SUCCESS_STATUSES = new Set(['TRADE_SUCCESS', 'TRADE_FINISHED']);
+const ALIPAY_STOCK_SHORTFALL_STATUS = 'paid_stock_shortfall_reconciliation_required';
+const TERMINAL_ATTEMPT_STATUSES = [
+  'paid',
+  ALIPAY_STOCK_SHORTFALL_STATUS,
+  'rejected_order_cancelled',
+  'rejected_amount_mismatch',
+  'paid_superseded_reconciliation_required',
+];
+
+function isInsufficientInventoryError(error: unknown): boolean {
+  return error instanceof Error && error.message === 'INSUFFICIENT_AVAILABLE_INVENTORY';
+}
 
 function isTerminalAttemptStatus(status: string | null | undefined): boolean {
   return status === 'TRADE_CLOSED'
     || status === 'paid_terminal_reconciliation_required'
     || status === 'paid'
+    || status === ALIPAY_STOCK_SHORTFALL_STATUS
     || status === 'paid_superseded_reconciliation_required'
     || status === 'rejected_order_cancelled'
     || status === 'rejected_amount_mismatch';
@@ -79,6 +93,59 @@ async function handlePointsTopupNotify(data: Record<string, string>) {
   if (!applied) return new NextResponse('success');
 
   return new NextResponse('success');
+}
+
+async function recordAlipayStockShortfall(
+  attempt: { id: string; outTradeNo: string; amount: number; order: { id: string; total: number } },
+  data: Record<string, string>,
+) {
+  await prisma.$transaction(async (tx) => {
+    const latestOrder = await tx.order.findUnique({
+      where: { id: attempt.order.id },
+      select: { paidAt: true },
+    });
+    // 同一笔通知的重试，或另一笔已提交的收款，都不能把已付款订单改成缺货待核对。
+    if (latestOrder?.paidAt) return;
+    const claimed = await tx.paymentAttempt.updateMany({
+      where: { id: attempt.id, status: { notIn: TERMINAL_ATTEMPT_STATUSES } },
+      data: {
+        status: ALIPAY_STOCK_SHORTFALL_STATUS,
+        tradeNo: data.trade_no || null,
+        notifiedAt: new Date(),
+      },
+    });
+    if (claimed.count !== 1) return;
+    await tx.order.update({
+      where: { id: attempt.order.id },
+      data: {
+        events: {
+          create: {
+            type: 'payment_stock_shortfall',
+            actorEmail: 'system',
+            message: '支付宝已收款，可售库存不足，订单未记为已付款',
+            metadata: JSON.stringify({
+              outTradeNo: attempt.outTradeNo,
+              tradeNo: data.trade_no || null,
+              amount: attempt.amount,
+            }),
+          },
+        },
+      },
+    });
+    await writeAuditLog({
+      action: 'payment.alipay_stock_shortfall_reconciliation_required',
+      resource: 'payments',
+      targetType: 'Order',
+      targetId: attempt.order.id,
+      after: {
+        outTradeNo: attempt.outTradeNo,
+        tradeNo: data.trade_no || null,
+        amount: attempt.amount,
+        orderTotal: attempt.order.total,
+        reason: 'insufficient_available_inventory',
+      },
+    }, tx);
+  });
 }
 
 export async function POST(req: Request) {
@@ -279,6 +346,12 @@ export async function POST(req: Request) {
       let pointsSettlement: 'not_required' | 'applied' | 'pending' = 'not_required';
       let pointsSettlementError: string | null = null;
       if (isPaid) {
+        // 在写入已付款之前预占。库存不足会抛出并回滚，订单不会变成可履约的已付款订单。
+        // 已有预占会跳过，确认订单时再次预占不会重复占用。
+        const shouldReserve = !latestAttempt.order.paidAt && !isInactiveOrderStatus(latestAttempt.order.status);
+        if (shouldReserve) {
+          await reserveOrderInventory(tx, latestAttempt.order.id, null, '支付宝收款预占库存');
+        }
         const claimed = await tx.order.updateMany({
           where: {
             id: latestAttempt.order.id,
@@ -295,6 +368,9 @@ export async function POST(req: Request) {
             select: { status: true, paidAt: true },
           });
           if (!latest?.paidAt) {
+            if (shouldReserve) {
+              await releaseOrderInventory(tx, latestAttempt.order.id, null, '付款未成交释放库存');
+            }
             const rejected = await tx.paymentAttempt.updateMany({
               where: { id: latestAttempt.id, status: latestAttempt.status },
               data: {
@@ -414,6 +490,15 @@ export async function POST(req: Request) {
       }
     });
   } catch (error) {
+    if (isInsufficientInventoryError(error)) {
+      try {
+        await recordAlipayStockShortfall(attempt, data);
+      } catch (recordError) {
+        console.error('[alipay notify] stock shortfall recording failed', recordError);
+        return new NextResponse('fail', { status: 500 });
+      }
+      return new NextResponse('success');
+    }
     console.error('[alipay notify] notification processing failed', error);
     return new NextResponse('fail', { status: 500 });
   }

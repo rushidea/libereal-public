@@ -764,6 +764,50 @@ export function getTestDb(): Database.Database {
       request_count INTEGER NOT NULL DEFAULT 0,
       PRIMARY KEY (ip, window_start)
     );
+    CREATE TABLE IF NOT EXISTS Coupon (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      type TEXT NOT NULL,
+      threshold REAL NOT NULL DEFAULT 0,
+      discount REAL NOT NULL,
+      stackable INTEGER NOT NULL DEFAULT 0,
+      requiresApproval INTEGER NOT NULL DEFAULT 0,
+      approvalStatus TEXT NOT NULL DEFAULT 'auto',
+      approvedBy TEXT,
+      approvedAt DATETIME,
+      validFrom DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      validUntil DATETIME,
+      maxUses INTEGER NOT NULL DEFAULT 0,
+      usedCount INTEGER NOT NULL DEFAULT 0,
+      description TEXT,
+      createdBy TEXT,
+      createdAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updatedAt DATETIME NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS CouponInstance (
+      id TEXT PRIMARY KEY,
+      couponId TEXT NOT NULL,
+      userId TEXT,
+      code TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'active',
+      issueApprovalStatus TEXT NOT NULL DEFAULT 'auto',
+      issuedBy TEXT,
+      approvedBy TEXT,
+      approvedAt DATETIME,
+      redeemedOrderId TEXT,
+      redeemedAt DATETIME,
+      expiresAt DATETIME,
+      createdAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updatedAt DATETIME NOT NULL,
+      FOREIGN KEY (couponId) REFERENCES Coupon (id) ON DELETE CASCADE
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS CouponInstance_code_key ON CouponInstance(code);
+    CREATE INDEX IF NOT EXISTS Coupon_type_approvalStatus_idx ON Coupon(type, approvalStatus);
+    CREATE INDEX IF NOT EXISTS Coupon_validUntil_idx ON Coupon(validUntil);
+    CREATE INDEX IF NOT EXISTS CouponInstance_userId_status_idx ON CouponInstance(userId, status);
+    CREATE INDEX IF NOT EXISTS CouponInstance_code_idx ON CouponInstance(code);
+    CREATE INDEX IF NOT EXISTS CouponInstance_couponId_idx ON CouponInstance(couponId);
+    CREATE INDEX IF NOT EXISTS CouponInstance_redeemedOrderId_idx ON CouponInstance(redeemedOrderId);
   `);
   ensureColumn(_db, 'Order', 'pointsRefundedCash', 'pointsRefundedCash REAL NOT NULL DEFAULT 0');
   ensureColumn(_db, 'PointsRedemption', 'pointsReturned', 'pointsReturned INTEGER NOT NULL DEFAULT 0');
@@ -883,6 +927,8 @@ export function seedAdmin(db: Database.Database, id = 'admin_test_id', email = '
 export function clearAllTables(db: Database.Database) {
   // 清表顺序：先子表后父表（外键依赖）
   db.exec(`
+    DELETE FROM CouponInstance;
+    DELETE FROM Coupon;
     DELETE FROM WechatMiniLoginChallenge;
     DELETE FROM AuditLog;
     DELETE FROM BackgroundTask;

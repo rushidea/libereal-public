@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   transactionOrderUpdate: vi.fn(),
   notificationCreate: vi.fn(),
   releaseOrderInventory: vi.fn(),
+  restoreRedeemedOrderCoupons: vi.fn(),
   refundOrderPointsProportionally: vi.fn(),
   releaseOrderReceivableOnCancellation: vi.fn(),
   requireOrganizationPermission: vi.fn(),
@@ -38,6 +39,9 @@ vi.mock('@/lib/prisma', () => ({
 vi.mock('@/lib/inventory', () => ({
   releaseOrderInventory: mocks.releaseOrderInventory,
   reserveOrderInventory: vi.fn(),
+}));
+vi.mock('@/lib/coupon-service', () => ({
+  restoreRedeemedOrderCoupons: mocks.restoreRedeemedOrderCoupons,
 }));
 vi.mock('@/lib/customer-credit', () => ({
   releaseOrderReceivableOnCancellation: mocks.releaseOrderReceivableOnCancellation,
@@ -95,6 +99,7 @@ describe('customer order actions', () => {
     mocks.transactionOrderUpdate.mockResolvedValue({});
     mocks.notificationCreate.mockResolvedValue({});
     mocks.releaseOrderInventory.mockResolvedValue(undefined);
+    mocks.restoreRedeemedOrderCoupons.mockResolvedValue(1);
     mocks.refundOrderPointsProportionally.mockResolvedValue({ ok: true, personal: 0, group: 0 });
     mocks.releaseOrderReceivableOnCancellation.mockResolvedValue(undefined);
     mocks.productFindMany.mockResolvedValue([{
@@ -119,6 +124,7 @@ describe('customer order actions', () => {
     expect(response.status).toBe(200);
     expect(mocks.transactionOrderUpdate).toHaveBeenCalled();
     expect(mocks.releaseOrderInventory).toHaveBeenCalled();
+    expect(mocks.restoreRedeemedOrderCoupons).toHaveBeenCalledWith(expect.anything(), 'order-1');
     expect(mocks.notificationCreate).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({ title: '订单状态更新' }),
     }));

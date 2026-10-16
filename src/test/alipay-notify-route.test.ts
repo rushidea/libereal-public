@@ -11,6 +11,8 @@ const mocks = vi.hoisted(() => ({
   orderFindUnique: vi.fn(),
   writeAuditLog: vi.fn(),
   applyOrderPointsDeduction: vi.fn(),
+  reserveOrderInventory: vi.fn(),
+  releaseOrderInventory: vi.fn(),
 }));
 
 vi.mock('@/lib/alipay', async (importOriginal) => {
@@ -54,6 +56,10 @@ vi.mock('@/lib/points-checkout-service', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/points-checkout-service')>();
   return { ...actual, applyOrderPointsDeduction: mocks.applyOrderPointsDeduction };
 });
+vi.mock('@/lib/inventory', () => ({
+  reserveOrderInventory: mocks.reserveOrderInventory,
+  releaseOrderInventory: mocks.releaseOrderInventory,
+}));
 
 import { POST } from '@/app/api/payments/alipay/notify/route';
 
@@ -96,6 +102,8 @@ describe('Alipay payment notify route', () => {
     mocks.orderFindUnique.mockResolvedValue({ status: 'pending', paidAt: new Date() });
     mocks.writeAuditLog.mockResolvedValue(undefined);
     mocks.applyOrderPointsDeduction.mockResolvedValue({ ok: true });
+    mocks.reserveOrderInventory.mockResolvedValue(undefined);
+    mocks.releaseOrderInventory.mockResolvedValue(undefined);
   });
 
   it('accepts a successful payment notification when rounded cents match the stored float amount', async () => {
@@ -110,6 +118,8 @@ describe('Alipay payment notify route', () => {
         tradeNo: '202607190001',
       }),
     });
+    expect(mocks.reserveOrderInventory).toHaveBeenCalledWith(expect.anything(), 'order-1', null, '支付宝收款预占库存');
+    expect(mocks.reserveOrderInventory.mock.invocationCallOrder[0]).toBeLessThan(mocks.orderUpdateMany.mock.invocationCallOrder[0]);
     expect(mocks.orderUpdateMany).toHaveBeenCalledWith({
       where: { id: 'order-1', total: 0.1 * 3, paidAt: null, status: { in: ['unpaid', 'pending'] } },
       data: { paidAt: expect.any(Date), status: 'pending', autoCloseAt: null },
@@ -145,6 +155,7 @@ describe('Alipay payment notify route', () => {
 
     expect(response.status).toBe(200);
     await expect(response.text()).resolves.toBe('success');
+    expect(mocks.reserveOrderInventory).not.toHaveBeenCalled();
     expect(mocks.orderUpdateMany).not.toHaveBeenCalled();
     expect(mocks.paymentAttemptUpdateMany).toHaveBeenCalledWith({
       where: expect.objectContaining({ id: 'attempt-1' }),
@@ -217,6 +228,8 @@ describe('Alipay payment notify route', () => {
 
     expect(response.status).toBe(200);
     await expect(response.text()).resolves.toBe('success');
+    expect(mocks.reserveOrderInventory).toHaveBeenCalled();
+    expect(mocks.releaseOrderInventory).toHaveBeenCalledWith(expect.anything(), 'order-1', null, '付款未成交释放库存');
     expect(mocks.paymentAttemptUpdateMany).toHaveBeenCalledWith({
       where: { id: 'attempt-1', status: 'created' },
       data: expect.objectContaining({ status: 'rejected_order_cancelled' }),
@@ -248,6 +261,66 @@ describe('Alipay payment notify route', () => {
     expect(mocks.orderUpdateMany).toHaveBeenCalled();
     expect(mocks.applyOrderPointsDeduction).toHaveBeenCalledWith(expect.anything(), 'order-1');
     expect(mocks.writeAuditLog).toHaveBeenCalledWith(expect.objectContaining({ action: 'payment.alipay_points_pending' }), expect.anything());
+  });
+
+  it('reserves stock before marking the order paid', async () => {
+    const response = await POST(notifyRequest());
+
+    expect(response.status).toBe(200);
+    expect(mocks.reserveOrderInventory).toHaveBeenCalledWith(expect.anything(), 'order-1', null, '支付宝收款预占库存');
+    expect(mocks.releaseOrderInventory).not.toHaveBeenCalled();
+  });
+
+  it('does not mark an order paid when stock cannot be reserved', async () => {
+    mocks.reserveOrderInventory.mockRejectedValue(new Error('INSUFFICIENT_AVAILABLE_INVENTORY'));
+    mocks.orderFindUnique.mockResolvedValue({ status: 'unpaid', paidAt: null });
+
+    const response = await POST(notifyRequest());
+
+    expect(response.status).toBe(200);
+    await expect(response.text()).resolves.toBe('success');
+    expect(mocks.orderUpdateMany).not.toHaveBeenCalled();
+    expect(mocks.paymentAttemptUpdate).not.toHaveBeenCalled();
+    expect(mocks.paymentAttemptUpdateMany).toHaveBeenCalledWith({
+      where: { id: 'attempt-1', status: { notIn: expect.arrayContaining(['paid', 'paid_stock_shortfall_reconciliation_required']) } },
+      data: expect.objectContaining({
+        status: 'paid_stock_shortfall_reconciliation_required',
+        tradeNo: '202607190001',
+      }),
+    });
+    expect(mocks.orderUpdate).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        events: { create: expect.objectContaining({ type: 'payment_stock_shortfall' }) },
+      }),
+    }));
+    expect(mocks.writeAuditLog).toHaveBeenCalledWith(expect.objectContaining({
+      action: 'payment.alipay_stock_shortfall_reconciliation_required',
+    }), expect.anything());
+  });
+
+  it('does not record a second stock-shortfall audit for the same attempt', async () => {
+    mocks.reserveOrderInventory.mockRejectedValue(new Error('INSUFFICIENT_AVAILABLE_INVENTORY'));
+    mocks.orderFindUnique.mockResolvedValue({ status: 'unpaid', paidAt: null });
+    mocks.paymentAttemptUpdateMany.mockResolvedValue({ count: 0 });
+
+    const response = await POST(notifyRequest());
+
+    expect(response.status).toBe(200);
+    expect(mocks.orderUpdateMany).not.toHaveBeenCalled();
+    expect(mocks.writeAuditLog).not.toHaveBeenCalled();
+    expect(mocks.orderUpdate).not.toHaveBeenCalled();
+  });
+
+  it('does not turn an already paid order into a stock shortfall when a duplicate notify cannot reserve', async () => {
+    mocks.reserveOrderInventory.mockRejectedValue(new Error('INSUFFICIENT_AVAILABLE_INVENTORY'));
+    mocks.orderFindUnique.mockResolvedValue({ status: 'pending', paidAt: new Date() });
+
+    const response = await POST(notifyRequest());
+
+    expect(response.status).toBe(200);
+    expect(mocks.orderUpdateMany).not.toHaveBeenCalled();
+    expect(mocks.paymentAttemptUpdateMany).not.toHaveBeenCalled();
+    expect(mocks.writeAuditLog).not.toHaveBeenCalled();
   });
 
   it('rolls the payment update back when points settlement throws', async () => {

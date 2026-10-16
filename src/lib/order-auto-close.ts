@@ -9,6 +9,7 @@
 import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { releaseOrderReceivableOnCancellation } from '@/lib/customer-credit';
+import { restoreRedeemedOrderCoupons } from '@/lib/coupon-service';
 import { releaseOrderInventory } from '@/lib/inventory';
 import {
   applyOrderPointsDeduction,
@@ -236,6 +237,7 @@ export async function closeStalePendingOrders(now = new Date(), batchLimit = 100
 
         if (isPostDeliveryPaymentMethod(order.paymentMethod)) await releaseOrderReceivableOnCancellation(tx, order.id, null);
         await releaseOrderInventory(tx, order.id, null, '超时未付款自动关闭释放库存');
+        await restoreRedeemedOrderCoupons(tx, order.id);
         const originalPaidYuan = Math.round((order.total + order.pointsDiscount) * 100) / 100;
         requirePointsRefund(await refundOrderPointsProportionally(tx, {
           orderId: order.id,

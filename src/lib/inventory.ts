@@ -63,7 +63,7 @@ async function record(
   } });
 }
 
-export async function reserveOrderInventory(tx: Tx, orderId: string, actorId?: string | null) {
+export async function reserveOrderInventory(tx: Tx, orderId: string, actorId?: string | null, reason = '订单确认预占库存') {
   const order = await tx.order.findUnique({ where: { id: orderId }, include: { orderItems: true } });
   if (!order) throw new Error('ORDER_NOT_FOUND');
   for (const item of order.orderItems) {
@@ -94,7 +94,7 @@ export async function reserveOrderInventory(tx: Tx, orderId: string, actorId?: s
       await tx.inventoryReservationBatch.create({ data: { reservationId: reservation.id, batchId: batch.id, quantity: allocated } });
       allocationRemaining -= allocated;
     }
-    await record(tx, before, after, { type: 'reserve', quantity: item.quantity, reason: '订单确认预占库存', actorId, orderId, reservationId: reservation.id });
+    await record(tx, before, after, { type: 'reserve', quantity: item.quantity, reason, actorId, orderId, reservationId: reservation.id });
     await syncProductMirror(tx, after);
   }
 }
