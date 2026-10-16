@@ -26,6 +26,7 @@ export async function GET() {
         identity: true, advisorName: true, advisorPhone: true, avatar: true,
         school: true, college: true, major: true, building: true, piLab: true, affiliatedLab: true,
         password: true,
+        emailVerified: true,
         wechatNickname: true, displayAvatarUrl: true,
         accounts: {
           select: { provider: true },
@@ -73,6 +74,7 @@ export async function GET() {
         wechatLinked,
         hasPassword,
         placeholderEmail,
+        emailVerified: Boolean(row.emailVerified) && !placeholderEmail,
         linkedProviders,
         credentialsEnabled: hasPassword,
       }

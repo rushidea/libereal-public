@@ -7,16 +7,24 @@ import { getAlipayPaymentSummary } from '@/data/alipay-payment';
 import type { Prisma } from '@prisma/client';
 import { getReadableOrganizationIds } from '@/lib/organization-record-access';
 import { listOrganizationIdsForPermission } from '@/lib/organization-service';
+import { verifiedStoredEmail } from '@/lib/verified-email-access';
 
 export async function GET() {
   const session = await auth();
-  const email = session?.user?.email;
-  if (!email) {
+  const userId = session?.user?.id;
+  if (!userId) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
   try {
-    const userId = session.user.id as string;
+    const identity = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { email: true, emailVerified: true },
+    });
+    if (!identity) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+    const verifiedEmail = verifiedStoredEmail(identity);
     const [readableOrganizationIds, orderCreatingOrganizationIds, inquiryCreatingOrganizationIds] = await Promise.all([
       getReadableOrganizationIds(userId),
       listOrganizationIdsForPermission(userId, 'organization.orders.create'),
@@ -24,14 +32,16 @@ export async function GET() {
     ]);
     const inquiryWhere: Prisma.InquiryWhereInput = {
     OR: [
-        { ownerScope: 'personal', email, status: { not: 'closed' } },
+        { ownerScope: 'personal', userId, status: { not: 'closed' } },
+        ...(verifiedEmail ? [{ ownerScope: 'personal' as const, email: verifiedEmail, status: { not: 'closed' as const } }] : []),
         ...(readableOrganizationIds.length ? [{ ownerScope: 'organization', organizationId: { in: readableOrganizationIds } }] : []),
         ...(inquiryCreatingOrganizationIds.length ? [{ ownerScope: 'organization', userId, organizationId: { in: inquiryCreatingOrganizationIds } }] : []),
       ],
     };
     const orderWhere: Prisma.OrderWhereInput = {
       OR: [
-        { ownerScope: 'personal', email },
+        { ownerScope: 'personal', customerId: userId },
+        ...(verifiedEmail ? [{ ownerScope: 'personal' as const, email: verifiedEmail }] : []),
         ...(readableOrganizationIds.length ? [{ ownerScope: 'organization', organizationId: { in: readableOrganizationIds } }] : []),
         ...(orderCreatingOrganizationIds.length ? [{ ownerScope: 'organization', customerId: userId, organizationId: { in: orderCreatingOrganizationIds } }] : []),
       ],

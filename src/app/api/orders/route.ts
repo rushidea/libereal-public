@@ -22,6 +22,7 @@ import { assertNoPendingForcedAck } from '@/lib/notification-ack';
 import { computePromoAdjustments, hasExceededSelectionAddonQuota, hasMisbrandedEligibleAddonMain, validateAddonPromotionLines, validateGiftPromotionLines } from '@/lib/cart-promotions/service';
 import type { CartLine } from '@/lib/cart-promotions/types';
 import { buildCheckoutRevision } from '@/lib/checkout-revision';
+import { normalizedEmailEquals, verifiedStoredEmail } from '@/lib/verified-email-access';
 import { redeemCoupon } from '@/lib/coupon-service';
 import { getReadableOrganizationIds, resolveRecordOwnership } from '@/lib/organization-record-access';
 import { listOrganizationIdsForPermission } from '@/lib/organization-service';
@@ -41,12 +42,13 @@ export async function GET(_req: NextRequest) {
   try {
     const user = await prisma.user.findUnique({
       where: { id: session.user.id as string },
-      select: { role: true, email: true },
+      select: { role: true, email: true, emailVerified: true },
     });
     if (!user) {
       return NextResponse.json({ error: 'User not found' }, { status: 404 });
     }
     const isAdmin = user.role === 'admin';
+    const personalEmail = verifiedStoredEmail(user);
 
     const readableOrganizationIds = isAdmin ? [] : await getReadableOrganizationIds(session.user.id as string);
     const orderCreatingOrganizationIds = isAdmin ? [] : await listOrganizationIdsForPermission(session.user.id as string, 'organization.orders.create');
@@ -54,7 +56,8 @@ export async function GET(_req: NextRequest) {
       ? {}
       : {
           OR: [
-            { ownerScope: 'personal', email: user.email },
+            { ownerScope: 'personal', customerId: session.user.id as string },
+            ...(personalEmail ? [{ ownerScope: 'personal' as const, email: personalEmail }] : []),
             ...(readableOrganizationIds.length ? [{ ownerScope: 'organization', organizationId: { in: readableOrganizationIds } }] : []),
             ...(orderCreatingOrganizationIds.length ? [{ ownerScope: 'organization', customerId: session.user.id as string, organizationId: { in: orderCreatingOrganizationIds } }] : []),
           ],
@@ -78,7 +81,7 @@ export async function GET(_req: NextRequest) {
         const { paymentAttempts, ...order } = o;
         const canViewPhone = isAdmin
           || o.customerId === session.user.id
-          || (o.ownerScope === 'personal' && o.email === session.user.email);
+          || (o.ownerScope === 'personal' && personalEmail !== null && normalizedEmailEquals(o.email, personalEmail));
         const userRow = await prisma.user.findUnique({
           where: { email: o.email },
           select: { name: true, institution: true, department: true },

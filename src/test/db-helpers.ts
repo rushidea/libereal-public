@@ -750,8 +750,8 @@ export function seedUserWithPassword(db: Database.Database, user: {
   role?: string;
 }) {
   db.prepare(`
-    INSERT INTO User (id, name, email, password, role, points, tier, createdAt, updatedAt)
-    VALUES (?, ?, ?, ?, ?, 0, 'tier-2', datetime('now'), datetime('now'))
+    INSERT INTO User (id, name, email, password, role, points, tier, emailVerified, createdAt, updatedAt)
+    VALUES (?, ?, ?, ?, ?, 0, 'tier-2', datetime('now'), datetime('now'), datetime('now'))
   `).run(
     user.id,
     user.name ?? 'Test User',
@@ -782,15 +782,16 @@ export function seedUser(db: Database.Database, user: {
   building?: string | null;
   piLab?: string | null;
   affiliatedLab?: string | null;
+  emailVerified?: string | null;
 }) {
   db.prepare(`
     INSERT INTO User (
       id, name, email, role, points, tier, phone, phoneVerifiedAt,
       institution, department, institutionType, institutionName, institutionUnit, institutionFacility,
-      school, college, major, building, piLab, affiliatedLab,
+      school, college, major, building, piLab, affiliatedLab, emailVerified,
       createdAt, updatedAt
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
   `).run(
     user.id,
     user.name ?? 'Test User',
@@ -812,6 +813,7 @@ export function seedUser(db: Database.Database, user: {
     user.building ?? null,
     user.piLab ?? null,
     user.affiliatedLab ?? null,
+    user.emailVerified === undefined ? new Date().toISOString() : user.emailVerified,
   );
 }
 

@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({
   requireActiveSession: vi.fn(),
   orderFindUnique: vi.fn(),
+  userFindUnique: vi.fn(),
   paymentAttemptCreate: vi.fn(),
   paymentAttemptFindFirst: vi.fn(),
   paymentAttemptFindUnique: vi.fn(),
@@ -14,6 +15,7 @@ vi.mock('@/lib/session', () => ({ requireActiveSession: mocks.requireActiveSessi
 vi.mock('@/lib/prisma', () => ({
   prisma: {
     order: { findUnique: mocks.orderFindUnique },
+    user: { findUnique: mocks.userFindUnique },
     paymentAttempt: {
       create: mocks.paymentAttemptCreate,
       findFirst: mocks.paymentAttemptFindFirst,
@@ -50,6 +52,11 @@ describe('Alipay order payment routes', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.requireActiveSession.mockResolvedValue(user);
+    mocks.userFindUnique.mockImplementation(async ({ where }: { where: { id: string } }) => {
+      if (where.id === user.id) return { email: user.email, emailVerified: new Date('2026-01-01T00:00:00.000Z') };
+      if (where.id === adminUser.id) return { email: adminUser.email, emailVerified: new Date('2026-01-01T00:00:00.000Z') };
+      return null;
+    });
     mocks.orderFindUnique.mockResolvedValue(order);
     mocks.paymentAttemptFindFirst.mockResolvedValue(null);
     mocks.paymentAttemptCreate.mockImplementation(async ({ data }) => ({ ...data }));
@@ -217,6 +224,18 @@ describe('Alipay order payment routes', () => {
         }),
       }),
     );
+  });
+
+  it('rejects payment when the matching email has not been verified', async () => {
+    mocks.userFindUnique.mockResolvedValue({ email: user.email, emailVerified: null });
+
+    const response = await createPayment(
+      new Request('https://libereal.cn/api/orders/order-1/alipay', { method: 'POST' }),
+      { params: Promise.resolve({ id: order.id }) },
+    );
+
+    expect(response.status).toBe(403);
+    expect(mocks.paymentAttemptCreate).not.toHaveBeenCalled();
   });
 
   it('rejects payment attempts belonging to another customer', async () => {

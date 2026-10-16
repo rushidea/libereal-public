@@ -6,6 +6,7 @@ import { getPublicSiteOrigin, isPublicHttpOrigin } from '@/lib/site-url';
 import { canPayOrderWithAlipay, formatAlipayTimeExpire } from '@/data/alipay-payment';
 import { reportError } from '@/lib/errorReporting';
 import { OrganizationRbacError, requireOrganizationPermission } from '@/lib/organization-service';
+import { emailKeyedAccess } from '@/lib/verified-email-access';
 import { isActivePaymentAttemptStatus } from '@/lib/payment-concurrency';
 
 function amountsEqualInCents(left: number, right: number): boolean {
@@ -44,7 +45,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
     }
   } else if (attempt.order.ownerScope === 'organization') {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
-  } else if (attempt.order.email !== user.email) {
+  } else if (attempt.order.customerId !== user.id && !(await emailKeyedAccess(user.id, attempt.order.email))) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   }
   if (!amountsEqualInCents(attempt.amount, attempt.order.total)) {

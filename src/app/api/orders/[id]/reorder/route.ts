@@ -5,6 +5,7 @@ import { prisma } from '@/lib/prisma';
 import { PRODUCT_LIST_SELECT } from '@/lib/prisma-selects';
 import { getProductDisplayPrice } from '@/lib/product-pricing';
 import { canReorderFromOrderStatus } from '@/lib/order-domain';
+import { emailKeyedAccess } from '@/lib/verified-email-access';
 
 type ProductRow = Prisma.ProductGetPayload<{ select: typeof PRODUCT_LIST_SELECT }>;
 
@@ -70,7 +71,7 @@ export async function POST(
   if (!canReorderFromOrderStatus(order.status)) return NextResponse.json({ error: '仅已取消或已关闭订单可以再次下单' }, { status: 409 });
 
   const ownsPersonalOrder = order.ownerScope === 'personal'
-    && (order.customerId === user.id || order.email === user.email);
+    && (order.customerId === user.id || await emailKeyedAccess(user.id, order.email));
   if (!ownsPersonalOrder) return NextResponse.json({ error: '无权再次下单' }, { status: 403 });
   if (order.orderItems.length === 0) return NextResponse.json({ error: '订单中没有可再次下单的商品' }, { status: 409 });
 
