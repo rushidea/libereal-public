@@ -8,6 +8,57 @@ import { orderAutoCloseAt } from '@/lib/order-auto-close';
 import { initialOrderStatus } from '@/lib/order-domain';
 import { getAlipayPaymentSummary } from '@/data/alipay-payment';
 
+type AdminOrderAddressSnapshot = {
+  sourceAddressId: string | null;
+  name: string;
+  phone: string;
+  address: string;
+  institution: string | null;
+};
+
+async function resolveAdminOrderAddress(input: {
+  addressId: unknown;
+  addressName: unknown;
+  addressPhone: unknown;
+  addressText: unknown;
+  addressInstitution: unknown;
+  customerId: string | null;
+}): Promise<{ snapshot: AdminOrderAddressSnapshot | null } | { error: string }> {
+  const addressId = typeof input.addressId === 'string' ? input.addressId.trim() : '';
+  if (addressId) {
+    if (!input.customerId) {
+      return { error: '未找到该客户，无法保存所选地址' };
+    }
+    const address = await prisma.address.findUnique({ where: { id: addressId } });
+    if (!address) return { error: '所选地址不存在，请重新选择' };
+    if (address.userId !== input.customerId) return { error: '所选地址不属于该客户，请重新选择' };
+    return {
+      snapshot: {
+        sourceAddressId: address.id,
+        name: address.name,
+        phone: address.phone,
+        address: address.address,
+        institution: address.institution,
+      },
+    };
+  }
+
+  const name = typeof input.addressName === 'string' ? input.addressName : '';
+  const phone = typeof input.addressPhone === 'string' ? input.addressPhone : '';
+  const text = typeof input.addressText === 'string' ? input.addressText : '';
+  if (!name && !phone && !text) return { snapshot: null };
+  const institution = typeof input.addressInstitution === 'string' ? input.addressInstitution : null;
+  return {
+    snapshot: {
+      sourceAddressId: null,
+      name,
+      phone,
+      address: text,
+      institution,
+    },
+  };
+}
+
 export async function GET(req: NextRequest) {
   const denied = await requireAdmin('orders.read');
   if (denied instanceof NextResponse) return denied;
@@ -78,12 +129,29 @@ export async function POST(req: NextRequest) {
     if (!Array.isArray(items) || items.length === 0) {
       return NextResponse.json({ error: 'items must be a non-empty array' }, { status: 400 });
     }
-    if (!customerEmail) {
-      return NextResponse.json({ error: 'customerEmail is required' }, { status: 400 });
+    const normalizedCustomerEmail = typeof customerEmail === 'string' ? customerEmail.trim() : '';
+    if (!normalizedCustomerEmail) {
+      return NextResponse.json({ error: '请选择客户' }, { status: 400 });
     }
     const normalizedPaymentMethod = normalizeOrderPaymentMethod(paymentMethod);
     if (!normalizedPaymentMethod) {
       return NextResponse.json({ error: '请选择有效的付款方式' }, { status: 400 });
+    }
+
+    const customer = await prisma.user.findUnique({
+      where: { email: normalizedCustomerEmail },
+      select: { id: true, email: true },
+    });
+    const resolvedAddress = await resolveAdminOrderAddress({
+      addressId,
+      addressName,
+      addressPhone,
+      addressText,
+      addressInstitution,
+      customerId: customer?.id ?? null,
+    });
+    if ('error' in resolvedAddress) {
+      return NextResponse.json({ error: resolvedAddress.error }, { status: 400 });
     }
 
     // Server-side price verification (P0-1)
@@ -91,7 +159,7 @@ export async function POST(req: NextRequest) {
       .filter((item: { catalogNumber?: string; productId?: string; price?: number }) => (item.catalogNumber || item.productId) && Number.isFinite(item.price))
       .map((item: { catalogNumber?: string; productId?: string; price: number }) => [item.catalogNumber || item.productId, { type: 'fixed_price' as const, value: item.price, reason: '管理员创建订单时指定价格' }]));
     const { verifiedItems, verifiedSubtotal, mismatchedCount } = await verifyAndPriceItems(items, {
-      customerEmail,
+      customerEmail: customer?.email ?? normalizedCustomerEmail,
       manualAdjustments,
       allowManualAdjustment: true,
       allowHazardousProducts: true,
@@ -134,21 +202,16 @@ export async function POST(req: NextRequest) {
     const order = await prisma.order.create({
       data: {
         id: orderId,
-        email: customerEmail,
+        email: customer?.email ?? normalizedCustomerEmail,
+        ...(customer ? { customerId: customer.id } : {}),
         subtotal: verifiedSubtotal,
         adjustmentTotal,
         total,
         status: orderStatus,
         autoCloseAt: orderAutoCloseAt(normalizedPaymentMethod),
         paymentMethod: normalizedPaymentMethod,
-        ...(addressName || addressPhone || addressText ? {
-          addressSnapshot: { create: {
-            sourceAddressId: addressId || null,
-            name: addressName || '',
-            phone: addressPhone || '',
-            address: addressText || '',
-            institution: addressInstitution || null,
-          } },
+        ...(resolvedAddress.snapshot ? {
+          addressSnapshot: { create: resolvedAddress.snapshot },
         } : {}),
         ...(adjustments.length ? { adjustments: { create: adjustments } } : {}),
         orderItems: {

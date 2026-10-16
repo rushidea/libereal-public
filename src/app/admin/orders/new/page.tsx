@@ -7,6 +7,7 @@ import { useRouter } from 'next/navigation';
 import { useCart } from '@/context/CartContext';
 import { ArrowLeft, Users, MapPin, CreditCard, CheckCircle, Zap, ChevronRight, Package, ShoppingCart } from 'lucide-react';
 import type { User } from '@prisma/client';
+import { ADMIN_PROXY_ORDER_PATH, adminProxyOrderErrorMessage, buildAdminProxyOrderBody, proxyOrderServiceFees, type AdminProxyOrderItem } from '@/data/admin-proxy-order';
 import { formatOrderPaymentMethod, ORDER_PAYMENT_METHODS } from '@/data/payment-methods';
 
 interface Customer extends User {
@@ -86,7 +87,8 @@ export default function NewOrderPage() {
   const formatPrice = (price: number) =>
     new Intl.NumberFormat('zh-CN', { style: 'currency', currency: 'CNY' }).format(price);
 
-  const extraFee = 0;
+  const { platformFee, transferFee } = proxyOrderServiceFees(paymentMethod, subtotal);
+  const extraFee = platformFee + transferFee;
   const grandTotal = subtotal + extraFee;
 
   const handleCustomerSelect = (c: Customer) => {
@@ -114,7 +116,7 @@ export default function NewOrderPage() {
     setSubmitting(true);
     setError('');
     try {
-      const orderItems = productItems.map(item => ({
+      const orderItems: AdminProxyOrderItem[] = productItems.map(item => ({
         productId: item.product.id,
         name: item.product.name,
         brand: item.product.brand,
@@ -126,25 +128,24 @@ export default function NewOrderPage() {
         leadTime: null,
         status: 'pending',
       }));
-      const body = {
+      const body = buildAdminProxyOrderBody({
         items: orderItems,
         paymentMethod,
-        forCustomerId: selectedCustomer.id,
-        addressId: selectedAddress?.id,
-        extraFee,
-      };
-      const res = await fetch('/api/orders', {
+        customerEmail: selectedCustomer.email,
+        subtotal,
+        address: selectedAddress,
+      });
+      const res = await fetch(ADMIN_PROXY_ORDER_PATH, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       });
+      const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        const data = await res.json();
-        throw new Error(data.error || '创建订单失败');
+        throw new Error(adminProxyOrderErrorMessage(res.status, data.error));
       }
-      const data = await res.json();
       productItems.forEach(item => removeItem(item.product.id));
-      router.push(`/account/orders?new=${data.orderId}`);
+      router.push('/admin/orders');
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : '创建订单失败，请重试');
       setSubmitting(false);
@@ -414,6 +415,18 @@ export default function NewOrderPage() {
                 <span className="text-gray-500">小计</span>
                 <span className="text-gray-800">{formatPrice(subtotal)}</span>
               </div>
+              {(platformFee > 0 || transferFee > 0) && (
+                <>
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-gray-500">服务费（2%）</span>
+                    <span className="text-orange-600">+{formatPrice(platformFee)}</span>
+                  </div>
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-gray-500">验收费</span>
+                    <span className="text-orange-600">+{formatPrice(transferFee)}</span>
+                  </div>
+                </>
+              )}
 
               <div className="flex items-center justify-between">
                 <span className="font-semibold text-gray-900">合计</span>
