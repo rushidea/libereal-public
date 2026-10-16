@@ -26,6 +26,42 @@ export function creditRestrictionForOverdueDays(maxOverdueDays: number): CreditR
   return 'active';
 }
 
+export function isManualCreditRestriction(account: { status: string; statusSource?: string | null }): boolean {
+  if (account.status === 'paused') return true;
+  return account.statusSource === 'manual' && (account.status === 'credit_limited' || account.status === 'overdue_hold');
+}
+
+export function maxOverdueDaysForReceivables(receivables: Array<{ dueAt: Date | null }>, now = new Date()): number {
+  if (receivables.length === 0) return -1;
+  return Math.max(...receivables.map((receivable) => overdueDaysFromDueAt(receivable.dueAt, now)));
+}
+
+export function hasEligibleCreditHold(
+  receivables: Array<{ dueAt: Date | null }>,
+  manuallyUnlockedAt: Date | null | undefined,
+  now = new Date(),
+): boolean {
+  return receivables.some((receivable) => {
+    const overdueDays = overdueDaysFromDueAt(receivable.dueAt, now);
+    return overdueDays >= CREDIT_REVIEW_POLICY.holdAfterDays
+      && (!manuallyUnlockedAt || !receivable.dueAt || manuallyUnlockedAt < receivable.dueAt);
+  });
+}
+
+/** 人工暂停、限额和停单保持不变；其余按当前已到期未结应收重算。 */
+export function creditStatusForOverdueReceivables(input: {
+  currentStatus: string;
+  statusSource?: string | null;
+  maxOverdueDays: number;
+  hasEligibleHold: boolean;
+}): string {
+  if (isManualCreditRestriction({ status: input.currentStatus, statusSource: input.statusSource })) {
+    return input.currentStatus;
+  }
+  if (input.hasEligibleHold) return 'overdue_hold';
+  return creditRestrictionForOverdueDays(input.maxOverdueDays);
+}
+
 export function creditLimitForAccount(
   account: { baseLimit: number; overrideLimit: number | null; temporaryLimit: number; temporaryUntil: Date | null; status?: string },
   now = new Date(),
@@ -188,9 +224,27 @@ export async function settleOrderReceivable(tx: Tx, orderId: string, actorId?: s
   if (!account) throw new Error('CREDIT_ACCOUNT_NOT_FOUND');
   const paidAt = new Date();
   const usedAmount = Math.max(0, account.usedAmount - receivable.amount);
+  const openReceivables = await tx.accountReceivable.findMany({
+    where: {
+      userId: receivable.userId,
+      status: { in: ['open', 'overdue'] },
+      id: { not: receivable.id },
+      dueAt: { not: null, lte: paidAt },
+    },
+    select: { dueAt: true },
+  });
+  const nextStatus = creditStatusForOverdueReceivables({
+    currentStatus: account.status,
+    statusSource: account.statusSource,
+    maxOverdueDays: maxOverdueDaysForReceivables(openReceivables, paidAt),
+    hasEligibleHold: hasEligibleCreditHold(openReceivables, account.manuallyUnlockedAt, paidAt),
+  });
   await tx.creditAccount.update({
     where: { id: account.id },
-    data: { usedAmount, status: ['overdue_hold', 'credit_limited'].includes(account.status) ? 'active' : account.status },
+    data: {
+      usedAmount,
+      ...(nextStatus === account.status ? {} : { status: nextStatus, statusSource: 'system' }),
+    },
   });
   await tx.creditTransaction.create({ data: { userId: receivable.userId, orderId, type: 'release', amount: -receivable.amount, balanceAfter: usedAmount, actorId } });
   await tx.accountReceivable.update({ where: { id: receivable.id }, data: { status: 'paid', paidAt } });

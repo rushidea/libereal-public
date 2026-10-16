@@ -16,7 +16,7 @@ vi.mock('@/lib/admin-mfa-settings', () => ({
   isAdminMfaScenarioEnabled: mocks.isAdminMfaScenarioEnabled,
 }));
 
-import { PATCH } from '@/app/api/admin/users/[id]/credit/route';
+import { GET, PATCH } from '@/app/api/admin/users/[id]/credit/route';
 import { NextRequest } from 'next/server';
 
 const admin = { id: 'admin_test_id', email: 'admin@test.com', role: 'admin', sessionId: 'session-1' };
@@ -50,7 +50,7 @@ describe('credit adjustment MFA scenario switch', () => {
     const response = await PATCH(patchRequest({ overrideLimit: 8000 }), { params: Promise.resolve({ id: 'user_1' }) });
 
     expect(response.status).toBe(403);
-    expect(mocks.requireAdmin).toHaveBeenCalledWith('customers.write');
+    expect(mocks.requireAdmin).toHaveBeenCalledWith('finance.write');
     expect(mocks.requireAdminStepUp).toHaveBeenCalledWith(admin);
     expect(getTestDb().prepare('SELECT overrideLimit FROM CreditAccount WHERE userId = ?').get('user_1')).toBeUndefined();
   });
@@ -69,6 +69,32 @@ describe('credit adjustment MFA scenario switch', () => {
     expect(db.prepare('SELECT overrideLimit FROM CreditAccount WHERE userId = ?').get('user_1')).toEqual({ overrideLimit: 8000 });
     expect(db.prepare('SELECT type, reason FROM CreditTransaction WHERE userId = ?').all('user_1')).toContainEqual({ type: 'admin_adjust', reason: '测试' });
     expect(db.prepare('SELECT action FROM AuditLog WHERE action = ?').get('customer.credit_changed')).toEqual({ action: 'customer.credit_changed' });
+  });
+
+  it('reads credit with finance.read', async () => {
+    mocks.requireAdmin.mockResolvedValue(admin);
+
+    const response = await GET(new NextRequest('http://localhost/api/admin/users/user_1/credit'), { params: Promise.resolve({ id: 'user_1' }) });
+
+    expect(response.status).toBe(200);
+    expect(mocks.requireAdmin).toHaveBeenCalledWith('finance.read');
+    expect(mocks.requireAdmin).not.toHaveBeenCalledWith('customers.write');
+  });
+
+  it('marks a restrictive status as manual and clears that flag when restored to active', async () => {
+    mocks.requireAdmin.mockResolvedValue(admin);
+    mocks.isAdminMfaScenarioEnabled.mockResolvedValue(false);
+
+    const limited = await PATCH(patchRequest({ status: 'credit_limited', reason: '人工限额' }), { params: Promise.resolve({ id: 'user_1' }) });
+    expect(limited.status).toBe(200);
+    expect(await limited.json()).toMatchObject({ account: { status: 'credit_limited', statusSource: 'manual' } });
+
+    const restored = await PATCH(patchRequest({ status: 'active', reason: '恢复' }), { params: Promise.resolve({ id: 'user_1' }) });
+    expect(restored.status).toBe(200);
+    const body = await restored.json();
+    expect(body.account.status).toBe('active');
+    expect(body.account.statusSource).toBe('system');
+    expect(body.account.manuallyUnlockedAt).toEqual(expect.any(String));
   });
 
   it('applies the adjustment after a successful step-up when the scenario is enabled', async () => {

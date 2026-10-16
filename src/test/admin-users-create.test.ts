@@ -147,6 +147,40 @@ describe('POST /api/admin/users create', () => {
     expect(thawed.isFrozen).toBe(0);
   });
 
+  it('sets customer tier with pricing.write and does not require customers.write', async () => {
+    seedUser(getTestDb(), { id: 'u_tier', email: 'tier-target@example.com', tier: '璞玉' });
+    requireAdmin.mockImplementation(async (permission?: string) => {
+      if (permission === 'pricing.write') {
+        return NextResponse.json({ error: 'Forbidden', requiredPermission: 'pricing.write' }, { status: 403 });
+      }
+      return { id: 'customer_admin_id', email: 'customer-admin@test.com', role: 'admin' };
+    });
+
+    const denied = await PATCH(makePatch({
+      userIds: ['u_tier'],
+      action: 'setTier',
+      tier: '翡翠',
+    }) as unknown as Request);
+    expect(denied.status).toBe(403);
+    expect(requireAdmin).toHaveBeenCalledWith('pricing.write');
+    expect(requireAdmin).not.toHaveBeenCalledWith('customers.write');
+    expect((getTestDb().prepare('SELECT tier FROM User WHERE id = ?').get('u_tier') as { tier: string }).tier).toBe('璞玉');
+
+    requireAdmin.mockImplementation(async (permission?: string) => {
+      if (permission === 'customers.write') {
+        return NextResponse.json({ error: 'Forbidden', requiredPermission: 'customers.write' }, { status: 403 });
+      }
+      return { id: 'finance_id', email: 'finance@test.com', role: 'admin' };
+    });
+    const allowed = await PATCH(makePatch({
+      userIds: ['u_tier'],
+      action: 'setTier',
+      tier: '翡翠',
+    }) as unknown as Request);
+    expect(allowed.status).toBe(200);
+    expect((getTestDb().prepare('SELECT tier FROM User WHERE id = ?').get('u_tier') as { tier: string }).tier).toBe('翡翠');
+  });
+
   it('returns 403 and changes nothing when freeze selection includes an admin', async () => {
     seedUser(getTestDb(), { id: 'u_freeze', email: 'freeze-target@example.com' });
 

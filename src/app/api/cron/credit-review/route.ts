@@ -2,7 +2,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import {
   CREDIT_REVIEW_POLICY,
-  creditRestrictionForOverdueDays,
+  creditStatusForOverdueReceivables,
+  hasEligibleCreditHold,
+  maxOverdueDaysForReceivables,
   overdueDaysFromDueAt,
   runDailyTierReview,
 } from '@/lib/customer-credit';
@@ -58,22 +60,16 @@ async function handle(req: NextRequest) {
     for (const [userId, userReceivables] of receivablesByUser) {
       const account = await prisma.creditAccount.findUnique({ where: { userId } });
       if (!account) continue;
-      const maxOverdueDays = userReceivables.length
-        ? Math.max(...userReceivables.map((receivable) => overdueDaysFromDueAt(receivable.dueAt, now)))
-        : -1;
-      const hasEligibleHold = userReceivables.some((receivable) => {
-        const overdueDays = overdueDaysFromDueAt(receivable.dueAt, now);
-        return overdueDays >= CREDIT_REVIEW_POLICY.holdAfterDays
-          && (!account.manuallyUnlockedAt || !receivable.dueAt || account.manuallyUnlockedAt < receivable.dueAt);
+      const maxOverdueDays = maxOverdueDaysForReceivables(userReceivables, now);
+      const desiredStatus = creditStatusForOverdueReceivables({
+        currentStatus: account.status,
+        statusSource: account.statusSource,
+        maxOverdueDays,
+        hasEligibleHold: hasEligibleCreditHold(userReceivables, account.manuallyUnlockedAt, now),
       });
-      const desiredStatus = account.status === 'paused'
-        ? 'paused'
-        : hasEligibleHold
-          ? 'overdue_hold'
-          : creditRestrictionForOverdueDays(maxOverdueDays);
       if (desiredStatus !== account.status) {
         await prisma.$transaction(async (tx) => {
-          await tx.creditAccount.update({ where: { id: account.id }, data: { status: desiredStatus } });
+          await tx.creditAccount.update({ where: { id: account.id }, data: { status: desiredStatus, statusSource: 'system' } });
           const isLimited = desiredStatus === 'credit_limited';
           await tx.notification.create({
             data: {

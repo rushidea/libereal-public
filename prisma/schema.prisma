@@ -719,6 +719,8 @@ model CreditAccount {
   temporaryUntil   DateTime?
   usedAmount       Float    @default(0)
   status           String   @default("active")
+  // system：审查或结清按未结应收计算；manual：财务设置的限额、停单或暂停，审查和结清不覆盖。
+  statusSource     String   @default("system")
   paymentTermDays  Int      @default(30)
   manuallyUnlockedAt DateTime?
   createdAt        DateTime @default(now())

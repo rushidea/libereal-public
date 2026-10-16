@@ -6,7 +6,7 @@ import { creditLimitForAccount, ensureCreditAccount } from '@/lib/customer-credi
 import { writeAuditLog } from '@/lib/audit';
 
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const admin = await requireAdmin('customers.read');
+  const admin = await requireAdmin('finance.read');
   if (admin instanceof NextResponse) return admin;
   const { id } = await params;
   const user = await prisma.user.findUnique({ where: { id }, select: { id: true, tier: true } });
@@ -17,7 +17,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
 }
 
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const admin = await requireAdmin('customers.write');
+  const admin = await requireAdmin('finance.write');
   if (admin instanceof NextResponse) return admin;
   const creditScenarioEnabled = await isAdminMfaScenarioEnabled('credit.adjust');
   const creditAdmin = creditScenarioEnabled ? await requireAdminStepUp(admin) : admin;
@@ -43,7 +43,11 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
         ...(temporaryLimit !== undefined ? { temporaryLimit } : {}),
         ...(body.temporaryUntil !== undefined ? { temporaryUntil: body.temporaryUntil ? new Date(body.temporaryUntil) : null } : {}),
         ...(paymentTermDays !== undefined ? { paymentTermDays } : {}),
-        ...(body.status !== undefined ? { status: body.status, manuallyUnlockedAt: body.status === 'active' ? new Date() : undefined } : {}),
+        ...(body.status !== undefined ? {
+          status: body.status,
+          statusSource: body.status === 'active' ? 'system' : 'manual',
+          ...(body.status === 'active' ? { manuallyUnlockedAt: new Date() } : {}),
+        } : {}),
       },
     });
     await tx.creditTransaction.create({ data: { userId: id, type: 'admin_adjust', amount: 0, balanceAfter: updated.usedAmount, reason: body.reason || '管理员调整授信', actorId: admin.id } });

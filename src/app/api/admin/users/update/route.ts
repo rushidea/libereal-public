@@ -4,6 +4,7 @@ import { prisma } from '@/lib/prisma';
 import { requireAdmin } from '@/lib/session';
 import { requireAdminPointsMutation } from '@/lib/admin-points-step-up';
 import type { Prisma } from '@prisma/client';
+import { customerProfileFieldsChanged, tierChangeRequiresPricing } from '@/lib/customer-profile-permissions';
 import { TIER_DISCOUNT_RATES } from '@/lib/discount';
 import { writeAuditLog } from '@/lib/audit';
 import { validatePointsTarget } from '@/lib/points';
@@ -39,7 +40,7 @@ function parseBrandDiscountsPayload(brandDiscounts: unknown): { ok: true; value:
 }
 
 export async function PUT(req: NextRequest) {
-  const user = await requireAdmin('customers.write');
+  const user = await requireAdmin();
   if (user instanceof NextResponse) return user;
 
   try {
@@ -75,16 +76,6 @@ export async function PUT(req: NextRequest) {
       return NextResponse.json({ error: 'userId required' }, { status: 400 });
     }
 
-    const touchesPricing = discountRate !== undefined || brandDiscounts !== undefined;
-    if (touchesPricing) {
-      const pricingAdmin = await requireAdmin('pricing.write');
-      if (pricingAdmin instanceof NextResponse) return pricingAdmin;
-    }
-    if (points !== undefined) {
-      const pointsAdmin = await requireAdminPointsMutation(typeof body.stepUpToken === 'string' ? body.stepUpToken.trim() : undefined);
-      if (pointsAdmin instanceof NextResponse) return pointsAdmin;
-    }
-
     const targetUser = await prisma.user.findUnique({
       where: { id: userId },
       select: {
@@ -118,6 +109,30 @@ export async function PUT(req: NextRequest) {
     });
     if (!targetUser) {
       return NextResponse.json({ error: '用户不存在' }, { status: 404 });
+    }
+
+    const tierChanged = tierChangeRequiresPricing(targetUser.tier, tier);
+    const pricingFieldsPresent = discountRate !== undefined || brandDiscounts !== undefined || tierChanged;
+    const roleChangingEarly = role !== undefined && role !== targetUser.role;
+    const customerFieldsChanged = customerProfileFieldsChanged(targetUser, body) || roleChangingEarly || role === 'admin';
+    if (customerFieldsChanged) {
+      const customerAdmin = await requireAdmin('customers.write');
+      if (customerAdmin instanceof NextResponse) return customerAdmin;
+    }
+    if (pricingFieldsPresent) {
+      const pricingAdmin = await requireAdmin('pricing.write');
+      if (pricingAdmin instanceof NextResponse) return pricingAdmin;
+    }
+    if (points !== undefined) {
+      const pointsAdmin = await requireAdminPointsMutation(typeof body.stepUpToken === 'string' ? body.stepUpToken.trim() : undefined);
+      if (pointsAdmin instanceof NextResponse) return pointsAdmin;
+    }
+    if (!customerFieldsChanged && !pricingFieldsPresent && points === undefined) {
+      const reader = await requireAdmin('customers.read');
+      if (reader instanceof NextResponse) {
+        const pricingReader = await requireAdmin('pricing.read');
+        if (pricingReader instanceof NextResponse) return pricingReader;
+      }
     }
 
     const hasStatusChange = approvalStatus !== undefined || isBlacklisted !== undefined || isFrozen !== undefined;

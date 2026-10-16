@@ -217,24 +217,32 @@ export async function DELETE(req: Request) {
 }
 
 export async function PATCH(req: Request) {
-  const denied = await requireAdmin('customers.write');
-  if (denied instanceof NextResponse) return denied;
-
   try {
     const { userIds, action, tier } = await req.json();
     if (!Array.isArray(userIds) || userIds.length === 0) {
       return NextResponse.json({ error: 'userIds is required' }, { status: 400 });
     }
 
+    if (action === 'setTier') {
+      const denied = await requireAdmin('pricing.write');
+      if (denied instanceof NextResponse) return denied;
+      if (!tier || !Object.prototype.hasOwnProperty.call(TIER_DISCOUNT_RATES, tier)) {
+        return NextResponse.json({ error: 'Invalid action' }, { status: 400 });
+      }
+      await prisma.user.updateMany({
+        where: { id: { in: userIds } },
+        data: { tier },
+      });
+      return NextResponse.json({ success: true });
+    }
+
+    const denied = await requireAdmin('customers.write');
+    if (denied instanceof NextResponse) return denied;
+
     if (action === 'approve') {
       await prisma.user.updateMany({
         where: { id: { in: userIds } },
         data: { isNewUser: false, approvalStatus: 'approved' },
-      });
-    } else if (action === 'setTier' && tier && Object.prototype.hasOwnProperty.call(TIER_DISCOUNT_RATES, tier)) {
-      await prisma.user.updateMany({
-        where: { id: { in: userIds } },
-        data: { tier },
       });
     } else if (action === 'freeze' || action === 'unfreeze') {
       const targets = await prisma.user.findMany({

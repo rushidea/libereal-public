@@ -134,6 +134,59 @@ describe('admin user status update', () => {
     expect(after).toEqual(before);
   });
 
+  it('keeps the current tier when the submitted tier is unchanged and pricing.write is absent', async () => {
+    requireAdmin.mockImplementation(async (permission?: string) => {
+      if (permission === 'pricing.write' || permission === 'customers.write') {
+        return NextResponse.json({ error: 'Forbidden', requiredPermission: permission }, { status: 403 });
+      }
+      return { id: 'finance_id', email: 'finance@test.com', role: 'admin' };
+    });
+
+    const res = await updateUser(makeReq({ userId: 'u_status', tier: '璞玉' }));
+    expect(res.status).toBe(200);
+    expect(requireAdmin).not.toHaveBeenCalledWith('pricing.write');
+    expect(requireAdmin).not.toHaveBeenCalledWith('customers.write');
+    expect((getTestDb().prepare('SELECT tier FROM User WHERE id = ?').get('u_status') as { tier: string }).tier).toBe('璞玉');
+  });
+
+  it('requires pricing.write to change a customer tier and allows it without customers.write', async () => {
+    requireAdmin.mockImplementation(async (permission?: string) => {
+      if (permission === 'pricing.write') {
+        return NextResponse.json({ error: 'Forbidden', requiredPermission: 'pricing.write' }, { status: 403 });
+      }
+      return { id: 'customer_admin_id', email: 'customer-admin@test.com', role: 'admin' };
+    });
+
+    const denied = await updateUser(makeReq({ userId: 'u_status', tier: '翡翠' }));
+    expect(denied.status).toBe(403);
+    expect(requireAdmin).toHaveBeenCalledWith('pricing.write');
+    expect(requireAdmin).not.toHaveBeenCalledWith('customers.write');
+    expect((getTestDb().prepare('SELECT tier FROM User WHERE id = ?').get('u_status') as { tier: string }).tier).toBe('璞玉');
+
+    requireAdmin.mockImplementation(async (permission?: string) => {
+      if (permission === 'customers.write') {
+        return NextResponse.json({ error: 'Forbidden', requiredPermission: 'customers.write' }, { status: 403 });
+      }
+      return { id: 'finance_id', email: 'finance@test.com', role: 'admin' };
+    });
+    const allowed = await updateUser(makeReq({ userId: 'u_status', tier: '翡翠' }));
+    expect(allowed.status).toBe(200);
+    expect((getTestDb().prepare('SELECT tier FROM User WHERE id = ?').get('u_status') as { tier: string }).tier).toBe('翡翠');
+  });
+
+  it('rejects a profile change without customers.write', async () => {
+    requireAdmin.mockImplementation(async (permission?: string) => {
+      if (permission === 'customers.write') {
+        return NextResponse.json({ error: 'Forbidden', requiredPermission: 'customers.write' }, { status: 403 });
+      }
+      return { id: 'finance_id', email: 'finance@test.com', role: 'admin' };
+    });
+
+    const res = await updateUser(makeReq({ userId: 'u_status', name: '新名字' }));
+    expect(res.status).toBe(403);
+    expect((getTestDb().prepare('SELECT name FROM User WHERE id = ?').get('u_status') as { name: string }).name).toBe('Status User');
+  });
+
   it('rejects promoting an already-frozen account to admin with only role field', async () => {
     getTestDb().prepare('UPDATE User SET isFrozen = 1 WHERE id = ?').run('u_status');
     const before = getTestDb().prepare(

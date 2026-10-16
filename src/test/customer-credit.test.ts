@@ -4,6 +4,7 @@ import {
   CREDIT_REVIEW_POLICY,
   creditLimitForAccount,
   creditRestrictionForOverdueDays,
+  creditStatusForOverdueReceivables,
   effectiveCreditLimit,
   ensureCreditAccount,
   overdueDaysFromDueAt,
@@ -114,6 +115,95 @@ describe('membership and customer credit', () => {
     seedOrder('order_1', 'buyer@test.com', 600);
     await expect(prisma.$transaction((tx) => reserveOrderCredit(tx, 'order_1'))).rejects.toThrow('CREDIT_LIMIT_EXCEEDED');
     expect(await prisma.accountReceivable.count()).toBe(0);
+  });
+
+  it('keeps a manual limit or stop when one order is settled and only clears a system restriction that is no longer warranted', async () => {
+    seedOrder('order_old', 'buyer@test.com', 2000);
+    seedOrder('order_new', 'buyer@test.com', 1500);
+    await prisma.$transaction((tx) => reserveOrderCredit(tx, 'order_old', 'admin_1'));
+    await prisma.$transaction((tx) => reserveOrderCredit(tx, 'order_new', 'admin_1'));
+    const dueOld = new Date(Date.now() - 95 * 86400000);
+    const dueNew = new Date(Date.now() - 70 * 86400000);
+    await prisma.accountReceivable.update({ where: { orderId: 'order_old' }, data: { dueAt: dueOld, termStartedAt: dueOld } });
+    await prisma.accountReceivable.update({ where: { orderId: 'order_new' }, data: { dueAt: dueNew, termStartedAt: dueNew } });
+    await prisma.creditAccount.update({ where: { userId: 'user_1' }, data: { status: 'overdue_hold', statusSource: 'system' } });
+
+    await prisma.$transaction((tx) => settleOrderReceivable(tx, 'order_old', 'finance_1'));
+    expect(await prisma.creditAccount.findUnique({ where: { userId: 'user_1' } })).toMatchObject({
+      status: 'credit_limited',
+      statusSource: 'system',
+      usedAmount: 1500,
+    });
+
+    await prisma.creditAccount.update({ where: { userId: 'user_1' }, data: { status: 'overdue_hold', statusSource: 'manual' } });
+    await prisma.$transaction((tx) => settleOrderReceivable(tx, 'order_new', 'finance_1'));
+    expect(await prisma.creditAccount.findUnique({ where: { userId: 'user_1' } })).toMatchObject({
+      status: 'overdue_hold',
+      statusSource: 'manual',
+      usedAmount: 0,
+    });
+  });
+
+  it('restores a system restriction only after no due receivable remains, and leaves a manual pause in place', async () => {
+    seedOrder('order_1', 'buyer@test.com', 4000);
+    await prisma.$transaction((tx) => reserveOrderCredit(tx, 'order_1', 'admin_1'));
+    const dueAt = new Date(Date.now() - 90 * 86400000);
+    await prisma.accountReceivable.update({ where: { orderId: 'order_1' }, data: { dueAt, termStartedAt: dueAt } });
+    await prisma.creditAccount.update({ where: { userId: 'user_1' }, data: { status: 'credit_limited', statusSource: 'system' } });
+
+    await prisma.$transaction((tx) => settleOrderReceivable(tx, 'order_1', 'finance_1'));
+    expect(await prisma.creditAccount.findUnique({ where: { userId: 'user_1' } })).toMatchObject({
+      status: 'active',
+      statusSource: 'system',
+      usedAmount: 0,
+    });
+
+    seedOrder('order_2', 'buyer@test.com', 1000);
+    await prisma.creditAccount.update({ where: { userId: 'user_1' }, data: { status: 'paused', statusSource: 'manual', usedAmount: 1000 } });
+    await prisma.accountReceivable.create({
+      data: {
+        orderId: 'order_2',
+        userId: 'user_1',
+        amount: 1000,
+        status: 'open',
+        confirmedAt: new Date(),
+        dueAt: new Date(Date.now() - 10 * 86400000),
+        paymentTermDaysSnapshot: 30,
+      },
+    });
+    await prisma.$transaction((tx) => settleOrderReceivable(tx, 'order_2', 'finance_1'));
+    expect(await prisma.creditAccount.findUnique({ where: { userId: 'user_1' } })).toMatchObject({
+      status: 'paused',
+      statusSource: 'manual',
+      usedAmount: 0,
+    });
+  });
+
+  it('does not treat a manual limit as cleared when overdue days would otherwise allow ordering', () => {
+    expect(creditStatusForOverdueReceivables({
+      currentStatus: 'credit_limited',
+      statusSource: 'manual',
+      maxOverdueDays: 10,
+      hasEligibleHold: false,
+    })).toBe('credit_limited');
+    expect(creditStatusForOverdueReceivables({
+      currentStatus: 'overdue_hold',
+      statusSource: 'manual',
+      maxOverdueDays: -1,
+      hasEligibleHold: false,
+    })).toBe('overdue_hold');
+    expect(creditStatusForOverdueReceivables({
+      currentStatus: 'paused',
+      statusSource: 'system',
+      maxOverdueDays: 120,
+      hasEligibleHold: true,
+    })).toBe('paused');
+    expect(creditStatusForOverdueReceivables({
+      currentStatus: 'credit_limited',
+      statusSource: 'system',
+      maxOverdueDays: -1,
+      hasEligibleHold: false,
+    })).toBe('active');
   });
 
   it('keeps later settlement on the adjusted receivable instead of the original total', async () => {

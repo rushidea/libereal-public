@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import type { Prisma } from '@prisma/client';
+import { customerProfileFieldsChanged, tierChangeRequiresPricing } from '@/lib/customer-profile-permissions';
 import { requireAdmin } from '@/lib/session';
 import { requireAdminPointsMutation } from '@/lib/admin-points-step-up';
 import { writeAuditLog } from '@/lib/audit';
@@ -49,7 +50,7 @@ export async function GET(req: NextRequest) {
 }
 
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const admin = await requireAdmin('customers.write');
+  const admin = await requireAdmin();
   if (admin instanceof NextResponse) return admin;
 
   try {
@@ -82,7 +83,19 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       piLab: typeof body.piLab === 'string' ? body.piLab.trim() : '',
       affiliatedLab: typeof body.affiliatedLab === 'string' ? body.affiliatedLab.trim() || null : null,
     };
-    if (discountRate !== undefined || brandDiscounts !== undefined) {
+    const existing = await prisma.user.findUnique({ where: { id }, select: { id: true, tier: true, discountRate: true, brandDiscounts: true, points: true, name: true, phone: true, institution: true, institutionType: true, institutionName: true, institutionUnit: true, department: true, institutionFacility: true, school: true, college: true, major: true, building: true, piLab: true, affiliatedLab: true } });
+    if (!existing) {
+      return NextResponse.json({ error: 'User not found' }, { status: 404 });
+    }
+
+    const tierChanged = tierChangeRequiresPricing(existing.tier, tier);
+    const pricingFieldsPresent = discountRate !== undefined || brandDiscounts !== undefined || tierChanged;
+    const customerFieldsChanged = customerProfileFieldsChanged(existing, body);
+    if (customerFieldsChanged) {
+      const customerAdmin = await requireAdmin('customers.write');
+      if (customerAdmin instanceof NextResponse) return customerAdmin;
+    }
+    if (pricingFieldsPresent) {
       const pricingAdmin = await requireAdmin('pricing.write');
       if (pricingAdmin instanceof NextResponse) return pricingAdmin;
     }
@@ -90,10 +103,12 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       const pointsAdmin = await requireAdminPointsMutation(typeof body.stepUpToken === 'string' ? body.stepUpToken.trim() : undefined);
       if (pointsAdmin instanceof NextResponse) return pointsAdmin;
     }
-
-    const existing = await prisma.user.findUnique({ where: { id }, select: { id: true, tier: true, discountRate: true, brandDiscounts: true, points: true, name: true, phone: true, institution: true, institutionType: true, institutionName: true, institutionUnit: true, department: true, institutionFacility: true, school: true, college: true, major: true, building: true, piLab: true, affiliatedLab: true } });
-    if (!existing) {
-      return NextResponse.json({ error: 'User not found' }, { status: 404 });
+    if (!customerFieldsChanged && !pricingFieldsPresent && points === undefined) {
+      const reader = await requireAdmin('customers.read');
+      if (reader instanceof NextResponse) {
+        const pricingReader = await requireAdmin('pricing.read');
+        if (pricingReader instanceof NextResponse) return pricingReader;
+      }
     }
 
     const updateData: Prisma.UserUpdateManyMutationInput = {};
