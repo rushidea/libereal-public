@@ -85,6 +85,68 @@ export async function reserveOrderCredit(tx: Tx, orderId: string, actorId?: stri
   });
 }
 
+const UNSETTLED_RECEIVABLE_STATUSES = new Set(['open', 'overdue']);
+
+function roundCents(value: number): number {
+  return Math.round((value + Number.EPSILON) * 100) / 100;
+}
+
+export function isUnsettledReceivableStatus(status: string): boolean {
+  return UNSETTLED_RECEIVABLE_STATUSES.has(status);
+}
+
+export type UnsettledReceivableSync = {
+  adjusted: boolean;
+  amount: number;
+  usedAmount: number;
+  status: string;
+};
+
+export async function syncUnsettledReceivableAmount(
+  tx: Tx,
+  orderId: string,
+  nextTotal: number,
+  actorId?: string | null,
+): Promise<UnsettledReceivableSync | null> {
+  if (!Number.isFinite(nextTotal) || nextTotal < 0) throw new Error('INVALID_ORDER_AMOUNT');
+  const receivable = await tx.accountReceivable.findUnique({ where: { orderId } });
+  if (!receivable) return null;
+  if (!isUnsettledReceivableStatus(receivable.status)) throw new Error('ORDER_AMOUNT_LOCKED');
+
+  const nextAmount = roundCents(nextTotal);
+  const delta = roundCents(nextAmount - receivable.amount);
+  const account = await tx.creditAccount.findUnique({ where: { userId: receivable.userId } });
+  if (!account) throw new Error('CREDIT_ACCOUNT_NOT_FOUND');
+  if (delta === 0) {
+    if (receivable.amount !== nextAmount) {
+      await tx.accountReceivable.update({ where: { id: receivable.id }, data: { amount: nextAmount } });
+    }
+    return { adjusted: false, amount: nextAmount, usedAmount: account.usedAmount, status: receivable.status };
+  }
+
+  const usedAmount = roundCents(account.usedAmount + delta);
+  if (usedAmount < 0) throw new Error('CREDIT_USED_INVALID');
+  if (delta > 0) {
+    if (!['active', 'credit_limited'].includes(account.status)) throw new Error('CREDIT_ACCOUNT_SUSPENDED');
+    if (usedAmount > creditLimitForAccount(account)) throw new Error('CREDIT_LIMIT_EXCEEDED');
+  }
+
+  await tx.creditAccount.update({ where: { id: account.id }, data: { usedAmount } });
+  await tx.creditTransaction.create({
+    data: {
+      userId: receivable.userId,
+      orderId,
+      type: 'amount_adjust',
+      amount: delta,
+      balanceAfter: usedAmount,
+      reason: '订单改价同步应收',
+      actorId,
+    },
+  });
+  await tx.accountReceivable.update({ where: { id: receivable.id }, data: { amount: nextAmount } });
+  return { adjusted: true, amount: nextAmount, usedAmount, status: receivable.status };
+}
+
 export async function startOrderReceivableTerm(tx: Tx, orderId: string, startedAt = new Date()) {
   const receivable = await tx.accountReceivable.findUnique({ where: { orderId } });
   if (!receivable) throw new Error('RECEIVABLE_NOT_FOUND');
