@@ -1,5 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
-import { applyOrderPointsDeduction, previewPointsRedeem, refundOrderPointsProportionally } from '@/lib/points-checkout-service';
+import {
+  applyOrderPointsDeduction,
+  POINTS_DEDUCTION_ROLLBACK_REASON,
+  previewPointsRedeem,
+  refundOrderPointsProportionally,
+} from '@/lib/points-checkout-service';
 
 describe('points checkout service organization context', () => {
   it('only allows the current research-group member to use group points', async () => {
@@ -39,8 +44,11 @@ describe('points checkout service organization context', () => {
         update: vi.fn(),
         updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       },
-      researchGroup: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
-      groupPointsLog: { create: vi.fn() },
+      researchGroup: {
+        findUnique: vi.fn().mockResolvedValue({ points: 100, status: 'active' }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      groupPointsLog: { findMany: vi.fn().mockResolvedValue([]), create: vi.fn() },
     };
 
     await expect(applyOrderPointsDeduction(tx as never, 'order-1')).resolves.toEqual({ ok: true });
@@ -180,5 +188,206 @@ describe('points checkout service organization context', () => {
     expect(order.pointsRefundedPersonal).toBe(10);
     expect(order.pointsRefundedCash).toBe(100);
     expect(tx.pointsLog.create).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('applyOrderPointsDeduction consistency', () => {
+  function settlementOrder(overrides: Record<string, unknown> = {}) {
+    return {
+      id: 'order-1',
+      customerId: 'user-1',
+      pointsPersonal: 10,
+      pointsGroup: 0,
+      pointsGroupId: null,
+      pointsDiscount: 10,
+      pointsApplied: false,
+      pointsAppliedAt: null,
+      status: 'pending',
+      ...overrides,
+    };
+  }
+
+  it('releases the applied flag when personal points are insufficient', async () => {
+    const writes: Array<Record<string, unknown>> = [];
+    const tx = {
+      order: {
+        findUnique: vi.fn().mockResolvedValue(settlementOrder()),
+        updateMany: vi.fn(async (args: { data: Record<string, unknown> }) => {
+          writes.push(args.data);
+          return { count: 1 };
+        }),
+      },
+      user: {
+        findUnique: vi.fn().mockResolvedValue({ points: 0 }),
+        updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+      },
+      pointsLog: { findMany: vi.fn().mockResolvedValue([]), create: vi.fn() },
+    };
+
+    await expect(applyOrderPointsDeduction(tx as never, 'order-1')).resolves.toEqual({
+      ok: false,
+      error: '个人积分不足',
+    });
+    expect(writes.at(-1)).toEqual({ pointsApplied: false, pointsAppliedAt: null });
+    expect(tx.pointsLog.create).not.toHaveBeenCalled();
+  });
+
+  it('releases the flag without writing ledgers when group points are already insufficient', async () => {
+    const tx = {
+      order: {
+        findUnique: vi.fn().mockResolvedValue(settlementOrder({
+          pointsPersonal: 8,
+          pointsGroup: 4,
+          pointsGroupId: 'group-1',
+          pointsDiscount: 12,
+        })),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      user: {
+        findUnique: vi.fn().mockResolvedValue({ points: 8 }),
+        updateMany: vi.fn(),
+        update: vi.fn(),
+      },
+      pointsLog: { findMany: vi.fn().mockResolvedValue([]), create: vi.fn() },
+      researchGroup: {
+        findUnique: vi.fn().mockResolvedValue({ points: 1, status: 'active' }),
+        updateMany: vi.fn(),
+      },
+      groupPointsLog: { findMany: vi.fn().mockResolvedValue([]), create: vi.fn() },
+    };
+
+    await expect(applyOrderPointsDeduction(tx as never, 'order-1')).resolves.toEqual({
+      ok: false,
+      error: '课题组积分不足',
+    });
+    expect(tx.user.updateMany).not.toHaveBeenCalled();
+    expect(tx.pointsLog.create).not.toHaveBeenCalled();
+    expect(tx.researchGroup.updateMany).not.toHaveBeenCalled();
+    expect(tx.order.updateMany).toHaveBeenLastCalledWith({
+      where: { id: 'order-1' },
+      data: { pointsApplied: false, pointsAppliedAt: null },
+    });
+  });
+
+  it('rolls back the personal deduction when the group balance changes after the precheck', async () => {
+    const tx = {
+      order: {
+        findUnique: vi.fn().mockResolvedValue(settlementOrder({
+          pointsPersonal: 8,
+          pointsGroup: 4,
+          pointsGroupId: 'group-1',
+          pointsDiscount: 12,
+        })),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      user: {
+        findUnique: vi.fn().mockResolvedValue({ points: 8 }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+        update: vi.fn(),
+      },
+      pointsLog: { findMany: vi.fn().mockResolvedValue([]), create: vi.fn() },
+      researchGroup: {
+        findUnique: vi.fn().mockResolvedValue({ points: 4, status: 'active' }),
+        updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+      },
+      groupPointsLog: { findMany: vi.fn().mockResolvedValue([]), create: vi.fn() },
+    };
+
+    await expect(applyOrderPointsDeduction(tx as never, 'order-1')).resolves.toEqual({
+      ok: false,
+      error: '课题组积分不足',
+    });
+    expect(tx.pointsLog.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        delta: 8,
+        type: 'order_redeem_refund',
+        reason: POINTS_DEDUCTION_ROLLBACK_REASON,
+        relatedId: 'order-1',
+      }),
+    });
+    expect(tx.groupPointsLog.create).not.toHaveBeenCalled();
+    expect(tx.order.updateMany).toHaveBeenLastCalledWith({
+      where: { id: 'order-1' },
+      data: { pointsApplied: false, pointsAppliedAt: null },
+    });
+  });
+
+  it('does not deduct again when the applied flag already has a matching negative ledger', async () => {
+    const tx = {
+      order: {
+        findUnique: vi.fn().mockResolvedValue(settlementOrder({
+          pointsApplied: true,
+          pointsAppliedAt: new Date('2026-08-01T00:00:00.000Z'),
+        })),
+        updateMany: vi.fn(),
+      },
+      user: { updateMany: vi.fn() },
+      pointsLog: { findMany: vi.fn().mockResolvedValue([{ delta: -10 }]), create: vi.fn() },
+    };
+
+    await expect(applyOrderPointsDeduction(tx as never, 'order-1')).resolves.toEqual({ ok: true });
+    expect(tx.user.updateMany).not.toHaveBeenCalled();
+    expect(tx.order.updateMany).not.toHaveBeenCalled();
+    expect(tx.pointsLog.create).not.toHaveBeenCalled();
+  });
+
+  it('deducts only the missing portion when the flag is set without a ledger', async () => {
+    const tx = {
+      order: {
+        findUnique: vi.fn().mockResolvedValue(settlementOrder({
+          pointsApplied: true,
+          pointsAppliedAt: new Date('2026-08-01T00:00:00.000Z'),
+        })),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      user: {
+        findUnique: vi.fn().mockResolvedValue({ points: 10 }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      pointsLog: { findMany: vi.fn().mockResolvedValue([]), create: vi.fn() },
+      $queryRaw: vi.fn().mockResolvedValue([{ stamp: '2026-08-01T00:00:00.000Z' }]),
+      $executeRaw: vi.fn().mockResolvedValue(1),
+    };
+
+    await expect(applyOrderPointsDeduction(tx as never, 'order-1')).resolves.toEqual({ ok: true });
+    expect(tx.user.updateMany).toHaveBeenCalledWith({
+      where: { id: 'user-1', points: { gte: 10 } },
+      data: { points: { decrement: 10 } },
+    });
+    expect(tx.order.updateMany).not.toHaveBeenCalledWith(expect.objectContaining({
+      data: { pointsApplied: false, pointsAppliedAt: null },
+    }));
+  });
+
+  it('rolls back personal points when the order has no research group id', async () => {
+    const tx = {
+      order: {
+        findUnique: vi.fn().mockResolvedValue(settlementOrder({
+          pointsPersonal: 6,
+          pointsGroup: 3,
+          pointsGroupId: null,
+        })),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      user: {
+        findUnique: vi.fn().mockResolvedValue({ points: 6 }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+        update: vi.fn(),
+      },
+      pointsLog: { findMany: vi.fn().mockResolvedValue([]), create: vi.fn() },
+      researchGroup: { updateMany: vi.fn() },
+      groupPointsLog: { findMany: vi.fn(), create: vi.fn() },
+    };
+
+    await expect(applyOrderPointsDeduction(tx as never, 'order-1')).resolves.toEqual({
+      ok: false,
+      error: '缺少课题组',
+    });
+    expect(tx.user.updateMany).not.toHaveBeenCalled();
+    expect(tx.pointsLog.create).not.toHaveBeenCalled();
+    expect(tx.order.updateMany).toHaveBeenLastCalledWith({
+      where: { id: 'order-1' },
+      data: { pointsApplied: false, pointsAppliedAt: null },
+    });
   });
 });

@@ -17,7 +17,12 @@ export function isUniqueConstraintError(error: unknown): error is { code: 'P2002
   return typeof error === 'object' && error !== null && 'code' in error && error.code === 'P2002';
 }
 
-/** Preserve payment settlement while rolling back a failed legacy points deduction. */
+/**
+ * Run points deduction inside a savepoint.
+ * A returned failure leaves the surrounding payment writes in place.
+ * An unexpected exception rolls the deduction back and propagates, so the
+ * payment transaction aborts and Alipay can retry the notification.
+ */
 export async function settlePaymentPoints(
   tx: import('@prisma/client').Prisma.TransactionClient,
   orderId: string,
@@ -31,6 +36,6 @@ export async function settlePaymentPoints(
   } catch (error) {
     await tx.$executeRawUnsafe('ROLLBACK TO SAVEPOINT payment_points_settlement');
     await tx.$executeRawUnsafe('RELEASE SAVEPOINT payment_points_settlement');
-    return { ok: false, error: error instanceof Error ? error.message : '积分结算失败' };
+    throw error;
   }
 }
