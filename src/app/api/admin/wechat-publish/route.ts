@@ -3,6 +3,10 @@ import { writeFile, mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { requireAdmin } from '@/lib/session';
 import {
+  WechatPublishPathError,
+  buildWechatPublishPaths,
+} from '@/lib/wechat-publish-paths';
+import {
   uploadCoverImage,
   createDraft,
   publishDraft,
@@ -50,16 +54,32 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: '文章缺少标题（# 标题）' }, { status: 400 });
     }
 
-    // Save cover image to temp file for upload
-    const coverBuffer = Buffer.from(await coverFile.arrayBuffer());
+    const contentDir = join(process.cwd(), 'content', 'wechat');
     const tmpDir = join(process.cwd(), '.tmp');
+    let publishPaths;
+    try {
+      publishPaths = buildWechatPublishPaths({
+        title: parsed.title,
+        coverFilename: typeof coverFile.name === 'string' ? coverFile.name : '',
+        contentDir,
+        tempDir: tmpDir,
+      });
+    } catch (error) {
+      if (error instanceof WechatPublishPathError) {
+        return NextResponse.json({ error: '文件路径无效' }, { status: 400 });
+      }
+      throw error;
+    }
+    if (!publishPaths.ok) {
+      return NextResponse.json({ error: '封面只支持 png、jpg、jpeg 或 webp 图片' }, { status: 400 });
+    }
+
+    const coverBuffer = Buffer.from(await coverFile.arrayBuffer());
     await mkdir(tmpDir, { recursive: true });
-    const coverExt = coverFile.name.split('.').pop() ?? 'png';
-    const tmpCoverPath = join(tmpDir, `wechat-cover-${Date.now()}.${coverExt}`);
-    await writeFile(tmpCoverPath, coverBuffer);
+    await writeFile(publishPaths.tempCoverPath, coverBuffer);
 
     // 1. Upload cover image to WeChat
-    const uploadResult = await uploadCoverImage(tmpCoverPath);
+    const uploadResult = await uploadCoverImage(publishPaths.tempCoverPath);
 
     // 2. Create draft
     const draft = await createDraft({
@@ -81,15 +101,9 @@ export async function POST(request: NextRequest) {
 
     // 4. Optionally save a copy to content/wechat/
     if (saveCopy) {
-      const contentDir = join(process.cwd(), 'content', 'wechat');
       await mkdir(contentDir, { recursive: true });
-      // Use title to generate filename
-      const slug = parsed.title
-        .replace(/[：:，,。.!！？?]/g, '')
-        .replace(/\s+/g, '-')
-        .slice(0, 40);
-      await writeFile(join(contentDir, `${slug}.md`), md);
-      await writeFile(join(contentDir, `${slug}-cover.${coverExt}`), coverBuffer);
+      await writeFile(publishPaths.articlePath, md);
+      await writeFile(publishPaths.coverCopyPath, coverBuffer);
     }
 
     return NextResponse.json({
