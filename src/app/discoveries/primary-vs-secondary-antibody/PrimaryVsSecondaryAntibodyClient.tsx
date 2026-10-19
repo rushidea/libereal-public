@@ -617,7 +617,7 @@ export default function PrimaryVsSecondaryAntibodyClient() {
             {/* H2 核对清单 */}
             <h2 id="checklist" className={h2Class}>下单前核对清单</h2>
             <p className={bodyClass}>
-              提交询价前，把这八项对着货号过一遍，能省掉一大半来回确认的时间。
+              提交询价前，把这八项对着货号过一遍，能少很多来回确认的时间。
             </p>
             <div className={tableWrapClass}>
               <table className={tableClass}>
