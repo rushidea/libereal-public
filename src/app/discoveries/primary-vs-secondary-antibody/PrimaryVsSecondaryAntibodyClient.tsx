@@ -301,7 +301,7 @@ export default function PrimaryVsSecondaryAntibodyClient() {
                     <td className={tdClass}>小鼠单抗（IgG1、IgG2a 等亚型）、IgM</td>
                     <td className={tdClass}>山羊抗小鼠 IgG (H+L)；亚型特异的抗小鼠 IgG1</td>
                     <td className={tdClass}>小鼠源</td>
-                    <td className={tdClass}>染鼠组织时换宿主或封闭内源 IgG</td>
+                    <td className={tdClass}>染鼠组织时换宿主，或用 MOM 封闭试剂处理内源 IgG</td>
                   </tr>
                   <tr>
                     <td className={`${tdClass} font-medium text-slate-900 dark:text-slate-100`}>大鼠</td>
@@ -329,7 +329,7 @@ export default function PrimaryVsSecondaryAntibodyClient() {
             </div>
 
             <h3 className={h3Class}>决策树：三个问题决定用什么二抗</h3>
-            <p className={bodyClass}>按顺序问自己三个问题，基本不会选错：</p>
+            <p className={bodyClass}>按顺序问自己三个问题，能覆盖绝大多数选型情况：</p>
             <ol className="mt-3 space-y-3 text-[15px] leading-7 text-slate-700 dark:text-slate-300">
               <li className="flex gap-3">
                 <span className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full bg-brand-100 text-xs font-bold text-brand-700 dark:bg-brand-500/25 dark:text-brand-300">
@@ -337,7 +337,7 @@ export default function PrimaryVsSecondaryAntibodyClient() {
                 </span>
                 <span>
                   <strong className="font-semibold text-slate-900 dark:text-slate-100">样本和一抗同种属吗？</strong>
-                  比如鼠单抗染鼠组织——二抗会把组织里的内源 IgG 一起识别，背景一片高。三条路：换不同宿主的一抗；用该物种正常血清封闭内源免疫球蛋白；或者直接用直标一抗，不上二抗。
+                  比如鼠单抗染鼠组织——抗鼠二抗会把组织里的内源小鼠 IgG 一起识别，背景一片高。三条路：换不同宿主的一抗；用 MOM（Mouse on Mouse）封闭试剂或 Fab 片段二抗处理内源 IgG；或者直接用直标一抗，不上二抗。一般封闭用二抗宿主的正常血清，别用样本同种属的血清——那等于再加一遍 IgG。
                 </span>
               </li>
               <li className="flex gap-3">
@@ -449,7 +449,7 @@ export default function PrimaryVsSecondaryAntibodyClient() {
 
             <h3 className={h3Class}>WB</h3>
             <p className={bodyClass}>
-              WB 是二抗用量最大的场景，HRP 二抗配 ECL 底物是默认组合。孵育完把膜洗干净比加量更管用——背景高，十有八九是封闭和洗涤的问题，不是二抗买错了。磷酸化蛋白检测建议用 BSA 封闭，少用脱脂牛奶。选型可以看
+              WB 是二抗用量最大的场景，HRP 二抗配 ECL 底物是默认组合。孵育完把膜洗干净比加量更管用——背景高，先查封闭和洗涤，再怀疑二抗，这两步出问题比买错二抗更常见。磷酸化蛋白检测建议用 BSA 封闭，少用脱脂牛奶。选型可以看
               <Link href={catalogHref('一抗', 'WB抗体')} className={`mx-1 ${linkClass}`}>WB 抗体</Link>
               目录，完整流程见
               <Link href="/scenes/western-blot" className={`mx-1 ${linkClass}`}>WB 场景页</Link>。
@@ -506,10 +506,10 @@ export default function PrimaryVsSecondaryAntibodyClient() {
                   fix: '按一抗宿主选二抗，下单前核对一抗货号里的宿主信息——Anti- 后面那个词，就是二抗要抗的对象。',
                 },
                 {
-                  title: '二抗宿主和样本同种属',
-                  wrong: '鼠源二抗染鼠组织。',
-                  result: '内源 IgG 被一起识别，背景居高不下。',
-                  fix: '换驴、山羊等不同宿主的二抗，或用该物种正常血清封闭内源免疫球蛋白。',
+                  title: '一抗宿主和样本同种属',
+                  wrong: '鼠单抗染鼠组织。',
+                  result: '抗鼠二抗除了结合你加的一抗，还会识别组织里的内源小鼠 IgG，背景一片高，靶点全被盖住。',
+                  fix: '换不同宿主的一抗；用 MOM（Mouse on Mouse）封闭试剂或 Fab 片段二抗处理内源 IgG；也可以改用直标一抗，不用二抗。',
                 },
                 {
                   title: '多标时两个一抗用了同一宿主',

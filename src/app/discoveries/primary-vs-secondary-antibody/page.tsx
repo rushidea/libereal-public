@@ -4,6 +4,7 @@ import PrimaryVsSecondaryAntibodyClient from './PrimaryVsSecondaryAntibodyClient
 import { buildBreadcrumbListJsonLd, buildFaqPageJsonLd } from '@/lib/seo/json-ld';
 import { canonicalSiteUrl } from '@/lib/site-url';
 import {
+  PRIMARY_VS_SECONDARY_ANTIBODY_COVER,
   PRIMARY_VS_SECONDARY_ANTIBODY_DESCRIPTION,
   PRIMARY_VS_SECONDARY_ANTIBODY_MODIFIED,
   PRIMARY_VS_SECONDARY_ANTIBODY_PUBLISHED,
@@ -41,6 +42,7 @@ export default function PrimaryVsSecondaryAntibodyPage() {
     datePublished: PRIMARY_VS_SECONDARY_ANTIBODY_PUBLISHED,
     dateModified: PRIMARY_VS_SECONDARY_ANTIBODY_MODIFIED,
     mainEntityOfPage: url,
+    image: [canonicalSiteUrl(PRIMARY_VS_SECONDARY_ANTIBODY_COVER)],
     author: { '@type': 'Organization', name: PUBLISHER },
     publisher: { '@type': 'Organization', name: PUBLISHER },
   };

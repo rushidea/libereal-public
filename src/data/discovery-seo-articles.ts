@@ -28,6 +28,9 @@ export const PRIMARY_VS_SECONDARY_ANTIBODY_DESCRIPTION =
 export const PRIMARY_VS_SECONDARY_ANTIBODY_PUBLISHED = '2026-10-19';
 export const PRIMARY_VS_SECONDARY_ANTIBODY_MODIFIED = '2026-10-19';
 
+/** 列表卡片封面与 Article 结构化数据配图共用；更换封面时两处同步改。 */
+export const PRIMARY_VS_SECONDARY_ANTIBODY_COVER = '/images/home/resource-methods.webp';
+
 export const primaryVsSecondaryAntibodyFaqs: DiscoveryArticleFaq[] = [
   {
     q: '一抗是兔源的，二抗该选什么？',
@@ -47,11 +50,11 @@ export const primaryVsSecondaryAntibodyFaqs: DiscoveryArticleFaq[] = [
   },
   {
     q: '组织样本和一抗同种属，会出现什么问题？',
-    a: '典型场景是鼠单抗染鼠组织：二抗除了结合你加的一抗，还会结合组织里的内源小鼠 IgG，背景一片高，靶点全被盖住。处理办法有三个：换不同宿主的一抗；用该物种的正常血清封闭内源免疫球蛋白；或者改用直标一抗，直接不上二抗。',
+    a: '典型场景是鼠单抗染鼠组织：二抗除了结合你加的一抗，还会结合组织里的内源小鼠 IgG，背景一片高，靶点全被盖住。处理办法有三个：换不同宿主的一抗；用 MOM（Mouse on Mouse）封闭试剂或 Fab 片段二抗压低内源背景；或者改用直标一抗，直接不上二抗。另外，一般封闭用二抗宿主的正常血清即可，不要用样本同种属的血清——那相当于又加了一遍 IgG。',
   },
   {
-    q: '什么情况要用预吸附二抗或 F(ab\')\'2 二抗？',
-    a: '预吸附（cross-adsorbed）二抗把对其他物种免疫球蛋白的交叉反应性吸附掉了，多标实验和交叉风险高的样本首选。F(ab\')\'2 片段去掉了 Fc 段，适合富含 Fc 受体的样本（如脾脏、免疫细胞），减少非特异结合；背景主要来自 Fc 受体时，换 F(ab\')\'2 比加封闭液更管用。',
+    q: '什么情况要用预吸附二抗或 F(ab\')₂ 二抗？',
+    a: '预吸附（cross-adsorbed）二抗把对其他物种免疫球蛋白的交叉反应性吸附掉了，多标实验和交叉风险高的样本首选。F(ab\')₂ 片段去掉了 Fc 段，适合富含 Fc 受体的样本（如脾脏、免疫细胞），减少非特异结合；背景主要来自 Fc 受体时，换 F(ab\')₂ 比加封闭液更管用。',
   },
 ];
 
@@ -63,8 +66,8 @@ export const DISCOVERY_SEO_ARTICLES: WechatArticleMeta[] = [
     date: PRIMARY_VS_SECONDARY_ANTIBODY_PUBLISHED,
     publishedDate: PRIMARY_VS_SECONDARY_ANTIBODY_PUBLISHED,
     dateModified: PRIMARY_VS_SECONDARY_ANTIBODY_MODIFIED,
-    // 暂复用「发现」栏目头图作为列表卡片封面；后续可替换为专属封面图路径。
-    cover: '/images/home/resource-methods.webp',
+    // 暂复用「发现」栏目头图作为列表卡片封面与结构化数据配图；后续可替换为专属封面图路径（改常量即可同步两处）。
+    cover: PRIMARY_VS_SECONDARY_ANTIBODY_COVER,
     summary: PRIMARY_VS_SECONDARY_ANTIBODY_DESCRIPTION,
     issue: '选型指南',
     wechatFirst: false,
