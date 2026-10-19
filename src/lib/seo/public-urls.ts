@@ -70,6 +70,7 @@ export const STATIC_SITEMAP_PATHS = [
   '/faq',
   '/discoveries',
   '/discoveries/articles',
+  '/discoveries/primary-vs-secondary-antibody',
   '/protocols',
   '/about',
   '/updates',
