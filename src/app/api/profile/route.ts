@@ -96,8 +96,9 @@ export async function PUT(req: NextRequest) {
   try {
     const body = await req.json();
     const { name, phone, smsCode, wechatNickname, displayAvatarUrl } = body;
-    // institution, department, identity, advisorName, advisorPhone, school, college, major, building, piLab, affiliatedLab
+    // institution, department, advisorName, advisorPhone, school, college, major, building, piLab, affiliatedLab
     // are LOCKED at registration time — cannot be updated from settings.
+    // identity is chosen once via PUT /api/profile/identity, not this route.
 
     const current = await prisma.user.findUnique({
       where: { id: userId },

@@ -24,6 +24,7 @@ import {
   readInquiryDraft,
   writeInquiryDraft,
 } from '@/lib/inquiry-draft';
+import { identityRequiresAdvisor } from '@/lib/identity-options';
 
 type Step = 'confirm' | 'form' | 'success';
 
@@ -86,6 +87,8 @@ export default function InquiryPage() {
     notes: '',
     honeypot: '',
   });
+  const [advisorNameFromProfile, setAdvisorNameFromProfile] = useState(false);
+  const [advisorPhoneFromProfile, setAdvisorPhoneFromProfile] = useState(false);
   const [hydrated, setHydrated] = useState(false);
   const [showAuthGate, setShowAuthGate] = useState(false);
   const [draftLeadTimes, setDraftLeadTimes] = useState<Record<number, string>>({});
@@ -151,6 +154,10 @@ export default function InquiryPage() {
       .then(r => r.json())
       .then(data => {
         if (data.profile) {
+          const nextAdvisorName = typeof data.profile.advisorName === 'string' ? data.profile.advisorName.trim() : '';
+          const nextAdvisorPhone = typeof data.profile.advisorPhone === 'string' ? data.profile.advisorPhone.trim() : '';
+          setAdvisorNameFromProfile(Boolean(nextAdvisorName));
+          setAdvisorPhoneFromProfile(Boolean(nextAdvisorPhone));
           setForm(prev => {
             const contact = mergeInquiryContact({
               name: data.profile.name || '',
@@ -280,7 +287,12 @@ export default function InquiryPage() {
       return;
     }
 
-    if (form.identity === '学生') {
+    if (identityRequiresAdvisor(form.identity) && !form.advisorName.trim()) {
+      setRateLimitError('请填写导师姓名');
+      return;
+    }
+
+    if (identityRequiresAdvisor(form.identity)) {
       const phoneDigits = form.phone.replace(/\D/g, '');
       const advisorDigits = form.advisorPhone.replace(/\D/g, '');
       if (phoneDigits.length >= 7 && advisorDigits.length >= 7) {
@@ -311,7 +323,7 @@ export default function InquiryPage() {
       `单位: ${form.institution}`,
       `部门: ${form.department}`,
       '身份: ' + (form.identity || '未填写'),
-      form.identity === '学生' ? ('导师姓名: ' + form.advisorName + '\n导师电话: ' + (form.advisorPhone || '未填写')) : null,
+      identityRequiresAdvisor(form.identity) ? ('导师姓名: ' + form.advisorName + '\n导师电话: ' + (form.advisorPhone || '未填写')) : null,
       '地址: ' + form.address,
       `付款方式: ${form.paymentMethod || '未指定'}`,
       `备注: ${form.notes}`,
@@ -652,6 +664,36 @@ export default function InquiryPage() {
                   value={form.address} onChange={(e) => setForm(form => ({...form, address: e.target.value }))}
                   className={inputClass(false)} />
               </div>
+
+              {identityRequiresAdvisor(form.identity) ? (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className={labelClass}>导师姓名 <span className="text-red-400">*</span></label>
+                    <input
+                      type="text"
+                      required
+                      readOnly={advisorNameFromProfile}
+                      maxLength={50}
+                      placeholder="导师姓名"
+                      value={form.advisorName}
+                      onChange={(event) => setForm((current) => ({ ...current, advisorName: event.target.value }))}
+                      className={advisorNameFromProfile ? `${inputClass(false)} bg-gray-50` : inputClass(!form.advisorName.trim())}
+                    />
+                  </div>
+                  <div>
+                    <label className={labelClass}>导师电话</label>
+                    <input
+                      type="tel"
+                      readOnly={advisorPhoneFromProfile}
+                      maxLength={50}
+                      placeholder="导师电话"
+                      value={form.advisorPhone}
+                      onChange={(event) => setForm((current) => ({ ...current, advisorPhone: event.target.value }))}
+                      className={advisorPhoneFromProfile ? `${inputClass(false)} bg-gray-50` : inputClass(false)}
+                    />
+                  </div>
+                </div>
+              ) : null}
 
               <div>
                 <label className={labelClass}><span className="flex items-center gap-1.5"><CreditCard className="w-3.5 h-3.5" /> 付款方式 <span className="text-red-400">*</span></span></label>

@@ -6,6 +6,11 @@ import { adminPermissionErrorMessage } from '@/data/admin-permission-message';
 import { saveUserProfileThenCredit } from '@/lib/admin-user-row-save';
 import { getInstitutionLabels } from '@/data/institution-profile';
 import { PASSWORD_MIN_LENGTH, validateNewPasswordLength } from '@/lib/password-policy';
+import {
+  CUSTOMER_IDENTITY_OPTIONS,
+  INTERNAL_IDENTITY_OPTIONS,
+  isAssignableIdentity,
+} from '@/lib/identity-options';
 
 interface UserType {
   id: string;
@@ -576,13 +581,26 @@ export default function UserRow({ user, onUpdate, selected, onSelectChange, show
                   </div>
                   <div>
                     <label className="text-xs font-medium text-gray-700">身份</label>
-                    <input
-                      type="text"
+                    <select
                       value={identity}
                       onChange={e => setIdentity(e.target.value)}
                       className="w-full mt-1 px-2 py-1.5 border border-gray-200 rounded text-sm text-gray-800 focus:outline-none focus:ring-2 focus:ring-brand-500"
-                      placeholder="身份/职位"
-                    />
+                    >
+                      <option value="">未设置</option>
+                      {identity && !isAssignableIdentity(identity) ? (
+                        <option value={identity}>{identity}（当前值）</option>
+                      ) : null}
+                      <optgroup label="客户身份">
+                        {CUSTOMER_IDENTITY_OPTIONS.map((option) => (
+                          <option key={option} value={option}>{option}</option>
+                        ))}
+                      </optgroup>
+                      <optgroup label="内部角色">
+                        {INTERNAL_IDENTITY_OPTIONS.map((option) => (
+                          <option key={option} value={option}>{option}</option>
+                        ))}
+                      </optgroup>
+                    </select>
                   </div>
                 </div>
                 </div>
