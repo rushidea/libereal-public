@@ -43,6 +43,7 @@ interface UserType {
     status: string;
     paymentTermDays: number;
   } | null;
+  lastLoginAt?: string | null;
 }
 
 interface DiscountTemplateLite {
@@ -80,6 +81,63 @@ function getLaboratory(user: UserType): string {
   return labs.join(' / ') || '-';
 }
 
+function TruncatedText({ text, title, className = '' }: { text: string; title?: string; className?: string }) {
+  const value = text.trim() || '—';
+  return <div className={`max-w-full truncate ${className}`} title={title || value}>{value}</div>;
+}
+
+function formatDate(value?: string | null): string {
+  if (!value) return '—';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '—';
+  return date.toLocaleDateString('zh-CN');
+}
+
+function formatDateTime(value?: string | null): string {
+  if (!value) return '—';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '—';
+  return date.toLocaleString('zh-CN', { hour12: false });
+}
+
+function organizationSummary(user: UserType): string {
+  const parts = [
+    getInstitution(user),
+    getInstitutionUnit(user),
+    getDepartment(user),
+    getInstitutionFacility(user),
+    getLaboratory(user),
+  ].filter(part => part && part !== '-');
+  return parts.join(' / ') || '—';
+}
+
+export const userTableColumn = {
+  phone: 'hidden xl:table-cell',
+  role: 'hidden xl:table-cell',
+  dates: 'hidden xl:table-cell',
+} as const;
+
+function StatusBadges({ user }: { user: UserType }) {
+  const quiet = !user.isNewUser && user.approvalStatus !== 'rejected' && !user.isBlacklisted && !user.isFrozen;
+  return (
+    <div className="flex min-w-0 flex-wrap gap-1">
+      {Boolean(user.isNewUser) && (
+        <span className="inline-flex items-center gap-1 rounded bg-green-100 px-1.5 py-0.5 text-xs text-green-700">
+          <Shield className="h-3 w-3" /> 待审核
+        </span>
+      )}
+      {user.approvalStatus === 'rejected' && <span className="rounded bg-red-100 px-1.5 py-0.5 text-xs text-red-700">审核未通过</span>}
+      {user.isBlacklisted && <span className="rounded bg-amber-100 px-1.5 py-0.5 text-xs text-amber-700">账户限制</span>}
+      {user.isFrozen && (
+        <span className="inline-flex items-center gap-1 rounded bg-slate-200 px-1.5 py-0.5 text-xs text-slate-700" title="可登录，无折扣价，不可下单询价">
+          <LockKeyhole className="h-3 w-3" /> 已冻结
+        </span>
+      )}
+      {quiet && <span className="rounded bg-gray-100 px-1.5 py-0.5 text-xs text-gray-700">正常</span>}
+    </div>
+  );
+}
+
 interface UserRowProps {
   user: UserType & { discountRate?: number | null; brandDiscounts?: string | null; department?: string; identity?: string; sourceTemplateId?: string | null };
   onUpdate: () => void;
@@ -87,6 +145,7 @@ interface UserRowProps {
   onSelectChange?: (selected: boolean) => void;
   showEditButton?: boolean;
   templates?: DiscountTemplateLite[];
+  layout?: 'table' | 'compact';
   canWriteCustomers?: boolean;
   canWriteTier?: boolean;
   canWriteCredit?: boolean;
@@ -94,7 +153,7 @@ interface UserRowProps {
 
 const CUSTOMER_TIERS = [{ value: 'standard', label: 'standard' }];
 
-export default function UserRow({ user, onUpdate, selected, onSelectChange, showEditButton, templates = [], canWriteCustomers = false, canWriteTier = false, canWriteCredit = false }: UserRowProps) {
+export default function UserRow({ user, onUpdate, selected, onSelectChange, showEditButton, templates = [], layout = 'table', canWriteCustomers = false, canWriteTier = false, canWriteCredit = false }: UserRowProps) {
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(user.name ?? '');
   const [email, setEmail] = useState(user.email ?? '');
@@ -331,111 +390,50 @@ export default function UserRow({ user, onUpdate, selected, onSelectChange, show
     setEditing(false);
   };
 
-  return (
-    <>
-      <article className={`min-w-0 rounded-brand border border-gray-200 bg-white/70 p-3 shadow-sm hover:bg-gray-50 sm:p-4 ${selected ? 'border-brand-300 bg-brand-50/40' : ''}`}>
-        <div className="min-w-0">
-          <div className="flex min-w-0 items-start gap-3">
-            <input
-              type="checkbox"
-              checked={selected ?? false}
-              onChange={e => { onSelectChange?.(e.target.checked); }}
-              className="mt-1 h-4 w-4 shrink-0 rounded border-gray-300 text-brand-500 cursor-pointer"
-              aria-label={`选择${user.name || user.email}`}
-            />
-            <div className="min-w-0 flex-1">
-              <div className="flex min-w-0 flex-wrap items-center gap-2">
-                <div className="break-words font-medium text-gray-900">{user.name || '未设置'}</div>
-            {Boolean(user.isNewUser) && (
-              <span className="flex items-center gap-1 text-xs px-1.5 py-0.5 bg-green-100 text-green-700 rounded">
-                <Shield className="w-3 h-3" /> 待审核
-              </span>
-            )}
-            {user.approvalStatus === 'rejected' && <span className="text-xs px-1.5 py-0.5 bg-red-100 text-red-700 rounded">审核未通过</span>}
-            {user.isBlacklisted && <span className="text-xs px-1.5 py-0.5 bg-amber-100 text-amber-700 rounded">账户限制</span>}
-            {user.isFrozen && <span className="flex items-center gap-1 text-xs px-1.5 py-0.5 bg-slate-200 text-slate-700 rounded" title="可登录，无折扣价，不可下单询价"><LockKeyhole className="w-3 h-3" /> 已冻结</span>}
-              </div>
-              <div className="break-words text-gray-500 text-xs">{user.email}</div>
-          {user.role !== 'admin' && (
-            <div className="mt-1 flex items-center gap-2">
-              {showEditButton && (
-                <button
-                  onClick={(e) => { e.stopPropagation(); setEditing(!editing); setFeedback(null); }}
-                  className="text-xs text-gray-400 hover:text-brand-600 flex items-center gap-1"
-                >
-                  <Edit2 className="w-3 h-3" /> {editing ? '收起' : '编辑'}
-                </button>
-              )}
-              <button
-                type="button"
-                disabled={saving}
-                onClick={(e) => { e.stopPropagation(); void handleToggleFreeze(); }}
-                className="text-xs text-slate-500 hover:text-slate-800"
-              >
-                {user.isFrozen ? '解冻' : '冻结'}
-              </button>
-            </div>
-          )}
-          {feedback && !editing && (
-            <p className={`mt-1 text-xs ${feedback.type === 'success' ? 'text-green-600' : 'text-red-600'}`}>{feedback.text}</p>
-          )}
-              <div className="mt-3 grid grid-cols-1 gap-2 border-t border-gray-100 pt-3 text-[13px] leading-4 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5">
-                <div className="flex min-w-0 items-start gap-1">
-                  <span className="shrink-0 pt-0.5 text-[10px] text-gray-500">角色</span>
-                  <span className={`min-w-0 truncate rounded-full px-2 py-0.5 text-xs font-medium ${user.role === 'admin' ? 'bg-purple-100 text-purple-700' : 'bg-gray-100 text-gray-700'}`}>
-                    {user.role}
-                  </span>
-                </div>
-                <div className="flex min-w-0 items-start gap-1">
-                  <span className="shrink-0 pt-0.5 text-[10px] text-gray-500">等级</span>
-                  <p className="min-w-0 break-words text-xs text-gray-700" title={user.tier || '-'}>{user.tier || '-'}</p>
-                </div>
-                <div className="flex min-w-0 items-start gap-1">
-                  <span className="shrink-0 pt-0.5 text-[10px] text-gray-500">机构</span>
-                  <p className="min-w-0 break-words [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:2] text-xs text-gray-700" title={getInstitution(user)}>{getInstitution(user)}</p>
-                </div>
-                <div className="flex min-w-0 items-start gap-1">
-                  <span className="shrink-0 pt-0.5 text-[10px] text-gray-500">组织单元</span>
-                  <p className="min-w-0 break-words [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:2] text-xs text-gray-700" title={getInstitutionUnit(user)}>{getInstitutionUnit(user)}</p>
-                </div>
-                <div className="flex min-w-0 items-start gap-1">
-                  <span className="shrink-0 pt-0.5 text-[10px] text-gray-500">部门</span>
-                  <p className="min-w-0 break-words [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:2] text-xs text-gray-700" title={getDepartment(user)}>{getDepartment(user)}</p>
-                </div>
-                <div className="flex min-w-0 items-start gap-1">
-                  <span className="shrink-0 pt-0.5 text-[10px] text-gray-500">具体单元</span>
-                  <p className="min-w-0 break-words [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:2] text-xs text-gray-700" title={getInstitutionFacility(user)}>{getInstitutionFacility(user)}</p>
-                </div>
-                <div className="flex min-w-0 items-start gap-1 sm:col-span-2 lg:col-span-1">
-                  <span className="shrink-0 pt-0.5 text-[10px] text-gray-500">实验室</span>
-                  <p className="min-w-0 break-words [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:2] text-xs text-gray-700" title={getLaboratory(user)}>{getLaboratory(user)}</p>
-                </div>
-                <div className="flex min-w-0 items-start gap-1">
-                  <span className="shrink-0 pt-0.5 text-[10px] text-gray-500">折扣</span>
-                  <p className="min-w-0 break-words text-xs text-gray-700">
-                    {user.sourceTemplateId
-                      ? (templates.find(t => t.id === user.sourceTemplateId)?.name ?? '已删除模板')
-                      : user.discountRate != null
-                        ? `${user.discountRate <= 2 ? `${(user.discountRate * 10).toFixed(1).replace(/\.0$/, '')}折` : user.discountRate}`
-                        : '—'}
-                  </p>
-                </div>
-                <div className="flex min-w-0 items-start gap-1">
-                  <span className="shrink-0 pt-0.5 text-[10px] text-gray-500">注册</span>
-                  <p className="min-w-0 break-words text-xs text-gray-600">{new Date(user.createdAt).toLocaleDateString('zh-CN')}</p>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </article>
-{editing && (
-        <div className="mt-2 min-w-0 rounded-brand border border-brand-100 bg-brand-50/50 p-3 sm:p-4">
+  const discountText = user.sourceTemplateId
+    ? (templates.find(t => t.id === user.sourceTemplateId)?.name ?? '已删除模板')
+    : user.discountRate != null
+      ? `${user.discountRate <= 2 ? `${(user.discountRate * 10).toFixed(1).replace(/\.0$/, '')}折` : user.discountRate}`
+      : '—';
+
+  const displayName = user.name || '未设置';
+  const orgTitle = organizationSummary(user);
+  const orgLabel = getInstitution(user);
+  const phoneLabel = displayValue(user.phone) || '—';
+  const createdLabel = formatDate(user.createdAt);
+  const lastLoginLabel = formatDateTime(user.lastLoginAt);
+  const actions = user.role !== 'admin' ? (
+    <div className="flex flex-wrap items-center gap-2">
+      {showEditButton && (
+        <button
+          type="button"
+          onClick={(e) => { e.stopPropagation(); setEditing(!editing); setFeedback(null); }}
+          className="inline-flex items-center gap-1 text-xs text-gray-500 hover:text-brand-600"
+          title={editing ? '收起' : '编辑'}
+        >
+          <Edit2 className="h-3.5 w-3.5" />
+          {layout === 'compact' && (editing ? '收起' : '编辑')}
+        </button>
+      )}
+      <button
+        type="button"
+        disabled={saving}
+        onClick={(e) => { e.stopPropagation(); void handleToggleFreeze(); }}
+        className="inline-flex items-center gap-1 text-xs text-slate-500 hover:text-slate-800 disabled:opacity-50"
+        title={user.isFrozen ? '解冻' : '冻结'}
+      >
+        <LockKeyhole className="h-3.5 w-3.5" />
+        {layout === 'compact' && (user.isFrozen ? '解冻' : '冻结')}
+      </button>
+    </div>
+  ) : null;
+
+  const editor = editing ? (
+        <div className="min-w-0 rounded-brand border border-brand-100 bg-brand-50/50 p-3 sm:p-4">
             <div className="space-y-3">
-              {/* Basic User Info - shown when 用户管理 is active */}
               {showEditButton && (
                 <div className="space-y-3">
-                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                  <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
                     <div>
                       <label className="text-xs font-medium text-gray-700">用户名</label>
                       <input
@@ -478,7 +476,7 @@ export default function UserRow({ user, onUpdate, selected, onSelectChange, show
                       </select>
                     </div>
                   </div>
-                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                  <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
                   <div>
                     <label className="text-xs font-medium text-gray-700">机构类型</label>
                     <input
@@ -590,7 +588,7 @@ export default function UserRow({ user, onUpdate, selected, onSelectChange, show
                 </div>
               )}
               {showEditButton && user.role !== 'admin' && (
-                <div className="grid grid-cols-1 gap-3 border-t border-brand-100 pt-3 sm:grid-cols-2 lg:grid-cols-6">
+                <div className="grid min-w-0 grid-cols-1 gap-3 border-t border-brand-100 pt-3 sm:grid-cols-2 lg:grid-cols-3">
                   <div>
                     <label className="text-xs font-medium text-gray-700">等级默认额度</label>
                     <div className="mt-1 rounded border border-gray-200 bg-gray-50 px-2 py-1.5 text-sm text-gray-600">¥{(user.creditAccount?.baseLimit ?? 0).toLocaleString()}</div>
@@ -624,8 +622,8 @@ export default function UserRow({ user, onUpdate, selected, onSelectChange, show
               )}
 
               {showEditButton && (
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 rounded-lg border border-gray-200 bg-white/70 p-3">
-                  <label className="flex items-center gap-2 text-xs font-medium text-gray-700">
+                <div className="grid min-w-0 grid-cols-1 gap-3 rounded-lg border border-gray-200 bg-white/70 p-3 sm:grid-cols-3">
+                  <label className="flex min-w-0 items-center gap-2 text-xs font-medium text-gray-700">
                     <span>审核状态</span>
                     <select
                       value={approvalStatus}
@@ -637,11 +635,11 @@ export default function UserRow({ user, onUpdate, selected, onSelectChange, show
                       <option value="rejected">审核不通过</option>
                     </select>
                   </label>
-                  <label className="flex items-center gap-2 text-xs font-medium text-gray-700">
+                  <label className="flex min-w-0 items-center gap-2 break-words text-xs font-medium text-gray-700">
                     <input type="checkbox" checked={isBlacklisted} onChange={e => setIsBlacklisted(e.target.checked)} className="rounded border-gray-300 text-amber-600 focus:ring-amber-500" />
                     账户限制，无法下单
                   </label>
-                  <label className="flex items-center gap-2 text-xs font-medium text-gray-700">
+                  <label className="flex min-w-0 items-center gap-2 break-words text-xs font-medium text-gray-700">
                     <input type="checkbox" checked={isFrozen} onChange={e => setIsFrozen(e.target.checked)} className="rounded border-gray-300 text-slate-600 focus:ring-slate-500" />
                     冻结（可登录，无折扣价，不可下单询价）
                   </label>
@@ -679,7 +677,114 @@ export default function UserRow({ user, onUpdate, selected, onSelectChange, show
               </div>
             </div>
         </div>
+  ) : null;
+
+  if (layout === 'table') {
+    return (
+      <>
+        <tr className={`group border-b border-gray-100 ${selected ? 'bg-brand-50/50' : 'hover:bg-gray-50/50'}`}>
+          <td className={`sticky left-0 z-10 w-10 border-b border-gray-100 px-3 py-3 ${selected ? 'bg-brand-50' : 'bg-white group-hover:bg-gray-50'}`}>
+            <input
+              type="checkbox"
+              checked={selected ?? false}
+              onChange={e => { onSelectChange?.(e.target.checked); }}
+              className="h-4 w-4 cursor-pointer rounded border-gray-300 text-brand-600"
+              aria-label={`选择${displayName}`}
+            />
+          </td>
+          <td className={`sticky left-10 z-10 w-36 border-b border-gray-100 px-3 py-3 shadow-[4px_0_6px_-4px_rgba(15,23,42,0.25)] ${selected ? 'bg-brand-50' : 'bg-white group-hover:bg-gray-50'}`}>
+            <TruncatedText text={displayName} className="font-medium text-gray-900" />
+            <TruncatedText text={user.role} className="mt-0.5 text-xs text-gray-500 xl:hidden" />
+          </td>
+          <td className="min-w-0 border-b border-gray-100 px-3 py-3">
+            <TruncatedText text={user.email} className="text-gray-700" />
+          </td>
+          <td className={`min-w-0 border-b border-gray-100 px-3 py-3 ${userTableColumn.phone}`}>
+            <TruncatedText text={phoneLabel} className="text-gray-700" />
+          </td>
+          <td className="min-w-0 border-b border-gray-100 px-3 py-3">
+            <TruncatedText text={orgLabel === '-' ? '—' : orgLabel} title={orgTitle} className="text-gray-700" />
+            {discountText !== '—' && <TruncatedText text={`折扣 ${discountText}`} className="text-xs text-gray-500" />}
+          </td>
+          <td className={`min-w-0 overflow-hidden border-b border-gray-100 px-3 py-3 ${userTableColumn.role}`}>
+            <TruncatedText text={user.role} className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${user.role === 'admin' ? 'bg-purple-100 text-purple-700' : 'bg-gray-100 text-gray-700'}`} />
+            <TruncatedText text={user.tier || '—'} className="mt-1 text-xs text-gray-500" />
+          </td>
+          <td className="min-w-0 overflow-hidden border-b border-gray-100 px-3 py-3">
+            <StatusBadges user={user} />
+          </td>
+          <td className={`min-w-0 border-b border-gray-100 px-3 py-3 text-xs text-gray-600 ${userTableColumn.dates}`}>
+            <TruncatedText text={`注册 ${createdLabel}`} />
+            <TruncatedText text={`登录 ${lastLoginLabel}`} className="text-gray-500" />
+          </td>
+          <td className="whitespace-nowrap border-b border-gray-100 px-3 py-3">{actions}</td>
+        </tr>
+        {feedback && !editing && (
+          <tr>
+            <td colSpan={9} className={`px-3 pb-2 text-xs ${feedback.type === 'success' ? 'text-green-600' : 'text-red-600'}`}>{feedback.text}</td>
+          </tr>
+        )}
+        {editing && (
+          <tr>
+            <td colSpan={9} className="border-b border-brand-200 bg-brand-50/70 p-3">
+              {editor}
+            </td>
+          </tr>
+        )}
+      </>
+    );
+  }
+
+  return (
+    <div className={`min-w-0 overflow-hidden rounded-xl border bg-white/85 p-4 shadow-sm ${selected ? 'border-brand-300' : 'border-white/80'}`}>
+      <div className="flex min-w-0 items-start gap-3">
+        <input
+          type="checkbox"
+          checked={selected ?? false}
+          onChange={e => { onSelectChange?.(e.target.checked); }}
+          className="mt-1 h-4 w-4 shrink-0 cursor-pointer rounded border-gray-300 text-brand-600"
+          aria-label={`选择${displayName}`}
+        />
+        <div className="min-w-0 flex-1">
+          <TruncatedText text={displayName} className="font-medium text-gray-900" />
+          <TruncatedText text={user.email} className="text-xs text-gray-600" />
+          <div className="mt-3 grid grid-cols-1 gap-y-2">
+            <div className="min-w-0">
+              <div className="text-[11px] text-gray-500">电话</div>
+              <TruncatedText text={phoneLabel} className="text-sm text-gray-700" />
+            </div>
+            <div className="min-w-0">
+              <div className="text-[11px] text-gray-500">机构</div>
+              <TruncatedText text={orgLabel === '-' ? '—' : orgLabel} title={orgTitle} className="text-sm text-gray-700" />
+            </div>
+            <div className="min-w-0">
+              <div className="text-[11px] text-gray-500">角色</div>
+              <TruncatedText text={user.role} className="text-sm text-gray-700" />
+            </div>
+            <div className="min-w-0">
+              <div className="text-[11px] text-gray-500">等级</div>
+              <TruncatedText text={user.tier || '—'} className="text-sm text-gray-700" />
+            </div>
+            <div className="min-w-0">
+              <div className="text-[11px] text-gray-500">注册</div>
+              <TruncatedText text={createdLabel} className="text-sm text-gray-700" />
+            </div>
+            <div className="min-w-0">
+              <div className="text-[11px] text-gray-500">最近登录</div>
+              <TruncatedText text={lastLoginLabel} className="text-sm text-gray-700" />
+            </div>
+          </div>
+          <div className="mt-3"><StatusBadges user={user} /></div>
+          {discountText !== '—' && (
+            <TruncatedText text={`折扣 ${discountText}`} className="mt-2 text-xs text-gray-500" />
+          )}
+        </div>
+      </div>
+      {actions && <div className="mt-3 flex justify-end">{actions}</div>}
+      {feedback && !editing && (
+        <p className={`mt-2 text-xs ${feedback.type === 'success' ? 'text-green-600' : 'text-red-600'}`}>{feedback.text}</p>
       )}
-    </>
+      {editor && <div className="mt-3">{editor}</div>}
+    </div>
   );
 }

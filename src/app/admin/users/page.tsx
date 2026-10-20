@@ -3,9 +3,8 @@
 import { useState, useEffect } from 'react';
 import { useSession } from 'next-auth/react';
 import { notFound } from 'next/navigation';
-import Link from 'next/link';
 import { Search, Shield, Check, UserX, AlertTriangle, Plus, LockKeyhole } from 'lucide-react';
-import UserRow from '@/components/admin/UserRow';
+import UserRow, { userTableColumn } from '@/components/admin/UserRow';
 import CreateUserModal from '@/components/admin/CreateUserModal';
 import UserDiscountTemplateSection from '@/components/admin/UserDiscountTemplateSection';
 import { parseAdminUsersResponse } from '@/data/admin-users-response';
@@ -39,6 +38,7 @@ interface User {
   isBlacklisted?: boolean;
   isFrozen?: boolean;
   identity?: string;
+  lastLoginAt?: string | null;
   creditAccount?: {
     baseLimit: number; overrideLimit?: number | null; temporaryLimit: number; temporaryUntil?: string | null;
     usedAmount: number; status: string; paymentTermDays: number;
@@ -60,6 +60,17 @@ export default function AdminUsersPage() {
   const filteredUsers = filterAdminUsersBySearch(users, search);
   const visibleSelectedIds = visibleSelectedUserIds(filteredUsers, selectedUserIds);
   const visibleSelectedUsers = filteredUsers.filter((user) => selectedUserIds.has(user.id));
+  const allVisibleSelected = filteredUsers.length > 0 && visibleSelectedIds.length === filteredUsers.length;
+  const [useCompactList, setUseCompactList] = useState(false);
+
+  useEffect(() => {
+    if (typeof window.matchMedia !== 'function') return;
+    const media = window.matchMedia('(max-width: 767px)');
+    const apply = () => setUseCompactList(media.matches);
+    apply();
+    media.addEventListener('change', apply);
+    return () => media.removeEventListener('change', apply);
+  }, []);
 
   useEffect(() => {
     if (status !== 'authenticated' || (session?.user as User)?.role !== 'admin') return;
@@ -303,46 +314,102 @@ export default function AdminUsersPage() {
         </div>
       </div>
 
-      {/* User cards */}
+      {useCompactList ? (
       <div className="min-w-0 space-y-3 rounded-xl border border-white/70 bg-white/70 p-3 shadow-sm backdrop-blur-md sm:p-4">
         <label className="flex items-center gap-2 text-xs text-gray-600">
           <input
             type="checkbox"
             className="rounded border-gray-300 text-brand-500 focus:ring-brand-500"
-            checked={filteredUsers.length > 0 && visibleSelectedIds.length === filteredUsers.length}
-            onChange={e => {
-              setSelectedUserIds(new Set(e.target.checked ? filteredUsers.map(user => user.id) : []));
-            }}
+            checked={allVisibleSelected}
+            onChange={e => setSelectedUserIds(e.target.checked ? new Set(filteredUsers.map(user => user.id)) : new Set())}
           />
           全选当前结果
         </label>
-        <div className="grid min-w-0 gap-3 md:grid-cols-2 xl:grid-cols-3">
-          {filteredUsers.map(user => (
-            <UserRow
-              key={user.id}
-              user={user}
-              onUpdate={fetchData}
-              selected={selectedUserIds.has(user.id)}
-              onSelectChange={selected => {
-                const next = new Set(selectedUserIds);
-                if (selected) next.add(user.id);
-                else next.delete(user.id);
-                setSelectedUserIds(next);
-              }}
-              showEditButton={user.role !== 'admin'}
-              templates={templates}
-              canWriteCustomers={Boolean(permissions?.includes('customers.write'))}
-              canWriteTier={Boolean(permissions?.includes('pricing.write'))}
-              canWriteCredit={Boolean(permissions?.includes('finance.write'))}
-            />
-          ))}
-        </div>
+        {filteredUsers.map(user => (
+          <UserRow
+            key={user.id}
+            layout="compact"
+            user={user}
+            onUpdate={fetchData}
+            selected={selectedUserIds.has(user.id)}
+            onSelectChange={selected => {
+              const next = new Set(selectedUserIds);
+              if (selected) next.add(user.id);
+              else next.delete(user.id);
+              setSelectedUserIds(next);
+            }}
+            showEditButton={user.role !== 'admin'}
+            templates={templates}
+            canWriteCustomers={Boolean(permissions?.includes('customers.write'))}
+            canWriteTier={Boolean(permissions?.includes('pricing.write'))}
+            canWriteCredit={Boolean(permissions?.includes('finance.write'))}
+          />
+        ))}
         {filteredUsers.length === 0 && (
-          <div className="px-4 py-12 text-center text-sm text-gray-600">
+          <div className="rounded-xl border border-white/80 bg-white/80 px-4 py-12 text-center text-sm text-gray-600">
             {users.length === 0 ? '暂无用户' : '没有匹配的用户'}
           </div>
         )}
       </div>
+
+      ) : (
+      <div className="min-w-0 overflow-hidden rounded-2xl border border-white/70 bg-white">
+        <div className="min-w-0 overflow-x-auto">
+          <table className="w-full table-fixed border-separate border-spacing-0 text-sm xl:min-w-[1240px]">
+            <thead>
+              <tr>
+                <th className="sticky left-0 z-20 w-10 border-b border-gray-200 bg-gray-50 px-3 py-3 text-left font-semibold text-gray-700">
+                  <input
+                    type="checkbox"
+                    checked={allVisibleSelected}
+                    onChange={e => setSelectedUserIds(e.target.checked ? new Set(filteredUsers.map(user => user.id)) : new Set())}
+                    className="h-4 w-4 rounded border-gray-300 text-brand-600"
+                    aria-label="全选当前结果"
+                  />
+                </th>
+                <th className="sticky left-10 z-20 w-36 border-b border-gray-200 bg-gray-50 px-3 py-3 text-left font-semibold text-gray-700 shadow-[4px_0_6px_-4px_rgba(15,23,42,0.25)]">姓名</th>
+                <th className="border-b border-gray-200 bg-gray-50 px-3 py-3 text-left font-semibold text-gray-700 xl:w-64">邮箱</th>
+                <th className={`border-b border-gray-200 bg-gray-50 px-3 py-3 text-left font-semibold text-gray-700 xl:w-36 ${userTableColumn.phone}`}>电话</th>
+                <th className="border-b border-gray-200 bg-gray-50 px-3 py-3 text-left font-semibold text-gray-700 xl:w-52">机构</th>
+                <th className={`border-b border-gray-200 bg-gray-50 px-3 py-3 text-left font-semibold text-gray-700 xl:w-28 ${userTableColumn.role}`}>角色</th>
+                <th className="w-24 border-b border-gray-200 bg-gray-50 px-3 py-3 text-left font-semibold text-gray-700">状态</th>
+                <th className={`border-b border-gray-200 bg-gray-50 px-3 py-3 text-left font-semibold text-gray-700 xl:w-40 ${userTableColumn.dates}`}>注册 / 最近登录</th>
+                <th className="w-16 border-b border-gray-200 bg-gray-50 px-3 py-3 text-left font-semibold text-gray-700">操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filteredUsers.map(user => (
+                <UserRow
+                  key={user.id}
+                  layout="table"
+                  user={user}
+                  onUpdate={fetchData}
+                  selected={selectedUserIds.has(user.id)}
+                  onSelectChange={selected => {
+                    const next = new Set(selectedUserIds);
+                    if (selected) next.add(user.id);
+                    else next.delete(user.id);
+                    setSelectedUserIds(next);
+                  }}
+                  showEditButton={user.role !== 'admin'}
+                  templates={templates}
+                  canWriteCustomers={Boolean(permissions?.includes('customers.write'))}
+                  canWriteTier={Boolean(permissions?.includes('pricing.write'))}
+                  canWriteCredit={Boolean(permissions?.includes('finance.write'))}
+                />
+              ))}
+              {filteredUsers.length === 0 && (
+                <tr>
+                  <td colSpan={9} className="px-4 py-12 text-center text-gray-600">
+                    {users.length === 0 ? '暂无用户' : '没有匹配的用户'}
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+      )}
 
       {/* Selected users actions */}
       {visibleSelectedIds.length > 0 && (
