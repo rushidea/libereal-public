@@ -1,4 +1,5 @@
 import { normalizeEmail } from '@/lib/auth-helpers';
+import { normalizeAdminIdentity, normalizeIdentityText } from '@/lib/identity-options';
 
 const CUSTOMER_TEXT_FIELDS = [
   'name',
@@ -24,6 +25,19 @@ export function providedBooleanChanged(current: boolean | number | null | undefi
   return next !== Boolean(current);
 }
 
+/**
+ * identity: null 会清空身份，不能因为不是字符串就跳过客户资料权限。
+ * normalizeAdminIdentity 接受、并且和当前值不同的写入同样算改动。
+ */
+export function identityChangeRequiresCustomerWrite(current: string | null | undefined, next: unknown): boolean {
+  if (next === undefined) return false;
+  if (next === null) return true;
+  const normalized = normalizeAdminIdentity(next, current);
+  if (!normalized.ok) return false;
+  const currentValue = normalizeIdentityText(current) || null;
+  return normalized.identity !== currentValue;
+}
+
 export function customerProfileFieldsChanged(
   current: {
     name?: string | null;
@@ -46,8 +60,10 @@ export function customerProfileFieldsChanged(
   body: Record<string, unknown>,
 ): boolean {
   for (const field of CUSTOMER_TEXT_FIELDS) {
+    if (field === 'identity') continue;
     if (providedTextChanged(current[field], body[field])) return true;
   }
+  if (identityChangeRequiresCustomerWrite(current.identity, body.identity)) return true;
   if (providedTextChanged(current.department, body.institutionDepartment)) return true;
   if (providedBooleanChanged(current.isBlacklisted, body.isBlacklisted)) return true;
   if (providedBooleanChanged(current.isFrozen, body.isFrozen)) return true;

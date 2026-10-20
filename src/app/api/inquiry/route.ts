@@ -12,7 +12,8 @@ import { resolveRecordOwnership } from '@/lib/organization-record-access';
 import { organizationRbacErrorStatus, OrganizationRbacError } from '@/lib/organization-service';
 import { buildCheckoutRequestFingerprint, isUniqueConstraintError, validCheckoutAttemptId } from '@/lib/checkout-idempotency';
 import { getTrustedClientIp } from '@/lib/trusted-client-ip';
-import { assertAllowedInquiryIdentity, identityForInquiryFromProfile, INQUIRY_IP_LIMIT_PER_WINDOW, INQUIRY_IP_WINDOW_MS } from '@/lib/inquiry-validation';
+import { identityForInquiryFromProfile, INQUIRY_IP_LIMIT_PER_WINDOW, INQUIRY_IP_WINDOW_MS, INQUIRY_MAX_ADVISOR_FIELD_LENGTH } from '@/lib/inquiry-validation';
+import { identityRequiresAdvisor } from '@/lib/identity-options';
 
 const HIGH_VALUE_INQUIRY_THRESHOLD = Number(process.env.HIGH_VALUE_INQUIRY_THRESHOLD ?? 5000);
 const BATCH_INQUIRY_ITEM_THRESHOLD = Number(process.env.BATCH_INQUIRY_ITEM_THRESHOLD ?? 5);
@@ -42,7 +43,7 @@ export async function POST(req: NextRequest) {
     const sessionUserId = activeUser.id;
 
     const body = await req.json() as InquiryBody;
-    const { name, email, phone, institution, department, address, notes, items, paymentMethod, identity, advisorName, advisorPhone, organizationId, honeypot } = body;
+    const { name, email, phone, institution, department, address, notes, items, paymentMethod, advisorName, advisorPhone, organizationId, honeypot } = body;
     const headerAttemptId = req.headers.get('idempotency-key');
     const bodyAttemptId = body.checkoutAttemptId;
     if (headerAttemptId !== null && bodyAttemptId !== undefined && headerAttemptId !== bodyAttemptId) return NextResponse.json({ error: '幂等键不一致' }, { status: 400 });
@@ -70,12 +71,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: '询价单至少包含一个商品' }, { status: 400 });
     }
 
-    let submittedIdentity: string | null = null;
-    try {
-      submittedIdentity = assertAllowedInquiryIdentity(identity);
-    } catch {
-      return NextResponse.json({ error: '身份取值无效' }, { status: 400 });
-    }
+    // 身份从账户资料宽松抄入，不因不在可选列表而拦截询价。
 
     // Commerce restrictions are checked before an existing keyed request can replay.
     if (sessionUserId) {
@@ -140,11 +136,13 @@ export async function POST(req: NextRequest) {
 
     // Determine initial status and check order limit for new users
     let initialStatus = '待确认';
-    let storedIdentity = submittedIdentity;
+    let storedIdentity: string | null = null;
+    let storedAdvisorName: string | null = null;
+    let storedAdvisorPhone: string | null = null;
     if (sessionUserId) {
       const user = await prisma.user.findUnique({
         where: { id: sessionUserId },
-        select: { isNewUser: true, phone: true, phoneVerifiedAt: true, approvalStatus: true, isBlacklisted: true, isFrozen: true, role: true, identity: true, creditAccount: { select: { status: true } } },
+        select: { isNewUser: true, phone: true, phoneVerifiedAt: true, approvalStatus: true, isBlacklisted: true, isFrozen: true, role: true, identity: true, advisorName: true, advisorPhone: true, creditAccount: { select: { status: true } } },
       });
       const forcedAckBlock = await assertNoPendingForcedAck(sessionUserId, user?.role);
       if (forcedAckBlock) return forcedAckBlock;
@@ -176,7 +174,31 @@ export async function POST(req: NextRequest) {
         }
         initialStatus = '待人工审核';
       }
-      storedIdentity = identityForInquiryFromProfile(user?.identity) ?? submittedIdentity;
+      storedIdentity = identityForInquiryFromProfile(user?.identity);
+      storedAdvisorName = user?.advisorName?.trim() || null;
+      storedAdvisorPhone = user?.advisorPhone?.trim() || null;
+    }
+
+    // 学生、博士研究生、硕士研究生若资料里没有导师姓名，询价单必须带上。
+    // 请求里的导师姓名和电话只写入这张询价单，不回写账户资料。已有资料导师时保持原值。
+    if (identityRequiresAdvisor(storedIdentity)) {
+      if (!storedAdvisorName) {
+        const submittedName = typeof advisorName === 'string' ? advisorName.trim() : '';
+        if (!submittedName) {
+          return NextResponse.json({ error: '请填写导师姓名' }, { status: 400 });
+        }
+        if (submittedName.length > INQUIRY_MAX_ADVISOR_FIELD_LENGTH) {
+          return NextResponse.json({ error: '导师信息字段过长' }, { status: 400 });
+        }
+        storedAdvisorName = submittedName;
+      }
+      if (!storedAdvisorPhone && typeof advisorPhone === 'string' && advisorPhone.trim()) {
+        const submittedPhone = advisorPhone.trim();
+        if (submittedPhone.length > INQUIRY_MAX_ADVISOR_FIELD_LENGTH) {
+          return NextResponse.json({ error: '导师信息字段过长' }, { status: 400 });
+        }
+        storedAdvisorPhone = submittedPhone;
+      }
     }
 
     try {
@@ -193,8 +215,8 @@ export async function POST(req: NextRequest) {
         subtotal: pricedItems.some((item) => item.quoteRequired) ? 0 : verifiedSubtotal,
         paymentMethod: paymentMethod || null,
         identity: storedIdentity,
-        advisorName: advisorName || null,
-        advisorPhone: advisorPhone || null,
+        advisorName: storedAdvisorName,
+        advisorPhone: storedAdvisorPhone,
         status: initialStatus,
         ip,
         userAgent: ua,

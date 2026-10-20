@@ -185,6 +185,63 @@ describe('POST /api/inquiry', () => {
     expect(response.status).toBe(401);
   });
 
+  it('requires advisor name for 学生, 博士研究生 and 硕士研究生', async () => {
+    const db = getTestDb();
+    seedUser(db, { id: 'real_user', email: 'real@test.com', role: 'customer', name: 'Real User' });
+    authMock.mockResolvedValue({
+      user: { id: 'real_user', email: 'real@test.com', name: 'Real User', role: 'customer', sessionId: 'session-identity' },
+      expires: new Date(Date.now() + 86400000).toISOString(),
+    });
+    const identities = ['学生', '博士研究生', '硕士研究生'] as const;
+
+    for (const [index, identity] of identities.entries()) {
+      db.prepare('UPDATE User SET identity = ?, advisorName = NULL, advisorPhone = NULL WHERE id = ?').run(identity, 'real_user');
+      const missing = await inquiryPOST(makeReq(validBody(), `10.8.0.${index}`));
+      expect(missing.status).toBe(400);
+      await expect(missing.json()).resolves.toMatchObject({ error: '请填写导师姓名' });
+
+      const res = await inquiryPOST(makeReq(validBody({
+        advisorName: '陈教授',
+        advisorPhone: '13600001111',
+      }), `10.8.1.${index}`));
+      expect(res.status).toBe(200);
+      const inquiry = db.prepare(`
+        SELECT identity, advisorName, advisorPhone FROM Inquiry WHERE userId = ? ORDER BY createdAt DESC LIMIT 1
+      `).get('real_user') as { identity: string; advisorName: string; advisorPhone: string };
+      expect(inquiry).toEqual({ identity, advisorName: '陈教授', advisorPhone: '13600001111' });
+      const user = db.prepare('SELECT advisorName, advisorPhone FROM User WHERE id = ?').get('real_user') as { advisorName: string | null; advisorPhone: string | null };
+      expect(user).toEqual({ advisorName: null, advisorPhone: null });
+    }
+  });
+
+  it('keeps the profile advisor and does not block internal or other identities', async () => {
+    const db = getTestDb();
+    seedUser(db, { id: 'real_user', email: 'real@test.com', role: 'customer', name: 'Real User' });
+    db.prepare('UPDATE User SET identity = ?, advisorName = ?, advisorPhone = ? WHERE id = ?').run('学生', '原导师', '13700002222', 'real_user');
+    authMock.mockResolvedValue({
+      user: { id: 'real_user', email: 'real@test.com', name: 'Real User', role: 'customer', sessionId: 'session-identity' },
+      expires: new Date(Date.now() + 86400000).toISOString(),
+    });
+
+    const kept = await inquiryPOST(makeReq(validBody({ advisorName: '新导师', advisorPhone: '13600003333' }), '10.8.2.1'));
+    expect(kept.status).toBe(200);
+    const keptRow = db.prepare('SELECT advisorName FROM Inquiry WHERE userId = ? ORDER BY createdAt DESC LIMIT 1').get('real_user') as { advisorName: string };
+    expect(keptRow.advisorName).toBe('原导师');
+    expect((db.prepare('SELECT advisorName FROM User WHERE id = ?').get('real_user') as { advisorName: string }).advisorName).toBe('原导师');
+
+    db.prepare('UPDATE User SET identity = ?, advisorName = NULL, advisorPhone = NULL WHERE id = ?').run('内部员工', 'real_user');
+    const internal = await inquiryPOST(makeReq(validBody(), '10.8.2.2'));
+    expect(internal.status).toBe(200);
+    const internalRow = db.prepare('SELECT identity, advisorName FROM Inquiry WHERE userId = ? ORDER BY createdAt DESC LIMIT 1').get('real_user') as { identity: string; advisorName: string | null };
+    expect(internalRow).toEqual({ identity: '内部员工', advisorName: null });
+
+    db.prepare('UPDATE User SET identity = ? WHERE id = ?').run('教授', 'real_user');
+    const professor = await inquiryPOST(makeReq(validBody(), '10.8.2.3'));
+    expect(professor.status).toBe(200);
+    const professorRow = db.prepare('SELECT identity FROM Inquiry WHERE userId = ? ORDER BY createdAt DESC LIMIT 1').get('real_user') as { identity: string };
+    expect(professorRow.identity).toBe('教授');
+  });
+
   it('marks inquiry pricing as unresolved and leaves the unit price null', async () => {
     const db = getTestDb();
     seedUser(db, { id: 'priced_user', email: 'buyer@test.com', role: 'customer' });

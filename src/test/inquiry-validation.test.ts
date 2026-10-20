@@ -1,11 +1,11 @@
 import { describe, it, expect } from 'vitest';
-import { assertAllowedInquiryIdentity, INQUIRY_ALLOWED_USER_IDENTITIES } from '@/lib/inquiry-validation';
+import { identityForInquiryFromProfile } from '@/lib/inquiry-validation';
 
 describe('inquiry validation', () => {
-  it('accepts known identity values and rejects unknown ones', () => {
-    expect(INQUIRY_ALLOWED_USER_IDENTITIES.has('研究生')).toBe(true);
-    expect(assertAllowedInquiryIdentity('研究员')).toBe('研究员');
-    expect(assertAllowedInquiryIdentity(null)).toBeNull();
-    expect(() => assertAllowedInquiryIdentity('不存在身份')).toThrow('INVALID_IDENTITY');
+  it('keeps legacy and internal profile identities for inquiry storage', () => {
+    expect(identityForInquiryFromProfile('资深副教授')).toBe('资深副教授');
+    expect(identityForInquiryFromProfile(' 内部员工 ')).toBe('内部员工');
+    expect(identityForInquiryFromProfile('研究生')).toBe('研究生');
+    expect(identityForInquiryFromProfile('   ')).toBeNull();
   });
 });

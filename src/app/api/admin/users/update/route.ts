@@ -11,6 +11,7 @@ import { validatePointsTarget } from '@/lib/points';
 import { normalizeEmail } from '@/lib/auth-helpers';
 import { buildLegacyInstitution, buildLegacySchoolFields, type InstitutionProfileInput } from '@/data/institution-profile';
 import { validateNewPasswordLength } from '@/lib/password-policy';
+import { normalizeAdminIdentity } from '@/lib/identity-options';
 
 function isEmptyBrandDiscounts(value: unknown): boolean {
   return value === null || value === '' || (typeof value === 'object' && value !== null && !Array.isArray(value) && Object.keys(value as object).length === 0);
@@ -39,6 +40,11 @@ function parseBrandDiscountsPayload(brandDiscounts: unknown): { ok: true; value:
   }
 }
 
+/**
+ * 更新用户资料。
+ * 权限：管理员。修改身份等客户资料需要 customers.write（用户管理）。
+ * 身份只接受客户可选值与内部角色，也允许清空。与当前值相同的历史自由文本可以原样保存。
+ */
 export async function PUT(req: NextRequest) {
   const user = await requireAdmin();
   if (user instanceof NextResponse) return user;
@@ -195,7 +201,13 @@ export async function PUT(req: NextRequest) {
       if (typeof department === 'string') updateData.department = department.trim() || null;
     }
     if (typeof phone === 'string') updateData.phone = phone.trim() || null;
-    if (typeof identity === 'string') updateData.identity = identity.trim() || null;
+    if (identity !== undefined) {
+      const normalizedIdentity = normalizeAdminIdentity(identity, targetUser.identity);
+      if (!normalizedIdentity.ok) {
+        return NextResponse.json({ error: '身份不在可选列表中' }, { status: 400 });
+      }
+      updateData.identity = normalizedIdentity.identity;
+    }
     if (role === 'customer' || role === 'admin') updateData.role = role;
 
     if (typeof email === 'string' && email.trim()) {

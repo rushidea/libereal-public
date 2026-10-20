@@ -14,6 +14,11 @@ import AccountSidebar from '@/components/account/AccountSidebar';
 import { getInstitutionLabels } from '@/data/institution-profile';
 import SecurityStepUpDialog from '@/components/security/SecurityStepUpDialog';
 import { PASSWORD_MIN_LENGTH, PASSWORD_TOO_SHORT_MESSAGE } from '@/lib/password-policy';
+import {
+  CUSTOMER_IDENTITY_OPTIONS,
+  customerCanChooseIdentity,
+  isCustomerIdentityOption,
+} from '@/lib/identity-options';
 
 type ProfileState = {
   name: string;
@@ -109,7 +114,11 @@ export default function AccountSettingsPage() {
   const [currentEmailConfirming, setCurrentEmailConfirming] = useState(false);
   const [currentEmailCountdown, setCurrentEmailCountdown] = useState(0);
   const [stepUpAction, setStepUpAction] = useState<'password_change' | 'password_setup' | null>(null);
+  const [savedIdentity, setSavedIdentity] = useState('');
+  const [identityChoice, setIdentityChoice] = useState('');
+  const [identityLoaded, setIdentityLoaded] = useState(false);
   const institutionLabels = getInstitutionLabels(profile.institutionType);
+  const identityEditable = identityLoaded && customerCanChooseIdentity(savedIdentity);
 
   const loadProfile = () => {
     fetch('/api/profile').then(r => r.json()).then(data => {
@@ -146,6 +155,9 @@ export default function AccountSettingsPage() {
           phoneLastChangedAt: data.profile.phoneLastChangedAt || null,
         });
         setOriginalPhone(data.profile.phone || '');
+        setSavedIdentity(data.profile.identity || '');
+        setIdentityChoice('');
+        setIdentityLoaded(true);
       }
     });
   };
@@ -251,6 +263,24 @@ export default function AccountSettingsPage() {
       if (!res.ok) {
         const data = await res.json();
         alert(data.error || '保存失败');
+      } else if (identityEditable && identityChoice) {
+        const identityRes = await fetch('/api/profile/identity', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ identity: identityChoice }),
+        });
+        if (!identityRes.ok) {
+          const data = await identityRes.json().catch(() => ({}));
+          const reason = (data as { error?: string }).error || '身份保存失败';
+          alert(`其他资料已经保存，但身份没有保存：${reason}`);
+          loadProfile();
+        } else {
+          setOriginalPhone(profile.tel.trim());
+          setPhoneSmsCode('');
+          setSaved(true);
+          setTimeout(() => setSaved(false), 3000);
+          loadProfile();
+        }
       } else {
         setOriginalPhone(profile.tel.trim());
         setPhoneSmsCode('');
@@ -616,7 +646,8 @@ export default function AccountSettingsPage() {
               </div>
               <div className="rounded-xl border border-amber-100 bg-amber-50/70 px-4 py-3 mb-4">
                 <p className="text-xs text-amber-700">
-                  <span className="font-medium">机构层级、实验室、身份和导师信息注册后锁定</span>，如需修改请联系客服。
+                  <span className="font-medium">机构层级、实验室和导师信息注册后锁定。</span>
+                  身份未设置或不在客户可选列表时，可以在此选择一次，选定后锁定。如需修改请联系客服。
                   手机号一年内可修改一次。
                 </p>
               </div>
@@ -668,10 +699,30 @@ export default function AccountSettingsPage() {
               )}
               <div className="mt-4">
                 <label className="block text-sm font-medium text-gray-700 dark:text-slate-900 mb-1">
-                  <Lock size={12} className="inline mr-1 text-amber-500" />
-                  身份 <span className="text-amber-500 text-xs">（锁定）</span>
+                  {identityEditable ? null : <Lock size={12} className="inline mr-1 text-amber-500" />}
+                  身份 {identityEditable ? null : <span className="text-amber-500 text-xs">（锁定）</span>}
                 </label>
-                <input value={profile.identity} disabled placeholder="如：教授、研究员、学生" className="w-full px-4 py-2.5 border border-gray-100 dark:border-slate-400 rounded-xl text-sm text-gray-400 dark:text-gray-500 bg-gray-50 dark:bg-slate-700/50" />
+                {identityEditable ? (
+                  <>
+                    <select
+                      value={isCustomerIdentityOption(identityChoice) ? identityChoice : ''}
+                      onChange={(event) => setIdentityChoice(event.target.value)}
+                      className="w-full px-4 py-2.5 border border-gray-200 dark:border-slate-400 rounded-xl text-sm text-gray-800 dark:text-slate-900 bg-white dark:bg-slate-100"
+                    >
+                      <option value="">请选择身份</option>
+                      {CUSTOMER_IDENTITY_OPTIONS.map((option) => (
+                        <option key={option} value={option}>{option}</option>
+                      ))}
+                    </select>
+                    {savedIdentity ? (
+                      <p className="mt-1 text-xs text-gray-500">当前身份：{savedIdentity}。选定并保存后不可自行修改。</p>
+                    ) : (
+                      <p className="mt-1 text-xs text-gray-500">只能选择一次，保存后不可自行修改。</p>
+                    )}
+                  </>
+                ) : (
+                  <input value={profile.identity} disabled placeholder="如：教授、研究员、学生" className="w-full px-4 py-2.5 border border-gray-100 dark:border-slate-400 rounded-xl text-sm text-gray-400 dark:text-gray-500 bg-gray-50 dark:bg-slate-700/50" />
+                )}
               </div>
               <div className="mt-2">
                 <label className="block text-sm font-medium text-gray-700 dark:text-slate-900 mb-1">
