@@ -8,6 +8,7 @@ import {
   userHasPassword,
 } from '@/lib/auth-helpers';
 import { consumeSecurityStepUpGrant } from '@/lib/security/security-step-up';
+import { validateNewPasswordLength } from '@/lib/password-policy';
 
 export async function POST(req: NextRequest) {
   const activeUser = await requireActiveSession();
@@ -31,8 +32,9 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: '两次输入的密码不一致' }, { status: 400 });
     }
 
-    if (password.length < 8) {
-      return NextResponse.json({ error: '密码至少 8 个字符' }, { status: 400 });
+    const passwordLengthError = validateNewPasswordLength(password);
+    if (passwordLengthError) {
+      return NextResponse.json({ error: passwordLengthError }, { status: 400 });
     }
 
     const user = await prisma.user.findUnique({

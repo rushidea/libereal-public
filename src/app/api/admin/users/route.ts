@@ -7,6 +7,7 @@ import { requireAdmin } from '@/lib/session';
 import { writeAuditLog } from '@/lib/audit';
 import { normalizeEmail } from '@/lib/auth-helpers';
 import { buildLegacyInstitution, buildLegacySchoolFields, type InstitutionProfileInput } from '@/data/institution-profile';
+import { validateNewPasswordLength } from '@/lib/password-policy';
 
 function generateUserId() {
   return `usr_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
@@ -58,8 +59,9 @@ export async function POST(req: Request) {
     if (!email.includes('@')) {
       return NextResponse.json({ error: '邮箱格式无效' }, { status: 400 });
     }
-    if (!password || password.length < 8) {
-      return NextResponse.json({ error: '密码至少 8 位' }, { status: 400 });
+    const passwordLengthError = validateNewPasswordLength(password);
+    if (passwordLengthError) {
+      return NextResponse.json({ error: passwordLengthError }, { status: 400 });
     }
 
     const existing = await prisma.user.findUnique({ where: { email }, select: { id: true } });

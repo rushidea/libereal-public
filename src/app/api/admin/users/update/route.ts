@@ -9,6 +9,7 @@ import { writeAuditLog } from '@/lib/audit';
 import { validatePointsTarget } from '@/lib/points';
 import { normalizeEmail } from '@/lib/auth-helpers';
 import { buildLegacyInstitution, buildLegacySchoolFields, type InstitutionProfileInput } from '@/data/institution-profile';
+import { validateNewPasswordLength } from '@/lib/password-policy';
 
 function isEmptyBrandDiscounts(value: unknown): boolean {
   return value === null || value === '' || (typeof value === 'object' && value !== null && !Array.isArray(value) && Object.keys(value as object).length === 0);
@@ -197,8 +198,9 @@ export async function PUT(req: NextRequest) {
     }
 
     if (typeof password === 'string' && password.length > 0) {
-      if (password.length < 8) {
-        return NextResponse.json({ error: '密码至少 8 位' }, { status: 400 });
+      const passwordLengthError = validateNewPasswordLength(password);
+      if (passwordLengthError) {
+        return NextResponse.json({ error: passwordLengthError }, { status: 400 });
       }
       updateData.password = await bcrypt.hash(password, 12);
     }

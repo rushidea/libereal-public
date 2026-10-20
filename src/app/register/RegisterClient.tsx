@@ -14,6 +14,7 @@ import AdaptiveHeader from '@/components/AdaptiveHeader';
 import MobileBottomNav from '@/components/mobile/MobileBottomNav';
 import { signInWithWeChat } from '@/lib/wechat-sign-in';
 import { getInstitutionLabels, isSchoolInstitutionType } from '@/data/institution-profile';
+import { PASSWORD_MIN_LENGTH } from '@/lib/password-policy';
 
 function RegisterForm() {
   const router = useRouter();
@@ -72,7 +73,7 @@ function RegisterForm() {
   }, [router, sessionStatus, wechat]);
 
   const passwordChecks = useMemo(() => ({
-    length: form.password.length >= 8,
+    length: form.password.length >= PASSWORD_MIN_LENGTH,
     uppercase: /[A-Z]/.test(form.password),
     lowercase: /[a-z]/.test(form.password),
     digit: /\d/.test(form.password),
@@ -607,7 +608,7 @@ function RegisterForm() {
                     </div>
                     <div className="grid grid-cols-2 gap-1 text-xs">
                       <div className={`flex items-center gap-1 ${passwordChecks.length ? 'text-green-600' : 'text-gray-400'}`}>
-                        {passwordChecks.length ? <Check className="w-3 h-3" /> : <X className="w-3 h-3" />} 8位以上
+                        {passwordChecks.length ? <Check className="w-3 h-3" /> : <X className="w-3 h-3" />} {PASSWORD_MIN_LENGTH}位以上
                       </div>
                       <div className={`flex items-center gap-1 ${passwordChecks.uppercase ? 'text-green-600' : 'text-gray-400'}`}>
                         {passwordChecks.uppercase ? <Check className="w-3 h-3" /> : <X className="w-3 h-3" />} 大写字母
