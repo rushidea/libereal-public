@@ -4,6 +4,7 @@ import React, { useState } from 'react';
 import { Check, X, Edit2, Save, Shield, LockKeyhole } from 'lucide-react';
 import { saveUserProfileThenCredit } from '@/lib/admin-user-row-save';
 import { getInstitutionLabels } from '@/data/institution-profile';
+import { PASSWORD_MIN_LENGTH, validateNewPasswordLength } from '@/lib/password-policy';
 
 interface UserType {
   id: string;
@@ -127,6 +128,13 @@ export default function UserRow({ user, onUpdate, selected, onSelectChange, show
     setSaving(true);
     setFeedback(null);
     try {
+      if (password.length > 0) {
+        const passwordLengthError = validateNewPasswordLength(password);
+        if (passwordLengthError) {
+          setFeedback({ type: 'error', text: passwordLengthError });
+          return;
+        }
+      }
       const payload: Record<string, unknown> = {
         userId: user.id,
         name,
@@ -399,10 +407,11 @@ export default function UserRow({ user, onUpdate, selected, onSelectChange, show
                       <label className="text-xs font-medium text-gray-700">新密码</label>
                       <input
                         type="password"
+                        minLength={password.length > 0 ? PASSWORD_MIN_LENGTH : undefined}
                         value={password}
                         onChange={e => setPassword(e.target.value)}
                         className="w-full mt-1 px-2 py-1.5 border border-gray-200 rounded text-sm text-gray-800 focus:outline-none focus:ring-2 focus:ring-brand-500"
-                        placeholder="留空则不修改"
+                        placeholder={`留空则不修改；填写时至少 ${PASSWORD_MIN_LENGTH} 位`}
                       />
                     </div>
                     <div>

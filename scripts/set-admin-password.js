@@ -112,13 +112,16 @@ function generateId(prefix) {
 }
 
 async function main() {
+  // Keep in sync with PASSWORD_MIN_LENGTH in src/lib/password-policy.ts
+  const PASSWORD_MIN_LENGTH = 8;
+
   const email = normalizeEmail(readRequired('email', 'ADMIN_EMAIL'));
   const password = await readPassword();
   const name = readArg('name') || process.env.ADMIN_NAME || '管理员';
   const dbPath = readDatabasePath();
 
-  if (password.length < 8) {
-    throw new Error('ADMIN_PASSWORD must be at least 8 characters.');
+  if (password.length < PASSWORD_MIN_LENGTH) {
+    throw new Error(`密码长度至少为 ${PASSWORD_MIN_LENGTH} 位`);
   }
 
   if (!existsSync(dbPath)) {

@@ -20,6 +20,7 @@ import {
   validateAcceptedLegalIds,
 } from '@/lib/legal-documents';
 import { normalizeChinaMobilePhone, verifySmsCode } from '@/lib/sms-verification';
+import { validateNewPasswordLength } from '@/lib/password-policy';
 import { consumeRegistrationEmailCode } from '@/lib/email-verification';
 import { storePendingRegistration, type VerifiedRegistrationProfile } from '@/lib/pending-registration';
 import {
@@ -169,8 +170,9 @@ export async function POST(req: NextRequest) {
     const fullInstitution = buildLegacyInstitution(institutionProfile);
     const legacyRegistration = buildLegacySchoolFields(institutionProfile);
 
-    if (password.length < 8) {
-      return NextResponse.json({ error: "密码至少8个字符" }, { status: 400 });
+    const passwordLengthError = validateNewPasswordLength(password);
+    if (passwordLengthError) {
+      return NextResponse.json({ error: passwordLengthError }, { status: 400 });
     }
 
     const normalizedPhone = normalizeChinaMobilePhone(String(phone));

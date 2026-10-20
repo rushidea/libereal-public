@@ -22,6 +22,7 @@ vi.mock('@/lib/security/security-step-up', () => ({
 }));
 
 import { PUT as passwordPUT } from '@/app/api/profile/password/route';
+import { PASSWORD_TOO_SHORT_MESSAGE } from '@/lib/password-policy';
 
 function makePutReq(body: object): NextRequest {
   return new NextRequest('http://localhost:3000/api/profile/password', {
@@ -80,6 +81,16 @@ describe('PUT /api/profile/password', () => {
   it('returns 400 when fields are missing', async () => {
     const res = await passwordPUT(makePutReq({ currentPassword: 'oldpass123' }));
     expect(res.status).toBe(400);
+  });
+
+  it('returns 400 when new password is shorter than minimum length', async () => {
+    const res = await passwordPUT(makePutReq({
+      currentPassword: 'oldpass123',
+      newPassword: 'short1',
+      stepUpToken: 'grant-token',
+    }));
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toBe(PASSWORD_TOO_SHORT_MESSAGE);
   });
 
   it('returns 401 when not logged in', async () => {

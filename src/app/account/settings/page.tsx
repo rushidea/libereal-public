@@ -13,6 +13,7 @@ import Breadcrumb from '@/components/Breadcrumb';
 import AccountSidebar from '@/components/account/AccountSidebar';
 import { getInstitutionLabels } from '@/data/institution-profile';
 import SecurityStepUpDialog from '@/components/security/SecurityStepUpDialog';
+import { PASSWORD_MIN_LENGTH, PASSWORD_TOO_SHORT_MESSAGE } from '@/lib/password-policy';
 
 type ProfileState = {
   name: string;
@@ -268,8 +269,8 @@ export default function AccountSettingsPage() {
       setCredentialMsg({ type: 'error', text: '两次输入的密码不一致' });
       return;
     }
-    if (credentialForm.password.length < 8) {
-      setCredentialMsg({ type: 'error', text: '密码至少 8 位' });
+    if (credentialForm.password.length < PASSWORD_MIN_LENGTH) {
+      setCredentialMsg({ type: 'error', text: PASSWORD_TOO_SHORT_MESSAGE });
       return;
     }
     if (profile.placeholderEmail && !credentialForm.email) {
@@ -318,8 +319,8 @@ export default function AccountSettingsPage() {
       setPasswordMsg({ type: 'error', text: '两次输入的新密码不一致' });
       return;
     }
-    if (passwordForm.newPassword.length < 6) {
-      setPasswordMsg({ type: 'error', text: '新密码长度至少为 6 位' });
+    if (passwordForm.newPassword.length < PASSWORD_MIN_LENGTH) {
+      setPasswordMsg({ type: 'error', text: PASSWORD_TOO_SHORT_MESSAGE });
       return;
     }
     if (!stepUpToken) {

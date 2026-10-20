@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { Plus, X } from 'lucide-react';
 import { adminSurfaceClasses } from '@/lib/admin-surfaces';
+import { PASSWORD_MIN_LENGTH } from '@/lib/password-policy';
 
 const TIERS = ['standard'];
 
@@ -121,7 +122,7 @@ export default function CreateUserModal({ open, onClose, onCreated }: Props) {
             </div>
             <div>
               <label className="text-xs font-medium text-gray-700">初始密码</label>
-              <input required type="password" minLength={8} value={password} onChange={(e) => setPassword(e.target.value)} className="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm" placeholder="至少 8 位" />
+              <input required type="password" minLength={PASSWORD_MIN_LENGTH} value={password} onChange={(e) => setPassword(e.target.value)} className="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm" placeholder={`至少 ${PASSWORD_MIN_LENGTH} 位`} />
             </div>
             <div>
               <label className="text-xs font-medium text-gray-700">角色</label>

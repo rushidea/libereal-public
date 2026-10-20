@@ -7,6 +7,7 @@ import { Lock, CheckCircle, AlertCircle, ArrowLeft, Eye, EyeOff } from 'lucide-r
 import TurnstileWidget from '@/components/TurnstileWidget';
 import AdaptiveHeader from '@/components/AdaptiveHeader';
 import MobileBottomNav from '@/components/mobile/MobileBottomNav';
+import { PASSWORD_MIN_LENGTH, PASSWORD_TOO_SHORT_MESSAGE } from '@/lib/password-policy';
 
 function ResetPasswordForm() {
 
@@ -26,8 +27,8 @@ function ResetPasswordForm() {
     e.preventDefault();
     setError('');
 
-    if (password.length < 6) {
-      setError('密码长度至少为 6 位');
+    if (password.length < PASSWORD_MIN_LENGTH) {
+      setError(PASSWORD_TOO_SHORT_MESSAGE);
       return;
     }
     if (password !== confirm) {
@@ -125,7 +126,7 @@ function ResetPasswordForm() {
                   <input
                     type={showPwd ? 'text' : 'password'}
                     required
-                    placeholder="至少 6 位"
+                    placeholder={`至少 ${PASSWORD_MIN_LENGTH} 位`}
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     className="w-full border border-gray-200 rounded-lg pl-10 pr-10 py-2.5 text-sm text-gray-800 bg-gray-50 focus:bg-white focus:ring-2 focus:ring-brand-500 focus:border-brand-500 outline-none transition-all"

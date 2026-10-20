@@ -8,6 +8,7 @@ import { getAdminMfaPolicy } from '@/lib/security/admin-mfa-policy';
 import { isMfaPhase1Enabled } from '@/lib/security/mfa-config';
 import { consumeSecurityStepUpGrant } from '@/lib/security/security-step-up';
 import { getAdminMfaSettings, saveAdminMfaScenarioConfig } from '@/lib/admin-mfa-settings';
+import { validateNewPasswordLengthRange } from '@/lib/password-policy';
 
 function isUniqueConstraintError(error: unknown): error is { code: 'P2002' } {
   return typeof error === 'object' && error !== null && 'code' in error && error.code === 'P2002';
@@ -129,7 +130,8 @@ export async function POST(req: NextRequest) {
 
     if (!name || name.length > 100) return NextResponse.json({ error: '姓名长度需在 1 到 100 个字符之间' }, { status: 400 });
     if (email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return NextResponse.json({ error: '邮箱格式无效' }, { status: 400 });
-    if (password.length < 8 || password.length > 128) return NextResponse.json({ error: '密码长度需在 8 到 128 个字符之间' }, { status: 400 });
+    const passwordLengthError = validateNewPasswordLengthRange(password);
+    if (passwordLengthError) return NextResponse.json({ error: passwordLengthError }, { status: 400 });
     if (roleIds.length === 0) return NextResponse.json({ error: '请至少选择一个管理角色' }, { status: 400 });
 
     const [existing, validRoles] = await Promise.all([

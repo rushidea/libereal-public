@@ -5,6 +5,7 @@ import { Check, History, KeyRound, LockKeyhole, Save, ShieldCheck } from 'lucide
 import SecurityStepUpDialog from '@/components/security/SecurityStepUpDialog';
 import { isAdminMfaStepUpResponse, useAdminMfaStepUp } from '@/components/admin/AdminMfaStepUpDialog';
 import { formatAdminMfaScenarioCount, getAdminMfaProtectionView } from '@/lib/admin-mfa-protection-view';
+import { PASSWORD_MIN_LENGTH } from '@/lib/password-policy';
 
 type Role = { id: string; key: string; name: string; description?: string; permissions: Array<{ permission: { key: string; name: string } }> };
 type AdminUser = { id: string; name?: string; email: string; adminRoleAssignments: Array<{ roleId: string }> };
@@ -104,7 +105,7 @@ export default function AdminAccessPage() {
 
   const createInternalUser = async (stepUpToken?: string) => {
     setInternalMessage(null);
-    if (!internalName.trim() || !internalEmail.trim() || internalPassword.length < 8 || internalRoleIds.length === 0) {
+    if (!internalName.trim() || !internalEmail.trim() || internalPassword.length < PASSWORD_MIN_LENGTH || internalRoleIds.length === 0) {
       setInternalMessage({ type: 'error', text: '请填写姓名、邮箱、至少 8 位密码并选择管理角色。' });
       return;
     }
@@ -213,7 +214,7 @@ export default function AdminAccessPage() {
             <input type="email" value={internalEmail} onChange={(event) => setInternalEmail(event.target.value)} className="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2.5 text-sm" placeholder="name@example.com" />
           </label>
           <label className="text-sm text-gray-700">初始密码
-            <input type="password" minLength={8} value={internalPassword} onChange={(event) => setInternalPassword(event.target.value)} className="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2.5 text-sm" placeholder="至少 8 位" />
+            <input type="password" minLength={PASSWORD_MIN_LENGTH} value={internalPassword} onChange={(event) => setInternalPassword(event.target.value)} className="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2.5 text-sm" placeholder={`至少 ${PASSWORD_MIN_LENGTH} 位`} />
           </label>
           <div className="text-sm text-gray-700 sm:col-span-2">
             <p className="font-medium">管理角色</p>

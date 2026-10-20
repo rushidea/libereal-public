@@ -1,16 +1,21 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import bcrypt from 'bcryptjs';
+import { validateNewPasswordLength } from '@/lib/password-policy';
 
 export async function POST(req: NextRequest) {
   try {
     const { token, password } = await req.json();
 
-    if (!token || !password) {
+    if (!token || password === undefined || password === null || password === '') {
       return NextResponse.json({ error: '缺少必填参数' }, { status: 400 });
     }
-    if (password.length < 6) {
-      return NextResponse.json({ error: '密码长度至少为 6 位' }, { status: 400 });
+    if (typeof password !== 'string') {
+      return NextResponse.json({ error: '缺少必填参数' }, { status: 400 });
+    }
+    const passwordLengthError = validateNewPasswordLength(password);
+    if (passwordLengthError) {
+      return NextResponse.json({ error: passwordLengthError }, { status: 400 });
     }
 
     const user = await prisma.user.findFirst({

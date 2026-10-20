@@ -3,6 +3,7 @@ import bcrypt from 'bcryptjs';
 import { prisma } from '@/lib/prisma';
 import { requireActiveSession } from '@/lib/session';
 import { consumeSecurityStepUpGrant } from '@/lib/security/security-step-up';
+import { validateNewPasswordLength } from '@/lib/password-policy';
 
 export async function PUT(req: NextRequest) {
   const activeUser = await requireActiveSession();
@@ -16,8 +17,9 @@ export async function PUT(req: NextRequest) {
       return NextResponse.json({ error: '请填写密码和安全验证信息' }, { status: 400 });
     }
 
-    if (newPassword.length < 6) {
-      return NextResponse.json({ error: '新密码长度至少为 6 位' }, { status: 400 });
+    const passwordLengthError = validateNewPasswordLength(newPassword);
+    if (passwordLengthError) {
+      return NextResponse.json({ error: passwordLengthError }, { status: 400 });
     }
 
     const user = await prisma.user.findUnique({
