@@ -583,35 +583,29 @@ export default function PrimaryVsSecondaryAntibodyClient() {
                 <thead>
                   <tr>
                     <th className={thClass}>实验</th>
-                    <th className={thClass}>二抗常见起始范围（仅供参考）</th>
+                    <th className={thClass}>稀释与孵育建议</th>
                   </tr>
                 </thead>
                 <tbody>
-                  <tr>
-                    <td className={`${tdClass} font-medium text-slate-900 dark:text-slate-100`}>WB（HRP-ECL）</td>
-                    <td className={tdClass}>1:1,000 – 1:10,000</td>
-                  </tr>
-                  <tr>
-                    <td className={`${tdClass} font-medium text-slate-900 dark:text-slate-100`}>IHC</td>
-                    <td className={tdClass}>1:100 – 1:500</td>
-                  </tr>
-                  <tr>
-                    <td className={`${tdClass} font-medium text-slate-900 dark:text-slate-100`}>IF / ICC</td>
-                    <td className={tdClass}>1:100 – 1:500</td>
-                  </tr>
-                  <tr>
-                    <td className={`${tdClass} font-medium text-slate-900 dark:text-slate-100`}>流式</td>
-                    <td className={tdClass}>1:50 – 1:200</td>
-                  </tr>
-                  <tr>
-                    <td className={`${tdClass} font-medium text-slate-900 dark:text-slate-100`}>ELISA（HRP-TMB）</td>
-                    <td className={tdClass}>1:1,000 – 1:5,000</td>
-                  </tr>
+                  {[
+                    'WB（HRP-ECL）',
+                    'IHC',
+                    'IF / ICC',
+                    '流式',
+                    'ELISA（HRP-TMB）',
+                  ].map((exp) => (
+                    <tr key={exp}>
+                      <td className={`${tdClass} font-medium text-slate-900 dark:text-slate-100`}>{exp}</td>
+                      <td className={tdClass}>
+                        按说明书推荐的起始浓度做梯度预实验；孵育时间同样以说明书为准。
+                      </td>
+                    </tr>
+                  ))}
                 </tbody>
               </table>
             </div>
             <p className="mt-3 text-sm text-slate-500 dark:text-slate-400">
-              以上为常见起始范围，不是通用标准；务必以产品说明书为起点做梯度预实验。
+              不同实验类型、样本和靶蛋白丰度的差异很大，二抗没有通用稀释比例，请务必以产品说明书为起点做梯度预实验，不要套用任何固定数值。
             </p>
 
             {/* H2 核对清单 */}
