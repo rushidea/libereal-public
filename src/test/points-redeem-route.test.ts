@@ -162,6 +162,30 @@ describe('POST /api/points/redeem', () => {
     expect((await res.json()).error).toMatch(/收货/);
   });
 
+  it('physical product: rejects invalid shippingInfo type', async () => {
+    const db = getTestDb();
+    seedProduct(db, { id: 'p1', name: '实物', pointsCost: 100, stock: 5, category: 'physical' });
+
+    const res = await POST(makeRequest({
+      productId: 'p1',
+      shippingInfo: { name: '张三', phone: 13800001111, address: '北京市' },
+    }) as NextRequest);
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toMatch(/格式无效/);
+  });
+
+  it('physical product: rejects shippingInfo fields exceeding max length', async () => {
+    const db = getTestDb();
+    seedProduct(db, { id: 'p1', name: '实物', pointsCost: 100, stock: 5, category: 'physical' });
+
+    const res = await POST(makeRequest({
+      productId: 'p1',
+      shippingInfo: { name: '张', phone: '13800001111', address: 'a'.repeat(501) },
+    }) as NextRequest);
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toMatch(/地址不能超过/);
+  });
+
   it('physical product: with shippingInfo succeeds', async () => {
     const db = getTestDb();
     seedProduct(db, { id: 'p1', name: '实物', pointsCost: 100, stock: 5, category: 'physical' });
@@ -176,14 +200,51 @@ describe('POST /api/points/redeem', () => {
     expect(JSON.parse(redemptions[0].shippingInfo)).toEqual({ name: '张三', phone: '13800001111', address: '北京市海淀区' });
   });
 
-  it('returns 400 if user has insufficient points', async () => {
+  it('returns 409 if user has insufficient points', async () => {
     const db = getTestDb();
     db.prepare('UPDATE User SET points = 50 WHERE id = ?').run('u1');
     seedProduct(db, { id: 'p1', name: '贵', pointsCost: 100, stock: 5 });
 
     const res = await POST(makeRequest({ productId: 'p1' }) as NextRequest);
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(409);
     expect((await res.json()).error).toMatch(/积分不足/);
+  });
+
+  it('returns 409 when concurrent redeems exceed balance (only one succeeds)', async () => {
+    const db = getTestDb();
+    db.prepare('UPDATE User SET points = ? WHERE id = ?').run(100, 'u1');
+    seedProduct(db, { id: 'p1', name: '百积分', pointsCost: 100, stock: 10 });
+
+    const [resA, resB] = await Promise.all([
+      POST(makeRequest({ productId: 'p1' }) as NextRequest),
+      POST(makeRequest({ productId: 'p1' }) as NextRequest),
+    ]);
+
+    const statuses = [resA.status, resB.status].sort();
+    expect(statuses).toEqual([200, 409]);
+
+    const u1 = db.prepare('SELECT points FROM User WHERE id = ?').get('u1') as { points: number };
+    expect(u1.points).toBe(0);
+    const redemptions = db.prepare('SELECT COUNT(*) AS c FROM PointsRedemption').get() as { c: number };
+    expect(redemptions.c).toBe(1);
+  });
+
+  it('returns 409 when concurrent redeems exceed stock (only one succeeds)', async () => {
+    const db = getTestDb();
+    seedProduct(db, { id: 'p1', name: '仅剩一件', pointsCost: 50, stock: 1 });
+
+    const [resA, resB] = await Promise.all([
+      POST(makeRequest({ productId: 'p1' }) as NextRequest),
+      POST(makeRequest({ productId: 'p1' }) as NextRequest),
+    ]);
+
+    const statuses = [resA.status, resB.status].sort();
+    expect(statuses).toEqual([200, 409]);
+
+    const p1 = db.prepare('SELECT stock FROM PointsProduct WHERE id = ?').get('p1') as { stock: number };
+    expect(p1.stock).toBe(0);
+    const redemptions = db.prepare('SELECT COUNT(*) AS c FROM PointsRedemption').get() as { c: number };
+    expect(redemptions.c).toBe(1);
   });
 
   it('returns 400 if product is out of stock (stock > 0 check)', async () => {
