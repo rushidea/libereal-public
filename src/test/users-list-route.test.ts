@@ -60,5 +60,20 @@ describe('GET /api/users', () => {
     expect(customer.major).toBe('基础医学系');
     expect(customer.piLab).toBe('李教授实验室');
     expect(customer.affiliatedLab).toBe('综合实验室');
+    expect(customer.lastLoginAt).toBeNull();
+  });
+
+  it('includes the latest session activity as lastLoginAt for customers.read', async () => {
+    const seenAt = '2026-03-01T08:30:00.000Z';
+    getTestDb().prepare(
+      `INSERT INTO user_sessions (id, user_id, session_id, last_seen_at, created_at)
+       VALUES (?, ?, ?, ?, ?)`,
+    ).run('sess_customer_1', 'customer_1', 'session_customer_1', seenAt, seenAt);
+
+    const response = await GET();
+    expect(response.status).toBe(200);
+    const users = await response.json();
+    const customer = users.find((user: { id: string }) => user.id === 'customer_1');
+    expect(new Date(customer.lastLoginAt).toISOString()).toBe(seenAt);
   });
 });

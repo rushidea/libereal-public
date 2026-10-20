@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import AdminUsersPage from '@/app/admin/users/page';
 
@@ -49,7 +49,12 @@ describe('admin users page delete selection', () => {
     vi.restoreAllMocks();
   });
 
-  it('select-all after search deactivates only the visible users', async () => {
+  it.each([false, true])('select-all after search deactivates only visible users (compact=%s)', async (compact) => {
+    vi.stubGlobal('matchMedia', vi.fn(() => ({
+      matches: compact,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    })));
     const confirm = vi.fn(() => true);
     vi.stubGlobal('confirm', confirm);
     const fetchMock = vi.fn((url: string, init?: RequestInit) => {
@@ -80,5 +85,34 @@ describe('admin users page delete selection', () => {
     expect(JSON.parse(String(deleteCall?.[1]?.body))).toEqual({ userIds: ['user_a'] });
     expect(confirm).toHaveBeenCalledWith(expect.stringContaining('订单、积分和授信会保留'));
     expect(await screen.findByText('已停用 1 个用户，订单、积分和授信已保留')).toBeInTheDocument();
+  });
+
+  it('mounts one selection control per user and retains selection across breakpoint changes', async () => {
+    let change: (() => void) | undefined;
+    const media = {
+      matches: false,
+      addEventListener: vi.fn((_event: string, listener: () => void) => { change = listener; }),
+      removeEventListener: vi.fn(),
+    };
+    vi.stubGlobal('matchMedia', vi.fn(() => media));
+    vi.stubGlobal('fetch', vi.fn((url: string) => Promise.resolve({
+      ok: true,
+      json: async () => url === '/api/users' ? users : [],
+    })));
+    const { container, unmount } = render(<AdminUsersPage />);
+    fireEvent.click(await screen.findByRole('checkbox', { name: '选择甲老师' }));
+
+    for (const compact of [false, true, false]) {
+      act(() => { media.matches = compact; change?.(); });
+      expect(container.querySelectorAll('input[type="checkbox"]')).toHaveLength(3);
+      expect(screen.getAllByRole('checkbox', { name: '全选当前结果' })).toHaveLength(1);
+      expect(screen.getByRole('checkbox', { name: '选择甲老师' })).toBeChecked();
+      expect(screen.getByRole('checkbox', { name: '选择乙老师' })).not.toBeChecked();
+      expect(container.querySelectorAll('table')).toHaveLength(compact ? 0 : 1);
+      expect(screen.getByRole('checkbox', { name: '选择甲老师' }).closest('tr') !== null).toBe(!compact);
+      expect(screen.queryAllByText('最近登录', { exact: true })).toHaveLength(compact ? 2 : 0);
+    }
+    unmount();
+    expect(media.removeEventListener).toHaveBeenCalledWith('change', change);
   });
 });

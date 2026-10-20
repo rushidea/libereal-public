@@ -22,7 +22,18 @@ export async function GET() {
         approvalStatus: true, isBlacklisted: true, isFrozen: true,
       },
     });
-    return NextResponse.json(users);
+    const lastSeen = users.length === 0
+      ? []
+      : await prisma.userSession.groupBy({
+        by: ['userId'],
+        where: { userId: { in: users.map(user => user.id) } },
+        _max: { lastSeenAt: true },
+      });
+    const lastLoginAtByUserId = new Map(lastSeen.map(row => [row.userId, row._max.lastSeenAt]));
+    return NextResponse.json(users.map(user => ({
+      ...user,
+      lastLoginAt: lastLoginAtByUserId.get(user.id) ?? null,
+    })));
   } catch (err) {
     console.error('[users GET] error:', err);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
