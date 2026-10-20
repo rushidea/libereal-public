@@ -10,6 +10,48 @@ interface RedeemRequestBody {
   variantIndex?: number;
 }
 
+const SHIPPING_NAME_MAX = 50;
+const SHIPPING_PHONE_MAX = 20;
+const SHIPPING_ADDRESS_MAX = 500;
+
+class RedeemConflictError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'RedeemConflictError';
+  }
+}
+
+function parseShippingInfo(
+  shippingInfo: unknown
+): { ok: true; value: { name: string; phone: string; address: string } } | { ok: false; error: string } {
+  if (shippingInfo === null || shippingInfo === undefined) {
+    return { ok: false, error: '实物商品需要填写收货信息' };
+  }
+  if (typeof shippingInfo !== 'object' || Array.isArray(shippingInfo)) {
+    return { ok: false, error: '收货信息格式无效' };
+  }
+  const raw = shippingInfo as Record<string, unknown>;
+  if (typeof raw.name !== 'string' || typeof raw.phone !== 'string' || typeof raw.address !== 'string') {
+    return { ok: false, error: '收货信息格式无效' };
+  }
+  const name = raw.name.trim();
+  const phone = raw.phone.trim();
+  const address = raw.address.trim();
+  if (!name || !phone || !address) {
+    return { ok: false, error: '实物商品需要填写收货信息' };
+  }
+  if (name.length > SHIPPING_NAME_MAX) {
+    return { ok: false, error: `收货人姓名不能超过 ${SHIPPING_NAME_MAX} 个字符` };
+  }
+  if (phone.length > SHIPPING_PHONE_MAX) {
+    return { ok: false, error: `联系电话不能超过 ${SHIPPING_PHONE_MAX} 个字符` };
+  }
+  if (address.length > SHIPPING_ADDRESS_MAX) {
+    return { ok: false, error: `收货地址不能超过 ${SHIPPING_ADDRESS_MAX} 个字符` };
+  }
+  return { ok: true, value: { name, phone, address } };
+}
+
 export async function POST(req: NextRequest) {
   const session = await auth();
   if (!session?.user) {
@@ -75,36 +117,38 @@ export async function POST(req: NextRequest) {
       activeCost = activeVariant.cost;
     }
 
-    const user = await prisma.user.findUnique({
-      where: { id: userId },
-      select: { id: true, points: true },
-    });
-    if (!user) {
-      return NextResponse.json({ error: '用户不存在' }, { status: 404 });
-    }
-    if (user.points < activeCost) {
-      return NextResponse.json({ error: '积分不足' }, { status: 400 });
+    let normalizedShipping: { name: string; phone: string; address: string } | null = null;
+    if (product.category === 'physical') {
+      const parsed = parseShippingInfo(shippingInfo);
+      if (!parsed.ok) {
+        return NextResponse.json({ error: parsed.error }, { status: 400 });
+      }
+      normalizedShipping = parsed.value;
     }
 
-    // Physical products require shipping info
-    if (product.category === 'physical' && (!shippingInfo || !shippingInfo.name || !shippingInfo.phone || !shippingInfo.address)) {
-      return NextResponse.json({ error: '实物商品需要填写收货信息' }, { status: 400 });
-    }
-
-    const newPoints = user.points - activeCost;
-    const newStock = product.stock === -1 ? -1 : product.stock - 1;
     const displayName = activeVariant ? `${product.name}（${activeVariant.name}）` : product.name;
+    const unlimitedStock = product.stock === -1;
 
-    // Atomic transaction: deduct points, decrement stock, create redemption + log + notification
-    const { redemptionId } = await prisma.$transaction(async (tx) => {
-      await tx.user.update({
-        where: { id: userId },
-        data: { points: newPoints },
+    // Atomic transaction: conditional decrement points/stock, create redemption + log
+    const { redemptionId, newPoints } = await prisma.$transaction(async (tx) => {
+      const pointsUpdate = await tx.user.updateMany({
+        where: { id: userId, points: { gte: activeCost } },
+        data: { points: { decrement: activeCost } },
       });
-      await tx.pointsProduct.update({
-        where: { id: productId },
-        data: { stock: newStock },
-      });
+      if (pointsUpdate.count !== 1) {
+        throw new RedeemConflictError('积分不足或已被其他操作修改，请刷新后重试');
+      }
+
+      if (!unlimitedStock) {
+        const stockUpdate = await tx.pointsProduct.updateMany({
+          where: { id: productId, stock: { gte: 1 } },
+          data: { stock: { decrement: 1 } },
+        });
+        if (stockUpdate.count !== 1) {
+          throw new RedeemConflictError('商品库存不足，请刷新后重试');
+        }
+      }
+
       const redemption = await tx.pointsRedemption.create({
         data: {
           userId,
@@ -112,7 +156,7 @@ export async function POST(req: NextRequest) {
           productName: displayName,
           pointsCost: activeCost,
           status: 'pending',
-          shippingInfo: shippingInfo ? JSON.stringify(shippingInfo) : null,
+          shippingInfo: normalizedShipping ? JSON.stringify(normalizedShipping) : null,
           variantName: activeVariant ? activeVariant.name : null,
         },
       });
@@ -125,7 +169,11 @@ export async function POST(req: NextRequest) {
           relatedId: redemption.id,
         },
       });
-      return { redemptionId: redemption.id };
+      const updatedUser = await tx.user.findUnique({
+        where: { id: userId },
+        select: { points: true },
+      });
+      return { redemptionId: redemption.id, newPoints: updatedUser?.points ?? 0 };
     });
 
     await prisma.notification.create({
@@ -145,6 +193,9 @@ export async function POST(req: NextRequest) {
       newPoints,
     });
   } catch (err) {
+    if (err instanceof RedeemConflictError) {
+      return NextResponse.json({ error: err.message }, { status: 409 });
+    }
     reportError(err, { tags: { route: 'points/redeem' } });
     return NextResponse.json({ error: '服务器错误' }, { status: 500 });
   }
