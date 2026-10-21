@@ -536,6 +536,8 @@ model Order {
   ownerScope       String   @default("personal") @map("owner_scope") // personal | organization
   email           String
   customerId      String?
+  // 后台代客下单的管理员。客户自行下单以及本字段加入前的订单为空。
+  createdByAdminId String? @map("created_by_admin_id")
   subtotal        Float    // 商品小计
   adjustmentTotal Float    @default(0)
   total           Float    @default(0)

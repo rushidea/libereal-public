@@ -328,6 +328,7 @@ export function getTestDb(): Database.Database {
       addressId TEXT,
       email TEXT NOT NULL,
       customerId TEXT,
+      created_by_admin_id TEXT,
       subtotal REAL NOT NULL,
       adjustmentTotal REAL NOT NULL DEFAULT 0,
       total REAL NOT NULL DEFAULT 0,
