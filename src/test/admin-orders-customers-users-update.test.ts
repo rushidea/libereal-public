@@ -345,6 +345,81 @@ describe('POST /api/admin/orders (admin create order)', () => {
     }) as NextRequest);
     expect(res.status).toBe(400);
   });
+
+  it('rejects a variant line when that variant does not have enough stock', async () => {
+    const db = getTestDb();
+    db.prepare(`
+      INSERT INTO Product (id, catalogNumber, name, brand, price, stockQuantity, applications, reactivity, createdAt, updatedAt)
+      VALUES ('p_var', 'CAT-V', '规格抗体', 'CST', 100, -1, '[]', '[]', datetime('now'), datetime('now'))
+    `).run();
+    db.prepare(`INSERT INTO ProductVariant (id, productId, catalogNumber, spec, price) VALUES ('variant_1', 'p_var', 'CAT-V-100', '100 µL', 100)`).run();
+    db.prepare(`
+      INSERT INTO InventoryAccount (id, productId, variantId, actualQuantity, availableQuantity, reservedQuantity, shippedQuantity, inboundQuantity, createdAt, updatedAt)
+      VALUES ('acc_var', 'p_var', 'variant_1', 1, 1, 0, 0, 0, datetime('now'), datetime('now'))
+    `).run();
+
+    const res = await ordersPOST(makeReq({
+      customerEmail: 'cust@test.com',
+      items: [{ productId: 'p_var', catalogNumber: 'CAT-V-100', variantId: 'variant_1', name: '规格抗体', price: 100, quantity: 2 }],
+      paymentMethod: 'bank_transfer',
+    }) as NextRequest);
+    const json = await res.json();
+    expect(res.status).toBe(400);
+    expect(json).toMatchObject({ error: '所选规格库存不足', code: 'VARIANT_INSUFFICIENT_STOCK' });
+    expect(db.prepare('SELECT COUNT(*) AS count FROM "Order"').get()).toEqual({ count: 0 });
+    expect(db.prepare('SELECT availableQuantity, reservedQuantity FROM InventoryAccount WHERE id = ?').get('acc_var')).toEqual({
+      availableQuantity: 1,
+      reservedQuantity: 0,
+    });
+  });
+
+  it('reserves the selected variant when an admin order is created', async () => {
+    const db = getTestDb();
+    db.prepare(`
+      INSERT INTO Product (id, catalogNumber, name, brand, price, stockQuantity, applications, reactivity, createdAt, updatedAt)
+      VALUES ('p_var', 'CAT-V', '规格抗体', 'CST', 100, -1, '[]', '[]', datetime('now'), datetime('now'))
+    `).run();
+    db.prepare(`INSERT INTO ProductVariant (id, productId, catalogNumber, spec, price) VALUES ('variant_1', 'p_var', 'CAT-V-100', '100 µL', 100)`).run();
+    db.prepare(`
+      INSERT INTO InventoryAccount (id, productId, variantId, actualQuantity, availableQuantity, reservedQuantity, shippedQuantity, inboundQuantity, createdAt, updatedAt)
+      VALUES ('acc_var', 'p_var', 'variant_1', 2, 2, 0, 0, 0, datetime('now'), datetime('now'))
+    `).run();
+    db.prepare(`
+      INSERT INTO InventoryAccount (id, productId, variantId, actualQuantity, availableQuantity, reservedQuantity, shippedQuantity, inboundQuantity, createdAt, updatedAt)
+      VALUES ('acc_product', 'p_var', NULL, 9, 9, 0, 0, 0, datetime('now'), datetime('now'))
+    `).run();
+
+    const res = await ordersPOST(makeReq({
+      customerEmail: 'cust@test.com',
+      items: [{ productId: 'p_var', catalogNumber: 'CAT-V-100', variantId: 'variant_1', name: '规格抗体', price: 100, quantity: 1 }],
+      paymentMethod: 'bank_transfer',
+    }) as NextRequest);
+    expect(res.status).toBe(200);
+    expect(db.prepare('SELECT availableQuantity, reservedQuantity FROM InventoryAccount WHERE id = ?').get('acc_var')).toEqual({
+      availableQuantity: 1,
+      reservedQuantity: 1,
+    });
+    expect(db.prepare('SELECT availableQuantity, reservedQuantity FROM InventoryAccount WHERE id = ?').get('acc_product')).toEqual({
+      availableQuantity: 9,
+      reservedQuantity: 0,
+    });
+    expect(db.prepare('SELECT stockQuantity FROM Product WHERE id = ?').get('p_var')).toEqual({ stockQuantity: -1 });
+  });
+
+  it('still creates an order for a product without variants when product stock is zero', async () => {
+    const db = getTestDb();
+    db.prepare(`
+      INSERT INTO Product (id, catalogNumber, name, brand, price, stockQuantity, applications, reactivity, createdAt, updatedAt)
+      VALUES ('p_plain', 'CAT-PLAIN', '无规格试剂', 'CST', 80, 0, '[]', '[]', datetime('now'), datetime('now'))
+    `).run();
+    const res = await ordersPOST(makeReq({
+      customerEmail: 'cust@test.com',
+      items: [{ productId: 'p_plain', catalogNumber: 'CAT-PLAIN', name: '无规格试剂', price: 80, quantity: 1 }],
+      paymentMethod: 'bank_transfer',
+    }) as NextRequest);
+    expect(res.status).toBe(200);
+    expect(db.prepare('SELECT COUNT(*) AS count FROM InventoryReservation').get()).toEqual({ count: 0 });
+  });
 });
 
 describe('GET /api/admin/customers', () => {

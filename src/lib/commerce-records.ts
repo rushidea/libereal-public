@@ -71,6 +71,26 @@ export function toInquiryItemCreates(items: ItemRecord[]): Prisma.InquiryItemCre
   });
 }
 
+function orderItemMetadata(item: ItemRecord): string | null {
+  const explicit = text(item.metadata);
+  let record: Record<string, unknown> | null = null;
+  if (explicit) {
+    try {
+      const parsed = JSON.parse(explicit) as unknown;
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return explicit;
+      record = parsed as Record<string, unknown>;
+    } catch {
+      return explicit;
+    }
+  }
+  const variantId = text(item.variantId);
+  const storedVariantId = record?.variantId;
+  const hasVariantId = typeof storedVariantId === 'string' && storedVariantId.trim().length > 0;
+  if (variantId && !hasVariantId) record = { ...(record ?? {}), variantId };
+  if (!record || Object.keys(record).length === 0) return null;
+  return JSON.stringify(record);
+}
+
 export function toOrderItemCreates(items: ItemRecord[]): Prisma.OrderItemCreateWithoutOrderInput[] {
   return items.map((item, position) => ({
     position,
@@ -85,7 +105,7 @@ export function toOrderItemCreates(items: ItemRecord[]): Prisma.OrderItemCreateW
     shippedQty: nonNegativeInteger(item.shippedQty),
     leadTime: text(item.actualLeadTime) ?? text(item.leadTime),
     status: text(item.status) ?? 'pending',
-    metadata: text(item.metadata),
+    metadata: orderItemMetadata(item),
     pricingSnapshot: text(item.pricingSnapshot),
   }));
 }

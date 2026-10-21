@@ -3,20 +3,29 @@ import { creditLimitForAccount } from '@/lib/customer-credit';
 import { TIERS } from '@/lib/discount';
 import { isPostDeliveryPaymentMethod } from '@/data/payment-methods';
 import { calculateOrderPoints } from '@/lib/points';
+import { assertVariantCheckoutStock, variantIdFromOrderLine } from '@/lib/inventory';
 
 type GuardDb = Prisma.TransactionClient;
 
 export async function assertQuoteAcceptanceStock(
   db: GuardDb,
-  lines: Array<{ productId: string | null; quantity: number }>,
+  lines: Array<{ productId: string | null; quantity: number; variantId?: string | null; metadata?: string | null }>,
 ) {
   const requested = new Map<string, number>();
+  const variantLines: Array<{ productId: string; quantity: number; variantId: string; metadata?: string | null }> = [];
   for (const line of lines) {
     if (!line.productId) continue;
+    const variantId = variantIdFromOrderLine(line);
+    if (variantId) {
+      variantLines.push({ productId: line.productId, quantity: line.quantity, variantId, metadata: line.metadata });
+      continue;
+    }
     requested.set(line.productId, (requested.get(line.productId) ?? 0) + line.quantity);
   }
+  // 有规格的行在事务内按规格账户校验，不足抛出 VARIANT_INSUFFICIENT_STOCK（下单接口返回 400）。
+  await assertVariantCheckoutStock(db, variantLines);
   for (const [productId, quantity] of requested) {
-    // 与 reserveOrderInventory 一致：按商品级库存账户（variantId 为空）校验，数量用本次接受数量。
+    // 没有规格的行保持商品级库存账户（variantId 为空），数量用本次接受数量。
     const account = await db.inventoryAccount.findFirst({ where: { productId, variantId: null } });
     const available = account
       ? account.availableQuantity

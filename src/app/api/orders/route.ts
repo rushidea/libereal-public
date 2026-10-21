@@ -29,6 +29,13 @@ import { getReadableOrganizationIds, resolveRecordOwnership } from '@/lib/organi
 import { listOrganizationIdsForPermission } from '@/lib/organization-service';
 import { organizationRbacErrorStatus, OrganizationRbacError, requireOrganizationPermission } from '@/lib/organization-service';
 import { buildCheckoutRequestFingerprint, isUniqueConstraintError, validCheckoutAttemptId } from '@/lib/checkout-idempotency';
+import {
+  assertVariantCheckoutStock,
+  isVariantStockInsufficientError,
+  reserveOrderInventory,
+  VARIANT_STOCK_INSUFFICIENT,
+  VARIANT_STOCK_INSUFFICIENT_MESSAGE,
+} from '@/lib/inventory';
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 export async function GET(_req: NextRequest) {
@@ -118,6 +125,7 @@ export async function GET(_req: NextRequest) {
   }
 }
 
+/** 创建购物车订单。权限：已登录会话；组织结算仍要 organization.pricing.read，组织下单仍要 organization.orders.create。规格库存不足返回 400，不新增权限。 */
 export async function POST(req: NextRequest) {
   const activeUser = await requireActiveSession();
   if (activeUser instanceof NextResponse) return activeUser;
@@ -217,6 +225,13 @@ export async function POST(req: NextRequest) {
     const unavailableItem = verifiedItems.find((item) => getVerifiedInventoryError(item));
     if (unavailableItem) {
       const inventoryError = getVerifiedInventoryError(unavailableItem);
+      if (unavailableItem.variantId && inventoryError === 'INSUFFICIENT_STOCK') {
+        return NextResponse.json({
+          error: VARIANT_STOCK_INSUFFICIENT_MESSAGE,
+          code: VARIANT_STOCK_INSUFFICIENT,
+          catalogNumber: unavailableItem.catalogNumber,
+        }, { status: 400 });
+      }
       return NextResponse.json({
         error: inventoryError === 'INSUFFICIENT_STOCK' ? '库存不足，请刷新购物车后重试' : '商品当前缺货，请刷新购物车后重试',
         code: inventoryError,
@@ -420,6 +435,11 @@ export async function POST(req: NextRequest) {
               throw new Error(`POINTS_PRECHECK:${recheck.error}`);
             }
           }
+          await assertVariantCheckoutStock(tx, orderItems.map((item) => ({
+            productId: item.productId,
+            quantity: item.quantity,
+            metadata: item.metadata,
+          })));
 
           const created = await tx.order.create({
             data: {
@@ -485,6 +505,8 @@ export async function POST(req: NextRequest) {
             },
           });
 
+          await reserveOrderInventory(tx, created.id, session.user!.id as string, '下单预占规格库存', { variantLinesOnly: true });
+
           if (pointsBreakdown) {
             const applied = await applyOrderPointsDeduction(tx, created.id);
             if (!applied.ok) {
@@ -504,6 +526,9 @@ export async function POST(req: NextRequest) {
           return created;
       }, orderCreatedAt);
     } catch (error) {
+      if (isVariantStockInsufficientError(error)) {
+        return NextResponse.json({ error: VARIANT_STOCK_INSUFFICIENT_MESSAGE, code: VARIANT_STOCK_INSUFFICIENT }, { status: 400 });
+      }
       if (error instanceof Error && error.message.startsWith('COUPON_')) {
         const msg = error.message.replace(/^COUPON_APPLY:/, '');
         return NextResponse.json({ error: msg }, { status: 400 });

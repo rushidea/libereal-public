@@ -70,6 +70,13 @@ vi.mock('@/data/order-number', () => ({
     run: (tx: unknown, orderId: string) => Promise<unknown>,
   ) => db.$transaction(async (tx) => run(tx, 'ORD-20260723-001')),
 }));
+vi.mock('@/lib/inventory', () => ({
+  assertVariantCheckoutStock: vi.fn(),
+  reserveOrderInventory: vi.fn(),
+  isVariantStockInsufficientError: (error: unknown) => error instanceof Error && error.message === 'VARIANT_INSUFFICIENT_STOCK',
+  VARIANT_STOCK_INSUFFICIENT: 'VARIANT_INSUFFICIENT_STOCK',
+  VARIANT_STOCK_INSUFFICIENT_MESSAGE: '所选规格库存不足',
+}));
 
 import { POST } from '@/app/api/orders/route';
 import { promotionLines, submittedPromotion, verifiedPromotion } from './cart-promotion-fixtures';
@@ -306,5 +313,73 @@ describe('POST /api/orders', () => {
     });
     expect(mocks.previewPointsRedeem).toHaveBeenCalledTimes(2);
     expect(mocks.applyOrderPointsDeduction).toHaveBeenCalledWith(expect.anything(), 'ORD-20260723-001');
+  });
+
+  it('rejects insufficient variant stock with 400 and does not create the order', async () => {
+    mocks.verifyAndPriceItems.mockResolvedValue({
+      verifiedSubtotal: 200,
+      mismatchedCount: 0,
+      verifiedItems: [{
+        productId: 'product-1',
+        catalogNumber: 'CAT-1-V',
+        name: '测试产品',
+        unitPrice: 100,
+        quantity: 2,
+        lineTotal: 200,
+        variantId: 'variant-1',
+        stockQuantity: 1,
+        available: true,
+        pricingSnapshot: '{"finalPrice":100}',
+        source: 'db',
+        priceMismatch: false,
+      }],
+    });
+
+    const response = await POST(request({
+      paymentMethod: 'bank_transfer',
+      acceptedLegalIds: ['checkout-terms'],
+      items: [{ productId: 'product-1', variantId: 'variant-1', catalogNumber: 'CAT-1-V', name: '测试产品', price: 100, quantity: 2 }],
+    }) as never);
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({
+      error: '所选规格库存不足',
+      code: 'VARIANT_INSUFFICIENT_STOCK',
+      catalogNumber: 'CAT-1-V',
+    });
+    expect(mocks.orderCreate).not.toHaveBeenCalled();
+  });
+
+  it('keeps product-level stock rejection on the existing conflict response', async () => {
+    mocks.verifyAndPriceItems.mockResolvedValue({
+      verifiedSubtotal: 100,
+      mismatchedCount: 0,
+      verifiedItems: [{
+        productId: 'product-1',
+        catalogNumber: 'CAT-1',
+        name: '测试产品',
+        unitPrice: 100,
+        quantity: 1,
+        lineTotal: 100,
+        stockQuantity: 0,
+        available: true,
+        pricingSnapshot: '{"finalPrice":100}',
+        source: 'db',
+        priceMismatch: false,
+      }],
+    });
+
+    const response = await POST(request({
+      paymentMethod: 'bank_transfer',
+      acceptedLegalIds: ['checkout-terms'],
+      items: [{ productId: 'product-1', catalogNumber: 'CAT-1', name: '测试产品', price: 100, quantity: 1 }],
+    }) as never);
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toMatchObject({
+      error: '库存不足，请刷新购物车后重试',
+      code: 'INSUFFICIENT_STOCK',
+    });
+    expect(mocks.orderCreate).not.toHaveBeenCalled();
   });
 });
