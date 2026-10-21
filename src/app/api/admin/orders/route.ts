@@ -7,6 +7,7 @@ import { requireAdmin } from '@/lib/session';
 import { normalizeOrderPaymentMethod } from '@/data/payment-methods';
 import { orderAutoCloseAt } from '@/lib/order-auto-close';
 import { initialOrderStatus } from '@/lib/order-domain';
+import { isOrderIdUniqueConflict, ORDER_NUMBER_BUSY_ERROR, withAllocatedOrderNumber } from '@/data/order-number';
 import { getAlipayPaymentSummary } from '@/data/alipay-payment';
 import {
   adminOrderStatusCounts,
@@ -239,16 +240,6 @@ export async function POST(req: NextRequest) {
     const adjustmentTotal = adjustments.reduce((sum, item) => sum + item.amount, 0);
     const total = verifiedSubtotal + adjustmentTotal;
 
-    const now = new Date();
-    const dateStr = now.toISOString().slice(0, 10).replace(/-/g, '');
-    const startOfToday = new Date(now);
-    startOfToday.setHours(0, 0, 0, 0);
-    const countToday = await prisma.order.count({
-      where: { createdAt: { gte: startOfToday } },
-    });
-    const seq = String(countToday + 1).padStart(3, '0');
-    const orderId = `ORD-${dateStr}-${seq}`;
-
     const orderItems = verifiedItems.map((vi) => ({
       productId: vi.productId || null,
       name: vi.name,
@@ -264,7 +255,7 @@ export async function POST(req: NextRequest) {
     }));
 
     const orderStatus = initialOrderStatus(normalizedPaymentMethod);
-    const order = await prisma.order.create({
+    const order = await withAllocatedOrderNumber(prisma, async (tx, orderId) => tx.order.create({
       data: {
         id: orderId,
         email: customer?.email ?? normalizedCustomerEmail,
@@ -290,12 +281,16 @@ export async function POST(req: NextRequest) {
         },
         events: { create: { type: 'order_created', message: '管理员创建订单' } },
       },
-    });
+    }));
 
-    return NextResponse.json({ order, orderId });
+    return NextResponse.json({ order, orderId: order.id });
   } catch (err) {
     if (err instanceof Error && err.message === AMBIGUOUS_PRODUCT_CATALOG_NUMBER) {
       return NextResponse.json({ error: '部分商品需要确认品牌后再创建订单。' }, { status: 400 });
+    }
+    if (isOrderIdUniqueConflict(err)) {
+      console.error('[admin/orders POST] order number conflict', err);
+      return NextResponse.json({ error: ORDER_NUMBER_BUSY_ERROR }, { status: 503 });
     }
     console.error('[admin/orders POST] error:', err);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
