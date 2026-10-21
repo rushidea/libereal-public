@@ -22,6 +22,8 @@ import {
   VARIANT_STOCK_INSUFFICIENT_MESSAGE,
 } from '@/lib/inventory';
 import { acceptanceQuantityError, lineTotalForAcceptedQuantity, quoteLineFulfillment, requestedQuantityFromBody, validateAcceptedQuantity } from '@/lib/quote-acceptance';
+import { quoteIsExpired, quoteValidUntilPassed } from '@/lib/quote-expiry';
+import { settleExpiredQuotes } from '@/lib/quote-expiry-settle';
 
 interface OrderItem {
   productId?: string | null;
@@ -85,6 +87,7 @@ export async function POST(
     const isAdmin = user.role === 'admin';
     // 管理员代客接受报价不能代扣客户积分。未传或 0 仍可接受。不新增权限。
     // 代接受生成且尚未支付的订单，由客户本人在付款前调用 POST /api/orders/:orderId/prepay-settlement 选择积分和优惠券。管理员不能代选。
+    // 已过期报价（status 为 expired，或 sent 且 validUntil 已到）不能接受，返回 QUOTE_EXPIRED，并把询价标为 quote_expired。不新增权限。
     if (isAdmin) {
       const pointsError = adminActingPointsError({ personalPoints, groupPoints, groupId });
       if (pointsError) return NextResponse.json({ error: pointsError }, { status: 400 });
@@ -94,7 +97,6 @@ export async function POST(
       where: { id },
       include: {
         quotes: {
-          where: { status: 'sent' },
           orderBy: { version: 'desc' },
           take: 1,
           include: { items: { orderBy: { position: 'asc' } } },
@@ -127,15 +129,18 @@ export async function POST(
     }
 
     const quote = inquiry.quotes[0];
-    if (quoteId !== undefined && (typeof quoteId !== 'string' || !quote || quote.id !== quoteId || (quoteVersion !== undefined && quote.version !== quoteVersion))) {
-      return NextResponse.json({ error: '报价版本已变化，请刷新后重新确认。', code: 'QUOTE_VERSION_CONFLICT' }, { status: 409 });
-    }
     if (!quote) {
       return NextResponse.json({ error: 'Quote not sent yet' }, { status: 400 });
     }
-    if (quote.validUntil && quote.validUntil < new Date()) {
-      await prisma.quote.update({ where: { id: quote.id }, data: { status: 'expired' } });
-      return NextResponse.json({ error: 'Quote has expired' }, { status: 400 });
+    if (quoteId !== undefined && (typeof quoteId !== 'string' || quote.id !== quoteId || (quoteVersion !== undefined && quote.version !== quoteVersion))) {
+      return NextResponse.json({ error: '报价版本已变化，请刷新后重新确认。', code: 'QUOTE_VERSION_CONFLICT' }, { status: 409 });
+    }
+    if (quote.status !== 'sent' || quoteIsExpired(quote)) {
+      if (quote.status === 'expired' || quoteIsExpired(quote)) {
+        await settleExpiredQuotes(prisma, [id]);
+        return NextResponse.json({ error: '报价已过期，请刷新后重新确认。', code: 'QUOTE_EXPIRED' }, { status: 400 });
+      }
+      return NextResponse.json({ error: '报价版本已变化，请刷新后重新确认。', code: 'QUOTE_VERSION_CONFLICT' }, { status: 409 });
     }
 
     try {
@@ -219,7 +224,10 @@ export async function POST(
       const { orderId, allOrdered } = await withAllocatedOrderNumber(prisma, async (tx, orderId) => {
         let allOrdered = false;
         const current = await tx.quote.findFirst({ where: { inquiryId: id }, orderBy: { version: 'desc' }, include: { items: true } });
-        if (!current || current.id !== quote.id || current.version !== quote.version || current.status !== 'sent' || (current.validUntil && current.validUntil < new Date())) {
+        if (current && (current.status === 'expired' || quoteValidUntilPassed(current.validUntil))) {
+          throw new Error('QUOTE_EXPIRED');
+        }
+        if (!current || current.id !== quote.id || current.version !== quote.version || current.status !== 'sent') {
           throw new Error('QUOTE_CONFLICT');
         }
         if (settled?.pointsBreakdown && pointsUserId) {
@@ -353,6 +361,10 @@ export async function POST(
       }
       if (e instanceof Error && (e.message === 'CREDIT_LIMIT_EXCEEDED' || e.message === 'CREDIT_ACCOUNT_SUSPENDED')) {
         return NextResponse.json({ error: '授信额度不足或账户不可用', code: e.message }, { status: 403 });
+      }
+      if (e instanceof Error && e.message === 'QUOTE_EXPIRED') {
+        await settleExpiredQuotes(prisma, [id]);
+        return NextResponse.json({ error: '报价已过期，请刷新后重新确认。', code: 'QUOTE_EXPIRED' }, { status: 400 });
       }
       if (e instanceof Error && e.message === 'QUOTE_CONFLICT') {
         if (scopedAttemptId) {

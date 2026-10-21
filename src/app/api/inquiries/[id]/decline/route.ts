@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { requireActiveSession } from '@/lib/session';
 import { OrganizationRbacError, requireOrganizationPermission } from '@/lib/organization-service';
+import { DECLINABLE_INQUIRY_STATUSES, DECLINABLE_QUOTE_STATUSES } from '@/lib/quote-expiry';
 import { parseQuoteDeclineInput, quoteDeclineReasonLabel } from '@/lib/quote-decline';
 import { emailKeyedAccess } from '@/lib/verified-email-access';
 
@@ -17,10 +18,11 @@ class DeclineRejected extends Error {
 }
 
 // permission: POST /api/inquiries/[id]/decline
-// Logged-in active session required.
+// Logged-in active session required. No MFA.
 // Personal inquiry: inquiry.userId matches the session user, or verified mailbox matches inquiry.email (case-insensitive). Admin role alone is not enough.
 // Organization inquiry: organization.orders.create on that organization (same permission as accepting the quote).
 // Admin read of the stored decline uses existing GET /api/inquiries and GET /api/inquiries/[id] (inquiries.read).
+// A quote that is already expired, or still sent but past validUntil, can be declined. Accepting it stays rejected.
 export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
@@ -85,15 +87,17 @@ export async function POST(
 
     const declinedAt = new Date();
     const result = await prisma.$transaction(async (tx) => {
-      if (inquiry.status !== 'quote_sent') {
+      if (!DECLINABLE_INQUIRY_STATUSES.includes(inquiry.status as (typeof DECLINABLE_INQUIRY_STATUSES)[number])) {
         throw new DeclineRejected('QUOTE_NOT_ACTIONABLE', '当前询价不能拒绝报价');
       }
       const quote = await tx.quote.findFirst({
-        where: { inquiryId: id, status: 'sent' },
+        where: { inquiryId: id },
         orderBy: { version: 'desc' },
         include: { items: { select: { orderedQty: true } } },
       });
-      if (!quote) throw new DeclineRejected('QUOTE_NOT_ACTIONABLE', '没有可拒绝的已发送报价');
+      if (!quote || !DECLINABLE_QUOTE_STATUSES.includes(quote.status as (typeof DECLINABLE_QUOTE_STATUSES)[number])) {
+        throw new DeclineRejected('QUOTE_NOT_ACTIONABLE', '没有可拒绝的已发送报价');
+      }
       if (typeof requestedQuoteId === 'string' && quote.id !== requestedQuoteId) {
         throw new DeclineRejected('QUOTE_VERSION_CONFLICT', '报价版本已变化，请刷新后重试');
       }
@@ -106,7 +110,7 @@ export async function POST(
       }
 
       const quoteUpdate = await tx.quote.updateMany({
-        where: { id: quote.id, status: 'sent' },
+        where: { id: quote.id, status: { in: [...DECLINABLE_QUOTE_STATUSES] } },
         data: {
           status: 'declined',
           declineReasonCode: parsed.reasonCode,
@@ -119,7 +123,7 @@ export async function POST(
       if (quoteUpdate.count !== 1) throw new DeclineRejected('QUOTE_NOT_ACTIONABLE', '报价状态已变化，请刷新后重试');
 
       const inquiryUpdate = await tx.inquiry.updateMany({
-        where: { id, status: 'quote_sent' },
+        where: { id, status: { in: [...DECLINABLE_INQUIRY_STATUSES] } },
         data: { status: 'declined' },
       });
       if (inquiryUpdate.count !== 1) throw new DeclineRejected('QUOTE_NOT_ACTIONABLE', '询价状态已变化，请刷新后重试');

@@ -9,6 +9,7 @@ import {
   Search, Package, Archive, Check, Clock, XCircle, ChevronRight, MessageSquare,
 } from 'lucide-react';
 import { InquiryIdDisplay } from '@/components/InquiryIdDisplay';
+import { effectiveInquiryStatus, presentedQuoteStatus } from '@/lib/quote-expiry';
 
 interface Inquiry {
   id: string;
@@ -26,7 +27,7 @@ interface Inquiry {
   paymentMethod?: string;
   notes?: string;
   userId?: string;
-  activeQuote?: { status: string; sentAt?: string; acceptedAt?: string; version: number; items: InquiryItem[] } | null;
+  activeQuote?: { status: string; validUntil?: string | null; sentAt?: string; acceptedAt?: string; version: number; items: InquiryItem[] } | null;
   quoteVersions?: QuoteVersion[];
   operationLogs?: string;
 }
@@ -67,7 +68,7 @@ export default function AdminInquiriesPage() {
         <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
           <MessageSquare className="w-6 h-6 text-brand-600" /> 活跃询价
         </h1>
-        <p className="text-sm text-gray-500 mt-1">查看和处理所有进行中的询价单（待处理/已报价/已接受）</p>
+        <p className="text-sm text-gray-500 mt-1">查看和处理所有进行中的询价单（待处理/已报价/已过期/已接受）</p>
       </div>
       <InquiriesPanel />
     </div>
@@ -280,21 +281,28 @@ function InquiryRow({
         <td className="px-4 py-3 text-gray-700">{inquiry.institution}</td>
         <td className="px-4 py-3 font-semibold text-gray-900">{inquiry.hasUnresolvedPricing ? '待报价确认' : `¥${inquiry.subtotal.toLocaleString('zh-CN', { minimumFractionDigits: 2 })}`}</td>
         <td className="px-4 py-3">
+          {(() => {
+            const shownStatus = effectiveInquiryStatus(inquiry.status, inquiry.activeQuote);
+            return (
           <span className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium ${
-            inquiry.status === 'closed' ? 'bg-gray-100 text-gray-600' :
-            inquiry.status === 'pending_quote' ? 'bg-yellow-100 text-yellow-700' :
-            inquiry.status === 'quote_sent' ? 'bg-blue-100 text-blue-700' :
-            inquiry.status === 'declined' ? 'bg-gray-100 text-gray-600' :
+            shownStatus === 'closed' ? 'bg-gray-100 text-gray-600' :
+            shownStatus === 'pending_quote' ? 'bg-yellow-100 text-yellow-700' :
+            shownStatus === 'quote_expired' ? 'bg-amber-100 text-amber-800' :
+            shownStatus === 'quote_sent' ? 'bg-blue-100 text-blue-700' :
+            shownStatus === 'declined' ? 'bg-gray-100 text-gray-600' :
             'bg-green-100 text-green-700'
           }`}>
-            {inquiry.status === 'closed' || inquiry.status === 'declined' ? <XCircle className="w-3 h-3" /> :
-             inquiry.status === 'pending_quote' ? <Clock className="w-3 h-3" /> :
+            {shownStatus === 'closed' || shownStatus === 'declined' ? <XCircle className="w-3 h-3" /> :
+             shownStatus === 'pending_quote' || shownStatus === 'quote_expired' ? <Clock className="w-3 h-3" /> :
              <Check className="w-3 h-3" />}
-            {inquiry.status === 'closed' ? '已关闭' :
-             inquiry.status === 'declined' ? '已放弃' :
-             inquiry.status === 'pending_quote' ? '待报价' :
-             inquiry.status === 'quote_sent' ? '已发报价' : inquiry.status}
+            {shownStatus === 'closed' ? '已关闭' :
+             shownStatus === 'declined' ? '已放弃' :
+             shownStatus === 'pending_quote' ? '待报价' :
+             shownStatus === 'quote_expired' ? '已过期' :
+             shownStatus === 'quote_sent' ? '已发报价' : shownStatus}
           </span>
+            );
+          })()}
         </td>
         <td className="px-4 py-3 text-gray-600 text-xs">{new Date(inquiry.createdAt).toLocaleDateString('zh-CN')}</td>
         <td className="px-4 py-3" onClick={e => e.stopPropagation()}>
@@ -496,7 +504,7 @@ function InquiryDetailPanel({
             <table className="min-w-[620px] w-full text-left text-xs">
               <thead className="bg-gray-50 text-gray-500"><tr><th className="px-3 py-2">版本</th><th className="px-3 py-2">状态</th><th className="px-3 py-2">金额</th><th className="px-3 py-2">发出时间</th><th className="px-3 py-2">有效期</th></tr></thead>
               <tbody className="divide-y divide-gray-100">
-                {inquiry.quoteVersions?.map((quote) => <tr key={quote.id}><td className="px-3 py-2 font-medium text-gray-900">第 {quote.version} 版</td><td className="px-3 py-2 text-gray-600">{{ draft: '草稿', sent: '已发送', accepted: '已接受', superseded: '已替代', expired: '已过期' }[quote.status] || quote.status}</td><td className="px-3 py-2 font-medium text-gray-900">¥{quote.subtotal.toLocaleString('zh-CN', { minimumFractionDigits: 2 })}</td><td className="px-3 py-2 text-gray-600">{quote.sentAt ? new Date(quote.sentAt).toLocaleString('zh-CN') : '—'}</td><td className="px-3 py-2 text-gray-600">{quote.validUntil ? new Date(quote.validUntil).toLocaleString('zh-CN') : '—'}</td></tr>)}
+                {inquiry.quoteVersions?.map((quote) => <tr key={quote.id}><td className="px-3 py-2 font-medium text-gray-900">第 {quote.version} 版</td><td className="px-3 py-2 text-gray-600">{{ draft: '草稿', sent: '已发送', accepted: '已接受', superseded: '已替代', expired: '已过期' }[presentedQuoteStatus(quote)] || presentedQuoteStatus(quote)}</td><td className="px-3 py-2 font-medium text-gray-900">¥{quote.subtotal.toLocaleString('zh-CN', { minimumFractionDigits: 2 })}</td><td className="px-3 py-2 text-gray-600">{quote.sentAt ? new Date(quote.sentAt).toLocaleString('zh-CN') : '—'}</td><td className="px-3 py-2 text-gray-600">{quote.validUntil ? new Date(quote.validUntil).toLocaleString('zh-CN') : '—'}</td></tr>)}
               </tbody>
             </table>
           </div>

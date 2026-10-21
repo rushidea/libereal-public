@@ -10,6 +10,7 @@ import LegalConsentModal from '@/components/legal/LegalConsentModal';
 import { QuoteAcceptancePreview, QuoteQuantityEditor } from '@/components/account/QuoteQuantityEditor';
 import { QuoteQuantityNudgeNotice } from '@/components/account/QuoteQuantityNudge';
 import { findQuoteQuantityNudges } from '@/lib/quote-quantity-nudge';
+import { customerCanAcceptQuote, effectiveInquiryStatus, quoteIsExpired } from '@/lib/quote-expiry';
 import DeclineQuoteDialog from '@/components/account/DeclineQuoteDialog';
 import { CheckoutPaymentFields, useCheckoutPointsBalance } from '@/components/checkout/CheckoutPaymentFields';
 import { InquiryIdDisplay } from '@/components/InquiryIdDisplay';
@@ -78,6 +79,7 @@ interface Inquiry {
 const STATUS_CONFIG: Record<string, { label: string; color: string; icon: React.ComponentType<{ className?: string }> }> = {
   'pending_quote': { label: '待报价', color: uiSurfaces.badgeWarning, icon: Clock },
   'quote_sent': { label: '已报价', color: uiSurfaces.badgeSuccess, icon: FileText },
+  'quote_expired': { label: '已过期', color: 'bg-amber-100 text-amber-800', icon: Clock },
   'closed': { label: '待报价', color: uiSurfaces.badgeWarning, icon: Clock },
   'declined': { label: '已放弃', color: 'bg-gray-100 text-gray-600', icon: X },
 };
@@ -344,7 +346,10 @@ export default function InquiriesPanel() {
     }
   }
 
-  const quoteSentCount = inquiries.filter(i => i.activeQuote?.status === 'sent').length;
+  const quoteSentCount = inquiries.filter((inquiry) => customerCanAcceptQuote({
+    inquiryStatus: inquiry.status,
+    quote: inquiry.activeQuote,
+  })).length;
 
   if (loading) {
     return (
@@ -381,7 +386,9 @@ export default function InquiriesPanel() {
       ) : (
         <div className="space-y-4">
           {inquiries.map(inquiry => {
-            const statusCfg = STATUS_CONFIG[inquiry.status] || STATUS_CONFIG['pending_quote'];
+            const quoteExpired = Boolean(inquiry.activeQuote && quoteIsExpired(inquiry.activeQuote));
+            const quoteOpen = customerCanAcceptQuote({ inquiryStatus: inquiry.status, quote: inquiry.activeQuote });
+            const statusCfg = STATUS_CONFIG[effectiveInquiryStatus(inquiry.status, inquiry.activeQuote)] || STATUS_CONFIG['pending_quote'];
             const items = parseItems(inquiry.activeQuote?.items ?? inquiry.items);
             const linkedOrders = inquiryOrders[inquiry.id] || [];
 
@@ -412,7 +419,19 @@ export default function InquiriesPanel() {
                 {selectedInquiry?.id === inquiry.id && (
                   <div className={`space-y-3 border-t p-6 ${uiSurfaces.border} bg-[var(--surface-muted)]`}>
                     {/* Quote received banner */}
-                    {inquiry.activeQuote?.status === 'sent' && (
+                    {quoteExpired && inquiry.activeQuote && (
+                      <div className="rounded-[var(--brand-border-radius)] border border-amber-200 bg-amber-50 p-4">
+                        <div className="mb-2 flex items-center gap-2 text-amber-800">
+                          <Clock className="w-5 h-5" />
+                          <p className="font-medium">报价已过期</p>
+                        </div>
+                        <p className="text-sm text-amber-800/80">
+                          报价版本：v{inquiry.activeQuote.version} · 有效期：{inquiry.activeQuote.validUntil ? new Date(inquiry.activeQuote.validUntil).toLocaleString('zh-CN') : '未提供'}
+                        </p>
+                      </div>
+                    )}
+
+                    {quoteOpen && inquiry.activeQuote && (
                       <div className="rounded-[var(--brand-border-radius)] border border-[var(--brand-color-success-border)] bg-[var(--brand-color-success-bg)] p-4">
                         <div className="mb-2 flex items-center gap-2 text-[var(--brand-color-success-text)]">
                           <FileText className="w-5 h-5" />
@@ -456,7 +475,7 @@ export default function InquiriesPanel() {
                     )}
 
                     {/* Product selection controls */}
-                    {inquiry.activeQuote?.status === 'sent' && (
+                    {quoteOpen && (
                       <div className="flex items-center justify-between">
                         <p className={`text-sm font-medium ${uiSurfaces.titleText}`}>
                           选择产品生成订单（已选 {selectedItems[inquiry.id]?.size || 0} 种）
@@ -499,7 +518,7 @@ export default function InquiriesPanel() {
                         const leadTime = item.actualLeadTime || item.customerLeadTime || item.leadTime;
                         const isOrdered = remaining === 0;
                         const isSelected = selectedItems[inquiry.id]?.has(i) || false;
-                        const canEdit = inquiry.activeQuote?.status === 'sent' && price != null && remaining > 0 && item.available !== false && !item.locked;
+                        const canEdit = quoteOpen && price != null && remaining > 0 && item.available !== false && !item.locked;
                         const canSelect = canEdit;
                         const finalQty = getItemQty(inquiry.id, i, remaining);
                         const subtotal = (price || 0) * finalQty;
@@ -593,7 +612,23 @@ export default function InquiriesPanel() {
                     </div>
 
                     {/* Bottom: Submit selected items as order */}
-                    {(inquiry.activeQuote?.status === 'sent' || acceptanceAttempts[inquiry.id]) && (
+                    {quoteExpired && inquiry.activeQuote && (
+                      <div className={`mt-4 border-t pt-4 ${uiSurfaces.border}`}>
+                        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                          <p className={`text-sm ${uiSurfaces.textSecondary}`}>报价已过期，不能再接受。可以放弃该报价，或等待重新报价。</p>
+                          <button
+                            type="button"
+                            data-testid="decline-quote-button"
+                            onClick={(e) => { e.stopPropagation(); setSelectedInquiry(inquiry); setShowDecline(true); }}
+                            className="min-h-11 w-full rounded-xl border border-gray-300 px-4 py-2.5 text-sm font-medium text-gray-700 sm:w-auto"
+                          >
+                            放弃
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
+                    {(quoteOpen || acceptanceAttempts[inquiry.id]) && (
                       <div className={`mt-4 border-t pt-4 ${uiSurfaces.border}`}>
                         {(() => {
                           const selId = selectedItems[inquiry.id];

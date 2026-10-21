@@ -3,6 +3,7 @@ import { sendAliyunSmsTemplate } from '@/lib/aliyun-sms';
 import { parseTaskPayload } from '@/lib/background-tasks';
 import { sendMail, sendQuoteNotificationEmailNow, type MailMessage } from '@/lib/mail';
 import { prisma } from '@/lib/prisma';
+import { settleExpiredQuotes } from '@/lib/quote-expiry-settle';
 import { runMfaChallengeCleanupOnce } from '@/lib/security/mfa-cleanup';
 
 type SmsPayload = { phone: string; templateCode: string; templateParams: Record<string, string | number> };
@@ -70,26 +71,18 @@ async function expireQuote(task: BackgroundTask): Promise<unknown> {
   const now = new Date();
   const quote = await prisma.quote.findUnique({
     where: { id: quoteId },
-    include: { inquiry: { select: { email: true, id: true } } },
+    select: { id: true, status: true, validUntil: true, inquiryId: true },
   });
-  if (!quote || quote.status !== 'sent') return { skipped: 'quote_inactive' };
+  if (!quote) return { skipped: 'quote_inactive' };
+  if (quote.status === 'expired') {
+    await settleExpiredQuotes(prisma, [quote.inquiryId], now);
+    return { skipped: 'quote_inactive' };
+  }
+  if (quote.status !== 'sent') return { skipped: 'quote_inactive' };
   if (!quote.validUntil) return { skipped: 'quote_has_no_expiration' };
   if (quote.validUntil > now) throw new Error('Quote expiration task ran before validUntil');
 
-  await prisma.$transaction([
-    prisma.quote.update({ where: { id: quote.id }, data: { status: 'expired' } }),
-    prisma.notification.create({
-      data: {
-        email: quote.inquiry.email,
-        role: 'customer',
-        type: 'quote_expired',
-        title: '报价已过期',
-        content: `询价单的第 ${quote.version} 版报价已过期`,
-        linkUrl: '/account/inquiries',
-        metadata: JSON.stringify({ inquiryId: quote.inquiry.id, quoteId: quote.id }),
-      },
-    }),
-  ]);
+  await settleExpiredQuotes(prisma, [quote.inquiryId], now);
   return { expired: true, quoteId };
 }
 

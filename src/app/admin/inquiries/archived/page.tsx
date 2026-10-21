@@ -164,16 +164,18 @@ const [loading, setLoading] = useState(true);
                           <span className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium ${
                             inquiry.status === 'closed' ? 'bg-gray-100 text-gray-600' :
                             inquiry.status === 'pending_quote' ? 'bg-yellow-100 text-yellow-700' :
+                            inquiry.status === 'quote_expired' ? 'bg-amber-100 text-amber-800' :
                             inquiry.status === 'quote_sent' ? 'bg-blue-100 text-blue-700' :
                             inquiry.status === 'declined' ? 'bg-gray-100 text-gray-600' :
                             'bg-green-100 text-green-700'
                           }`}>
                             {inquiry.status === 'closed' || inquiry.status === 'declined' ? <XCircle className="w-3 h-3" /> :
-                             inquiry.status === 'pending_quote' ? <Clock className="w-3 h-3" /> :
+                             inquiry.status === 'pending_quote' || inquiry.status === 'quote_expired' ? <Clock className="w-3 h-3" /> :
                              <Check className="w-3 h-3" />}
                             {inquiry.status === 'closed' ? '已关闭' :
                              inquiry.status === 'declined' ? '已放弃' :
                              inquiry.status === 'pending_quote' ? '待报价' :
+                             inquiry.status === 'quote_expired' ? '已过期' :
                              inquiry.status === 'quote_sent' ? '已发报价' :
                              inquiry.status}
                           </span>

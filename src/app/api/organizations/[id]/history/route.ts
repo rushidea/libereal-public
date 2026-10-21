@@ -2,6 +2,8 @@ import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { requireActiveSession } from '@/lib/session';
 import { CREDIT_REVIEW_POLICY, creditRestrictionForOverdueDays, overdueDaysFromDueAt } from '@/lib/customer-credit';
+import { QUOTE_EXPIRED_INQUIRY_STATUS } from '@/lib/quote-expiry';
+import { settleExpiredQuotes } from '@/lib/quote-expiry-settle';
 import {
   hasOrganizationPermission,
   organizationRbacErrorStatus,
@@ -59,8 +61,13 @@ export async function GET(_request: Request, { params }: RouteParams) {
       }),
     ]);
 
-    const canReviewOrders = hasOrganizationPermission(membership, 'organization.orders.review');
     const now = new Date();
+    const settled = await settleExpiredQuotes(prisma, inquiries.map((inquiry) => inquiry.id), now);
+    const expiredInquiryIds = new Set(settled.expiredInquiryIds);
+    const visibleInquiries = inquiries.map((inquiry) => (
+      expiredInquiryIds.has(inquiry.id) ? { ...inquiry, status: QUOTE_EXPIRED_INQUIRY_STATUS } : inquiry
+    ));
+    const canReviewOrders = hasOrganizationPermission(membership, 'organization.orders.review');
     const payables = orders.flatMap((order) => {
         const receivable = order.receivable;
         if (!receivable) return [];
@@ -94,7 +101,7 @@ export async function GET(_request: Request, { params }: RouteParams) {
         ...order,
         canReview: canReviewOrders && order.status === 'pending' && order.customerId !== user.id,
       })),
-      inquiries,
+      inquiries: visibleInquiries,
       payables,
     });
   } catch (error) {

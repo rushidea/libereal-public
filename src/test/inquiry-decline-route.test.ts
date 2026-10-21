@@ -144,6 +144,35 @@ describe('POST /api/inquiries/[id]/decline', () => {
     expect(inquiry.status).toBe('quote_sent');
   });
 
+  it('declines a quote that is already expired and one that is sent but past validUntil', async () => {
+    const db = getTestDb();
+    const past = new Date(Date.now() - 86_400_000).toISOString();
+    db.prepare(`UPDATE Quote SET status = 'expired', validUntil = ? WHERE id = 'q1'`).run(past);
+    db.prepare(`UPDATE Inquiry SET status = 'quote_sent' WHERE id = 'inq-1'`).run();
+
+    const expired = await declinePOST(
+      declineRequest('inq-1', { reasonCode: 'plans_changed', quoteId: 'q1' }),
+      { params: Promise.resolve({ id: 'inq-1' }) },
+    );
+    expect(expired.status).toBe(200);
+    await expect(expired.json()).resolves.toMatchObject({ success: true, inquiryStatus: 'declined', quoteStatus: 'declined' });
+    expect((db.prepare('SELECT status FROM Inquiry WHERE id = ?').get('inq-1') as { status: string }).status).toBe('declined');
+    expect((db.prepare('SELECT status FROM Quote WHERE id = ?').get('q1') as { status: string }).status).toBe('declined');
+
+    db.prepare(`UPDATE Inquiry SET status = 'quote_expired' WHERE id = 'inq-pending'`).run();
+    db.prepare(`
+      INSERT INTO Quote (id, inquiryId, version, status, subtotal, currency, validUntil, sentAt, createdAt, updatedAt)
+      VALUES ('q-due', 'inq-pending', 1, 'sent', 50, 'CNY', ?, ?, datetime('now'), datetime('now'))
+    `).run(past, past);
+    const due = await declinePOST(
+      declineRequest('inq-pending', { reasonCode: 'price_high', note: '过期了' }),
+      { params: Promise.resolve({ id: 'inq-pending' }) },
+    );
+    expect(due.status).toBe(200);
+    await expect(due.json()).resolves.toMatchObject({ success: true, inquiryStatus: 'declined', quoteId: 'q-due' });
+    expect((db.prepare('SELECT status FROM Quote WHERE id = ?').get('q-due') as { status: string }).status).toBe('declined');
+  });
+
   it('rejects a second decline, another customer, an admin who does not own it, and a missing session', async () => {
     const first = await declinePOST(declineRequest('inq-1', { reasonCode: 'plans_changed' }), { params: Promise.resolve({ id: 'inq-1' }) });
     expect(first.status).toBe(200);

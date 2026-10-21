@@ -4,6 +4,7 @@ import { prisma } from '@/lib/prisma';
 import { orderItemView } from '@/lib/commerce-records';
 import { viewInquiryItemGroups } from '@/lib/inquiry-item-brands';
 import { quoteView } from '@/lib/quote-records';
+import { applySettledQuoteExpiry, settleExpiredQuotes } from '@/lib/quote-expiry-settle';
 import { loadQuoteProductTaxonomy } from '@/lib/quote-item-taxonomy';
 import { getAlipayPaymentSummary } from '@/data/alipay-payment';
 import type { Prisma } from '@prisma/client';
@@ -80,11 +81,13 @@ export async function GET() {
       : [];
     const countMap = new Map(orderCounts.map((c) => [c.inquiryId, c._count._all]));
 
-    const inquiryItemViews = await viewInquiryItemGroups(inquiries.map((inq) => inq.inquiryItems));
-    const quoteTaxonomy = await loadQuoteProductTaxonomy(inquiries.flatMap((inquiry) => (
+    const settled = await settleExpiredQuotes(prisma, inquiries.map((inquiry) => inquiry.id));
+    const visibleInquiries = inquiries.map((inquiry) => applySettledQuoteExpiry(inquiry, settled));
+    const inquiryItemViews = await viewInquiryItemGroups(visibleInquiries.map((inq) => inq.inquiryItems));
+    const quoteTaxonomy = await loadQuoteProductTaxonomy(visibleInquiries.flatMap((inquiry) => (
       inquiry.quotes.flatMap((quote) => quote.items.map((item) => item.productId))
     )));
-    const inquiriesWithOrderCount = inquiries.map((inq, index) => {
+    const inquiriesWithOrderCount = visibleInquiries.map((inq, index) => {
       const { userId: creatorUserId, inquiryItems, quotes, ...publicInquiry } = inq;
       void creatorUserId;
       void inquiryItems;

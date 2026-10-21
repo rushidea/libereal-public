@@ -46,6 +46,7 @@ describe('pending inquiry badge statuses', () => {
   it('does not count declined inquiries as pending', () => {
     expect(PENDING_INQUIRY_STATUSES).not.toContain('declined');
     expect(PENDING_INQUIRY_STATUSES).not.toContain('quote_sent');
+    expect(PENDING_INQUIRY_STATUSES).not.toContain('quote_expired');
     expect(PENDING_INQUIRY_STATUSES).toContain('pending_quote');
   });
 });
