@@ -25,6 +25,16 @@ export type BlockedVariantRemoval = {
   catalogNumber: string;
   spec: string;
   reasons: VariantRemovalReason[];
+  /** 仍未结束、且绑定在该规格上的促销名称。已结束的促销不会出现在这里。 */
+  promotionNames?: string[];
+};
+
+/** 规格级 PromotionProduct 绑定。variantId 为空表示商品级活动，删除单个规格不会级联删掉它。 */
+export type VariantPromotionMembership = {
+  variantId: string | null | undefined;
+  name: string;
+  status: string;
+  endsAt: Date | string | number;
 };
 
 export type VariantRemovalEvidence = {
@@ -33,6 +43,8 @@ export type VariantRemovalEvidence = {
   inquiryMetadata: Iterable<string | null | undefined>;
   quoteMetadata: Iterable<string | null | undefined>;
   cartItems: Iterable<string | null | undefined>;
+  promotions?: Iterable<VariantPromotionMembership>;
+  now?: Date;
 };
 
 export class VariantRemovalBlockedError extends Error {
@@ -55,13 +67,32 @@ function describeReasons(reasons: VariantRemovalReason[]): string {
   return parts.join('，');
 }
 
+function describePromotions(names: readonly string[]): string {
+  if (names.length === 0) return '';
+  return `参加了未结束的促销${names.map((name) => `「${name}」`).join('、')}`;
+}
+
+function removalAdvice(blocked: BlockedVariantRemoval[]): string {
+  const pronoun = blocked.length > 1 ? '这些规格' : '该规格';
+  const promotionNames = [...new Set(blocked.flatMap((item) => item.promotionNames ?? []))];
+  const hasOtherReason = blocked.some((item) => item.reasons.length > 0);
+  if (promotionNames.length > 0 && !hasOtherReason) {
+    const source = promotionNames.length > 1 ? '这些促销' : '促销';
+    return `${pronoun}不能删除，请先从${source}中移除${pronoun}后再保存。`;
+  }
+  const keep = `${pronoun}不能删除，请重新打开商品并保留${pronoun}后再保存。`;
+  if (promotionNames.length === 0) return keep;
+  const source = promotionNames.length > 1 ? '这些促销' : '促销';
+  return `${keep}参加了促销的规格请先从${source}中移除。`;
+}
+
 export function formatVariantRemovalBlockedMessage(blocked: BlockedVariantRemoval[]): string {
   const details = blocked.map((item) => {
     const name = item.spec ? `${item.catalogNumber}（${item.spec}）` : item.catalogNumber;
-    return `规格 ${name}${describeReasons(item.reasons)}`;
+    const parts = [describeReasons(item.reasons), describePromotions(item.promotionNames ?? [])].filter(Boolean);
+    return `规格 ${name}${parts.join('，')}`;
   }).join('；');
-  const pronoun = blocked.length > 1 ? '这些规格' : '该规格';
-  return `无法保存，本次修改已全部取消。${details}。${pronoun}不能删除，请重新打开商品并保留${pronoun}后再保存。`;
+  return `无法保存，本次修改已全部取消。${details}。${removalAdvice(blocked)}`;
 }
 
 export function variantIdFromItemMetadata(metadata: string | null | undefined): string | null {
@@ -116,6 +147,26 @@ function noteReason(
   reasonsById.set(variantId, reasons);
 }
 
+function coerceDate(value: Date | string | number): Date | null {
+  const date = value instanceof Date ? value : new Date(value);
+  return Number.isFinite(date.getTime()) ? date : null;
+}
+
+/**
+ * 进行中或未开始的促销仍要拦住。
+ * 状态已是 ended，或结束时间已到（含刚好到期），视为已结束，不拦截。
+ * 草稿、生效中、已暂停只要结束时间还在未来，规格绑定还在，删除会把规格从活动里悄悄去掉。
+ */
+function isPromotionStillOpen(membership: VariantPromotionMembership, now: Date): boolean {
+  if (membership.status === 'ended') return false;
+  const endsAt = coerceDate(membership.endsAt);
+  return endsAt !== null && endsAt.getTime() > now.getTime();
+}
+
+function enrolledPromotionNames(names: readonly string[]): string[] {
+  return [...new Set(names)].sort((left, right) => left.localeCompare(right, 'zh-CN'));
+}
+
 export function findBlockedVariantRemovals(
   removed: VariantRemovalCandidate[],
   evidence: VariantRemovalEvidence,
@@ -141,12 +192,27 @@ export function findBlockedVariantRemovals(
     }
   }
 
+  const now = evidence.now ?? new Date();
+  const promotionsById = new Map<string, string[]>();
+  for (const membership of evidence.promotions ?? []) {
+    const variantId = typeof membership.variantId === 'string' ? membership.variantId.trim() : '';
+    if (!variantId || !removedIds.has(variantId) || !isPromotionStillOpen(membership, now)) continue;
+    const name = membership.name.trim();
+    if (!name) continue;
+    const names = promotionsById.get(variantId) ?? [];
+    if (!names.includes(name)) names.push(name);
+    promotionsById.set(variantId, names);
+  }
+
   return removed.flatMap((item) => {
     const reasons = reasonsById.get(item.id);
-    if (!reasons || reasons.size === 0) return [];
+    const promotionNames = enrolledPromotionNames(promotionsById.get(item.id) ?? []);
+    const reasonList = VARIANT_REMOVAL_REASONS.filter((reason) => reasons?.has(reason));
+    if (reasonList.length === 0 && promotionNames.length === 0) return [];
     return [{
       ...item,
-      reasons: VARIANT_REMOVAL_REASONS.filter((reason) => reasons.has(reason)),
+      reasons: reasonList,
+      ...(promotionNames.length > 0 ? { promotionNames } : {}),
     }];
   });
 }
@@ -182,6 +248,13 @@ export async function assertVariantsCanBeRemoved(
     where: { OR: containsAny(ids, 'items') },
     select: { items: true },
   });
+  const promotionLinks = await tx.promotionProduct.findMany({
+    where: { variantId: { in: ids } },
+    select: {
+      variantId: true,
+      promotion: { select: { name: true, status: true, endsAt: true } },
+    },
+  });
 
   const blocked = findBlockedVariantRemovals(removed, {
     inventoryVariantIds: accounts.map((account) => account.variantId),
@@ -189,6 +262,12 @@ export async function assertVariantsCanBeRemoved(
     inquiryMetadata: inquiryItems.map((item) => item.metadata),
     quoteMetadata: quoteItems.map((item) => item.metadata),
     cartItems: carts.map((cart) => cart.items),
+    promotions: promotionLinks.map((link) => ({
+      variantId: link.variantId,
+      name: link.promotion.name,
+      status: link.promotion.status,
+      endsAt: link.promotion.endsAt,
+    })),
   });
   if (blocked.length > 0) throw new VariantRemovalBlockedError(blocked);
 }

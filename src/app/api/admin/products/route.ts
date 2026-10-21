@@ -339,7 +339,9 @@ export async function PUT(req: NextRequest) {
         const retainedIdSet = new Set(retainedIds);
         const removed = existing.filter((item) => !retainedIdSet.has(item.id));
         // 规格没有下架字段。库存账户以及批次、预占、流水都级联挂在规格上；
-        // 订单、询价、报价和购物车只在 JSON 里保存规格 id。硬删除会拆掉这些记录，所以先阻止保存。
+        // 订单、询价、报价和购物车只在 JSON 里保存规格 id；
+        // 规格级促销绑定也会随规格级联删除。硬删除会拆掉这些记录，所以先阻止保存。
+        // 已结束的促销不拦截。
         if (removed.length > 0) {
           await assertVariantsCanBeRemoved(tx, removed);
           await tx.productVariant.deleteMany({ where: { productId: id, id: { in: removed.map((item) => item.id) } } });
