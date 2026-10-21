@@ -84,6 +84,7 @@ export async function POST(
     }
     const isAdmin = user.role === 'admin';
     // 管理员代客接受报价不能代扣客户积分。未传或 0 仍可接受。不新增权限。
+    // 代接受生成且尚未支付的订单，由客户本人在付款前调用 POST /api/orders/:orderId/prepay-settlement 选择积分和优惠券。管理员不能代选。
     if (isAdmin) {
       const pointsError = adminActingPointsError({ personalPoints, groupPoints, groupId });
       if (pointsError) return NextResponse.json({ error: pointsError }, { status: 400 });

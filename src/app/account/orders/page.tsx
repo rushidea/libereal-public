@@ -11,6 +11,7 @@ import MobileBottomNav from '@/components/mobile/MobileBottomNav';
 
 import Breadcrumb from '@/components/Breadcrumb';
 import AlipayPaymentButton from '@/components/account/AlipayPaymentButton';
+import OrderPrepaySettlement from '@/components/account/OrderPrepaySettlement';
 import AlipayPaymentStatusView from '@/components/payment/AlipayPaymentStatus';
 import type { AlipayPaymentSummary } from '@/data/alipay-payment';
 import { formatOrderPaymentMethod } from '@/data/payment-methods';
@@ -67,6 +68,16 @@ type Order = {
   updatedAt: string;
   leadTime?: string;
   notes?: string;
+  pointsPersonal?: number;
+  pointsGroup?: number;
+  pointsGroupId?: string | null;
+  ownerPrepaySettlement?: {
+    eligible: boolean;
+    couponCode: string | null;
+    personalPoints: number;
+    groupPoints: number;
+    groupId: string | null;
+  } | null;
 };
 
 const STATUS_OPTIONS = [...ORDER_STATUSES];
@@ -446,6 +457,20 @@ function OrdersContent() {
                                   付款方式：<span className="font-bold text-orange-600">{translatePaymentMethod(selectedOrder.paymentMethod)}</span>
                                 </div>
                               )}
+                              {selectedOrder.ownerPrepaySettlement?.eligible && (
+                                <OrderPrepaySettlement
+                                  orderId={selectedOrder.id}
+                                  paymentMethod={selectedOrder.paymentMethod || ''}
+                                  personalPoints={selectedOrder.pointsPersonal ?? selectedOrder.ownerPrepaySettlement.personalPoints}
+                                  groupPoints={selectedOrder.pointsGroup ?? selectedOrder.ownerPrepaySettlement.groupPoints}
+                                  groupId={selectedOrder.pointsGroupId ?? selectedOrder.ownerPrepaySettlement.groupId}
+                                  couponCode={selectedOrder.ownerPrepaySettlement.couponCode}
+                                  onSettled={(patch) => {
+                                    setOrders((current) => current.map((item) => item.id === patch.id ? { ...item, ...patch } : item));
+                                    setSelectedOrder((current) => current?.id === patch.id ? { ...current, ...patch } : current);
+                                  }}
+                                />
+                              )}
                               <AlipayPaymentButton order={selectedOrder} payment={selectedOrder.payment} />
                             </div>
                           </td>
@@ -513,6 +538,20 @@ function OrdersContent() {
                           <p className="text-xs text-gray-500 dark:text-gray-500 mb-1">付款方式</p>
                           <p className="text-orange-600 font-medium">{translatePaymentMethod(selectedOrder.paymentMethod)}</p>
                         </div>
+                      )}
+                      {selectedOrder.ownerPrepaySettlement?.eligible && (
+                        <OrderPrepaySettlement
+                          orderId={selectedOrder.id}
+                          paymentMethod={selectedOrder.paymentMethod || ''}
+                          personalPoints={selectedOrder.pointsPersonal ?? selectedOrder.ownerPrepaySettlement.personalPoints}
+                          groupPoints={selectedOrder.pointsGroup ?? selectedOrder.ownerPrepaySettlement.groupPoints}
+                          groupId={selectedOrder.pointsGroupId ?? selectedOrder.ownerPrepaySettlement.groupId}
+                          couponCode={selectedOrder.ownerPrepaySettlement.couponCode}
+                          onSettled={(patch) => {
+                            setOrders((current) => current.map((item) => item.id === patch.id ? { ...item, ...patch } : item));
+                            setSelectedOrder((current) => current?.id === patch.id ? { ...current, ...patch } : current);
+                          }}
+                        />
                       )}
                       <AlipayPaymentButton order={selectedOrder} payment={selectedOrder.payment} />
                       <div>
