@@ -4,7 +4,8 @@
  * 职责：
  * - getUsableCoupons(userId)：列出用户可用券（active、未过期、二次授权通过、未使用）；
  * - redeemCoupon(tx, code, userId, orderId, subtotal)：下单事务内核销——
- *   校验券有效/授权/未用/未过期 → 生成订单级 coupon 调整 → 标记实例 used + 模板 usedCount+1。
+ *   校验券有效/授权/未用/未过期 → 生成订单级 coupon 调整 →
+ *   条件更新认领实例（仍为 active）并在剩余次数足够时增加模板 usedCount。
  * - restoreRedeemedOrderCoupons(tx, orderId)：取消或超时关单时退回该订单核销的券，同一实例只退一次。
  *
  * 二次授权（无门槛券安全红线）：
