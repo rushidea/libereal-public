@@ -90,12 +90,53 @@ export type CouponRedeemResult =
   | { ok: true; adjustment: { type: string; label: string; amount: number; reason: string | null }; instanceId: string; code: string }
   | { ok: false; error: string };
 
+const COUPON_CLAIM_CONFLICT = '优惠券正在被其他订单使用，请重试';
+
+function errorText(error: unknown): string {
+  const parts: string[] = [];
+  const seen = new Set<unknown>();
+  let current: unknown = error;
+  while (current && typeof current === 'object' && !seen.has(current)) {
+    seen.add(current);
+    const record = current as Record<string, unknown>;
+    for (const key of ['code', 'message', 'originalCode', 'originalMessage', 'kind']) {
+      if (record[key] != null) parts.push(String(record[key]));
+    }
+    current = record.cause;
+  }
+  return parts.join('\n');
+}
+
+/**
+ * 并发写冲突。better-sqlite3 适配器把 SQLITE_BUSY / SNAPSHOT 报成
+ * P1008「Operation has timed out」；其他驱动可能是 P2034。
+ * 此时本次认领没有落库，调用方抛错即可回滚整单。
+ */
+function isCouponWriteConflict(error: unknown): boolean {
+  return /P2034|P1008|SQLITE_BUSY|database is locked|write conflict|deadlock|Operation has timed out|SocketTimeout/i.test(errorText(error));
+}
+
+async function claimCouponWrite(
+  run: () => Promise<{ count: number }>,
+): Promise<{ ok: true; count: number } | { ok: false; error: string }> {
+  try {
+    const result = await run();
+    return { ok: true, count: Number(result.count) };
+  } catch (error) {
+    if (isCouponWriteConflict(error)) return { ok: false, error: COUPON_CLAIM_CONFLICT };
+    throw error;
+  }
+}
+
 /**
  * 下单事务内核销一张券。
  * 校验顺序：实例存在 → 属于该用户（定向）→ 双重授权 → 未使用 → 未过期（实例+模板）→
  * 未到生效期 → 模板未超量 → 门槛。
  * 核销时绑定订单（redeemedOrderId），便于退款与审计追溯。
+ * 实例与模板额度都用条件更新认领：并发下单只有一方 count=1。
+ * 认领失败或写冲突时返回中文错误；调用方必须抛错，整单才会回滚。
  * 返回订单级负调整（amount 为负），由调用方并入 adjustments。
+ * subtotal 必须是调用方传入的范围内商品小计（与算价策略同一口径）。模板 approvalStatus 须为 auto 或 approved。
  */
 export async function redeemCoupon(
   tx: Tx,
@@ -144,14 +185,31 @@ export async function redeemCoupon(
   const discount = Math.min(instance.coupon.discount, Math.round(subtotal * 100) / 100);
   if (discount <= 0) return { ok: false, error: '优惠券金额无效' };
 
-  await tx.couponInstance.update({
-    where: { id: instance.id },
+  // 只有仍未使用的实例能被这次更新认领。另一笔并发事务已核销时 count=0。
+  const claimed = await claimCouponWrite(() => tx.couponInstance.updateMany({
+    where: { id: instance.id, status: 'active' },
     data: { status: 'used', redeemedAt: now, redeemedOrderId: orderId ?? null },
-  });
-  await tx.coupon.update({
-    where: { id: instance.coupon.id },
+  }));
+  if (!claimed.ok) return claimed;
+  if (claimed.count !== 1) {
+    return { ok: false, error: '优惠券不可用（已使用/已作废）' };
+  }
+
+  // maxUses=0 表示不限；否则要求剩余次数大于 0。额度认领失败时，实例更新还在同一事务里，靠调用方抛错回滚。
+  const counted = await claimCouponWrite(() => tx.coupon.updateMany({
+    where: {
+      id: instance.coupon.id,
+      OR: [
+        { maxUses: 0 },
+        { usedCount: { lt: instance.coupon.maxUses } },
+      ],
+    },
     data: { usedCount: { increment: 1 } },
-  });
+  }));
+  if (!counted.ok) return counted;
+  if (counted.count !== 1) {
+    return { ok: false, error: '该券已发放完毕' };
+  }
 
   return {
     ok: true,
