@@ -501,6 +501,38 @@ describe('POST /api/inquiries/[id]/quote (admin send quote)', () => {
     expect(db.prepare('SELECT points FROM User WHERE id = ?').get('buyer_points')).toEqual({ points: 40 });
   });
 
+  it('returns product taxonomy on the quote and still accepts a quantity past both nudge thresholds', async () => {
+    const db = getTestDb();
+    db.prepare(`
+      INSERT INTO Product (id, catalogNumber, name, brand, price, category, subcategory, type, applications, reactivity, createdAt, updatedAt)
+      VALUES ('prod-reagent', 'RG-1', 'Buffer', 'Brand', 10, '化学试剂', '常规化学试剂', NULL, '[]', '[]', datetime('now'), datetime('now'))
+    `).run();
+    db.prepare('UPDATE InquiryItem SET productId = ?, catalogNumber = ?, name = ? WHERE inquiryId = ?')
+      .run('prod-reagent', 'RG-1', 'Buffer', 'i1');
+    const response = await quotePOST(makeReq('i1', {
+      items: [{ productId: 'prod-reagent', catalogNumber: 'RG-1', name: 'Buffer', price: 10, quantity: 1 }],
+    }) as NextRequest, { params: Promise.resolve({ id: 'i1' }) });
+    expect(response.status).toBe(200);
+    const view = await response.json() as { quote: { id: string; items: Array<{ category: string | null; subcategory: string | null; type: string | null }> } };
+    expect(view.quote.items[0]).toMatchObject({ category: '化学试剂', subcategory: '常规化学试剂', type: null });
+
+    const accepted = await confirmQuotePOST(new NextRequest('http://localhost:3000/api/orders/i1/confirm-items', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        itemIndices: [0],
+        quantities: { 0: 51 },
+        quoteId: view.quote.id,
+        quoteVersion: 1,
+        acceptanceAttemptId: 'accept-reagent-51',
+        acceptedLegalIds: ['site-sales-terms', 'customer-purchase'],
+        paymentMethod: 'bank_transfer',
+      }),
+    }), { params: Promise.resolve({ id: 'i1' }) });
+    expect(accepted.status).toBe(200);
+    expect(db.prepare('SELECT quantity, unitPrice FROM OrderItem').get()).toEqual({ quantity: 51, unitPrice: 10 });
+  });
+
   it('returns 400 for invalid items JSON string', async () => {
     const res = await quotePOST(makeReq('i1', { items: 'not-json' }) as NextRequest, {
       params: Promise.resolve({ id: 'i1' }),

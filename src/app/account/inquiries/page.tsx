@@ -10,6 +10,8 @@ import SiteFooter from '@/components/SiteFooter';
 import MobileBottomNav from '@/components/mobile/MobileBottomNav';
 import LegalConsentModal from '@/components/legal/LegalConsentModal';
 import { QuoteAcceptancePreview, QuoteQuantityEditor } from '@/components/account/QuoteQuantityEditor';
+import { QuoteQuantityNudgeNotice } from '@/components/account/QuoteQuantityNudge';
+import { findQuoteQuantityNudges } from '@/lib/quote-quantity-nudge';
 import DeclineQuoteDialog from '@/components/account/DeclineQuoteDialog';
 import { CheckoutPaymentFields, useCheckoutPointsBalance } from '@/components/checkout/CheckoutPaymentFields';
 import { InquiryIdDisplay } from '@/components/InquiryIdDisplay';
@@ -45,6 +47,9 @@ interface InquiryItem {
   locked?: boolean;
   minQuantity?: number | null;
   quantityStep?: number | null;
+  category?: string | null;
+  subcategory?: string | null;
+  type?: string | null;
 }
 
 interface Order {
@@ -696,6 +701,15 @@ export default function MyInquiriesPage() {
           personalPoints: settlement.personalPoints,
           groupPoints: settlement.groupPoints,
         });
+        const quantityNudges = findQuoteQuantityNudges(selItems.map(({ item, idx }) => ({
+          key: item.id || String(idx),
+          name: item.name,
+          catalogNumber: item.catalogNumber,
+          quantity: getItemQty(selectedInquiry.id, idx, remainingQuantity(item)),
+          category: item.category,
+          subcategory: item.subcategory,
+          type: item.type,
+        })));
 
         return (
           <div className="fixed inset-0 z-site-overlay flex justify-center overflow-y-auto bg-black/40 px-4 pb-4 pt-[calc(var(--site-header-height)+var(--site-header-gap))]">
@@ -706,6 +720,7 @@ export default function MyInquiriesPage() {
                   ? `你正在代客户接受报价 v${selectedInquiry.activeQuote?.version}。请核对报价编号、商品、规格、数量与金额。本次选择将转为独立订单。数量可以多于报价，按报价单价计。积分由客户在结算时自行选择，此处不能代扣。`
                   : `你正在接受报价 v${selectedInquiry.activeQuote?.version}。确认前请核对报价编号、商品、规格、数量与金额；本次选择将转为独立订单。数量可以多于报价，按报价单价计。积分可与支付宝或其他付款方式组合抵扣。`}
               </p>
+              <QuoteQuantityNudgeNotice nudges={quantityNudges} />
               <QuoteAcceptancePreview lines={selItems.map(({ item, idx }) => ({
                 name: item.name || item.product?.name || '产品',
                 quotedQuantity: item.quantity || 1,

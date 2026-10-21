@@ -3,6 +3,7 @@ import { prisma } from '@/lib/prisma';
 import { requireAdmin } from '@/lib/session';
 import { INQUIRY_LIST_SELECT } from '@/lib/prisma-selects';
 import { quoteView } from '@/lib/quote-records';
+import { loadQuoteProductTaxonomy } from '@/lib/quote-item-taxonomy';
 import { viewInquiryItemGroups } from '@/lib/inquiry-item-brands';
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -18,6 +19,9 @@ export async function GET(_req: NextRequest) {
       select: INQUIRY_LIST_SELECT,
     });
     const itemViews = await viewInquiryItemGroups(inquiries.map((inquiry) => inquiry.inquiryItems));
+    const quoteTaxonomy = await loadQuoteProductTaxonomy(inquiries.flatMap((inquiry) => (
+      inquiry.quotes.flatMap((quote) => quote.items.map((item) => item.productId))
+    )));
     return NextResponse.json({
       inquiries: inquiries.map((row, index) => {
         const { inquiryItems, quotes, ...inquiry } = row;
@@ -25,7 +29,7 @@ export async function GET(_req: NextRequest) {
         return {
           ...inquiry,
           items: itemViews[index],
-          activeQuote: quotes[0] ? quoteView(quotes[0]) : null,
+          activeQuote: quotes[0] ? quoteView(quotes[0], quoteTaxonomy) : null,
         };
       }),
     });

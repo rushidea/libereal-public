@@ -5,6 +5,7 @@ import type { Prisma } from '@prisma/client';
 import { toInquiryItemCreates } from '@/lib/commerce-records';
 import { viewInquiryItems } from '@/lib/inquiry-item-brands';
 import { quoteView } from '@/lib/quote-records';
+import { loadQuoteProductTaxonomy } from '@/lib/quote-item-taxonomy';
 import { canAccessOrganizationRecord } from '@/lib/organization-record-access';
 import { emailKeyedAccess } from '@/lib/verified-email-access';
 
@@ -51,10 +52,11 @@ export async function GET(
 
   const { inquiryItems, quotes, userId: creatorUserId, ...publicInquiry } = inquiry;
   void creatorUserId;
+  const quoteTaxonomy = await loadQuoteProductTaxonomy(quotes.flatMap((quote) => quote.items.map((item) => item.productId)));
   return NextResponse.json({
     ...publicInquiry,
     items: await viewInquiryItems(inquiryItems),
-    activeQuote: quotes[0] ? quoteView(quotes[0]) : null,
+    activeQuote: quotes[0] ? quoteView(quotes[0], quoteTaxonomy) : null,
   });
 }
 

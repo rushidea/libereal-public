@@ -1,5 +1,25 @@
 import { effectiveQuoteQuantityConstraint } from '@/lib/quote-acceptance';
 
+export type QuoteProductTaxonomy = {
+  category: string | null;
+  subcategory: string | null;
+  type: string | null;
+};
+
+const EMPTY_QUOTE_TAXONOMY: QuoteProductTaxonomy = {
+  category: null,
+  subcategory: null,
+  type: null,
+};
+
+function taxonomyFor(
+  productId: string | null,
+  taxonomyByProductId?: ReadonlyMap<string, QuoteProductTaxonomy>,
+): QuoteProductTaxonomy {
+  if (!productId || !taxonomyByProductId) return EMPTY_QUOTE_TAXONOMY;
+  return taxonomyByProductId.get(productId) ?? EMPTY_QUOTE_TAXONOMY;
+}
+
 export const QUOTE_STATUS_LABELS: Record<string, string> = {
   draft: '草稿',
   sent: '已发送',
@@ -47,7 +67,11 @@ export type QuoteRecord = {
 // GET /api/inquiries — admin inquiries.read
 // GET /api/inquiries/[id] — personal owner, organization record access, or admin inquiries.read
 // GET /api/my-orders — logged-in account (own records, or organization visibility already applied by that route)
-export function quoteView(quote: QuoteRecord) {
+// category / subcategory / type 来自关联商品，只给前端数量软提醒用，不参与接受校验。
+export function quoteView(
+  quote: QuoteRecord,
+  taxonomyByProductId?: ReadonlyMap<string, QuoteProductTaxonomy>,
+) {
   return {
     id: quote.id,
     version: quote.version,
@@ -80,6 +104,7 @@ export function quoteView(quote: QuoteRecord) {
         productId: item.productId,
         catalogNumber: item.catalogNumber,
         name: item.name,
+        ...taxonomyFor(item.productId, taxonomyByProductId),
         price: item.unitPrice,
         quantity: item.quantity,
         orderedQty: item.orderedQty,

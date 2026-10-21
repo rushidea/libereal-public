@@ -39,10 +39,10 @@ export default function LegalConsentModal({ open, onClose, onConfirm, submitting
   return (
     <div className="fixed inset-0 z-site-overlay flex items-end justify-center p-4 sm:items-center">
       <button type="button" className={`absolute inset-0 ${uiSurfaces.modalBackdrop}`} aria-label="关闭" onClick={onClose} />
-      <div className={`relative w-full max-w-lg rounded-[var(--brand-border-radius-lg)] ${uiSurfaces.modal} p-5 sm:p-6`}>
+      <div role="dialog" aria-modal="true" aria-labelledby="legal-consent-title" className={`relative w-full max-w-lg rounded-[var(--brand-border-radius-lg)] ${uiSurfaces.modal} p-5 sm:p-6`}>
         <div className="mb-4 flex items-start justify-between gap-3">
           <div>
-            <h2 className={`text-lg font-semibold ${uiSurfaces.titleText}`}>确认采购协议</h2>
+            <h2 id="legal-consent-title" className={`text-lg font-semibold ${uiSurfaces.titleText}`}>确认采购协议</h2>
             <p className={`mt-1 text-sm ${uiSurfaces.mutedText}`}>提交订单前请阅读并同意下列条款与协议。</p>
           </div>
           <button type="button" onClick={onClose} className={`${uiSurfaces.buttonGhost} h-11 w-11 min-h-[44px] min-w-[44px] p-0 ${uiSurfaces.focusRing}`}>

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { requireAdmin } from '@/lib/session';
 import { quoteView } from '@/lib/quote-records';
+import { loadQuoteProductTaxonomy } from '@/lib/quote-item-taxonomy';
 import { viewInquiryItemGroups } from '@/lib/inquiry-item-brands';
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -38,14 +39,17 @@ export async function GET(_req: NextRequest) {
       },
     });
     const itemViews = await viewInquiryItemGroups(inquiries.map((inquiry) => inquiry.inquiryItems));
+    const quoteTaxonomy = await loadQuoteProductTaxonomy(inquiries.flatMap((inquiry) => (
+      inquiry.quotes.flatMap((quote) => quote.items.map((item) => item.productId))
+    )));
     return NextResponse.json(inquiries.map((row, index) => {
       const { inquiryItems, quotes, ...inquiry } = row;
       void inquiryItems;
       return {
         ...inquiry,
         items: itemViews[index],
-        activeQuote: quotes[0] ? quoteView(quotes[0]) : null,
-        quoteVersions: quotes.map(quoteView),
+        activeQuote: quotes[0] ? quoteView(quotes[0], quoteTaxonomy) : null,
+        quoteVersions: quotes.map((quote) => quoteView(quote, quoteTaxonomy)),
       };
     }));
   } catch (err) {
