@@ -98,6 +98,20 @@ export function canTransitionOrder(from: OrderStatus, to: OrderStatus): boolean 
   return from === to || STATUS_TRANSITIONS[from].includes(to);
 }
 
+/** 报价接口入口：未付款仍可改价并发送报价，待确认可以进入已确认。 */
+export const ORDER_QUOTE_ENTRY_STATUSES: readonly OrderStatus[] = ['unpaid', 'pending'];
+
+export const UNPAID_ORDER_QUOTE_CONFIRM_REJECTION = '未付款订单不能直接确认为已确认。';
+
+export function canEnterOrderQuoteFlow(status: string): boolean {
+  return (ORDER_QUOTE_ENTRY_STATUSES as readonly string[]).includes(status);
+}
+
+export function orderQuoteStatusRejectionMessage(status: string): string {
+  if (!isOrderStatus(status)) return '订单当前状态不允许确认报价。';
+  return `订单当前状态为${ORDER_STATUS_LABELS[status]}，不能确认报价。`;
+}
+
 export function assertOrderTransition(from: string, to: unknown): asserts to is OrderStatus {
   if (!isOrderStatus(from) || !isOrderStatus(to)) throw new Error('INVALID_ORDER_STATUS');
   if (!canTransitionOrder(from, to)) throw new Error('INVALID_ORDER_TRANSITION');

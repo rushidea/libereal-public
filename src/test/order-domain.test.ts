@@ -2,14 +2,27 @@ import { describe, expect, it } from 'vitest';
 import {
   assertOrderTransition,
   calculateOrderAmounts,
+  canEnterOrderQuoteFlow,
   displayedOrderStatus,
   fulfillmentStatus,
   initialOrderStatus,
+  orderQuoteStatusRejectionMessage,
   requiresPaidAlipayRefund,
   validateShipmentItems,
 } from '@/lib/order-domain';
 
 describe('order domain', () => {
+  it('only lets unpaid and pending orders enter quote confirmation', () => {
+    expect(canEnterOrderQuoteFlow('unpaid')).toBe(true);
+    expect(canEnterOrderQuoteFlow('pending')).toBe(true);
+    for (const status of ['confirmed', 'partially_shipped', 'shipped', 'completed', 'cancelled', 'closed', 'unknown']) {
+      expect(canEnterOrderQuoteFlow(status)).toBe(false);
+      expect(orderQuoteStatusRejectionMessage(status)).toMatch(/不能确认报价|不允许确认报价/);
+    }
+    expect(orderQuoteStatusRejectionMessage('cancelled')).toBe('订单当前状态为已取消，不能确认报价。');
+    expect(orderQuoteStatusRejectionMessage('shipped')).toBe('订单当前状态为已发货，不能确认报价。');
+  });
+
   it('allows defined order transitions and rejects terminal changes', () => {
     expect(() => assertOrderTransition('unpaid', 'cancelled')).not.toThrow();
     expect(() => assertOrderTransition('unpaid', 'closed')).not.toThrow();
