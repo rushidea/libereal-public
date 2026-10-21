@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import type { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
-import { AMBIGUOUS_PRODUCT_CATALOG_NUMBER, verifyAndPriceItems } from '@/lib/pricing';
+import { AMBIGUOUS_PRODUCT_CATALOG_NUMBER, CustomerUnavailableProductError, verifyAndPriceItems, type PriceLookupItem } from '@/lib/pricing';
 import { toOrderItemCreates } from '@/lib/commerce-records';
 import {
   assertVariantCheckoutStock,
@@ -11,6 +11,9 @@ import {
   VARIANT_STOCK_INSUFFICIENT_MESSAGE,
 } from '@/lib/inventory';
 import { requireAdmin } from '@/lib/session';
+import { writeAuditLog } from '@/lib/audit';
+import { adminOrderResolvedLineError, parseAdminOrderCreateCharges } from '@/lib/admin-order-create';
+import { reviewCommerceLinesWithCatalog } from '@/lib/commerce-line-catalog';
 import { normalizeOrderPaymentMethod } from '@/data/payment-methods';
 import { orderAutoCloseAt } from '@/lib/order-auto-close';
 import { initialOrderStatus } from '@/lib/order-domain';
@@ -181,10 +184,10 @@ export async function GET(req: NextRequest) {
   }
 }
 
-/** 后台下单，代客下单走同一接口。权限：管理员 orders.write（已配置 MFA 时包含 step-up）。规格库存不足返回 400，不新增权限。没有规格的商品保持现有逻辑，这里不额外做商品级库存校验。 */
+/** 后台下单，代客下单走同一接口。权限：管理员 orders.write（已配置 MFA 时包含 step-up）。费用和单价须为有限、非负、最多两位小数，数量须为正整数；目录价偏差和超量只在响应的 warnings 里提示，不拦截。不代扣客户积分。规格库存不足返回 400，不新增权限。没有规格的商品保持现有逻辑，这里不额外做商品级库存校验。 */
 export async function POST(req: NextRequest) {
-  const denied = await requireAdmin('orders.write');
-  if (denied instanceof NextResponse) return denied;
+  const admin = await requireAdmin('orders.write');
+  if (admin instanceof NextResponse) return admin;
 
   try {
     const {
@@ -196,8 +199,8 @@ export async function POST(req: NextRequest) {
       addressText,
       addressInstitution,
       customerEmail,
-      platformFee = 0,
-      transferFee = 0,
+      platformFee,
+      transferFee,
     } = await req.json();
 
     if (!Array.isArray(items) || items.length === 0) {
@@ -211,6 +214,18 @@ export async function POST(req: NextRequest) {
     if (!normalizedPaymentMethod) {
       return NextResponse.json({ error: '请选择有效的付款方式' }, { status: 400 });
     }
+    const charges = parseAdminOrderCreateCharges({ items, platformFee, transferFee });
+    if (!charges.ok) {
+      return NextResponse.json({ error: charges.error }, { status: 400 });
+    }
+    const normalizedItems = (items as Array<Record<string, unknown>>).map((item, index) => {
+      const line = charges.lines[index];
+      const next: Record<string, unknown> = { ...item, quantity: line.quantity };
+      delete next.unitPrice;
+      if (line.price === undefined) delete next.price;
+      else next.price = line.price;
+      return next;
+    });
 
     const customer = await prisma.user.findUnique({
       where: { email: normalizedCustomerEmail },
@@ -229,10 +244,22 @@ export async function POST(req: NextRequest) {
     }
 
     // Server-side price verification (P0-1)
-    const manualAdjustments = Object.fromEntries(items
-      .filter((item: { catalogNumber?: string; productId?: string; price?: number }) => (item.catalogNumber || item.productId) && Number.isFinite(item.price))
-      .map((item: { catalogNumber?: string; productId?: string; price: number }) => [item.catalogNumber || item.productId, { type: 'fixed_price' as const, value: item.price, reason: '管理员创建订单时指定价格' }]));
-    const { verifiedItems, verifiedSubtotal, mismatchedCount } = await verifyAndPriceItems(items, {
+    const pricedItems: PriceLookupItem[] = normalizedItems.map((item) => ({
+      productId: typeof item.productId === 'string' ? item.productId : null,
+      catalogNumber: typeof item.catalogNumber === 'string' ? item.catalogNumber : null,
+      brand: typeof item.brand === 'string' ? item.brand : null,
+      name: typeof item.name === 'string' ? item.name : '',
+      // 未传单价时用 NaN，让计价走目录价；不合法的单价已在前面返回 400。
+      price: typeof item.price === 'number' ? item.price : Number.NaN,
+      quantity: typeof item.quantity === 'number' ? item.quantity : undefined,
+      variantId: typeof item.variantId === 'string' ? item.variantId : null,
+      spec: typeof item.spec === 'string' ? item.spec : null,
+      unit: typeof item.unit === 'string' ? item.unit : null,
+    }));
+    const manualAdjustments = Object.fromEntries(pricedItems
+      .filter((item) => (item.catalogNumber || item.productId) && Number.isFinite(item.price))
+      .map((item) => [item.catalogNumber || item.productId, { type: 'fixed_price' as const, value: item.price, reason: '管理员创建订单时指定价格' }]));
+    const { verifiedItems, verifiedSubtotal, mismatchedCount } = await verifyAndPriceItems(pricedItems, {
       customerEmail: customer?.email ?? normalizedCustomerEmail,
       manualAdjustments,
       allowManualAdjustment: true,
@@ -241,9 +268,26 @@ export async function POST(req: NextRequest) {
     if (mismatchedCount > 0) {
       console.warn(`[admin/orders POST] ${mismatchedCount} item(s) missing DB price`);
     }
+    for (let index = 0; index < verifiedItems.length; index += 1) {
+      const item = verifiedItems[index];
+      const resolvedError = adminOrderResolvedLineError(index, item.name, item.unitPrice, item.quantity);
+      if (resolvedError) return NextResponse.json({ error: resolvedError }, { status: 400 });
+    }
+    // 合理性警告只提示：不要求 confirmWarnings，也不因目录价偏差或超量拒绝建单。
+    const lineReview = await reviewCommerceLinesWithCatalog(verifiedItems.map((item, index) => ({
+      index,
+      productId: item.productId,
+      variantId: item.variantId,
+      name: item.name,
+      spec: item.spec,
+      catalogNumber: item.catalogNumber,
+      unitPrice: item.unitPrice,
+      quantity: item.quantity,
+    })));
+    const warnings = lineReview.warnings;
     const adjustments = [
-      ...(platformFee ? [{ type: 'platform_fee', label: '平台服务费', amount: Number(platformFee) }] : []),
-      ...(transferFee ? [{ type: 'transfer_fee', label: '转账手续费', amount: Number(transferFee) }] : []),
+      ...(charges.platformFee ? [{ type: 'platform_fee', label: '平台服务费', amount: charges.platformFee, createdBy: admin.id }] : []),
+      ...(charges.transferFee ? [{ type: 'transfer_fee', label: '转账手续费', amount: charges.transferFee, createdBy: admin.id }] : []),
     ];
     const adjustmentTotal = adjustments.reduce((sum, item) => sum + item.amount, 0);
     const total = verifiedSubtotal + adjustmentTotal;
@@ -281,11 +325,17 @@ export async function POST(req: NextRequest) {
         variantId: item.variantId,
         metadata: item.metadata,
       })));
+      const warningMetadata = warnings.map((warning) => ({
+        code: warning.code,
+        message: warning.message,
+        index: warning.index ?? null,
+      }));
       const created = await tx.order.create({
         data: {
           id: orderId,
           email: customer?.email ?? normalizedCustomerEmail,
           ...(customer ? { customerId: customer.id } : {}),
+          createdByAdminId: admin.id,
           subtotal: verifiedSubtotal,
           adjustmentTotal,
           total,
@@ -303,17 +353,59 @@ export async function POST(req: NextRequest) {
             create: {
               toStatus: orderStatus,
               reason: 'admin_order_created',
+              actorId: admin.id,
+              actorEmail: admin.email,
             },
           },
-          events: { create: { type: 'order_created', message: '管理员创建订单' } },
+          events: {
+            create: {
+              type: 'order_created',
+              message: '管理员创建订单',
+              actorId: admin.id,
+              actorEmail: admin.email,
+              metadata: warningMetadata.length ? JSON.stringify({ warnings: warningMetadata }) : null,
+            },
+          },
         },
       });
-      await reserveOrderInventory(tx, created.id, denied.id, '后台下单预占规格库存', { variantLinesOnly: true });
+      await writeAuditLog({
+        actorId: admin.id,
+        actorEmail: admin.email,
+        action: 'order.admin_created',
+        resource: 'orders',
+        targetType: 'Order',
+        targetId: created.id,
+        after: {
+          createdByAdminId: admin.id,
+          email: created.email,
+          customerId: created.customerId,
+          subtotal: created.subtotal,
+          adjustmentTotal: created.adjustmentTotal,
+          total: created.total,
+          paymentMethod: created.paymentMethod,
+          platformFee: charges.platformFee,
+          transferFee: charges.transferFee,
+        },
+        metadata: warningMetadata.length ? { warnings: warningMetadata } : undefined,
+      }, tx);
+      await reserveOrderInventory(tx, created.id, admin.id, '后台下单预占规格库存', { variantLinesOnly: true });
       return created;
     });
 
-    return NextResponse.json({ order, orderId: order.id });
+    return NextResponse.json({ order, orderId: order.id, warnings });
   } catch (err) {
+    if (err instanceof Error && (err.message === 'INVALID_FALLBACK_PRICE' || err.message === 'INVALID_PRICE_ADJUSTMENT')) {
+      return NextResponse.json({ error: '单价必须是有限、非负、最多两位小数的数字' }, { status: 400 });
+    }
+    if (err instanceof Error && (err.message === 'INVALID_ITEM_QUANTITY' || err.message === 'INVALID_QUANTITY')) {
+      return NextResponse.json({ error: '数量必须为正整数' }, { status: 400 });
+    }
+    if (err instanceof CustomerUnavailableProductError) {
+      return NextResponse.json(
+        { error: `${err.productName} 已下架，无法创建订单`, catalogNumber: err.catalogNumber },
+        { status: 400 },
+      );
+    }
     if (isVariantStockInsufficientError(err)) {
       return NextResponse.json({ error: VARIANT_STOCK_INSUFFICIENT_MESSAGE, code: VARIANT_STOCK_INSUFFICIENT }, { status: 400 });
     }
