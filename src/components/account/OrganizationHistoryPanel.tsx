@@ -84,6 +84,7 @@ function statusLabel(status: string): string {
     cancelled: '已取消',
     pending_quote: '待报价',
     quote_sent: '已报价',
+    quote_expired: '已过期',
     declined: '已放弃',
     closed: '已关闭',
     open: '待回款',

@@ -14,6 +14,7 @@ import AdaptiveHeader from '@/components/AdaptiveHeader';
 import { InquiryIdDisplay } from '@/components/InquiryIdDisplay';
 import SiteFooter from '@/components/SiteFooter';
 import MobileBottomNav from '@/components/mobile/MobileBottomNav';
+import { effectiveInquiryStatus, quoteIsExpired } from '@/lib/quote-expiry';
 
 function translatePaymentMethod(method: string): string {
   const map: Record<string, string> = {
@@ -81,6 +82,7 @@ type Inquiry = {
 const STATUS_CONFIG: Record<string, { label: string; color: string; bg: string; icon: React.ComponentType<{ size?: number; className?: string }> }> = {
   'pending_quote': { label: '待报价', color: 'text-amber-700 dark:text-amber-300', bg: 'bg-amber-50 dark:bg-amber-500/20', icon: Clock },
   'quote_sent': { label: '已报价', color: 'text-brand-700 dark:text-brand-300', bg: 'bg-brand-50 dark:bg-brand-500/20', icon: FileText },
+  'quote_expired': { label: '已过期', color: 'text-amber-800 dark:text-amber-200', bg: 'bg-amber-50 dark:bg-amber-500/20', icon: Clock },
   'closed': { label: '已关闭', color: 'text-gray-500 dark:text-gray-400', bg: 'bg-gray-100 dark:bg-gray-500/20', icon: Check },
   'declined': { label: '已放弃', color: 'text-gray-600 dark:text-gray-400', bg: 'bg-gray-100 dark:bg-gray-500/20', icon: X },
 };
@@ -153,7 +155,10 @@ export default function InquiryDetailPage({ params }: { params: Promise<{ id: st
     );
   }
 
-  const s = STATUS_CONFIG[inquiry.status] || STATUS_CONFIG['pending_quote'];
+  const quote = inquiry.activeQuote;
+  const statusQuote = inquiry.quoteIsHistorical ? inquiry.currentQuote : quote;
+  const quoteExpired = Boolean(quote && !inquiry.quoteIsHistorical && quoteIsExpired(quote));
+  const s = STATUS_CONFIG[effectiveInquiryStatus(inquiry.status, statusQuote)] || STATUS_CONFIG['pending_quote'];
 
   return (
     <div className="min-h-screen libereal-service-page flex flex-col">
@@ -180,10 +185,10 @@ export default function InquiryDetailPage({ params }: { params: Promise<{ id: st
             <div>
               <p className="text-xs font-semibold uppercase tracking-[0.14em] text-brand-700 dark:text-brand-500">当前采购状态</p>
               <h2 className="mt-1 text-lg font-semibold text-gray-900 dark:text-slate-900">
-                {inquiry.quoteIsHistorical ? '历史报价版本（已被新版本替代）' : inquiry.activeQuote?.status === 'sent' && inquiry.activeQuote.validUntil && new Date(inquiry.activeQuote.validUntil) < new Date() ? '报价已失效，需要重新报价' : inquiry.activeQuote?.status === 'sent' ? '报价可供核对与接受' : inquiry.activeQuote?.status === 'accepted' ? '报价已接受，订单已生成' : '询价已提交，等待报价'}
+                {inquiry.quoteIsHistorical ? '历史报价版本（已被新版本替代）' : quoteExpired ? '报价已过期' : inquiry.activeQuote?.status === 'sent' ? '报价可供核对与接受' : inquiry.activeQuote?.status === 'accepted' ? '报价已接受，订单已生成' : '询价已提交，等待报价'}
               </h2>
               <p className="mt-1 text-sm text-gray-600 dark:text-slate-600">
-                {inquiry.quoteIsHistorical ? '该版本仅用于历史核对，不能接受；请打开当前报价版本。' : inquiry.activeQuote?.status === 'sent' && inquiry.activeQuote.validUntil && new Date(inquiry.activeQuote.validUntil) < new Date() ? '下一步：联系 Libereal 获取新的报价版本。当前报价不可接受。' : inquiry.activeQuote?.status === 'sent' ? `下一步：确认报价 v${inquiry.activeQuote.version} 的商品、规格、数量与金额。` : inquiry.activeQuote?.status === 'accepted' ? '下一步：查看由该报价生成的订单记录。' : '下一步：Libereal 将根据本次提交准备报价；最终金额尚未确定。'}
+                {inquiry.quoteIsHistorical ? '该版本仅用于历史核对，不能接受；请打开当前报价版本。' : quoteExpired ? '当前报价不能接受。可以放弃该报价，或等待 Libereal 重新报价。' : inquiry.activeQuote?.status === 'sent' ? `下一步：确认报价 v${inquiry.activeQuote.version} 的商品、规格、数量与金额。` : inquiry.activeQuote?.status === 'accepted' ? '下一步：查看由该报价生成的订单记录。' : '下一步：Libereal 将根据本次提交准备报价；最终金额尚未确定。'}
               </p>
             </div>
             {inquiry.activeQuote && <span className="whitespace-nowrap rounded-full bg-white px-3 py-1.5 text-sm font-semibold text-brand-700 shadow-sm dark:bg-slate-200 dark:text-brand-600">报价 v{inquiry.activeQuote.version}{inquiry.quoteIsHistorical ? ' · superseded' : ''}</span>}

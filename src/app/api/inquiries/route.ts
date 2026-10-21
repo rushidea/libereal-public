@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { requireAdmin } from '@/lib/session';
 import { quoteView } from '@/lib/quote-records';
+import { applySettledQuoteExpiry, settleExpiredQuotes } from '@/lib/quote-expiry-settle';
 import { loadQuoteProductTaxonomy } from '@/lib/quote-item-taxonomy';
 import { viewInquiryItemGroups } from '@/lib/inquiry-item-brands';
 
@@ -38,11 +39,13 @@ export async function GET(_req: NextRequest) {
         archivedAt: true,
       },
     });
-    const itemViews = await viewInquiryItemGroups(inquiries.map((inquiry) => inquiry.inquiryItems));
-    const quoteTaxonomy = await loadQuoteProductTaxonomy(inquiries.flatMap((inquiry) => (
+    const settled = await settleExpiredQuotes(prisma, inquiries.map((inquiry) => inquiry.id));
+    const visible = inquiries.map((inquiry) => applySettledQuoteExpiry(inquiry, settled));
+    const itemViews = await viewInquiryItemGroups(visible.map((inquiry) => inquiry.inquiryItems));
+    const quoteTaxonomy = await loadQuoteProductTaxonomy(visible.flatMap((inquiry) => (
       inquiry.quotes.flatMap((quote) => quote.items.map((item) => item.productId))
     )));
-    return NextResponse.json(inquiries.map((row, index) => {
+    return NextResponse.json(visible.map((row, index) => {
       const { inquiryItems, quotes, ...inquiry } = row;
       void inquiryItems;
       return {

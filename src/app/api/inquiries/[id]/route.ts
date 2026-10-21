@@ -5,6 +5,7 @@ import type { Prisma } from '@prisma/client';
 import { toInquiryItemCreates } from '@/lib/commerce-records';
 import { viewInquiryItems } from '@/lib/inquiry-item-brands';
 import { quoteView } from '@/lib/quote-records';
+import { applySettledQuoteExpiry, settleExpiredQuotes } from '@/lib/quote-expiry-settle';
 import { loadQuoteProductTaxonomy } from '@/lib/quote-item-taxonomy';
 import { canAccessOrganizationRecord } from '@/lib/organization-record-access';
 import { emailKeyedAccess } from '@/lib/verified-email-access';
@@ -50,7 +51,9 @@ export async function GET(
   if (!allowed) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   }
 
-  const { inquiryItems, quotes, userId: creatorUserId, ...publicInquiry } = inquiry;
+  const settled = await settleExpiredQuotes(prisma, [inquiry.id]);
+  const currentInquiry = applySettledQuoteExpiry(inquiry, settled);
+  const { inquiryItems, quotes, userId: creatorUserId, ...publicInquiry } = currentInquiry;
   void creatorUserId;
   const quoteTaxonomy = await loadQuoteProductTaxonomy(quotes.flatMap((quote) => quote.items.map((item) => item.productId)));
   return NextResponse.json({

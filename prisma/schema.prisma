@@ -506,7 +506,7 @@ model Inquiry {
   identity     String?
   advisorName  String?
   advisorPhone String?
-  status       String   @default("pending_quote")  // pending_quote | quote_sent | declined | closed
+  status       String   @default("pending_quote")  // pending_quote | quote_sent | quote_expired | declined | closed
   operationLogs String  @default("[]")  // JSON: [{adminId, adminEmail, time, items: [{name, price, quantity, leadTime}]}]
   ip           String?
   userAgent    String?

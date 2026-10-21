@@ -12,6 +12,7 @@ import LegalConsentModal from '@/components/legal/LegalConsentModal';
 import { QuoteAcceptancePreview, QuoteQuantityEditor } from '@/components/account/QuoteQuantityEditor';
 import { QuoteQuantityNudgeNotice } from '@/components/account/QuoteQuantityNudge';
 import { findQuoteQuantityNudges } from '@/lib/quote-quantity-nudge';
+import { customerCanAcceptQuote, effectiveInquiryStatus, quoteIsExpired } from '@/lib/quote-expiry';
 import DeclineQuoteDialog from '@/components/account/DeclineQuoteDialog';
 import { CheckoutPaymentFields, useCheckoutPointsBalance } from '@/components/checkout/CheckoutPaymentFields';
 import { InquiryIdDisplay } from '@/components/InquiryIdDisplay';
@@ -84,6 +85,7 @@ interface Inquiry {
 const STATUS_CONFIG: Record<string, { label: string; color: string; icon: React.ComponentType<{ className?: string }> }> = {
   'pending_quote': { label: '待报价', color: 'bg-amber-100 text-amber-700', icon: Clock },
   'quote_sent': { label: '已报价', color: 'bg-brand-100 text-brand-700', icon: FileText },
+  'quote_expired': { label: '已过期', color: 'bg-amber-100 text-amber-800', icon: Clock },
   'closed': { label: '待报价', color: 'bg-amber-100 text-amber-700', icon: Clock },
   'declined': { label: '已放弃', color: 'bg-gray-100 text-gray-600', icon: X },
 };
@@ -353,7 +355,10 @@ export default function MyInquiriesPage() {
     );
   }
 
-  const quoteSentCount = inquiries.filter(i => i.activeQuote?.status === 'sent').length;
+  const quoteSentCount = inquiries.filter((inquiry) => customerCanAcceptQuote({
+    inquiryStatus: inquiry.status,
+    quote: inquiry.activeQuote,
+  })).length;
 
   return (
     <div className="min-h-screen libereal-service-page flex flex-col">
@@ -395,7 +400,9 @@ export default function MyInquiriesPage() {
           <div className="space-y-4">
             {inquiries.map((inquiry) => {
               const items = parseItems(inquiry.activeQuote?.items ?? inquiry.items);
-              const statusCfg = STATUS_CONFIG[inquiry.status] || STATUS_CONFIG['pending_quote'];
+              const quoteExpired = Boolean(inquiry.activeQuote && quoteIsExpired(inquiry.activeQuote));
+              const quoteOpen = customerCanAcceptQuote({ inquiryStatus: inquiry.status, quote: inquiry.activeQuote });
+              const statusCfg = STATUS_CONFIG[effectiveInquiryStatus(inquiry.status, inquiry.activeQuote)] || STATUS_CONFIG['pending_quote'];
               const linkedOrders = inquiryOrders[inquiry.id] || [];
 
               return (
@@ -437,7 +444,19 @@ export default function MyInquiriesPage() {
                   {selectedInquiry?.id === inquiry.id && (
                     <div className="border-t border-gray-100 dark:border-slate-400 bg-gray-50/50 dark:bg-gray-700/30 p-6">
                       {/* Quote received banner */}
-                      {inquiry.activeQuote?.status === 'sent' && (
+                      {quoteExpired && inquiry.activeQuote && (
+                        <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 p-4 dark:border-amber-400/40 dark:bg-amber-500/15">
+                          <div className="mb-2 flex items-center gap-2 text-amber-800 dark:text-amber-100">
+                            <Clock className="w-5 h-5" />
+                            <p className="font-medium">报价已过期</p>
+                          </div>
+                          <p className="text-sm text-amber-800/80 dark:text-amber-100/80">
+                            报价版本：v{inquiry.activeQuote.version} · 有效期：{inquiry.activeQuote.validUntil ? new Date(inquiry.activeQuote.validUntil).toLocaleString('zh-CN') : '未提供'}
+                          </p>
+                        </div>
+                      )}
+
+                      {quoteOpen && inquiry.activeQuote && (
                         <div className="mb-4 p-4 bg-brand-50 dark:bg-brand-500/20 border border-brand-200 dark:border-brand-500/40 rounded-xl">
                           <div className="flex items-center gap-2 text-brand-700 dark:text-brand-500 mb-2">
                             <FileText className="w-5 h-5" />
@@ -483,7 +502,7 @@ export default function MyInquiriesPage() {
                       )}
 
                       {/* Product selection controls */}
-                      {inquiry.activeQuote?.status === 'sent' && (
+                      {quoteOpen && (
                         <div className="mb-3 flex items-center justify-between">
                           <p className="text-sm font-medium text-gray-700 dark:text-gray-600">
                             选择产品生成订单（已选 {selectedItems[inquiry.id]?.size || 0} 种）
@@ -526,7 +545,7 @@ export default function MyInquiriesPage() {
                           const leadTime = item.actualLeadTime || item.customerLeadTime || item.leadTime;
                           const isOrdered = remaining === 0;
                           const isSelected = selectedItems[inquiry.id]?.has(i) || false;
-                          const canEdit = inquiry.activeQuote?.status === 'sent' && price != null && remaining > 0 && item.available !== false && !item.locked;
+                          const canEdit = quoteOpen && price != null && remaining > 0 && item.available !== false && !item.locked;
                           const canSelect = canEdit;
                           const finalQty = getItemQty(inquiry.id, i, remaining);
                           const subtotal = (price || 0) * finalQty;
@@ -620,7 +639,23 @@ export default function MyInquiriesPage() {
                       </div>
 
                       {/* Bottom: Submit selected items as order */}
-                      {(inquiry.activeQuote?.status === 'sent' || acceptanceAttempts[inquiry.id]) && (
+                      {quoteExpired && inquiry.activeQuote && (
+                        <div className="mt-4 border-t border-gray-200 pt-4 dark:border-slate-400">
+                          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                            <p className="text-sm text-gray-600 dark:text-gray-500">报价已过期，不能再接受。可以放弃该报价，或等待重新报价。</p>
+                            <button
+                              type="button"
+                              data-testid="decline-quote-button"
+                              onClick={(e) => { e.stopPropagation(); setSelectedInquiry(inquiry); setShowDecline(true); }}
+                              className="min-h-11 w-full rounded-xl border border-gray-300 px-4 py-2.5 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 dark:border-slate-500 dark:text-slate-900 dark:hover:bg-slate-300/50 sm:w-auto"
+                            >
+                              放弃
+                            </button>
+                          </div>
+                        </div>
+                      )}
+
+                      {(quoteOpen || acceptanceAttempts[inquiry.id]) && (
                         <div className="mt-4 pt-4 border-t border-gray-200 dark:border-slate-400">
                           {(() => {
                             const selId = selectedItems[inquiry.id];

@@ -111,6 +111,35 @@ describe('GET /api/inquiries (admin list)', () => {
     });
     expect(inquiry?.items[0]?.customerLeadTime).toBe('14 天');
   });
+
+  it('lazily expires a sent quote that is past validUntil and leaves a current quote alone', async () => {
+    const db = getTestDb();
+    const past = new Date(Date.now() - 86_400_000).toISOString();
+    const future = new Date(Date.now() + 86_400_000).toISOString();
+    db.prepare(`UPDATE Inquiry SET status = 'quote_sent' WHERE id = 'i1'`).run();
+    db.prepare(`
+      INSERT INTO Quote (id, inquiryId, version, status, subtotal, currency, validUntil, sentAt, createdAt, updatedAt)
+      VALUES ('q-live', 'i1', 1, 'sent', 100, 'CNY', ?, ?, datetime('now'), datetime('now'))
+    `).run(future, future);
+    db.prepare(`
+      INSERT INTO Quote (id, inquiryId, version, status, subtotal, currency, validUntil, sentAt, createdAt, updatedAt)
+      VALUES ('q-due', 'i2', 1, 'sent', 80, 'CNY', ?, ?, datetime('now'), datetime('now'))
+    `).run(past, past);
+
+    const response = await inquiriesGET(new NextRequest('http://localhost:3000/api/inquiries') as NextRequest);
+    const inquiries = await response.json() as Array<{ id: string; status: string; activeQuote: { id: string; status: string } | null }>;
+    expect(inquiries.find((inquiry) => inquiry.id === 'i1')).toMatchObject({ status: 'quote_sent', activeQuote: { id: 'q-live', status: 'sent' } });
+    expect(inquiries.find((inquiry) => inquiry.id === 'i2')).toMatchObject({ status: 'quote_expired', activeQuote: { id: 'q-due', status: 'expired' } });
+
+    const stored = db.prepare('SELECT status FROM Inquiry WHERE id = ?').get('i2') as { status: string };
+    expect(stored.status).toBe('quote_expired');
+    const notifications = db.prepare(`SELECT type FROM Notification WHERE email = 'z2@test.com' AND type = 'quote_expired'`).all();
+    expect(notifications).toHaveLength(1);
+
+    await inquiriesGET(new NextRequest('http://localhost:3000/api/inquiries') as NextRequest);
+    const again = db.prepare(`SELECT COUNT(*) AS count FROM Notification WHERE type = 'quote_expired'`).get() as { count: number };
+    expect(again.count).toBe(1);
+  });
 });
 
 describe('POST /api/inquiries/[id]/quote (admin send quote)', () => {
@@ -210,6 +239,191 @@ describe('POST /api/inquiries/[id]/quote (admin send quote)', () => {
       { version: 1, status: 'superseded', subtotal: 100 },
       { version: 2, status: 'sent', subtotal: 120 },
     ]);
+  });
+
+  it('publishes a quote for pre-quote statuses and clears unresolved pricing', async () => {
+    const db = getTestDb();
+    db.prepare(`UPDATE Inquiry SET status = '待人工审核', has_unresolved_pricing = 1 WHERE id = 'i1'`).run();
+    const res = await quotePOST(makeReq('i1') as NextRequest, { params: Promise.resolve({ id: 'i1' }) });
+    expect(res.status).toBe(200);
+    expect(db.prepare('SELECT status, has_unresolved_pricing FROM Inquiry WHERE id = ?').get('i1')).toEqual({
+      status: 'quote_sent',
+      has_unresolved_pricing: 0,
+    });
+  });
+
+  it('republishes after the previous quote expired and nothing was ordered', async () => {
+    const db = getTestDb();
+    db.prepare(`UPDATE Inquiry SET status = 'quote_sent' WHERE id = 'i1'`).run();
+    db.prepare(`
+      INSERT INTO Quote (id, inquiryId, version, status, subtotal, currency, createdAt, updatedAt)
+      VALUES ('q-exp', 'i1', 1, 'expired', 100, 'CNY', datetime('now'), datetime('now'))
+    `).run();
+
+    const res = await quotePOST(makeReq('i1', { items: [{ productId: 'p1', name: 'A', price: 80, quantity: 1 }] }) as NextRequest, {
+      params: Promise.resolve({ id: 'i1' }),
+    });
+    expect(res.status).toBe(200);
+    expect(db.prepare('SELECT version, status, subtotal FROM Quote WHERE inquiryId = ? ORDER BY version').all('i1')).toEqual([
+      { version: 1, status: 'expired', subtotal: 100 },
+      { version: 2, status: 'sent', subtotal: 80 },
+    ]);
+  });
+
+  it.each([
+    ['declined', '询价已放弃，不能发布报价', 'INQUIRY_DECLINED'],
+    ['closed', '询价已关闭，不能发布报价', 'INQUIRY_CLOSED'],
+    ['处理中', '当前询价状态不能发布报价', 'INQUIRY_NOT_QUOTABLE'],
+  ])('returns 409 and does not write a quote when the inquiry status is %s', async (status, error, code) => {
+    const db = getTestDb();
+    db.prepare('UPDATE Inquiry SET status = ? WHERE id = ?').run(status, 'i1');
+    const res = await quotePOST(makeReq('i1') as NextRequest, { params: Promise.resolve({ id: 'i1' }) });
+    const json = await res.json();
+    expect(res.status).toBe(409);
+    expect(json).toMatchObject({ error, code });
+    expect(db.prepare('SELECT status FROM Inquiry WHERE id = ?').get('i1')).toEqual({ status });
+    expect(db.prepare('SELECT COUNT(*) AS count FROM Quote').get()).toEqual({ count: 0 });
+    expect(db.prepare('SELECT COUNT(*) AS count FROM Notification').get()).toEqual({ count: 0 });
+    expect(db.prepare('SELECT COUNT(*) AS count FROM BackgroundTask').get()).toEqual({ count: 0 });
+  });
+
+  it('returns 409 when the inquiry is archived', async () => {
+    const db = getTestDb();
+    db.prepare(`UPDATE Inquiry SET archivedAt = datetime('now') WHERE id = 'i1'`).run();
+    const res = await quotePOST(makeReq('i1') as NextRequest, { params: Promise.resolve({ id: 'i1' }) });
+    const json = await res.json();
+    expect(res.status).toBe(409);
+    expect(json).toMatchObject({ error: '询价已归档，不能发布报价', code: 'INQUIRY_ARCHIVED' });
+    const inquiry = db.prepare('SELECT status, archivedAt FROM Inquiry WHERE id = ?').get('i1') as { status: string; archivedAt: string | null };
+    expect(inquiry.status).toBe('pending_quote');
+    expect(inquiry.archivedAt).not.toBeNull();
+    expect(db.prepare('SELECT COUNT(*) AS count FROM Quote').get()).toEqual({ count: 0 });
+  });
+
+  it('returns 409 and keeps the sent quote when the inquiry already has an order', async () => {
+    const db = getTestDb();
+    db.prepare(`UPDATE Inquiry SET status = 'quote_sent' WHERE id = 'i1'`).run();
+    db.prepare(`
+      INSERT INTO Quote (id, inquiryId, version, status, subtotal, currency, createdAt, updatedAt)
+      VALUES ('q-sent', 'i1', 1, 'sent', 100, 'CNY', datetime('now'), datetime('now'))
+    `).run();
+    db.prepare(`
+      INSERT INTO "Order" (id, inquiryId, email, subtotal, total, status, shippingMethod, operationLogs, createdAt, updatedAt)
+      VALUES ('o1', 'i1', 'q@test.com', 100, 100, 'confirmed', 'logistics', '[]', datetime('now'), datetime('now'))
+    `).run();
+
+    const res = await quotePOST(makeReq('i1') as NextRequest, { params: Promise.resolve({ id: 'i1' }) });
+    const json = await res.json();
+    expect(res.status).toBe(409);
+    expect(json).toMatchObject({ error: '询价已下单，不能发布报价', code: 'INQUIRY_ORDERED' });
+    expect(db.prepare('SELECT status FROM Inquiry WHERE id = ?').get('i1')).toEqual({ status: 'quote_sent' });
+    expect(db.prepare('SELECT id, version, status FROM Quote').all()).toEqual([{ id: 'q-sent', version: 1, status: 'sent' }]);
+  });
+
+  it('returns 409 when a quote line is already partially ordered', async () => {
+    const db = getTestDb();
+    db.prepare(`UPDATE Inquiry SET status = 'quote_sent' WHERE id = 'i1'`).run();
+    db.prepare(`
+      INSERT INTO Quote (id, inquiryId, version, status, subtotal, currency, createdAt, updatedAt)
+      VALUES ('q-part', 'i1', 1, 'sent', 200, 'CNY', datetime('now'), datetime('now'))
+    `).run();
+    db.prepare(`
+      INSERT INTO QuoteItem (id, quoteId, position, name, unitPrice, quantity, orderedQty, lineTotal, createdAt, updatedAt)
+      VALUES ('qi-part', 'q-part', 0, 'A', 100, 2, 1, 200, datetime('now'), datetime('now'))
+    `).run();
+
+    const res = await quotePOST(makeReq('i1') as NextRequest, { params: Promise.resolve({ id: 'i1' }) });
+    const json = await res.json();
+    expect(res.status).toBe(409);
+    expect(json).toMatchObject({ error: '询价已下单，不能发布报价', code: 'INQUIRY_ORDERED' });
+    expect(db.prepare('SELECT status FROM Quote WHERE id = ?').get('q-part')).toEqual({ status: 'sent' });
+    expect(db.prepare('SELECT COUNT(*) AS count FROM Quote').get()).toEqual({ count: 1 });
+  });
+
+  it('returns 409 when a quote was already accepted', async () => {
+    const db = getTestDb();
+    db.prepare(`UPDATE Inquiry SET status = 'quote_sent' WHERE id = 'i1'`).run();
+    db.prepare(`
+      INSERT INTO Quote (id, inquiryId, version, status, subtotal, currency, createdAt, updatedAt)
+      VALUES ('q-acc', 'i1', 1, 'accepted', 100, 'CNY', datetime('now'), datetime('now'))
+    `).run();
+
+    const res = await quotePOST(makeReq('i1') as NextRequest, { params: Promise.resolve({ id: 'i1' }) });
+    const json = await res.json();
+    expect(res.status).toBe(409);
+    expect(json).toMatchObject({ error: '报价已接受，不能发布报价', code: 'QUOTE_ACCEPTED' });
+    expect(db.prepare('SELECT status FROM Inquiry WHERE id = ?').get('i1')).toEqual({ status: 'quote_sent' });
+    expect(db.prepare('SELECT id, status FROM Quote').all()).toEqual([{ id: 'q-acc', status: 'accepted' }]);
+  });
+
+  it('lets an admin send a new quote after the previous one expired', async () => {
+    const db = getTestDb();
+    const past = new Date(Date.now() - 86_400_000).toISOString();
+    db.prepare(`
+      INSERT INTO Quote (id, inquiryId, version, status, subtotal, currency, validUntil, sentAt, createdAt, updatedAt)
+      VALUES ('q-old', 'i1', 1, 'expired', 90, 'CNY', ?, ?, datetime('now'), datetime('now'))
+    `).run(past, past);
+    db.prepare(`UPDATE Inquiry SET status = 'quote_expired' WHERE id = 'i1'`).run();
+
+    const response = await quotePOST(makeReq('i1', { items: [{ productId: 'p1', name: 'A', price: 130, quantity: 1 }] }) as NextRequest, {
+      params: Promise.resolve({ id: 'i1' }),
+    });
+    expect(response.status).toBe(200);
+
+    const inquiry = db.prepare('SELECT status FROM Inquiry WHERE id = ?').get('i1') as { status: string };
+    expect(inquiry.status).toBe('quote_sent');
+    const quotes = db.prepare('SELECT version, status, subtotal FROM Quote WHERE inquiryId = ? ORDER BY version').all('i1') as Array<{ version: number; status: string; subtotal: number }>;
+    expect(quotes).toEqual([
+      { version: 1, status: 'expired', subtotal: 90 },
+      { version: 2, status: 'sent', subtotal: 130 },
+    ]);
+  });
+
+  it('refuses to accept an expired quote and does not create an order', async () => {
+    const db = getTestDb();
+    const past = new Date(Date.now() - 86_400_000).toISOString();
+    db.prepare(`
+      INSERT INTO Quote (id, inquiryId, version, status, subtotal, currency, validUntil, sentAt, createdAt, updatedAt)
+      VALUES ('q-exp', 'i1', 1, 'expired', 100, 'CNY', ?, ?, datetime('now'), datetime('now'))
+    `).run(past, past);
+    db.prepare(`UPDATE Inquiry SET status = 'quote_sent' WHERE id = 'i1'`).run();
+
+    const response = await confirmQuotePOST(new NextRequest('http://localhost:3000/api/orders/i1/confirm-items', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ itemIndices: [0], quoteId: 'q-exp', quoteVersion: 1, acceptanceAttemptId: 'accept-expired' }),
+    }), { params: Promise.resolve({ id: 'i1' }) });
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({ code: 'QUOTE_EXPIRED' });
+
+    const inquiry = db.prepare('SELECT status FROM Inquiry WHERE id = ?').get('i1') as { status: string };
+    const quote = db.prepare('SELECT status FROM Quote WHERE id = ?').get('q-exp') as { status: string };
+    expect(inquiry.status).toBe('quote_expired');
+    expect(quote.status).toBe('expired');
+    expect(await prisma.order.count({ where: { inquiryId: 'i1' } })).toBe(0);
+  });
+
+  it('refuses to accept a sent quote whose validUntil has passed', async () => {
+    const db = getTestDb();
+    const past = new Date(Date.now() - 3_600_000).toISOString();
+    db.prepare(`
+      INSERT INTO Quote (id, inquiryId, version, status, subtotal, currency, validUntil, sentAt, createdAt, updatedAt)
+      VALUES ('q-due', 'i1', 1, 'sent', 100, 'CNY', ?, ?, datetime('now'), datetime('now'))
+    `).run(past, past);
+    db.prepare(`UPDATE Inquiry SET status = 'quote_sent' WHERE id = 'i1'`).run();
+
+    const response = await confirmQuotePOST(new NextRequest('http://localhost:3000/api/orders/i1/confirm-items', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ itemIndices: [0], quoteId: 'q-due', quoteVersion: 1, acceptanceAttemptId: 'accept-due' }),
+    }), { params: Promise.resolve({ id: 'i1' }) });
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({ code: 'QUOTE_EXPIRED' });
+    const inquiry = db.prepare('SELECT status FROM Inquiry WHERE id = ?').get('i1') as { status: string };
+    const quote = db.prepare('SELECT status FROM Quote WHERE id = ?').get('q-due') as { status: string };
+    expect(inquiry.status).toBe('quote_expired');
+    expect(quote.status).toBe('expired');
+    expect(await prisma.order.count({ where: { inquiryId: 'i1' } })).toBe(0);
   });
 
   it('records quote acceptance and creates an order from the quote snapshot', async () => {

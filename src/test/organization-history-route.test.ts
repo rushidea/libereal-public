@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   organizationRbacErrorStatus: vi.fn(() => 403),
   orderFindMany: vi.fn(),
   inquiryFindMany: vi.fn(),
+  quoteFindMany: vi.fn(),
   OrganizationRbacError: class OrganizationRbacError extends Error {
     code: string;
     constructor(code: string, message = code) {
@@ -24,12 +25,16 @@ vi.mock('@/lib/organization-service', () => ({
   hasOrganizationPermission: mocks.hasOrganizationPermission,
   organizationRbacErrorStatus: mocks.organizationRbacErrorStatus,
 }));
-vi.mock('@/lib/prisma', () => ({
-  prisma: {
+vi.mock('@/lib/prisma', () => {
+  const prisma = {
     order: { findMany: mocks.orderFindMany },
     inquiry: { findMany: mocks.inquiryFindMany },
-  },
-}));
+    quote: { findMany: mocks.quoteFindMany },
+    notification: { create: vi.fn() },
+    $transaction: (run: (tx: unknown) => unknown) => run(prisma),
+  };
+  return { prisma };
+});
 
 import { GET } from '@/app/api/organizations/[id]/history/route';
 
@@ -55,6 +60,7 @@ describe('organization history route', () => {
     mocks.inquiryFindMany.mockResolvedValue([
       { id: 'inquiry-1', status: 'closed', subtotal: 100, createdAt: new Date('2026-08-01T00:00:00Z'), archivedAt: null },
     ]);
+    mocks.quoteFindMany.mockResolvedValue([]);
   });
 
   it('allows the original owner or authorized administrator to read organization-owned history only', async () => {
