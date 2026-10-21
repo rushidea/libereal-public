@@ -282,6 +282,14 @@ export function getTestDb(): Database.Database {
       createdAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
       updatedAt DATETIME NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS Cart (
+      id TEXT PRIMARY KEY,
+      userId TEXT NOT NULL UNIQUE,
+      items TEXT NOT NULL,
+      updatedAt DATETIME NOT NULL,
+      createdAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (userId) REFERENCES User(id) ON DELETE CASCADE
+    );
     CREATE TABLE IF NOT EXISTS Inquiry (
       id TEXT PRIMARY KEY,
       checkoutAttemptId TEXT UNIQUE,
@@ -993,6 +1001,7 @@ export function clearAllTables(db: Database.Database) {
     DELETE FROM "Order";
     DELETE FROM Inquiry;
     DELETE FROM organizations;
+    DELETE FROM Cart;
     DELETE FROM Address;
     DELETE FROM NotificationReceipt;
     DELETE FROM Notification;

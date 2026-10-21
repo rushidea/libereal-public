@@ -9,7 +9,7 @@ import { PUT as updateProduct } from '@/app/api/admin/products/route';
 import { DELETE as deleteProduct, GET as getProduct } from '@/app/api/admin/products/[id]/route';
 import { ProductSearchService } from '@/lib/product-search';
 import { NextRequest } from 'next/server';
-import { clearAllTables, closeTestDb, getTestDb, seedAdmin } from './db-helpers';
+import { clearAllTables, closeTestDb, getTestDb, seedAdmin, seedUser } from './db-helpers';
 
 const authMock = auth as unknown as Mock;
 
@@ -153,6 +153,150 @@ describe('admin product catalog models', () => {
     expect(getTestDb().prepare('SELECT catalogNumber, price FROM ProductVariant WHERE productId = ?').all('product_1')).toEqual([
       { catalogNumber: 'CAT-1-50', price: 125 },
     ]);
+  });
+
+  async function createTwoVariants() {
+    const created = await updateProduct(updateRequest({
+      variants: [
+        { catalogNumber: 'CAT-1-50', spec: '50 µL', price: 120 },
+        { catalogNumber: 'CAT-1-100', spec: '100 µL', price: 200 },
+      ],
+    }));
+    expect(created.status).toBe(200);
+    const db = getTestDb();
+    const retained = db.prepare('SELECT id FROM ProductVariant WHERE catalogNumber = ?').get('CAT-1-50') as { id: string };
+    const removed = db.prepare('SELECT id FROM ProductVariant WHERE catalogNumber = ?').get('CAT-1-100') as { id: string };
+    return { retained, removed };
+  }
+
+  async function expectRemovalBlocked(retainedId: string, removedId: string, reason: string) {
+    const updated = await updateProduct(updateRequest({
+      name: '不应写回',
+      variants: [{ id: retainedId, catalogNumber: 'CAT-1-50', spec: '50 µL', price: 125 }],
+    }));
+    expect(updated.status).toBe(409);
+    const body = await updated.json() as { error?: string };
+    expect(body.error).toContain('无法保存');
+    expect(body.error).toContain('本次修改已全部取消');
+    expect(body.error).toContain('CAT-1-100');
+    expect(body.error).toContain(reason);
+    expect(body.error).toContain('不能删除');
+    const db = getTestDb();
+    expect(db.prepare('SELECT COUNT(*) AS count FROM ProductVariant WHERE id = ?').get(removedId)).toEqual({ count: 1 });
+    expect(db.prepare('SELECT COUNT(*) AS count FROM ProductVariant WHERE productId = ?').get('product_1')).toEqual({ count: 2 });
+    expect((db.prepare('SELECT name FROM Product WHERE id = ?').get('product_1') as { name: string }).name).toBe('AKT1 Antibody');
+    expect((db.prepare('SELECT price FROM ProductVariant WHERE id = ?').get(retainedId) as { price: number }).price).toBe(120);
+  }
+
+  it('rejects deleting a variant that still has inventory records', async () => {
+    const { retained, removed } = await createTwoVariants();
+    const db = getTestDb();
+    db.prepare(`INSERT INTO "Order" (id, email, subtotal, total, status, createdAt, updatedAt) VALUES ('order_variant', 'buyer@test.com', 200, 200, 'confirmed', datetime('now'), datetime('now'))`).run();
+    db.prepare(`INSERT INTO OrderItem (id, orderId, position, productId, catalogNumber, name, unitPrice, quantity, status, metadata, createdAt, updatedAt) VALUES ('order_item_variant', 'order_variant', 0, 'product_1', 'CAT-1-100', 'AKT1 Antibody', 200, 2, 'pending', ?, datetime('now'), datetime('now'))`)
+      .run(JSON.stringify({ variantId: removed.id }));
+    db.prepare(`INSERT INTO InventoryAccount (id, productId, variantId, actualQuantity, availableQuantity, reservedQuantity, shippedQuantity, inboundQuantity, createdAt, updatedAt) VALUES ('inventory_variant', 'product_1', ?, 5, 3, 2, 0, 0, datetime('now'), datetime('now'))`)
+      .run(removed.id);
+    db.prepare(`INSERT INTO InventoryReservation (id, inventoryAccountId, orderId, orderItemId, quantity, fulfilledQuantity, status, createdAt, updatedAt) VALUES ('reservation_variant', 'inventory_variant', 'order_variant', 'order_item_variant', 2, 0, 'active', datetime('now'), datetime('now'))`).run();
+
+    await expectRemovalBlocked(retained.id, removed.id, '库存记录');
+    expect(db.prepare('SELECT COUNT(*) AS count FROM InventoryAccount WHERE id = ?').get('inventory_variant')).toEqual({ count: 1 });
+    expect(db.prepare('SELECT COUNT(*) AS count FROM InventoryReservation WHERE id = ?').get('reservation_variant')).toEqual({ count: 1 });
+  });
+
+  it('rejects deleting a variant that only has a zero-quantity inventory account', async () => {
+    const { retained, removed } = await createTwoVariants();
+    getTestDb().prepare(`INSERT INTO InventoryAccount (id, productId, variantId, actualQuantity, availableQuantity, reservedQuantity, shippedQuantity, inboundQuantity, createdAt, updatedAt) VALUES ('inventory_zero', 'product_1', ?, 0, 0, 0, 0, 0, datetime('now'), datetime('now'))`)
+      .run(removed.id);
+    await expectRemovalBlocked(retained.id, removed.id, '库存记录');
+  });
+
+  it('rejects deleting a variant referenced by an order, inquiry, quote, or cart', async () => {
+    const cases: Array<{ reason: string; seed: (removedId: string) => void }> = [
+      {
+        reason: '订单',
+        seed: (removedId) => {
+          const db = getTestDb();
+          db.prepare(`INSERT INTO "Order" (id, email, subtotal, total, status, createdAt, updatedAt) VALUES ('order_ref', 'buyer@test.com', 200, 200, 'confirmed', datetime('now'), datetime('now'))`).run();
+          db.prepare(`INSERT INTO OrderItem (id, orderId, position, productId, catalogNumber, name, unitPrice, quantity, metadata, createdAt, updatedAt) VALUES ('order_item_ref', 'order_ref', 0, 'product_1', 'CAT-1-100', 'AKT1 Antibody', 200, 1, ?, datetime('now'), datetime('now'))`)
+            .run(JSON.stringify({ variantId: removedId, spec: '100 µL' }));
+        },
+      },
+      {
+        reason: '询价',
+        seed: (removedId) => {
+          const db = getTestDb();
+          db.prepare(`INSERT INTO Inquiry (id, name, email, phone, institution, status, createdAt, operationLogs) VALUES ('inquiry_ref', '买家', 'buyer@test.com', '13800000000', '实验室', 'pending_quote', datetime('now'), '[]')`).run();
+          db.prepare(`INSERT INTO InquiryItem (id, inquiryId, position, productId, catalogNumber, name, unitPrice, quantity, metadata, createdAt, updatedAt) VALUES ('inquiry_item_ref', 'inquiry_ref', 0, 'product_1', 'CAT-1-100', 'AKT1 Antibody', 200, 1, ?, datetime('now'), datetime('now'))`)
+            .run(JSON.stringify({ variantId: removedId }));
+        },
+      },
+      {
+        reason: '报价',
+        seed: (removedId) => {
+          const db = getTestDb();
+          db.prepare(`INSERT INTO Inquiry (id, name, email, phone, institution, status, createdAt, operationLogs) VALUES ('inquiry_quote', '买家', 'buyer@test.com', '13800000000', '实验室', 'quote_sent', datetime('now'), '[]')`).run();
+          db.prepare(`INSERT INTO Quote (id, inquiryId, version, subtotal, status, createdAt, updatedAt) VALUES ('quote_ref', 'inquiry_quote', 1, 200, 'sent', datetime('now'), datetime('now'))`).run();
+          db.prepare(`INSERT INTO QuoteItem (id, quoteId, position, productId, catalogNumber, name, unitPrice, quantity, lineTotal, metadata, createdAt, updatedAt) VALUES ('quote_item_ref', 'quote_ref', 0, 'product_1', 'CAT-1-100', 'AKT1 Antibody', 200, 1, 200, ?, datetime('now'), datetime('now'))`)
+            .run(JSON.stringify({ variantId: removedId }));
+        },
+      },
+      {
+        reason: '购物车',
+        seed: (removedId) => {
+          const db = getTestDb();
+          seedUser(db, { id: 'buyer_cart', email: 'cart@test.com' });
+          db.prepare(`INSERT INTO Cart (id, userId, items, createdAt, updatedAt) VALUES ('cart_ref', 'buyer_cart', ?, datetime('now'), datetime('now'))`)
+            .run(JSON.stringify([{ product: { id: 'product_1', variantId: removedId, catalogNumber: 'CAT-1-100', brand: 'CST' }, quantity: 1 }]));
+        },
+      },
+      {
+        reason: '购物车',
+        seed: (removedId) => {
+          const db = getTestDb();
+          seedUser(db, { id: 'buyer_legacy_cart', email: 'legacy-cart@test.com' });
+          db.prepare(`INSERT INTO Cart (id, userId, items, createdAt, updatedAt) VALUES ('cart_legacy', 'buyer_legacy_cart', ?, datetime('now'), datetime('now'))`)
+            .run(JSON.stringify([{ product: { id: removedId, catalogNumber: 'CAT-1-100', brand: 'CST' }, quantity: 1 }]));
+        },
+      },
+    ];
+
+    for (const item of cases) {
+      clearAllTables(getTestDb());
+      seedAdmin(getTestDb());
+      seedProduct();
+      const { retained, removed } = await createTwoVariants();
+      item.seed(removed.id);
+      await expectRemovalBlocked(retained.id, removed.id, item.reason);
+    }
+  });
+
+  it('still deletes an unreferenced variant when a referenced sibling is kept', async () => {
+    const { retained, removed } = await createTwoVariants();
+    const db = getTestDb();
+    db.prepare(`INSERT INTO InventoryAccount (id, productId, variantId, actualQuantity, availableQuantity, reservedQuantity, shippedQuantity, inboundQuantity, createdAt, updatedAt) VALUES ('inventory_kept', 'product_1', ?, 0, 0, 0, 0, 0, datetime('now'), datetime('now'))`)
+      .run(retained.id);
+    const updated = await updateProduct(updateRequest({
+      variants: [{ id: retained.id, catalogNumber: 'CAT-1-50', spec: '50 µL', price: 125 }],
+    }));
+    expect(updated.status).toBe(200);
+    expect(db.prepare('SELECT id FROM ProductVariant WHERE productId = ?').all('product_1')).toEqual([{ id: retained.id }]);
+    expect(db.prepare('SELECT COUNT(*) AS count FROM ProductVariant WHERE id = ?').get(removed.id)).toEqual({ count: 0 });
+    expect(db.prepare('SELECT COUNT(*) AS count FROM InventoryAccount WHERE id = ?').get('inventory_kept')).toEqual({ count: 1 });
+  });
+
+  it('does not treat a product-level inventory account or a partial id match as a variant reference', async () => {
+    const { retained, removed } = await createTwoVariants();
+    const db = getTestDb();
+    db.prepare(`INSERT INTO InventoryAccount (id, productId, variantId, actualQuantity, availableQuantity, reservedQuantity, shippedQuantity, inboundQuantity, createdAt, updatedAt) VALUES ('inventory_product', 'product_1', NULL, 8, 8, 0, 0, 0, datetime('now'), datetime('now'))`).run();
+    db.prepare(`INSERT INTO "Order" (id, email, subtotal, total, status, createdAt, updatedAt) VALUES ('order_other', 'buyer@test.com', 200, 200, 'confirmed', datetime('now'), datetime('now'))`).run();
+    db.prepare(`INSERT INTO OrderItem (id, orderId, position, productId, catalogNumber, name, unitPrice, quantity, metadata, createdAt, updatedAt) VALUES ('order_item_other', 'order_other', 0, 'product_1', 'CAT-1-100', 'AKT1 Antibody', 200, 1, ?, datetime('now'), datetime('now'))`)
+      .run(JSON.stringify({ variantId: `${removed.id}-other`, note: removed.id }));
+
+    const updated = await updateProduct(updateRequest({
+      variants: [{ id: retained.id, catalogNumber: 'CAT-1-50', spec: '50 µL', price: 125 }],
+    }));
+    expect(updated.status).toBe(200);
+    expect(db.prepare('SELECT id FROM ProductVariant WHERE productId = ?').all('product_1')).toEqual([{ id: retained.id }]);
   });
 
   it('returns the aggregated product detail to administrators', async () => {
