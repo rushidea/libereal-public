@@ -37,6 +37,9 @@ type InquiryItem = {
   unit?: string | null;
   quantity?: number;
   price?: number;
+  category?: string | null;
+  subcategory?: string | null;
+  type?: string | null;
   leadTime?: string;
   customerLeadTime?: string | null;
   actualLeadTime?: string | null;

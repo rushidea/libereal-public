@@ -3,6 +3,7 @@ import { prisma } from '@/lib/prisma';
 import { requireAdmin } from '@/lib/session';
 import { enqueueBackgroundTask } from '@/lib/background-tasks';
 import { quoteView } from '@/lib/quote-records';
+import { loadQuoteProductTaxonomy } from '@/lib/quote-item-taxonomy';
 import { AMBIGUOUS_PRODUCT_CATALOG_NUMBER, verifyAndPriceItems } from '@/lib/pricing';
 import { mergeQuoteConstraintMetadata, packageConstraintFromVariant, readExplicitQuantityConstraint } from '@/lib/quote-acceptance';
 
@@ -168,7 +169,8 @@ export async function POST(
       },
     });
 
-    return NextResponse.json({ success: true, quote: quoteView(quote) });
+    const quoteTaxonomy = await loadQuoteProductTaxonomy(quote.items.map((item) => item.productId));
+    return NextResponse.json({ success: true, quote: quoteView(quote, quoteTaxonomy) });
   } catch (err) {
     if (err instanceof Error && err.message === AMBIGUOUS_PRODUCT_CATALOG_NUMBER) {
       return NextResponse.json({ error: '部分商品需要确认品牌后再报价。' }, { status: 400 });
