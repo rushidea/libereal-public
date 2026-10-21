@@ -3,6 +3,17 @@ import { calculatePrice, type PriceAdjustment, type PromotionCandidate } from '@
 import { lookupBrandDiscountRate } from '@/lib/discount-brand-catalog';
 import type { Prisma } from '@prisma/client';
 
+const pricingVariantSelect = {
+  id: true,
+  catalogNumber: true,
+  spec: true,
+  price: true,
+  promotionalPrice: true,
+  minimumSalePrice: true,
+  productId: true,
+  inventoryAccounts: { select: { availableQuantity: true }, take: 1 },
+} satisfies Prisma.ProductVariantSelect;
+
 export const AMBIGUOUS_PRODUCT_CATALOG_NUMBER = 'AMBIGUOUS_PRODUCT_CATALOG_NUMBER';
 
 export interface PriceLookupItem {
@@ -217,8 +228,8 @@ export async function verifyAndPriceItems(
     if (lookupKey) {
       const directProduct = item.variantId ? null : await findPricingProduct(item);
       const variant = item.variantId
-        ? await prisma.productVariant.findUnique({ where: { id: item.variantId }, select: { id: true, catalogNumber: true, spec: true, price: true, promotionalPrice: true, minimumSalePrice: true, productId: true } }).catch(() => null)
-        : directProduct ? null : await prisma.productVariant.findFirst({ where: { catalogNumber: lookupKey }, select: { id: true, catalogNumber: true, spec: true, price: true, promotionalPrice: true, minimumSalePrice: true, productId: true } }).catch(() => null);
+        ? await prisma.productVariant.findUnique({ where: { id: item.variantId }, select: pricingVariantSelect }).catch(() => null)
+        : directProduct ? null : await prisma.productVariant.findFirst({ where: { catalogNumber: lookupKey }, select: pricingVariantSelect }).catch(() => null);
       if (item.variantId && !variant) throw new Error('PRODUCT_VARIANT_NOT_FOUND');
       const product = directProduct || await prisma.product.findFirst({
         where: variant
@@ -238,7 +249,10 @@ export async function verifyAndPriceItems(
       if (product) {
         available = product.inStock;
         leadTime = product.leadTime;
-        stockQuantity = product.stockQuantity;
+        // 规格已有库存账户时，可售量以该账户为准（-1 仍是不限库存）。没有规格账户才用商品 stockQuantity。
+        // 货期/leadTime 只是快照，不作为期货或超卖开关。
+        const variantAvailable = variant?.inventoryAccounts?.[0]?.availableQuantity;
+        stockQuantity = variantAvailable ?? product.stockQuantity;
         matchedVariantId = variant?.id || null;
         matchedSpec = variant?.spec ?? item.spec ?? null;
         matchedCategory = product.category;

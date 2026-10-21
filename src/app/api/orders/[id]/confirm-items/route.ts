@@ -14,6 +14,12 @@ import { normalizePointsIntent } from '@/lib/points-checkout';
 import { assertCheckoutPointsAvailable, settleCheckoutPayment } from '@/lib/checkout-payment-settlement';
 import { applyOrderPointsDeduction } from '@/lib/points-checkout-service';
 import { assertQuoteAcceptanceCredit, assertQuoteAcceptanceStock, quoteAcceptancePointsAudit } from '@/lib/quote-acceptance-guards';
+import {
+  isVariantStockInsufficientError,
+  reserveOrderInventory,
+  VARIANT_STOCK_INSUFFICIENT,
+  VARIANT_STOCK_INSUFFICIENT_MESSAGE,
+} from '@/lib/inventory';
 import { acceptanceQuantityError, lineTotalForAcceptedQuantity, quoteLineFulfillment, requestedQuantityFromBody, validateAcceptedQuantity } from '@/lib/quote-acceptance';
 
 interface OrderItem {
@@ -212,7 +218,11 @@ export async function POST(
         if (settled?.pointsBreakdown && pointsUserId) {
           await assertCheckoutPointsAvailable(tx, pointsUserId, settled.amountsBeforePoints.total, settled.intent);
         }
-        await assertQuoteAcceptanceStock(tx, orderItems.map((item) => ({ productId: item.productId ?? null, quantity: item.quantity })));
+        await assertQuoteAcceptanceStock(tx, orderItems.map((item) => ({
+          productId: item.productId ?? null,
+          quantity: item.quantity,
+          metadata: item.metadata ?? null,
+        })));
         await assertQuoteAcceptanceCredit(tx, {
           userId: inquiry.userId,
           email: inquiry.email,
@@ -283,6 +293,7 @@ export async function POST(
             }),
           } },
         } });
+        await reserveOrderInventory(tx, created.id, session.user.id as string, '询价转订单预占规格库存', { variantLinesOnly: true });
         if (settled?.pointsBreakdown) {
           const applied = await applyOrderPointsDeduction(tx, created.id);
           if (!applied.ok) throw new Error(`POINTS_APPLY:${applied.error}`);
@@ -323,6 +334,9 @@ export async function POST(
         allOrdered,
       });
     } catch (e) {
+      if (isVariantStockInsufficientError(e)) {
+        return NextResponse.json({ error: VARIANT_STOCK_INSUFFICIENT_MESSAGE, code: VARIANT_STOCK_INSUFFICIENT }, { status: 400 });
+      }
       if (e instanceof Error && e.message.startsWith('POINTS_')) {
         const message = e.message.replace(/^POINTS_(PRECHECK|APPLY):/, '');
         return NextResponse.json({ error: message }, { status: 400 });

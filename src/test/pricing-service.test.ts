@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { AMBIGUOUS_PRODUCT_CATALOG_NUMBER, verifyAndPriceItems } from '@/lib/pricing';
+import { AMBIGUOUS_PRODUCT_CATALOG_NUMBER, getVerifiedInventoryError, verifyAndPriceItems } from '@/lib/pricing';
 import { clearAllTables, closeTestDb, getTestDb, seedUser } from './db-helpers';
 
 function seedProduct() {
@@ -128,5 +128,36 @@ describe('pricing service', () => {
     await expect(verifyAndPriceItems([
       { catalogNumber: 'CAT-1', name: '测试产品', price: 1 },
     ], { userId: 'user_1' })).rejects.toThrow('PRODUCT_REQUIRES_INQUIRY');
+  });
+
+  it('uses variant inventory accounts for checkout stock validation', async () => {
+    const db = getTestDb();
+    db.prepare('UPDATE Product SET stockQuantity = -1, inStock = 1 WHERE id = ?').run('product_1');
+    db.prepare(`
+      INSERT INTO ProductVariant (id, productId, catalogNumber, spec, price, originalPrice)
+      VALUES ('variant_stock', 'product_1', 'CAT-1-V', '100 µL', 100, 100)
+    `).run();
+    db.prepare(`
+      INSERT INTO InventoryAccount (id, productId, variantId, actualQuantity, availableQuantity, reservedQuantity, shippedQuantity, inboundQuantity, createdAt, updatedAt)
+      VALUES ('acc_variant', 'product_1', 'variant_stock', 1, 1, 0, 0, 0, datetime('now'), datetime('now'))
+    `).run();
+
+    const result = await verifyAndPriceItems([{
+      productId: 'product_1', catalogNumber: 'CAT-1-V', variantId: 'variant_stock', name: '测试产品', price: 100, quantity: 2,
+    }], { userId: 'user_1', allowClientFallback: false, strictQuantity: true });
+
+    expect(result.verifiedItems[0].stockQuantity).toBe(1);
+    expect(result.verifiedItems[0].variantId).toBe('variant_stock');
+    expect(getVerifiedInventoryError(result.verifiedItems[0])).toBe('INSUFFICIENT_STOCK');
+  });
+
+  it('keeps product stock validation when the line has no variant', async () => {
+    getTestDb().prepare('UPDATE Product SET stockQuantity = 1, inStock = 1 WHERE id = ?').run('product_1');
+    const result = await verifyAndPriceItems([{
+      productId: 'product_1', catalogNumber: 'CAT-1', name: '测试产品', price: 100, quantity: 2,
+    }], { userId: 'user_1', allowClientFallback: false, strictQuantity: true });
+    expect(result.verifiedItems[0].variantId).toBeNull();
+    expect(result.verifiedItems[0].stockQuantity).toBe(1);
+    expect(getVerifiedInventoryError(result.verifiedItems[0])).toBe('INSUFFICIENT_STOCK');
   });
 });

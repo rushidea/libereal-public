@@ -3,6 +3,13 @@ import type { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { AMBIGUOUS_PRODUCT_CATALOG_NUMBER, verifyAndPriceItems } from '@/lib/pricing';
 import { toOrderItemCreates } from '@/lib/commerce-records';
+import {
+  assertVariantCheckoutStock,
+  isVariantStockInsufficientError,
+  reserveOrderInventory,
+  VARIANT_STOCK_INSUFFICIENT,
+  VARIANT_STOCK_INSUFFICIENT_MESSAGE,
+} from '@/lib/inventory';
 import { requireAdmin } from '@/lib/session';
 import { normalizeOrderPaymentMethod } from '@/data/payment-methods';
 import { orderAutoCloseAt } from '@/lib/order-auto-close';
@@ -174,6 +181,7 @@ export async function GET(req: NextRequest) {
   }
 }
 
+/** 后台下单，代客下单走同一接口。权限：管理员 orders.write（已配置 MFA 时包含 step-up）。规格库存不足返回 400，不新增权限。没有规格的商品保持现有逻辑，这里不额外做商品级库存校验。 */
 export async function POST(req: NextRequest) {
   const denied = await requireAdmin('orders.write');
   if (denied instanceof NextResponse) return denied;
@@ -249,42 +257,66 @@ export async function POST(req: NextRequest) {
       clientPrice: vi.clientPrice,
       quantity: vi.quantity,
       shippedQty: 0,
-      leadTime: null,
+      leadTime: vi.leadTime ?? null,
       status: 'pending',
+      variantId: vi.variantId ?? null,
+      metadata: JSON.stringify({
+        variantId: vi.variantId ?? null,
+        spec: vi.spec ?? null,
+        unit: vi.unit ?? null,
+        stockSnapshot: {
+          available: vi.available ?? null,
+          stockQuantity: vi.stockQuantity ?? null,
+          leadTime: vi.leadTime ?? null,
+        },
+      }),
       pricingSnapshot: vi.pricingSnapshot,
     }));
 
     const orderStatus = initialOrderStatus(normalizedPaymentMethod);
-    const order = await withAllocatedOrderNumber(prisma, async (tx, orderId) => tx.order.create({
-      data: {
-        id: orderId,
-        email: customer?.email ?? normalizedCustomerEmail,
-        ...(customer ? { customerId: customer.id } : {}),
-        subtotal: verifiedSubtotal,
-        adjustmentTotal,
-        total,
-        status: orderStatus,
-        autoCloseAt: orderAutoCloseAt(normalizedPaymentMethod),
-        paymentMethod: normalizedPaymentMethod,
-        ...(resolvedAddress.snapshot ? {
-          addressSnapshot: { create: resolvedAddress.snapshot },
-        } : {}),
-        ...(adjustments.length ? { adjustments: { create: adjustments } } : {}),
-        orderItems: {
-          create: toOrderItemCreates(orderItems),
-        },
-        statusHistory: {
-          create: {
-            toStatus: orderStatus,
-            reason: 'admin_order_created',
+    const order = await withAllocatedOrderNumber(prisma, async (tx, orderId) => {
+      await assertVariantCheckoutStock(tx, orderItems.map((item) => ({
+        productId: item.productId,
+        quantity: item.quantity,
+        variantId: item.variantId,
+        metadata: item.metadata,
+      })));
+      const created = await tx.order.create({
+        data: {
+          id: orderId,
+          email: customer?.email ?? normalizedCustomerEmail,
+          ...(customer ? { customerId: customer.id } : {}),
+          subtotal: verifiedSubtotal,
+          adjustmentTotal,
+          total,
+          status: orderStatus,
+          autoCloseAt: orderAutoCloseAt(normalizedPaymentMethod),
+          paymentMethod: normalizedPaymentMethod,
+          ...(resolvedAddress.snapshot ? {
+            addressSnapshot: { create: resolvedAddress.snapshot },
+          } : {}),
+          ...(adjustments.length ? { adjustments: { create: adjustments } } : {}),
+          orderItems: {
+            create: toOrderItemCreates(orderItems),
           },
+          statusHistory: {
+            create: {
+              toStatus: orderStatus,
+              reason: 'admin_order_created',
+            },
+          },
+          events: { create: { type: 'order_created', message: '管理员创建订单' } },
         },
-        events: { create: { type: 'order_created', message: '管理员创建订单' } },
-      },
-    }));
+      });
+      await reserveOrderInventory(tx, created.id, denied.id, '后台下单预占规格库存', { variantLinesOnly: true });
+      return created;
+    });
 
     return NextResponse.json({ order, orderId: order.id });
   } catch (err) {
+    if (isVariantStockInsufficientError(err)) {
+      return NextResponse.json({ error: VARIANT_STOCK_INSUFFICIENT_MESSAGE, code: VARIANT_STOCK_INSUFFICIENT }, { status: 400 });
+    }
     if (err instanceof Error && err.message === AMBIGUOUS_PRODUCT_CATALOG_NUMBER) {
       return NextResponse.json({ error: '部分商品需要确认品牌后再创建订单。' }, { status: 400 });
     }
