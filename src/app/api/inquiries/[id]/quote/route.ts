@@ -7,6 +7,11 @@ import { loadQuoteProductTaxonomy } from '@/lib/quote-item-taxonomy';
 import { writeAuditLog } from '@/lib/audit';
 import { reviewCommerceLinesWithCatalog } from '@/lib/commerce-line-catalog';
 import { decideCommerceLineReview, reviewCommerceLines } from '@/lib/commerce-line-review';
+import {
+  InquiryQuotePublishRejected,
+  assessInquiryQuotePublish,
+  claimInquiryForQuotePublish,
+} from '@/lib/inquiry-quote-publish';
 import { AMBIGUOUS_PRODUCT_CATALOG_NUMBER, verifyAndPriceItems } from '@/lib/pricing';
 import { mergeQuoteConstraintMetadata, packageConstraintFromVariant, readExplicitQuantityConstraint } from '@/lib/quote-acceptance';
 
@@ -35,6 +40,9 @@ function metadataVariantId(metadata: string | null | undefined): string | null {
   return typeof value === 'string' && value.trim() ? value : null;
 }
 
+// 发布报价。权限：管理员 inquiries.write。不要求 pricing.write，也不额外要求 MFA。
+// 只有询价仍可报价时才发布：pending_quote、待确认、待人工审核，以及尚未下单、未接受的 quote_sent / quote_expired。
+// 已放弃、已关闭、已归档、已下单或报价已接受时返回 409。状态条件与写入在同一事务的条件更新里完成。
 export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -50,6 +58,10 @@ export async function POST(
     });
     if (!inquiry) {
       return NextResponse.json({ error: 'Inquiry not found' }, { status: 404 });
+    }
+    const publishDecision = await assessInquiryQuotePublish(prisma, id);
+    if (!publishDecision.ok) {
+      return NextResponse.json({ error: publishDecision.error, code: publishDecision.code }, { status: publishDecision.status });
     }
 
     const body = await req.json();
@@ -160,6 +172,13 @@ export async function POST(
       return NextResponse.json({ error: 'validUntil must be a future date' }, { status: 400 });
     }
     const quote = await prisma.$transaction(async (tx) => {
+      const claimed = await claimInquiryForQuotePublish(tx, id);
+      if (claimed !== 1) {
+        const decision = await assessInquiryQuotePublish(tx, id);
+        throw new InquiryQuotePublishRejected(decision.ok
+          ? { status: 409, code: 'INQUIRY_NOT_QUOTABLE', error: '询价状态已变化，请刷新后重试' }
+          : decision);
+      }
       const latest = await tx.quote.findFirst({ where: { inquiryId: id }, orderBy: { version: 'desc' }, select: { version: true } });
       await tx.quote.updateMany({ where: { inquiryId: id, status: { in: ['draft', 'sent'] } }, data: { status: 'superseded' } });
       const created = await tx.quote.create({
@@ -175,7 +194,6 @@ export async function POST(
         },
         include: { items: { orderBy: { position: 'asc' } } },
       });
-      await tx.inquiry.update({ where: { id }, data: { status: 'quote_sent' } });
       await enqueueBackgroundTask('quote.expire', { quoteId: created.id }, {
         runAt: validUntil,
         priority: 10,
@@ -225,6 +243,9 @@ export async function POST(
     const quoteTaxonomy = await loadQuoteProductTaxonomy(quote.items.map((item) => item.productId));
     return NextResponse.json({ success: true, quote: quoteView(quote, quoteTaxonomy) });
   } catch (err) {
+    if (err instanceof InquiryQuotePublishRejected) {
+      return NextResponse.json({ error: err.message, code: err.code }, { status: err.status });
+    }
     if (err instanceof Error && err.message === AMBIGUOUS_PRODUCT_CATALOG_NUMBER) {
       return NextResponse.json({ error: '部分商品需要确认品牌后再报价。' }, { status: 400 });
     }
