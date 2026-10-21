@@ -175,6 +175,11 @@ export interface CouponRuleConfig extends BaseRuleConfig {
   approvalStatus: 'auto' | 'pending' | 'approved' | 'rejected';
   /** 实例发放二次授权状态 */
   issueApprovalStatus: 'auto' | 'pending' | 'approved' | 'rejected';
+  /**
+   * 适用范围。缺省视为全站，兼容未带范围字段的旧规则。
+   * 门槛与抵扣只看范围内且未下架的商品小计。
+   */
+  scope?: import('@/lib/coupon-scope').CouponScope;
 }
 
 /** 规则配置联合类型 */
@@ -206,6 +211,12 @@ export interface CartLine {
     name?: string;
     /** 规格（一口价按规格匹配用，可选） */
     spec?: string | null;
+    /** 一级品类（Product.category），优惠券品类范围用。 */
+    category?: string;
+    /** 二级品类（Product.subcategory），优惠券品类范围用。 */
+    subcategory?: string;
+    /** 已下架（Product.deletedAt 非空）。不计入优惠券范围。 */
+    delisted?: boolean;
   };
   quantity: number;
   /** 快速下单行不参与活动 */
