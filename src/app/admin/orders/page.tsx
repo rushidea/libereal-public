@@ -3,8 +3,6 @@
 import { useState, useEffect, useRef, useCallback, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 
-import { useSession } from 'next-auth/react';
-import type { Session } from 'next-auth';
 import {
   Search, Package, Archive, Ban, ChevronLeft, ChevronRight,
   Plus, Check, Clock, ClipboardList, Wallet,
@@ -17,6 +15,7 @@ import AlipayPaymentStatusView from '@/components/payment/AlipayPaymentStatus';
 import type { AlipayPaymentSummary } from '@/data/alipay-payment';
 import { canTransitionOrder, displayedOrderStatus, isOrderStatus } from '@/lib/order-domain';
 import { ADMIN_ORDER_LIST_PAGE_SIZE, toAdminOrderListSearchParams } from '@/data/admin-order-list-query';
+import { commerceLineWarningList, commerceLineWarningPrompt } from '@/lib/commerce-line-review';
 
 interface Order {
   id: string;
@@ -53,10 +52,12 @@ interface Order {
 
 interface OrderItem {
   id?: string;
+  productId?: string;
   isQuickOrder?: boolean;
   name?: string;
   brand?: string;
   catalogNumber?: string;
+  spec?: string;
   quantity?: number;
   shippedQty?: number;
   price?: number;
@@ -73,6 +74,22 @@ interface OrderItem {
     promotionalPrice?: number;
     price?: number;
   };
+}
+
+async function patchOrderItems(orderId: string, items: OrderItem[], confirmed = false): Promise<{ ok: boolean; cancelled?: boolean; message?: string }> {
+  const response = await fetch(`/api/orders/${orderId}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ items, ...(confirmed ? { confirmWarnings: true } : {}) }),
+  });
+  const data = await response.json().catch(() => ({}));
+  const warnings = commerceLineWarningList(data);
+  if (warnings && !confirmed) {
+    if (!window.confirm(commerceLineWarningPrompt(warnings, '保存订单商品'))) return { ok: false, cancelled: true };
+    return patchOrderItems(orderId, items, true);
+  }
+  if (!response.ok) return { ok: false, message: typeof data.error === 'string' ? data.error : '保存失败' };
+  return { ok: true };
 }
 
 const ORDER_STATUS_CONFIG: Record<string, { label: string; color: string; icon: React.ComponentType<{ className?: string }> }> = {
@@ -205,7 +222,6 @@ export default function AdminOrdersPage() {
 
 function OrdersPanel() {
   const router = useRouter();
-  const { data: session } = useSession();
   const searchParams = useSearchParams();
   // ?view=receivable：工作台/侧边栏「待收款」入口进入的视图
   const receivableView = searchParams.get('view') === 'receivable';
@@ -394,12 +410,14 @@ function OrdersPanel() {
     }
   }
 
-  async function handleAddProductToOrder(product: { name: string; brand: string; catalogNumber: string; price?: number; promotionalPrice?: number }) {
+  async function handleAddProductToOrder(product: { id?: string; name: string; brand: string; catalogNumber: string; spec?: string; price?: number; promotionalPrice?: number }) {
     if (!selectedOrder) return;
     const newItem: OrderItem = {
+      productId: product.id,
       name: product.name,
       brand: product.brand,
       catalogNumber: product.catalogNumber,
+      spec: product.spec,
       price: product.promotionalPrice ?? product.price ?? 0,
       quantity: 1,
       leadTime: '',
@@ -408,18 +426,16 @@ function OrdersPanel() {
     const updatedItems = [...orderItems, newItem];
     const newSubtotal = updatedItems.reduce((sum, it) => sum + (it.price || 0) * (it.quantity || 1), 0);
     try {
-      const res = await fetch(`/api/orders/${selectedOrder.id}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ items: updatedItems, subtotal: newSubtotal }),
-      });
-      if (res.ok) {
-        setOrderItems(updatedItems);
-        setSelectedOrder(prev => prev ? { ...prev, items: updatedItems, subtotal: newSubtotal } : null);
-        setAddProductSearch('');
-        setAddingToOrder(false);
-        fetchData();
+      const result = await patchOrderItems(selectedOrder.id, updatedItems);
+      if (!result.ok) {
+        if (!result.cancelled) alert(result.message || '保存失败');
+        return;
       }
+      setOrderItems(updatedItems);
+      setSelectedOrder(prev => prev ? { ...prev, items: updatedItems, subtotal: newSubtotal } : null);
+      setAddProductSearch('');
+      setAddingToOrder(false);
+      fetchData();
     } catch (e) { console.error(e); }
   }
 
@@ -557,7 +573,6 @@ function OrdersPanel() {
             archiveOrders={archiveOrders}
             deleteOrders={deleteOrders}
             handleAddProductToOrder={handleAddProductToOrder}
-            session={session}
             formatPrice={formatPrice}
             fetchData={fetchData}
             permissions={permissions}
@@ -619,7 +634,6 @@ function OrdersPanel() {
                   archiveOrders={archiveOrders}
                   deleteOrders={deleteOrders}
                   handleAddProductToOrder={handleAddProductToOrder}
-                  session={session}
                   formatPrice={formatPrice}
                   fetchData={fetchData}
                   permissions={permissions}
@@ -663,7 +677,7 @@ function OrdersRow({
   order, selectedOrder, openOrder, detailError, retryDetail, selectedOrders, setSelectedOrders,
   orderItems, setOrderItems, addingToOrder, setAddingToOrder, addProductSearch, setAddProductSearch,
   updateOrderStatus, archiveOrders, deleteOrders, handleAddProductToOrder,
-  session, formatPrice, fetchData, permissions,
+  formatPrice, fetchData, permissions,
 }: {
   order: Order;
   selectedOrder: Order | null;
@@ -682,7 +696,6 @@ function OrdersRow({
   archiveOrders: (ids: string[]) => Promise<void>;
   deleteOrders: (ids: string[]) => Promise<void>;
   handleAddProductToOrder: (p: { name: string; brand: string; catalogNumber: string; price?: number; promotionalPrice?: number }) => Promise<void>;
-  session: Session | null;
   formatPrice: (p: number) => string;
   fetchData: () => Promise<void>;
   permissions: string[] | null;
@@ -758,7 +771,6 @@ function OrdersRow({
                 setAddProductSearch={setAddProductSearch}
                 updateOrderStatus={updateOrderStatus}
                 handleAddProductToOrder={handleAddProductToOrder}
-                session={session}
                 formatPrice={formatPrice}
                 fetchData={fetchData}
                 permissions={permissions}
@@ -775,7 +787,7 @@ function MobileOrderCard({
   order, selectedOrder, openOrder, detailError, retryDetail,
   orderItems, setOrderItems, addingToOrder, setAddingToOrder, addProductSearch, setAddProductSearch,
   updateOrderStatus, archiveOrders, deleteOrders, handleAddProductToOrder,
-  session, formatPrice, fetchData, permissions,
+  formatPrice, fetchData, permissions,
 }: {
   order: Order;
   selectedOrder: Order | null;
@@ -792,7 +804,6 @@ function MobileOrderCard({
   archiveOrders: (ids: string[]) => Promise<void>;
   deleteOrders: (ids: string[]) => Promise<void>;
   handleAddProductToOrder: (p: { name: string; brand: string; catalogNumber: string; price?: number; promotionalPrice?: number }) => Promise<void>;
-  session: Session | null;
   formatPrice: (p: number) => string;
   fetchData: () => Promise<void>;
   permissions: string[] | null;
@@ -860,7 +871,6 @@ function MobileOrderCard({
             setAddProductSearch={setAddProductSearch}
             updateOrderStatus={updateOrderStatus}
             handleAddProductToOrder={handleAddProductToOrder}
-            session={session}
             formatPrice={formatPrice}
             fetchData={fetchData}
             permissions={permissions}
@@ -874,7 +884,7 @@ function MobileOrderCard({
 function OrderDetailSlot({
   selectedOrder, detailError, retryDetail, orderItems, setOrderItems, addingToOrder, setAddingToOrder,
   addProductSearch, setAddProductSearch, updateOrderStatus, handleAddProductToOrder,
-  session, formatPrice, fetchData, permissions,
+  formatPrice, fetchData, permissions,
 }: {
   selectedOrder: Order | null;
   detailError: string;
@@ -887,7 +897,6 @@ function OrderDetailSlot({
   setAddProductSearch: (s: string) => void;
   updateOrderStatus: (id: string, s: string) => Promise<string | null>;
   handleAddProductToOrder: (p: { name: string; brand: string; catalogNumber: string; price?: number; promotionalPrice?: number }) => Promise<void>;
-  session: Session | null;
   formatPrice: (p: number) => string;
   fetchData: () => Promise<void>;
   permissions: string[] | null;
@@ -915,7 +924,6 @@ function OrderDetailSlot({
       setAddProductSearch={setAddProductSearch}
       updateOrderStatus={updateOrderStatus}
       handleAddProductToOrder={handleAddProductToOrder}
-      session={session}
       formatPrice={formatPrice}
       fetchData={fetchData}
       permissions={permissions}
@@ -926,7 +934,7 @@ function OrderDetailSlot({
 function OrderDetailPanel({
   order, orderItems, setOrderItems, addingToOrder, setAddingToOrder,
   addProductSearch, setAddProductSearch, updateOrderStatus, handleAddProductToOrder,
-  session, formatPrice, fetchData, permissions,
+  formatPrice, fetchData, permissions,
 }: {
   order: Order;
   orderItems: OrderItem[];
@@ -937,12 +945,21 @@ function OrderDetailPanel({
   setAddProductSearch: (s: string) => void;
   updateOrderStatus: (id: string, s: string) => Promise<string | null>;
   handleAddProductToOrder: (p: { catalogNumber: string; name: string; price?: number; brand: string }) => Promise<void>;
-  session: Session | null;
   formatPrice: (p: number) => string;
   fetchData: () => Promise<void>;
   permissions: string[] | null;
 }) {
   const canWriteOrders = !permissions || permissions.includes('orders.write');
+  async function persistItems(items: OrderItem[]) {
+    const result = await patchOrderItems(order.id, items);
+    if (!result.ok) {
+      if (!result.cancelled) alert(result.message || '保存失败');
+      await fetchData();
+      return false;
+    }
+    await fetchData();
+    return true;
+  }
   const canWriteFinance = !permissions || permissions.includes('finance.write');
   const [actionError, setActionError] = useState('');
   const [pointsRefundYuan, setPointsRefundYuan] = useState('');
@@ -1149,8 +1166,7 @@ function OrderDetailPanel({
                             const newPrice = parseFloat(e.target.value) || 0;
                             const updated = [...orderItems];
                             updated[i] = { ...updated[i], price: newPrice };
-                            const res = await fetch(`/api/orders/${order.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ items: updated }) });
-                            if (res.ok) fetchData();
+                            await persistItems(updated);
                           }}
                           className="text-sm px-2 py-1 border border-gray-200 rounded w-full text-gray-900" />
                       </div>
@@ -1163,11 +1179,12 @@ function OrderDetailPanel({
                             setOrderItems(updated);
                           }}
                           onBlur={async e => {
-                            const newQty = parseInt(e.target.value) || 1;
+                            const raw = e.target.value.trim();
+                            const parsed = Number(raw);
+                            const quantity = Number.isInteger(parsed) && parsed > 0 ? parsed : raw;
                             const updated = [...orderItems];
-                            updated[i] = { ...updated[i], quantity: newQty };
-                            const res = await fetch(`/api/orders/${order.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ items: updated }) });
-                            if (res.ok) fetchData();
+                            updated[i] = { ...updated[i], quantity: quantity as number };
+                            await persistItems(updated);
                           }}
                           className="text-sm px-2 py-1 border border-gray-200 rounded w-full text-gray-900" />
                       </div>
@@ -1182,8 +1199,7 @@ function OrderDetailPanel({
                           onBlur={async e => {
                             const updated = [...orderItems];
                             updated[i] = { ...updated[i], leadTime: e.target.value };
-                            const res = await fetch(`/api/orders/${order.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ items: updated }) });
-                            if (res.ok) fetchData();
+                            await persistItems(updated);
                           }}
                           placeholder="如：3-5个工作日"
                           className="text-sm px-2 py-1 border border-gray-200 rounded w-full text-gray-900" />
@@ -1211,19 +1227,8 @@ function OrderDetailPanel({
         ) : canWriteOrders ? (
           <button onClick={async () => {
             if (!confirm('确定确认订单并通知客户吗？')) return;
-            const patchRes = await fetch(`/api/orders/${order.id}`, {
-              method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                items: orderItems,
-                adminLog: {
-                  adminId: session?.user?.id || session?.user?.email || 'admin',
-                  adminEmail: session?.user?.email,
-                  time: new Date().toISOString(),
-                  items: orderItems.map(it => ({ name: it.name, price: it.price, quantity: it.quantity, leadTime: it.leadTime || '' })),
-                },
-              }),
-            });
-            if (!patchRes.ok) { alert('保存失败'); return; }
+            const saved = await persistItems(orderItems);
+            if (!saved) return;
             const res = await fetch(`/api/orders/${order.id}/quote`, { method: 'POST' });
             if (res.ok) fetchData();
             else alert('操作失败');

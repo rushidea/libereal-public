@@ -14,6 +14,9 @@ import { refundOrderPointsProportionally, requirePointsRefund, POINTS_REFUND_FAI
 import { canAccessOrganizationRecord } from '@/lib/organization-record-access';
 import { requireOrganizationPermission } from '@/lib/organization-service';
 import { emailKeyedAccess } from '@/lib/verified-email-access';
+import { writeAuditLog } from '@/lib/audit';
+import { commerceLineRefFromRecord, reviewCommerceLinesWithCatalog } from '@/lib/commerce-line-catalog';
+import { decideCommerceLineReview, type CommerceLineFinding } from '@/lib/commerce-line-review';
 
 export async function GET(
   _req: NextRequest,
@@ -164,6 +167,7 @@ export async function PATCH(
       effectivePaymentMethod = normalizedPaymentMethod;
     }
 
+    let confirmedLineWarnings: CommerceLineFinding[] = [];
     const normalizedEffectivePaymentMethod = normalizeOrderPaymentMethod(effectivePaymentMethod);
     if (body.status === 'confirmed' && normalizedEffectivePaymentMethod === 'alipay' && !order.paidAt) {
       return NextResponse.json({ error: 'ALIPAY_PAYMENT_REQUIRED' }, { status: 409 });
@@ -187,13 +191,26 @@ export async function PATCH(
       if (!Array.isArray(items)) {
         return NextResponse.json({ error: 'items must be an array' }, { status: 400 });
       }
+      // 改订单行价格沿用 orders.write。不另要求 pricing.write，也不在原有 MFA 之外加验证。
+      const lineReview = await reviewCommerceLinesWithCatalog(
+        (items as Array<Record<string, unknown>>).map(commerceLineRefFromRecord),
+      );
+      const lineDecision = decideCommerceLineReview(lineReview, body.confirmWarnings);
+      if (!lineDecision.ok) return NextResponse.json(lineDecision.body, { status: lineDecision.status });
+      confirmedLineWarnings = lineDecision.warnings;
+      const pricedItems = (items as Array<Record<string, unknown>>).map((item) => {
+        const rawPrice = item.price !== undefined ? item.price : item.unitPrice;
+        const price = typeof rawPrice === 'number' ? rawPrice : Number(rawPrice);
+        const quantity = typeof item.quantity === 'number' ? item.quantity : Number(item.quantity);
+        return { ...item, price, quantity };
+      });
       updateData.orderItems = {
         deleteMany: {},
-        create: toOrderItemCreates(items),
+        create: toOrderItemCreates(pricedItems),
       };
       try {
         const amounts = calculateOrderAmounts(
-          (items as Array<{ price?: number; quantity?: number }>).map((item) => ({ unitPrice: item.price || 0, quantity: item.quantity || 1 })),
+          pricedItems.map((item) => ({ unitPrice: item.price, quantity: item.quantity })),
           order.adjustments,
         );
         updateData.subtotal = amounts.subtotal;
@@ -213,7 +230,15 @@ export async function PATCH(
             message: `${order.status} -> ${body.status}`,
             metadata: JSON.stringify({ fromStatus: order.status, toStatus: body.status, reason: body.reason || null }),
           }] : []),
-          ...(body.items !== undefined ? [{ type: 'items_updated', actorId: user.id, actorEmail: user.email, message: '订单商品已更新' }] : []),
+          ...(body.items !== undefined ? [{
+            type: 'items_updated',
+            actorId: user.id,
+            actorEmail: user.email,
+            message: '订单商品已更新',
+            metadata: confirmedLineWarnings.length
+              ? JSON.stringify({ confirmedWarnings: confirmedLineWarnings })
+              : null,
+          }] : []),
         ];
         await tx.order.update({ where: { id }, data: {
           ...updateData,
@@ -230,6 +255,18 @@ export async function PATCH(
           } : {}),
           ...(eventCreates.length ? { events: { create: eventCreates } } : {}),
         } });
+        if (confirmedLineWarnings.length > 0) {
+          await writeAuditLog({
+            actorId: user.id,
+            actorEmail: user.email,
+            action: 'order.line_warnings_confirmed',
+            resource: 'orders',
+            targetType: 'Order',
+            targetId: id,
+            reason: '管理员确认订单行核对警告后保存',
+            metadata: { confirmWarnings: true, warnings: confirmedLineWarnings },
+          }, tx);
+        }
         if (body.status === 'confirmed' && order.status !== 'confirmed') {
           if (isPostDeliveryPaymentMethod(effectivePaymentMethod)) await reserveOrderCredit(tx, id, user.id);
           await reserveOrderInventory(tx, id, user.id);
