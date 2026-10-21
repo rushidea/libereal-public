@@ -7,6 +7,7 @@ import { requireOrganizationPermission } from '@/lib/organization-service';
 import { orderAutoCloseAt } from '@/lib/order-auto-close';
 import { initialOrderStatus } from '@/lib/order-domain';
 import { buildCheckoutRequestFingerprint, isUniqueConstraintError, validCheckoutAttemptId } from '@/lib/checkout-idempotency';
+import { isOrderIdUniqueConflict, ORDER_NUMBER_BUSY_ERROR, withAllocatedOrderNumber } from '@/data/order-number';
 import { verifiedEmailMatches } from '@/lib/verified-email-access';
 import { normalizeOrderPaymentMethod } from '@/data/payment-methods';
 import { normalizePointsIntent } from '@/lib/points-checkout';
@@ -197,23 +198,13 @@ export async function POST(
       const orderSubtotal = settled?.amounts.subtotal ?? subtotal;
       const orderAdjustmentTotal = settled?.amounts.adjustmentTotal ?? 0;
 
-      const now = new Date();
-      const dateStr = now.toISOString().slice(0, 10).replace(/-/g, '');
-      const startOfToday = new Date(now);
-      startOfToday.setHours(0, 0, 0, 0);
-      const countToday = await prisma.order.count({
-        where: { createdAt: { gte: startOfToday } },
-      });
-      const seq = String(countToday + 1).padStart(3, '0');
-      const orderId = `ORD-${dateStr}-${seq}`;
-
-      let allOrdered = false;
       const orderStatus = initialOrderStatus(orderPaymentMethod);
       const pointsAudit = {
         ...quoteAcceptancePointsAudit(orderTotal),
         pointsRedeemed: (settled?.pointsBreakdown?.personalPoints ?? 0) + (settled?.pointsBreakdown?.groupPoints ?? 0),
       };
-      await prisma.$transaction(async (tx) => {
+      const { orderId, allOrdered } = await withAllocatedOrderNumber(prisma, async (tx, orderId) => {
+        let allOrdered = false;
         const current = await tx.quote.findFirst({ where: { inquiryId: id }, orderBy: { version: 'desc' }, include: { items: true } });
         if (!current || current.id !== quote.id || current.version !== quote.version || current.status !== 'sent' || (current.validUntil && current.validUntil < new Date())) {
           throw new Error('QUOTE_CONFLICT');
@@ -319,6 +310,7 @@ export async function POST(
           await tx.quote.update({ where: { id: quote.id }, data: { status: 'accepted', acceptedAt: new Date() } });
           await tx.inquiry.update({ where: { id }, data: { status: 'closed' } });
         }
+        return { orderId, allOrdered };
       });
 
       const order = await prisma.order.findUnique({
@@ -350,6 +342,10 @@ export async function POST(
         }
         return NextResponse.json({ error: '报价或剩余数量已变化，请刷新后重新确认', code: 'QUOTE_VERSION_CONFLICT' }, { status: 409 });
       }
+      if (isOrderIdUniqueConflict(e)) {
+        console.error('[confirm-items POST] order number conflict', e);
+        return NextResponse.json({ error: ORDER_NUMBER_BUSY_ERROR }, { status: 503 });
+      }
       if (isUniqueConstraintError(e) && scopedAttemptId) {
         const winner = await prisma.order.findUnique({ where: { checkoutAttemptId: scopedAttemptId } });
         if (winner) {
@@ -358,12 +354,11 @@ export async function POST(
         }
       }
       console.error('[confirm-items parse error]', e);
-      const message = e instanceof Error ? e.message : String(e);
-      return NextResponse.json({ error: 'Failed to process order', detail: message }, { status: 500 });
+      return NextResponse.json({ error: '订单处理失败，请稍后重试' }, { status: 500 });
     }
   } catch (err) {
     console.error('[confirm-items POST] error:', err);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    return NextResponse.json({ error: '订单处理失败，请稍后重试' }, { status: 500 });
   }
 }
 

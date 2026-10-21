@@ -56,6 +56,19 @@ vi.mock('@/lib/points-checkout-service', () => ({
 vi.mock('@/data/order-number', () => ({
   orderDateInShanghai: () => '20260723',
   nextOrderNumber: () => 'ORD-20260723-001',
+  allocateOrderNumber: async () => 'ORD-20260723-001',
+  ORDER_NUMBER_ALLOCATION_ATTEMPTS: 3,
+  ORDER_NUMBER_BUSY_ERROR: '订单提交繁忙，请稍后重试',
+  isUniqueConstraintError: (error: unknown) => typeof error === 'object' && error !== null && 'code' in error && (error as { code?: string }).code === 'P2002',
+  isOrderIdUniqueConflict: (error: unknown) => {
+    if (typeof error !== 'object' || error === null || !('code' in error) || (error as { code?: string }).code !== 'P2002') return false;
+    const target = (error as { meta?: { target?: unknown } }).meta?.target;
+    return Array.isArray(target) && target.map(String).includes('id');
+  },
+  withAllocatedOrderNumber: async (
+    db: { $transaction: (fn: (tx: unknown) => Promise<unknown>) => Promise<unknown> },
+    run: (tx: unknown, orderId: string) => Promise<unknown>,
+  ) => db.$transaction(async (tx) => run(tx, 'ORD-20260723-001')),
 }));
 
 import { POST } from '@/app/api/orders/route';

@@ -10,7 +10,7 @@ import {
   validateAcceptedLegalIds,
 } from '@/lib/legal-documents';
 import { orderItemView, toOrderItemCreates } from '@/lib/commerce-records';
-import { nextOrderNumber, orderDateInShanghai } from '@/data/order-number';
+import { isOrderIdUniqueConflict, ORDER_NUMBER_BUSY_ERROR, withAllocatedOrderNumber } from '@/data/order-number';
 import { calculateCheckoutFeeAdjustments } from '@/lib/checkout-fees';
 import { isThirdPartyPaymentMethod, normalizeOrderPaymentMethod } from '@/data/payment-methods';
 import { getAlipayPaymentSummary } from '@/data/alipay-payment';
@@ -404,20 +404,9 @@ export async function POST(req: NextRequest) {
     }
 
     const orderCreatedAt = new Date();
-    const orderDate = orderDateInShanghai(orderCreatedAt);
-    let order: Awaited<ReturnType<typeof prisma.order.create>> | null = null;
-    let orderId = '';
-
-    for (let attempt = 0; attempt < 3; attempt++) {
-      const latestOrder = await prisma.order.findFirst({
-        where: { id: { startsWith: `ORD-${orderDate}-` } },
-        orderBy: { id: 'desc' },
-        select: { id: true },
-      });
-      orderId = nextOrderNumber(orderCreatedAt, latestOrder?.id ?? null);
-
-      try {
-        order = await prisma.$transaction(async (tx) => {
+    let order: Awaited<ReturnType<typeof prisma.order.create>>;
+    try {
+      order = await withAllocatedOrderNumber(prisma, async (tx, orderId) => {
           // 事务内再次校验积分余额。积分在下单时扣减并作为订单占用，
           // 取消订单时按现有退款逻辑退回，避免支付宝到账后才扣减造成支付已成功但积分结算失败。
           if (pointsBreakdown) {
@@ -513,32 +502,26 @@ export async function POST(req: NextRequest) {
           }
 
           return created;
-        });
-        break;
-      } catch (error) {
-        if (error instanceof Error && error.message.startsWith('COUPON_')) {
-          const msg = error.message.replace(/^COUPON_APPLY:/, '');
-          return NextResponse.json({ error: msg }, { status: 400 });
-        }
-        if (error instanceof Error && error.message.startsWith('POINTS_')) {
-          const msg = error.message.replace(/^POINTS_(PRECHECK|APPLY):/, '');
-          return NextResponse.json({ error: msg }, { status: 400 });
-        }
-        if (isUniqueConstraintError(error) && checkoutAttemptId) {
-          const winner = await prisma.order.findUnique({ where: { checkoutAttemptId } });
-          if (winner) {
-            if (winner.customerId !== session.user.id || winner.organizationId !== ownership.organizationId || winner.ownerScope !== ownership.ownerScope || winner.checkoutRequestFingerprint !== requestFingerprint) {
-              return NextResponse.json({ error: '幂等键已用于其他请求' }, { status: 409 });
-            }
-            return NextResponse.json({ order: winner, orderId: winner.id, replayed: true });
-          }
-        }
-        if (!isUniqueConstraintError(error) || attempt === 2) throw error;
+      }, orderCreatedAt);
+    } catch (error) {
+      if (error instanceof Error && error.message.startsWith('COUPON_')) {
+        const msg = error.message.replace(/^COUPON_APPLY:/, '');
+        return NextResponse.json({ error: msg }, { status: 400 });
       }
-    }
-
-    if (!order) {
-      throw new Error('ORDER_NUMBER_ALLOCATION_FAILED');
+      if (error instanceof Error && error.message.startsWith('POINTS_')) {
+        const msg = error.message.replace(/^POINTS_(PRECHECK|APPLY):/, '');
+        return NextResponse.json({ error: msg }, { status: 400 });
+      }
+      if (isUniqueConstraintError(error) && checkoutAttemptId && !isOrderIdUniqueConflict(error)) {
+        const winner = await prisma.order.findUnique({ where: { checkoutAttemptId } });
+        if (winner) {
+          if (winner.customerId !== session.user.id || winner.organizationId !== ownership.organizationId || winner.ownerScope !== ownership.ownerScope || winner.checkoutRequestFingerprint !== requestFingerprint) {
+            return NextResponse.json({ error: '幂等键已用于其他请求' }, { status: 409 });
+          }
+          return NextResponse.json({ order: winner, orderId: winner.id, replayed: true });
+        }
+      }
+      throw error;
     }
 
     // Create admin notification
@@ -548,19 +531,19 @@ export async function POST(req: NextRequest) {
         role: 'admin',
         type: 'order_created',
         title: '新订单',
-        content: `新订单 ${orderId}，金额 ¥${amounts.total.toLocaleString()}`,
+        content: `新订单 ${order.id}，金额 ¥${amounts.total.toLocaleString()}`,
         linkUrl: '/admin/orders',
-        metadata: JSON.stringify({ orderId }),
+        metadata: JSON.stringify({ orderId: order.id }),
       },
     });
 
     sendAdminOperationalEmail({
       subject: 'LIBEREAL · 新订单',
-      message: `新订单 ${orderId}，金额 ¥${amounts.total.toLocaleString()}`,
+      message: `新订单 ${order.id}，金额 ¥${amounts.total.toLocaleString()}`,
       path: '/admin/orders',
     });
 
-    return NextResponse.json({ order, orderId });
+    return NextResponse.json({ order, orderId: order.id });
   } catch (err) {
     if (err instanceof CustomerUnavailableProductError) {
       return NextResponse.json(
@@ -578,6 +561,10 @@ export async function POST(req: NextRequest) {
       if (['CLIENT_FALLBACK_FORBIDDEN', 'INVALID_FALLBACK_PRICE', 'INVALID_QUANTITY', 'PRODUCT_VARIANT_NOT_FOUND', 'PRODUCT_VARIANT_MISMATCH', 'PRODUCT_CATALOG_MISMATCH', 'PRODUCT_BRAND_MISMATCH'].includes(err.message)) {
         return NextResponse.json({ error: '部分商品信息或价格需要重新确认' }, { status: 400 });
       }
+    }
+    if (isOrderIdUniqueConflict(err)) {
+      reportError(err, { tags: { route: 'orders', reason: 'order_number_conflict' }, extra: { method: 'POST' } });
+      return NextResponse.json({ error: ORDER_NUMBER_BUSY_ERROR }, { status: 503 });
     }
     reportError(err, { tags: { route: 'orders' }, extra: { method: 'POST' } });
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
