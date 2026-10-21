@@ -55,6 +55,7 @@ export function CheckoutPaymentFields({
   pointsError,
   pointsDiscount,
   compact = false,
+  showPointsSection = true,
 }: {
   paymentMethod: string;
   onPaymentMethodChange: (value: string) => void;
@@ -66,13 +67,15 @@ export function CheckoutPaymentFields({
   pointsError?: string;
   pointsDiscount: number;
   compact?: boolean;
+  /** 管理员代客接受报价时关闭。客户结算默认展示。 */
+  showPointsSection?: boolean;
 }) {
   const sectionClass = compact ? 'mb-4' : 'mb-8';
   const isPlatformPayment = isThirdPartyPaymentMethod(paymentMethod);
 
   return (
     <div data-testid="checkout-payment-fields">
-      <div className={`${sectionClass} rounded-xl p-5 ${uiSurfaces.panelStrong}`}>
+      {showPointsSection && <div className={`${sectionClass} rounded-xl p-5 ${uiSurfaces.panelStrong}`}>
         <h2 className="mb-4 flex items-center gap-2 font-semibold text-gray-900 dark:text-slate-900">
           <Coins className="w-5 h-5 text-brand-600" />
           积分抵扣
@@ -140,7 +143,7 @@ export function CheckoutPaymentFields({
             {paymentMethod === 'alipay' ? '（支付宝到账后扣减）' : '（下单后立即扣减）'}
           </p>
         )}
-      </div>
+      </div>}
 
       <div className={`${compact ? '' : 'mb-8'} rounded-xl p-5 ${uiSurfaces.panelStrong}`}>
         <h2 className="mb-4 flex items-center gap-2 font-semibold text-gray-900 dark:text-slate-900">
