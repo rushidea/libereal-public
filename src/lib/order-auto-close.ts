@@ -14,6 +14,7 @@ import { releaseOrderInventory } from '@/lib/inventory';
 import {
   applyOrderPointsDeduction,
   POINTS_DEDUCTION_ROLLBACK_REASON,
+  PREPAY_POINTS_RELEASE_REASON,
   POINTS_SETTLEMENT_BUSY_ERROR,
   refundOrderPointsProportionally,
   requirePointsRefund,
@@ -63,7 +64,7 @@ async function findAlipayOrdersNeedingPointsSettlement(batchLimit: number): Prom
                   AND p.userId = o.customerId
                   AND (
                     p.type = 'order_redeem'
-                    OR (p.type = 'order_redeem_refund' AND p.reason = ${POINTS_DEDUCTION_ROLLBACK_REASON})
+                    OR (p.type = 'order_redeem_refund' AND p.reason IN (${Prisma.join([POINTS_DEDUCTION_ROLLBACK_REASON, PREPAY_POINTS_RELEASE_REASON])}))
                   )
               ), 0) > -o.pointsPersonal
             )
@@ -76,7 +77,7 @@ async function findAlipayOrdersNeedingPointsSettlement(batchLimit: number): Prom
                   AND g.groupId = o.pointsGroupId
                   AND (
                     g.type = 'order_redeem'
-                    OR (g.type = 'order_redeem_refund' AND g.reason = ${POINTS_DEDUCTION_ROLLBACK_REASON})
+                    OR (g.type = 'order_redeem_refund' AND g.reason IN (${Prisma.join([POINTS_DEDUCTION_ROLLBACK_REASON, PREPAY_POINTS_RELEASE_REASON])}))
                   )
               ), 0) > -o.pointsGroup
             )

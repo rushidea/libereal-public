@@ -323,6 +323,21 @@ describe('Alipay payment notify route', () => {
     expect(mocks.writeAuditLog).not.toHaveBeenCalled();
   });
 
+  it('does not settle when the order total changed inside the payment transaction', async () => {
+    mocks.orderFindUnique.mockResolvedValue({ status: 'unpaid', paidAt: null, total: 0.2 });
+
+    const response = await POST(notifyRequest());
+
+    expect(response.status).toBe(200);
+    await expect(response.text()).resolves.toBe('success');
+    expect(mocks.reserveOrderInventory).not.toHaveBeenCalled();
+    expect(mocks.orderUpdateMany).not.toHaveBeenCalled();
+    expect(mocks.paymentAttemptUpdate).toHaveBeenCalledWith({
+      where: { id: 'attempt-1' },
+      data: expect.objectContaining({ status: 'rejected_amount_mismatch', tradeNo: '202607190001' }),
+    });
+  });
+
   it('rolls the payment update back when points settlement throws', async () => {
     mocks.paymentAttemptFindUnique.mockResolvedValue({
       id: 'attempt-1',

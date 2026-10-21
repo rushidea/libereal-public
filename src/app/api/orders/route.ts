@@ -36,6 +36,7 @@ import {
   VARIANT_STOCK_INSUFFICIENT,
   VARIANT_STOCK_INSUFFICIENT_MESSAGE,
 } from '@/lib/inventory';
+import { ownerPrepaySettlementViews } from '@/lib/order-prepay-settlement';
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 export async function GET(_req: NextRequest) {
@@ -83,6 +84,7 @@ export async function GET(_req: NextRequest) {
       },
     });
 
+    const settlementViews = await ownerPrepaySettlementViews(prisma, orders);
     // Hydrate with user/inquiry info
     const enriched = await Promise.all(
       orders.map(async (o) => {
@@ -114,6 +116,7 @@ export async function GET(_req: NextRequest) {
           userPhone: phoneRow?.phone || '',
           userDepartment: userRow?.department || '',
           payment: getAlipayPaymentSummary(order, paymentAttempts[0]),
+          ownerPrepaySettlement: settlementViews.get(o.id) ?? null,
         };
       })
     );

@@ -172,6 +172,11 @@ async function creditGroupPoints(
 /** 扣减失败时写回的流水原因。补偿任务用它把失败回滚从真实退款里区分出来。 */
 export const POINTS_DEDUCTION_ROLLBACK_REASON = '课题组扣减失败回滚';
 
+/** 付款前改选积分时退回已占用积分。占用净额要把这笔退回抵消，避免再次扣减时漏扣或重扣。 */
+export const PREPAY_POINTS_RELEASE_REASON = '付款前调整积分退回';
+
+const POINTS_HOLD_REFUND_REASONS = [POINTS_DEDUCTION_ROLLBACK_REASON, PREPAY_POINTS_RELEASE_REASON] as const;
+
 /** 另一笔结算已经占住订单。调用方应稍后重试，不要把它记成永久失败。 */
 export const POINTS_SETTLEMENT_BUSY_ERROR = '积分结算进行中，请稍后重试';
 
@@ -193,7 +198,7 @@ async function heldOrderRedeemPoints(tx: Tx, order: PointsSettlementOrder) {
         userId: order.customerId,
         OR: [
           { type: 'order_redeem' },
-          { type: 'order_redeem_refund', reason: POINTS_DEDUCTION_ROLLBACK_REASON },
+          { type: 'order_redeem_refund', reason: { in: [...POINTS_HOLD_REFUND_REASONS] } },
         ],
       },
       select: { delta: true },
@@ -209,7 +214,7 @@ async function heldOrderRedeemPoints(tx: Tx, order: PointsSettlementOrder) {
         groupId: order.pointsGroupId,
         OR: [
           { type: 'order_redeem' },
-          { type: 'order_redeem_refund', reason: POINTS_DEDUCTION_ROLLBACK_REASON },
+          { type: 'order_redeem_refund', reason: { in: [...POINTS_HOLD_REFUND_REASONS] } },
         ],
       },
       select: { delta: true },
@@ -280,6 +285,74 @@ async function releasePointsClaimIfUnheld(
     where: { id: orderId },
     data: { pointsApplied: false, pointsAppliedAt: null },
   });
+}
+
+/**
+ * 把未支付订单上已占用的积分原路退回，并放开 `pointsApplied`。
+ * 必须在改写订单积分字段之前调用：占用净额按当前课题组和个人积分流水计算。
+ * 退款流水使用付款前调整原因，随后的扣减才能把净占用看成 0。
+ */
+export async function releaseUnpaidOrderPointsHold(
+  tx: Tx,
+  orderId: string,
+  actorUserId?: string | null,
+): Promise<{ ok: true; personal: number; group: number } | { ok: false; error: string }> {
+  const order = await tx.order.findUnique({
+    where: { id: orderId },
+    select: {
+      id: true,
+      customerId: true,
+      paidAt: true,
+      status: true,
+      pointsPersonal: true,
+      pointsGroup: true,
+      pointsGroupId: true,
+      pointsApplied: true,
+      pointsRefundedPersonal: true,
+      pointsRefundedGroup: true,
+    },
+  });
+  if (!order) return { ok: false, error: '订单不存在' };
+  if (order.paidAt || isInactiveOrderStatus(order.status) || (order.status !== 'unpaid' && order.status !== 'pending')) {
+    return { ok: false, error: '订单已不能调整积分' };
+  }
+  if (order.pointsRefundedPersonal > 0 || order.pointsRefundedGroup > 0) {
+    return { ok: false, error: '订单积分已发生退回，不能再调整抵扣' };
+  }
+
+  const held = await heldOrderRedeemPoints(tx, order);
+  if (held.group > 0 && !order.pointsGroupId) return { ok: false, error: '订单缺少课题组' };
+  if ((held.personal > 0 || held.group > 0) && !order.customerId) return { ok: false, error: '订单缺少客户' };
+  if (held.personal === 0 && held.group === 0 && !order.pointsApplied) {
+    return { ok: true, personal: 0, group: 0 };
+  }
+
+  const claimed = await claimOrderPointsSettlement(tx, order);
+  if (!claimed) return { ok: false, error: POINTS_SETTLEMENT_BUSY_ERROR };
+
+  if (held.personal > 0 && order.customerId) {
+    await creditPersonalPoints(tx, {
+      userId: order.customerId,
+      points: held.personal,
+      relatedId: order.id,
+      reason: PREPAY_POINTS_RELEASE_REASON,
+    });
+  }
+  if (held.group > 0 && order.pointsGroupId) {
+    await creditGroupPoints(tx, {
+      groupId: order.pointsGroupId,
+      points: held.group,
+      relatedId: order.id,
+      actorUserId: actorUserId ?? order.customerId,
+      reason: PREPAY_POINTS_RELEASE_REASON,
+    });
+  }
+
+  await tx.order.update({
+    where: { id: order.id },
+    data: { pointsApplied: false, pointsAppliedAt: null },
+  });
+  return { ok: true, personal: held.personal, group: held.group };
 }
 
 /**

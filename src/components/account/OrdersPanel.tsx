@@ -4,6 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { Package, Search, Filter, Truck, Eye } from 'lucide-react';
 import { uiSurfaces } from '@/lib/ui-surfaces';
 import AlipayPaymentButton from '@/components/account/AlipayPaymentButton';
+import OrderPrepaySettlement from '@/components/account/OrderPrepaySettlement';
 import type { AlipayPaymentSummary } from '@/data/alipay-payment';
 import { formatOrderPaymentMethod } from '@/data/payment-methods';
 import { displayedOrderStatus, ORDER_STATUS_LABELS, ORDER_STATUSES } from '@/lib/order-domain';
@@ -40,6 +41,17 @@ type Order = {
   updatedAt: string;
   leadTime?: string;
   notes?: string;
+  pointsPersonal?: number;
+  pointsGroup?: number;
+  pointsGroupId?: string | null;
+  adjustments?: Array<{ id: string; label: string; amount: number; reason?: string | null }>;
+  ownerPrepaySettlement?: {
+    eligible: boolean;
+    couponCode: string | null;
+    personalPoints: number;
+    groupPoints: number;
+    groupId: string | null;
+  } | null;
 };
 
 const STATUS_OPTIONS = [...ORDER_STATUSES];
@@ -260,6 +272,20 @@ export default function OrdersPanel() {
                             <div className={`text-right text-sm ${uiSurfaces.textSecondary}`}>
                               付款方式：<span className="font-bold text-[var(--brand-color-warning-text)]">{translatePaymentMethod(order.paymentMethod)}</span>
                             </div>
+                          )}
+                          {order.ownerPrepaySettlement?.eligible && (
+                            <OrderPrepaySettlement
+                              orderId={order.id}
+                              paymentMethod={order.paymentMethod || ''}
+                              personalPoints={order.pointsPersonal ?? order.ownerPrepaySettlement.personalPoints}
+                              groupPoints={order.pointsGroup ?? order.ownerPrepaySettlement.groupPoints}
+                              groupId={order.pointsGroupId ?? order.ownerPrepaySettlement.groupId}
+                              couponCode={order.ownerPrepaySettlement.couponCode}
+                              onSettled={(patch) => {
+                                setOrders((current) => current.map((item) => item.id === patch.id ? { ...item, ...patch } : item));
+                                setSelectedOrder((current) => current?.id === patch.id ? { ...current, ...patch } : current);
+                              }}
+                            />
                           )}
                           <AlipayPaymentButton order={order} payment={order.payment} />
                         </div>

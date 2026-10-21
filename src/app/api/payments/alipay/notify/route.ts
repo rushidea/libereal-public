@@ -345,6 +345,77 @@ export async function POST(req: Request) {
       let pointsSettlement: 'not_required' | 'applied' | 'pending' = 'not_required';
       let pointsSettlementError: string | null = null;
       if (isPaid) {
+        // 事务内再看一眼金额和付款单状态。客户可能刚在付款前改了应付，或旧付款单已被替换。
+        const snapshot = await tx.order.findUnique({
+          where: { id: latestAttempt.order.id },
+          select: { total: true, paidAt: true, status: true },
+        });
+        const attemptRow = await tx.paymentAttempt.findUnique({
+          where: { id: latestAttempt.id },
+          select: { status: true, amount: true, paidAt: true },
+        });
+        if (
+          attemptRow
+          && (attemptRow.status === 'superseded' || attemptRow.status === 'paid_superseded_reconciliation_required')
+        ) {
+          if (attemptRow.status === 'superseded') {
+            await tx.paymentAttempt.update({
+              where: { id: latestAttempt.id },
+              data: {
+                status: 'paid_superseded_reconciliation_required',
+                tradeNo: data.trade_no || null,
+                notifiedAt: new Date(),
+                paidAt: attemptRow.paidAt ?? latestAttempt.paidAt ?? new Date(),
+              },
+            });
+            await writeAuditLog({
+              action: 'payment.alipay_superseded_paid_reconciliation_required',
+              resource: 'payments',
+              targetType: 'Order',
+              targetId: latestAttempt.order.id,
+              after: {
+                outTradeNo: latestAttempt.outTradeNo,
+                tradeNo: data.trade_no || null,
+                amount: attemptRow.amount,
+                orderTotal: snapshot?.total ?? latestAttempt.order.total,
+                reason: 'superseded_attempt_paid',
+              },
+            }, tx);
+          }
+          return;
+        }
+        if (
+          snapshot
+          && !snapshot.paidAt
+          && (AUTO_CLOSEABLE_ORDER_STATUSES as readonly string[]).includes(snapshot.status)
+          && typeof snapshot.total === 'number'
+          && attemptRow
+          && !amountsEqualInCents(attemptRow.amount, snapshot.total)
+        ) {
+          await tx.paymentAttempt.update({
+            where: { id: latestAttempt.id },
+            data: {
+              status: 'rejected_amount_mismatch',
+              tradeNo: data.trade_no || null,
+              notifiedAt: new Date(),
+            },
+          });
+          await writeAuditLog({
+            action: 'payment.alipay_rejected',
+            resource: 'payments',
+            targetType: 'Order',
+            targetId: latestAttempt.order.id,
+            after: {
+              outTradeNo: latestAttempt.outTradeNo,
+              tradeNo: data.trade_no || null,
+              amount: attemptRow.amount,
+              orderTotal: snapshot.total,
+              orderStatus: snapshot.status,
+              reason: 'rejected_amount_mismatch',
+            },
+          }, tx);
+          return;
+        }
         // 在写入已付款之前预占。库存不足会抛出并回滚，订单不会变成可履约的已付款订单。
         // 已有预占会跳过，确认订单时再次预占不会重复占用。
         const shouldReserve = !latestAttempt.order.paidAt && !isInactiveOrderStatus(latestAttempt.order.status);

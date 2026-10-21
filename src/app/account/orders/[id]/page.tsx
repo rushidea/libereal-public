@@ -14,6 +14,7 @@ import AdaptiveHeader from '@/components/AdaptiveHeader';
 import MobileBottomNav from '@/components/mobile/MobileBottomNav';
 import SiteFooter from '@/components/SiteFooter';
 import AlipayPaymentButton from '@/components/account/AlipayPaymentButton';
+import OrderPrepaySettlement from '@/components/account/OrderPrepaySettlement';
 import { InquiryIdDisplay } from '@/components/InquiryIdDisplay';
 import { formatOrderPaymentMethod } from '@/data/payment-methods';
 import type { AlipayPaymentSummary } from '@/data/alipay-payment';
@@ -70,6 +71,18 @@ type Order = {
     phone?: string;
   };
   quoteOrigin?: { inquiryId: string; quoteId: string; quoteVersion: number; acceptedAt?: string | null } | null;
+  pointsPersonal?: number;
+  pointsGroup?: number;
+  pointsGroupId?: string | null;
+  pointsDiscount?: number;
+  pointsApplied?: boolean;
+  ownerPrepaySettlement?: {
+    eligible: boolean;
+    couponCode: string | null;
+    personalPoints: number;
+    groupPoints: number;
+    groupId: string | null;
+  } | null;
 };
 
 const STATUS_CONFIG: Record<string, { label: string; color: string; bg: string; icon: React.ComponentType<{ size?: number; className?: string }> }> = {
@@ -318,6 +331,17 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
                     <span className="shrink-0 pt-1 text-gray-500 dark:text-gray-500">关联询价</span>
                     <InquiryIdDisplay id={order.inquiryId} size="compact" className="max-w-full text-gray-800 dark:text-slate-900 sm:max-w-[70%] sm:justify-end" />
                   </div>
+                )}
+                {order.ownerPrepaySettlement?.eligible && (
+                  <OrderPrepaySettlement
+                    orderId={order.id}
+                    paymentMethod={order.paymentMethod || ''}
+                    personalPoints={order.pointsPersonal ?? order.ownerPrepaySettlement.personalPoints}
+                    groupPoints={order.pointsGroup ?? order.ownerPrepaySettlement.groupPoints}
+                    groupId={order.pointsGroupId ?? order.ownerPrepaySettlement.groupId}
+                    couponCode={order.ownerPrepaySettlement.couponCode}
+                    onSettled={(patch) => setOrder((current) => current ? { ...current, ...patch } : current)}
+                  />
                 )}
                 <AlipayPaymentButton order={order} payment={order.payment} className="pt-1" />
               </div>

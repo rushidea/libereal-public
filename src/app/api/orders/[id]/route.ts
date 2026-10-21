@@ -17,6 +17,7 @@ import { emailKeyedAccess } from '@/lib/verified-email-access';
 import { writeAuditLog } from '@/lib/audit';
 import { commerceLineRefFromRecord, reviewCommerceLinesWithCatalog } from '@/lib/commerce-line-catalog';
 import { decideCommerceLineReview, type CommerceLineFinding } from '@/lib/commerce-line-review';
+import { ownerPrepaySettlementViews } from '@/lib/order-prepay-settlement';
 
 export async function GET(
   _req: NextRequest,
@@ -73,11 +74,13 @@ export async function GET(
     }
 
     const { orderItems, paymentAttempts, ...rest } = order;
+    const settlementViews = await ownerPrepaySettlementViews(prisma, [order]);
     return NextResponse.json({
       ...rest,
       items: orderItems.map(orderItemView),
       inquiry,
       payment: getAlipayPaymentSummary(order, paymentAttempts[0]),
+      ownerPrepaySettlement: settlementViews.get(order.id) ?? null,
     });
   } catch (err) {
     console.error('[order GET] error:', err);

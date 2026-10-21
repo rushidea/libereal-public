@@ -56,6 +56,7 @@ export function CheckoutPaymentFields({
   pointsDiscount,
   compact = false,
   showPointsSection = true,
+  showPaymentSection = true,
 }: {
   paymentMethod: string;
   onPaymentMethodChange: (value: string) => void;
@@ -69,6 +70,8 @@ export function CheckoutPaymentFields({
   compact?: boolean;
   /** 管理员代客接受报价时关闭。客户结算默认展示。 */
   showPointsSection?: boolean;
+  /** 订单已选定付款方式时关闭，只保留积分。 */
+  showPaymentSection?: boolean;
 }) {
   const sectionClass = compact ? 'mb-4' : 'mb-8';
   const isPlatformPayment = isThirdPartyPaymentMethod(paymentMethod);
@@ -145,7 +148,7 @@ export function CheckoutPaymentFields({
         )}
       </div>}
 
-      <div className={`${compact ? '' : 'mb-8'} rounded-xl p-5 ${uiSurfaces.panelStrong}`}>
+      {showPaymentSection && <div className={`${compact ? '' : 'mb-8'} rounded-xl p-5 ${uiSurfaces.panelStrong}`}>
         <h2 className="mb-4 flex items-center gap-2 font-semibold text-gray-900 dark:text-slate-900">
           <CreditCard className="w-5 h-5 text-brand-600" />
           付款方式
@@ -185,7 +188,7 @@ export function CheckoutPaymentFields({
             </p>
           </div>
         )}
-      </div>
+      </div>}
     </div>
   );
 }

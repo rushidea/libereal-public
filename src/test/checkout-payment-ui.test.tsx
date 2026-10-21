@@ -48,4 +48,25 @@ describe('checkout payment fields', () => {
     expect(screen.getByRole('radio', { name: '对公转账' })).toBeChecked();
     expect(screen.getByRole('radio', { name: '支付宝' })).toBeInTheDocument();
   });
+
+  it('hides the payment method picker when an existing order only needs points', () => {
+    render(
+      <CheckoutPaymentFields
+        paymentMethod="alipay"
+        onPaymentMethodChange={() => {}}
+        personalPoints={0}
+        onPersonalPointsChange={() => {}}
+        groupPoints={0}
+        onGroupPointsChange={() => {}}
+        pointsBalance={{ personalPoints: 20, group: null }}
+        pointsDiscount={0}
+        showPaymentSection={false}
+      />,
+    );
+
+    expect(screen.getByRole('heading', { name: '积分抵扣' })).toBeInTheDocument();
+    expect(screen.getByLabelText('个人积分')).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: '付款方式' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('radio', { name: '支付宝' })).not.toBeInTheDocument();
+  });
 });
