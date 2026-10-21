@@ -4,6 +4,9 @@ import { requireAdmin } from '@/lib/session';
 import { enqueueBackgroundTask } from '@/lib/background-tasks';
 import { quoteView } from '@/lib/quote-records';
 import { loadQuoteProductTaxonomy } from '@/lib/quote-item-taxonomy';
+import { writeAuditLog } from '@/lib/audit';
+import { reviewCommerceLinesWithCatalog } from '@/lib/commerce-line-catalog';
+import { decideCommerceLineReview, reviewCommerceLines } from '@/lib/commerce-line-review';
 import { AMBIGUOUS_PRODUCT_CATALOG_NUMBER, verifyAndPriceItems } from '@/lib/pricing';
 import { mergeQuoteConstraintMetadata, packageConstraintFromVariant, readExplicitQuantityConstraint } from '@/lib/quote-acceptance';
 
@@ -63,6 +66,23 @@ export async function POST(
     if (!Array.isArray(items) || items.length === 0) {
       return NextResponse.json({ error: 'items must be a non-empty array' }, { status: 400 });
     }
+    // 权限仍是 inquiries.write。单价和数量先做规则核对：硬错误直接拒绝，软警告需 confirmWarnings 后才发布。
+    const quotedLines = (items as Array<Record<string, unknown>>).map((item, index) => {
+      const inquiryItem = inquiry.inquiryItems[index];
+      return {
+        index,
+        name: typeof item.name === 'string' ? item.name : inquiryItem?.name,
+        spec: typeof item.spec === 'string' ? item.spec : null,
+        catalogNumber: typeof item.catalogNumber === 'string' ? item.catalogNumber : inquiryItem?.catalogNumber,
+        unitPrice: item.price !== undefined ? item.price : item.unitPrice !== undefined ? item.unitPrice : inquiryItem?.unitPrice,
+        quantity: item.quantity !== undefined ? item.quantity : inquiryItem?.quantity ?? 1,
+      };
+    });
+    const preliminaryReview = reviewCommerceLines(quotedLines);
+    if (preliminaryReview.errors.length > 0) {
+      const invalidLines = decideCommerceLineReview(preliminaryReview, false);
+      if (!invalidLines.ok) return NextResponse.json(invalidLines.body, { status: invalidLines.status });
+    }
     const manualAdjustments = Object.fromEntries(items
       .filter((item: Record<string, unknown>) => (typeof item.catalogNumber === 'string' || typeof item.productId === 'string') && Number.isFinite(Number(item.price ?? item.unitPrice)))
       .map((item: Record<string, unknown>) => [String(item.catalogNumber ?? item.productId), {
@@ -78,8 +98,25 @@ export async function POST(
         : metadataBrand(inquiry.inquiryItems[position]?.metadata),
       name: String(item.name ?? inquiry.inquiryItems[position]?.name ?? 'Unknown'),
       price: Number(item.price ?? item.unitPrice),
-      quantity: Math.max(1, Number(item.quantity) || 1),
+      quantity: Number(quotedLines[position].quantity),
     })), { customerEmail: inquiry.email, manualAdjustments, allowManualAdjustment: true });
+    const lineReview = await reviewCommerceLinesWithCatalog(priced.verifiedItems.map((pricedItem, index) => {
+      const item = items[index] as Record<string, unknown>;
+      const inquiryItem = inquiry.inquiryItems[index];
+      return {
+        index,
+        productId: pricedItem.productId ?? (typeof item.productId === 'string' ? item.productId : inquiryItem?.productId),
+        variantId: pricedItem.variantId
+          ?? (typeof item.variantId === 'string' ? item.variantId : metadataVariantId(inquiryItem?.metadata)),
+        name: String(item.name ?? inquiryItem?.name ?? pricedItem.name),
+        spec: pricedItem.spec ?? (typeof item.spec === 'string' ? item.spec : null),
+        catalogNumber: pricedItem.catalogNumber ?? (typeof item.catalogNumber === 'string' ? item.catalogNumber : inquiryItem?.catalogNumber),
+        unitPrice: pricedItem.unitPrice,
+        quantity: pricedItem.quantity,
+      };
+    }));
+    const lineDecision = decideCommerceLineReview(lineReview, body.confirmWarnings);
+    if (!lineDecision.ok) return NextResponse.json(lineDecision.body, { status: lineDecision.status });
     const variantIds = Array.from(new Set(priced.verifiedItems
       .map((item, position) => item.variantId
         || (typeof (items[position] as Record<string, unknown>).variantId === 'string'
@@ -154,6 +191,22 @@ export async function POST(
         priority: 5,
         dedupeKey: `quote-email:${created.id}`,
       }, tx);
+      if (lineDecision.warnings.length > 0) {
+        await writeAuditLog({
+          actorId: user.id,
+          actorEmail: user.email,
+          action: 'quote.warnings_confirmed',
+          resource: 'inquiries',
+          targetType: 'Quote',
+          targetId: created.id,
+          reason: '管理员确认报价核对警告后发布',
+          metadata: {
+            inquiryId: id,
+            confirmWarnings: true,
+            warnings: lineDecision.warnings,
+          },
+        }, tx);
+      }
       return created;
     });
 
