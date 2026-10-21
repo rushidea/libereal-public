@@ -40,6 +40,12 @@ export interface VerifiedItem {
   variantId?: string | null;
   spec?: string | null;
   unit?: string | null;
+  /** Product.category，优惠券品类范围用。 */
+  category?: string | null;
+  /** Product.subcategory，优惠券品类范围用。 */
+  subcategory?: string | null;
+  /** Product.deletedAt 非空。优惠券不算入范围，计价本身不因下架改价。 */
+  delisted?: boolean;
   available?: boolean | null;
   leadTime?: string | null;
   stockQuantity?: number | null;
@@ -96,6 +102,9 @@ const pricingProductSelect = {
   subBrand: true,
   minimumSalePrice: true,
   hazardous: true,
+  category: true,
+  subcategory: true,
+  deletedAt: true,
   inStock: true,
   leadTime: true,
   stockQuantity: true,
@@ -199,6 +208,9 @@ export async function verifyAndPriceItems(
     let matchedVariantId: string | null = null;
     let baseUnitPrice: number | undefined;
     let matchedSpec: string | null = null;
+    let matchedCategory: string | null = null;
+    let matchedSubcategory: string | null = null;
+    let matchedDelisted = false;
     let manualAdjustment: PriceAdjustment | undefined;
     let pricingSnapshot = '';
 
@@ -229,6 +241,9 @@ export async function verifyAndPriceItems(
         stockQuantity = product.stockQuantity;
         matchedVariantId = variant?.id || null;
         matchedSpec = variant?.spec ?? item.spec ?? null;
+        matchedCategory = product.category;
+        matchedSubcategory = product.subcategory;
+        matchedDelisted = product.deletedAt != null;
       }
       const adjustmentKey = variant?.id || variant?.catalogNumber || product?.catalogNumber || item.catalogNumber || item.productId || undefined;
       manualAdjustment = adjustmentKey
@@ -355,6 +370,9 @@ export async function verifyAndPriceItems(
       variantId: matchedVariantId,
       spec: matchedSpec ?? item.spec ?? null,
       unit: item.unit ?? null,
+      category: matchedCategory,
+      subcategory: matchedSubcategory,
+      delisted: matchedDelisted,
       available,
       leadTime,
       stockQuantity,

@@ -16,6 +16,7 @@ import {
   Shield,
   ShieldCheck,
   Sparkles,
+  Ticket,
   User,
 } from 'lucide-react';
 
@@ -24,6 +25,7 @@ import { uiSurfaces } from '@/lib/ui-surfaces';
 export type AccountTabKey =
   | 'overview'
   | 'orders'
+  | 'coupons'
   | 'inquiries'
   | 'wishlist'
   | 'points'
@@ -47,6 +49,7 @@ type AccountTab = {
 const accountTabs: AccountTab[] = [
   { key: 'overview', label: '账户概览', icon: User, standaloneHref: '/account' },
   { key: 'orders', label: '我的订单', icon: Package, standaloneHref: '/account/orders' },
+  { key: 'coupons', label: '我的优惠券', icon: Ticket, rootHref: '/account/coupons', standaloneHref: '/account/coupons' },
   { key: 'inquiries', label: '我的询价', icon: FileText, standaloneHref: '/account/inquiries' },
   { key: 'wishlist', label: '我的收藏', icon: Heart, standaloneHref: '/account?tab=wishlist' },
   { key: 'points', label: '积分商城', icon: Coins, rootHref: '/account/points', standaloneHref: '/account/points' },

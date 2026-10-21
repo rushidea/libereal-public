@@ -11,6 +11,7 @@ import { computePromoAdjustments, hasExceededSelectionAddonQuota, hasMisbrandedE
 import type { CartLine } from '@/lib/cart-promotions/types';
 import { buildCheckoutRevision } from '@/lib/checkout-revision';
 import { buildCouponRule } from '@/lib/coupon-service';
+import { formatCouponScopeLabel } from '@/lib/coupon-scope';
 import { requireOrganizationPermission } from '@/lib/organization-service';
 
 export async function POST(req: NextRequest) {
@@ -63,12 +64,16 @@ export async function POST(req: NextRequest) {
       return {
         product: {
           id: vi.productId ?? '',
+          variantId: vi.variantId || undefined,
           brand: vi.brand ?? raw?.brand ?? '',
           catalogNumber: vi.catalogNumber ?? '',
           name: vi.name ?? '',
           price: vi.unitPrice,
           spec: vi.spec ?? null,
           serverVerified: vi.source === 'db',
+          category: vi.category ?? undefined,
+          subcategory: vi.subcategory ?? undefined,
+          delisted: vi.delisted === true,
         },
         quantity: vi.quantity,
         isQuickOrder: false,
@@ -99,15 +104,17 @@ export async function POST(req: NextRequest) {
     const { adjustments: promoAdjustments, discountTotal: promoDiscountTotal } = promoComputation;
 
     // ── 优惠券（落地 5）：满减/无门槛券，服务端重新评估（防前端改价）──
-    let couponAdjustment: { type: string; label: string; amount: number; reason: string | null } | null = null;
+    let couponAdjustment: { type: string; label: string; amount: number; reason: string | null; scopeLabel: string } | null = null;
     let couponError: string | null = null;
+    let couponScopeLabel: string | null = null;
     const couponCode = typeof body.couponCode === 'string' && body.couponCode.trim() ? body.couponCode.trim() : '';
     if (couponCode) {
       const rule = await buildCouponRule(couponCode);
       if (!rule) {
         couponError = '优惠券不存在或不可用';
       } else {
-        // 券门槛基于商品小计（不含券本身优惠）
+        couponScopeLabel = formatCouponScopeLabel(rule.config.scope ?? { type: 'all' });
+        // 券门槛基于范围内商品小计（不含券本身优惠，已下架商品不计入）
         const couponEval = promoComputation.evals.find(
           (e) => e.rule.id === `coupon:${couponCode}`,
         );
@@ -123,7 +130,8 @@ export async function POST(req: NextRequest) {
             type: 'coupon',
             label: rule.config.name,
             amount: -evalResult.adjustments[0].amount,
-            reason: `券码 ${couponCode}${rule.config.stackable ? '（可叠加）' : ''}`,
+            reason: `券码 ${couponCode}${rule.config.stackable ? '（可叠加）' : ''} · ${couponScopeLabel}`,
+            scopeLabel: couponScopeLabel,
           };
         } else if (evalResult?.details && typeof evalResult.details.couponAmount === 'number' && evalResult.details.couponAmount === 0) {
           // 门槛不足/待授权等：透出具体原因
@@ -173,6 +181,7 @@ export async function POST(req: NextRequest) {
       adjustments: [...allAdjustments, ...(pointsBreakdown && pointsBreakdown.pointsDiscount > 0 ? [{ type: 'points_redeem', amount: -pointsBreakdown.pointsDiscount }] : [])],
       coupon: couponAdjustment,
       couponError,
+      couponScopeLabel,
       totalBeforePoints: amounts.total,
       points: pointsBreakdown,
       total: payable,

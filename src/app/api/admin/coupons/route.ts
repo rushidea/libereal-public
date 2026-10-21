@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import { couponScopeWriteData } from '@/lib/coupon-service';
 import { requireAdmin } from '@/lib/session';
 
 function newCouponCode(): string {
@@ -39,7 +40,7 @@ export async function POST(request: Request) {
       return await issueCoupon(request, user);
     }
 
-    const { name, type, threshold, discount, validDays, maxUses, description } = body;
+    const { name, type, threshold, discount, validDays, maxUses, description, scopeType, scopeTargets } = body;
 
     if (!name || typeof name !== 'string' || name.trim() === '') {
       return NextResponse.json({ error: '券名称不能为空' }, { status: 400 });
@@ -53,6 +54,9 @@ export async function POST(request: Request) {
     if (couponType === 'threshold' && (!Number.isFinite(thresholdNum) || thresholdNum <= 0)) {
       return NextResponse.json({ error: '满减券门槛金额必须大于 0' }, { status: 400 });
     }
+
+    const scope = await couponScopeWriteData({ scopeType, scopeTargets });
+    if (!scope.ok) return NextResponse.json({ error: scope.error }, { status: 400 });
 
     const now = new Date();
     // 无门槛券：模板生成即需二次授权（安全红线：避免错误生成）
@@ -69,6 +73,8 @@ export async function POST(request: Request) {
         createdBy: user.id ?? null,
         maxUses: Number(maxUses) > 0 ? Number(maxUses) : 0,
         description: description?.trim() || null,
+        scopeType: scope.scopeType,
+        scopeTargets: scope.scopeTargets,
         validFrom: now,
         validUntil: Number(validDays) > 0
           ? new Date(now.getTime() + Number(validDays) * 86400000)

@@ -801,6 +801,8 @@ export function getTestDb(): Database.Database {
       usedCount INTEGER NOT NULL DEFAULT 0,
       description TEXT,
       createdBy TEXT,
+      scopeType TEXT NOT NULL DEFAULT 'all',
+      scopeTargets TEXT NOT NULL DEFAULT '[]',
       createdAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
       updatedAt DATETIME NOT NULL
     );
@@ -832,6 +834,8 @@ export function getTestDb(): Database.Database {
     CREATE INDEX IF NOT EXISTS "Product_brand_catalog_lower_idx" ON "Product"("brand", LOWER("catalogNumber")) WHERE "deletedAt" IS NULL;
     CREATE INDEX IF NOT EXISTS "ProductVariant_catalog_lower_idx" ON "ProductVariant"(LOWER("catalogNumber"));
   `);
+  ensureColumn(_db, 'Coupon', 'scopeType', `scopeType TEXT NOT NULL DEFAULT 'all'`);
+  ensureColumn(_db, 'Coupon', 'scopeTargets', `scopeTargets TEXT NOT NULL DEFAULT '[]'`);
   ensureColumn(_db, 'Order', 'pointsRefundedCash', 'pointsRefundedCash REAL NOT NULL DEFAULT 0');
   ensureColumn(_db, 'PointsRedemption', 'pointsReturned', 'pointsReturned INTEGER NOT NULL DEFAULT 0');
   return _db;

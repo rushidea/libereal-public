@@ -13,8 +13,15 @@
  * - 实例级：CouponInstance.issueApprovalStatus 须 approved/auto 才可核销；
  * - 两关都过才允许用券，杜绝未授权生成/发放的券被消费。
  */
-import type { Prisma, PrismaClient } from '@prisma/client';
+import type { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
+import {
+  formatCouponScopeLabel,
+  normalizeCouponScopeInput,
+  parseCouponScope,
+  serializeCouponScope,
+  type CouponScope,
+} from '@/lib/coupon-scope';
 
 export type CouponView = {
   id: string;
@@ -26,9 +33,36 @@ export type CouponView = {
   discount: number;
   stackable: boolean;
   expiresAt: string | null;
+  scopeType: CouponScope['type'];
+  scopeLabel: string;
 };
 
 type Tx = Prisma.TransactionClient;
+
+function sameCouponMoney(left: number, right: number): boolean {
+  return Math.round(left * 100) === Math.round(right * 100);
+}
+
+function sameCouponInstant(left: Date | null, right: Date | null): boolean {
+  if (left == null || right == null) return left == null && right == null;
+  return left.getTime() === right.getTime();
+}
+
+/**
+ * 无门槛券改优惠金额、发放上限、有效期或适用范围后，必须重新二次授权。
+ * 满减券不走这条规则。名称和说明不算敏感字段。
+ */
+export function unrestrictedCouponUpdateNeedsReapproval(
+  coupon: { type: string; discount: number; maxUses: number; validUntil: Date | null; scopeType: string; scopeTargets: string },
+  next: { discount: number; maxUses: number; validUntil: Date | null; scopeType: string; scopeTargets: string },
+): boolean {
+  if (coupon.type !== 'unrestricted') return false;
+  return !sameCouponMoney(coupon.discount, next.discount)
+    || Math.floor(coupon.maxUses) !== Math.floor(next.maxUses)
+    || !sameCouponInstant(coupon.validUntil, next.validUntil)
+    || coupon.scopeType !== next.scopeType
+    || coupon.scopeTargets !== next.scopeTargets;
+}
 
 /** 是否可核销（模板 + 实例双重授权通过 + 有效期含 validFrom） */
 function isRedeemable(
@@ -83,7 +117,13 @@ export async function getUsableCoupons(userId: string): Promise<CouponView[]> {
       discount: i.coupon.discount,
       stackable: i.coupon.stackable,
       expiresAt: i.expiresAt ? i.expiresAt.toISOString() : null,
+      ...scopeView(i.coupon.scopeType, i.coupon.scopeTargets),
     }));
+}
+
+function scopeView(scopeType: string, scopeTargets: string): { scopeType: CouponScope['type']; scopeLabel: string } {
+  const scope = parseCouponScope(scopeType, scopeTargets);
+  return { scopeType: scope.type, scopeLabel: formatCouponScopeLabel(scope) };
 }
 
 export type CouponRedeemResult =
@@ -283,6 +323,57 @@ export async function buildCouponRule(code: string): Promise<{
       approvalStatus: instance.coupon.approvalStatus as 'auto' | 'pending' | 'approved' | 'rejected',
       issueApprovalStatus: instance.issueApprovalStatus as 'auto' | 'pending' | 'approved' | 'rejected',
       description: instance.coupon.description ?? instance.coupon.name,
+      scope: parseCouponScope(instance.coupon.scopeType, instance.coupon.scopeTargets),
     },
   };
+}
+
+/**
+ * 把管理端提交的范围整理成可写入 Coupon 的字段。
+ * 商品/规格会按数据库核对，已下架商品不能选入范围，展示名以库内货号和名称为准。
+ */
+export async function couponScopeWriteData(body: {
+  scopeType?: unknown;
+  scopeTargets?: unknown;
+}): Promise<{ ok: true; scopeType: string; scopeTargets: string } | { ok: false; error: string }> {
+  const normalized = normalizeCouponScopeInput(body);
+  if (!normalized.ok) return normalized;
+  if (normalized.scope.type !== 'product') {
+    return { ok: true, scopeType: normalized.scopeType, scopeTargets: normalized.scopeTargets };
+  }
+
+  const products = [];
+  for (const target of normalized.scope.products) {
+    const product = await prisma.product.findUnique({
+      where: { id: target.productId },
+      select: {
+        id: true,
+        name: true,
+        catalogNumber: true,
+        deletedAt: true,
+        variants: { select: { id: true, spec: true, catalogNumber: true } },
+      },
+    });
+    if (!product || product.deletedAt) {
+      return { ok: false, error: '适用范围包含不存在或已下架的商品' };
+    }
+    if (target.variantId) {
+      const variant = product.variants.find((item) => item.id === target.variantId);
+      if (!variant) return { ok: false, error: '适用范围包含无效的商品规格' };
+      products.push({
+        productId: product.id,
+        variantId: variant.id,
+        label: `${variant.catalogNumber} · ${product.name} · ${variant.spec}`,
+      });
+      continue;
+    }
+    products.push({
+      productId: product.id,
+      variantId: null,
+      label: `${product.catalogNumber} · ${product.name}`,
+    });
+  }
+
+  const stored = serializeCouponScope({ type: 'product', products });
+  return { ok: true, scopeType: stored.scopeType, scopeTargets: stored.scopeTargets };
 }

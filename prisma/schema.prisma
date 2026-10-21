@@ -1614,6 +1614,11 @@ model Coupon {
   usedCount   Int      @default(0)
   description String?
   createdBy   String?
+  // 适用范围。all=全站（默认，与历史券一致）；brand/category/product 只抵扣范围内商品。
+  // scopeTargets 为 JSON：all 为 []；brand/category 为名称数组；product 为 { productId, variantId, label }[]。
+  // variantId 为空表示该商品全部规格。已下架商品不计入范围。
+  scopeType    String @default("all")
+  scopeTargets String @default("[]")
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
   instances   CouponInstance[]

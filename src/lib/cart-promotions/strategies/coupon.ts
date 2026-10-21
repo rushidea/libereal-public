@@ -8,14 +8,26 @@
  * - 无门槛券（unrestricted，stackable=true）：无门槛直接立减 discount 元，
  *   可与其他优惠叠加（折上折再减）；
  * - 二次授权：模板 approvalStatus 与实例 issueApprovalStatus 均须 auto/approved 才可用；
- * - 券不可用（门槛不足/未授权/已过期）→ triggered=false，无优惠。
+ * - 券不可用（门槛不足/未授权/已过期/范围内无商品）→ triggered=false，无优惠。
+ * - 适用范围：只统计范围内且未下架的商品小计；门槛与抵扣上限都用这个小计。
+ *   促销标记行、快速下单行仍不计入。缺省范围视为全站。
  */
+import {
+  COUPON_SCOPE_EMPTY_MESSAGE,
+  couponScopedLines,
+  formatCouponScopeLabel,
+  type CouponScope,
+} from '@/lib/coupon-scope';
 import type {
   CouponRuleConfig,
   PriceAdjustment,
   RuleEvaluation,
   RuleStrategy,
 } from '../types';
+
+function couponScope(config: CouponRuleConfig): CouponScope {
+  return config.scope ?? { type: 'all' };
+}
 
 export const couponStrategy: RuleStrategy<CouponRuleConfig> = {
   type: 'coupon',
@@ -33,12 +45,24 @@ export const couponStrategy: RuleStrategy<CouponRuleConfig> = {
       };
     }
 
-    // 订单金额 = 商品行小计（排除促销标记行：换购/赠品行不计入门槛）
-    const subtotal = ctx.items
-      .filter((i) => !i.isQuickOrder && !i.promoMark)
-      .reduce((s, i) => s + (i.product.price ?? 0) * i.quantity, 0);
+    // 范围内商品小计（排除促销标记行、快速下单行和已下架商品）
+    const scope = couponScope(config);
+    const scoped = couponScopedLines(ctx.items, scope);
+    const subtotal = scoped.subtotal;
+    const scopeLabel = formatCouponScopeLabel(scope);
+    // 全站券且没有任何可计行（只剩赠品/换购）时，沿用原来的门槛/金额无效提示。
+    // 其余「范围内一件都没有」（含只剩已下架商品）明确提示券不可用。
+    if (scoped.inScopeCount === 0 && !(scope.type === 'all' && scoped.baseCount === 0)) {
+      return {
+        active: true,
+        triggered: false,
+        summary: `${config.name}：${COUPON_SCOPE_EMPTY_MESSAGE}`,
+        details: { reason: 'out_of_scope', subtotal: 0, couponAmount: 0, scopeLabel },
+        adjustments: [],
+      };
+    }
 
-    // 满减门槛校验
+    // 满减门槛校验（按范围内小计）
     if (config.threshold > 0 && subtotal < config.threshold) {
       return {
         active: true,
@@ -72,6 +96,7 @@ export const couponStrategy: RuleStrategy<CouponRuleConfig> = {
         discount: config.discount,
         stackable: config.stackable,
         code: config.code,
+        scopeLabel,
       },
     }];
 
@@ -79,7 +104,7 @@ export const couponStrategy: RuleStrategy<CouponRuleConfig> = {
       active: true,
       triggered: true,
       summary: `${config.name}：已立减 ¥${amount.toFixed(2)}`,
-      details: { subtotal, threshold: config.threshold, couponAmount: amount, stackable: config.stackable },
+      details: { subtotal, threshold: config.threshold, couponAmount: amount, stackable: config.stackable, scopeLabel },
       adjustments,
     };
   },

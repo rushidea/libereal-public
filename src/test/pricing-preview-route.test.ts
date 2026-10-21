@@ -155,6 +155,7 @@ describe('POST /api/orders/pricing-preview', () => {
       total: 99,
       coupon: null,
       couponError: null,
+      couponScopeLabel: null,
       items: [{
         productId: 'product-1', catalogNumber: 'CAT-1', unitPrice: 99,
         finalUnitPrice: 99, quantity: 1, lineTotal: 99, finalLineTotal: 99,

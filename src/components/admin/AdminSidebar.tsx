@@ -7,7 +7,7 @@ import {
   LayoutDashboard, Archive, Receipt, MessageSquare,
   Users, Coins, Tag, Home, ClipboardList, Zap, Package, BookOpen, MoreHorizontal, Scale,
   Warehouse, BadgePercent, ShieldCheck, ListTodo, Megaphone, Newspaper, Building2,
-  SlidersHorizontal,
+  SlidersHorizontal, Ticket,
 } from 'lucide-react';
 import BottomPopup from '@/components/mobile/BottomPopup';
 import { uiSurfaces } from '@/lib/ui-surfaces';
@@ -85,6 +85,7 @@ const NAV_SECTIONS: NavSection[] = [
       { href: '/admin/discounts', label: '折扣模板', icon: Tag, permission: 'pricing.read' },
       { href: '/admin/discounts/apply', label: '批量应用', icon: Zap, permission: 'pricing.write' },
       { href: '/admin/promotions', label: '促销活动', icon: BadgePercent, permission: 'pricing.read' },
+      { href: '/admin/coupons', label: '优惠券', icon: Ticket, permission: 'pricing.read' },
     ],
   },
   {

@@ -78,8 +78,10 @@ interface PricingPreview {
     label: string;
     amount: number;
     reason: string | null;
+    scopeLabel?: string | null;
   } | null;
   couponError?: string | null;
+  couponScopeLabel?: string | null;
   points?: {
     personalPoints: number;
     groupPoints: number;
@@ -139,6 +141,15 @@ export default function OrderCheckoutPage() {
   const [pointsError, setPointsError] = useState('');
   const [couponCode, setCouponCode] = useState('');
   const [couponError, setCouponError] = useState('');
+  const [usableCoupons, setUsableCoupons] = useState<Array<{
+    instanceId: string;
+    code: string;
+    name: string;
+    scopeLabel: string;
+    type: string;
+    threshold: number;
+    discount: number;
+  }>>([]);
   const [organizationId, setOrganizationId] = useState('');
   const [pricingRevision, setPricingRevision] = useState('');
   const [pricingRefreshNonce, setPricingRefreshNonce] = useState(0);
@@ -150,10 +161,14 @@ export default function OrderCheckoutPage() {
     syncFromDb().finally(() => {
       if (active) setCartReady(true);
     });
+    fetch('/api/coupons')
+      .then((response) => (response.ok ? response.json() : []))
+      .then((data) => { if (active && Array.isArray(data)) setUsableCoupons(data); })
+      .catch(() => {});
     return () => {
       active = false;
     };
-  }, [syncFromDb]);
+  }, []);
 
   useEffect(() => {
     const allProductItems = items.filter((i): i is ProductCartItem => !i.isQuickOrder);
@@ -660,6 +675,22 @@ export default function OrderCheckoutPage() {
               </div>
             )}
             {/* 优惠券 */}
+            {usableCoupons.length > 0 && (
+              <div className="mt-3 space-y-1">
+                <p className="text-xs text-gray-500 dark:text-slate-600">选择优惠券</p>
+                {usableCoupons.map((coupon) => (
+                  <button
+                    key={coupon.instanceId}
+                    type="button"
+                    onClick={() => setCouponCode(coupon.code)}
+                    className={`flex w-full min-h-11 flex-col items-start rounded-md border px-3 py-2 text-left text-sm ${couponCode.trim() === coupon.code ? 'border-brand-500 bg-brand-50' : 'border-gray-200 dark:border-slate-400/70'}`}
+                  >
+                    <span className="text-gray-800 dark:text-slate-900">{coupon.name} · {coupon.type === 'threshold' ? `满 ${coupon.threshold} 减 ${coupon.discount}` : `减 ${coupon.discount}`}</span>
+                    <span className="text-xs text-brand-700">{coupon.scopeLabel || '全站商品'}</span>
+                  </button>
+                ))}
+              </div>
+            )}
             <div className="mt-3 flex items-center gap-2">
               <input
                 type="text"
@@ -669,6 +700,9 @@ export default function OrderCheckoutPage() {
                 className="w-full rounded-md border border-gray-200 px-3 py-1.5 text-sm focus:border-brand-500 focus:outline-none dark:border-slate-400/70 dark:bg-slate-800 dark:text-slate-100"
               />
             </div>
+            {(pricingPreview?.coupon?.scopeLabel || pricingPreview?.couponScopeLabel) && (
+              <p className="text-xs text-gray-500 dark:text-slate-600">{pricingPreview?.coupon?.scopeLabel || pricingPreview?.couponScopeLabel}</p>
+            )}
             {couponError && (
               <div className="mb-2 text-xs text-red-600 dark:text-red-400">{couponError}</div>
             )}
