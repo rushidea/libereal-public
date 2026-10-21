@@ -4,6 +4,7 @@ import {
   formatVariantRemovalBlockedMessage,
   variantIdFromItemMetadata,
   variantIdsReferencedByCart,
+  type VariantRemovalEvidence,
 } from '@/lib/variant-removal-guard';
 
 const removed = [
@@ -66,4 +67,72 @@ describe('variant removal guard', () => {
       cartItems: ['[]'],
     })).toEqual([]);
   });
+
+  it('blocks variants still enrolled in an open promotion and lists the promotion names', () => {
+    const now = new Date('2026-10-21T04:00:00.000Z');
+    const blocked = findBlockedVariantRemovals(removed, evidence({
+      now,
+      promotions: [
+        { variantId: 'variant-100', name: '开学季', status: 'active', endsAt: '2026-11-01T00:00:00.000Z' },
+        { variantId: 'variant-100', name: '金秋促销', status: 'draft', endsAt: new Date('2026-12-01T00:00:00.000Z') },
+        { variantId: 'variant-100', name: '金秋促销', status: 'paused', endsAt: '2026-12-01T00:00:00.000Z' },
+        { variantId: 'variant-100', name: '已经结束', status: 'ended', endsAt: '2026-12-01T00:00:00.000Z' },
+        { variantId: 'variant-100', name: '时间已过', status: 'active', endsAt: '2026-10-01T00:00:00.000Z' },
+        { variantId: ' variant-100 ', name: ' 空白活动 ', status: 'active', endsAt: '2026-12-01T00:00:00.000Z' },
+        { variantId: 'variant-50', name: '刚好结束', status: 'active', endsAt: now },
+        { variantId: 'variant-50', name: '未开始的活动', status: 'active', endsAt: '2026-12-01T00:00:00.000Z' },
+        { variantId: null, name: '商品级活动', status: 'active', endsAt: '2026-12-01T00:00:00.000Z' },
+        { variantId: 'other-variant', name: '别的规格', status: 'active', endsAt: '2026-12-01T00:00:00.000Z' },
+      ],
+    }));
+
+    const autumnNames = ['开学季', '金秋促销', '空白活动'].sort((left, right) => left.localeCompare(right, 'zh-CN'));
+    expect(blocked).toEqual([
+      { id: 'variant-100', catalogNumber: 'CAT-1-100', spec: '100 µL', reasons: [], promotionNames: autumnNames },
+      { id: 'variant-50', catalogNumber: 'CAT-1-50', spec: '50 µL', reasons: [], promotionNames: ['未开始的活动'] },
+    ]);
+    const listed = autumnNames.map((name) => `「${name}」`).join('、');
+    expect(formatVariantRemovalBlockedMessage(blocked)).toBe(
+      `无法保存，本次修改已全部取消。规格 CAT-1-100（100 µL）参加了未结束的促销${listed}；规格 CAT-1-50（50 µL）参加了未结束的促销「未开始的活动」。这些规格不能删除，请先从这些促销中移除这些规格后再保存。`,
+    );
+  });
+
+  it('does not block a variant that only belongs to an ended promotion', () => {
+    const now = new Date('2026-10-21T04:00:00.000Z');
+    expect(findBlockedVariantRemovals(removed, evidence({
+      now,
+      promotions: [
+        { variantId: 'variant-100', name: '手工结束', status: 'ended', endsAt: '2026-12-01T00:00:00.000Z' },
+        { variantId: 'variant-50', name: '时间已过', status: 'active', endsAt: now.getTime() },
+        { variantId: 'variant-50', name: '坏掉的结束时间', status: 'paused', endsAt: 'not-a-date' },
+      ],
+    }))).toEqual([]);
+  });
+
+  it('keeps inventory wording and adds the promotion name when both apply', () => {
+    const blocked = findBlockedVariantRemovals(
+      [{ id: 'variant-100', catalogNumber: 'CAT-1-100', spec: '' }],
+      evidence({
+        inventoryVariantIds: ['variant-100'],
+        now: new Date('2026-10-21T04:00:00.000Z'),
+        promotions: [
+          { variantId: 'variant-100', name: '金秋促销', status: 'active', endsAt: '2026-12-01T00:00:00.000Z' },
+        ],
+      }),
+    );
+    expect(formatVariantRemovalBlockedMessage(blocked)).toBe(
+      '无法保存，本次修改已全部取消。规格 CAT-1-100已有库存记录，参加了未结束的促销「金秋促销」。该规格不能删除，请重新打开商品并保留该规格后再保存。参加了促销的规格请先从促销中移除。',
+    );
+  });
 });
+
+function evidence(overrides: Partial<VariantRemovalEvidence> = {}): VariantRemovalEvidence {
+  return {
+    inventoryVariantIds: [],
+    orderMetadata: [],
+    inquiryMetadata: [],
+    quoteMetadata: [],
+    cartItems: [],
+    ...overrides,
+  };
+}

@@ -169,7 +169,7 @@ describe('admin product catalog models', () => {
     return { retained, removed };
   }
 
-  async function expectRemovalBlocked(retainedId: string, removedId: string, reason: string) {
+  async function expectRemovalBlocked(retainedId: string, removedId: string, reason: string, extras: string[] = []) {
     const updated = await updateProduct(updateRequest({
       name: '不应写回',
       variants: [{ id: retainedId, catalogNumber: 'CAT-1-50', spec: '50 µL', price: 125 }],
@@ -181,6 +181,7 @@ describe('admin product catalog models', () => {
     expect(body.error).toContain('CAT-1-100');
     expect(body.error).toContain(reason);
     expect(body.error).toContain('不能删除');
+    for (const extra of extras) expect(body.error).toContain(extra);
     const db = getTestDb();
     expect(db.prepare('SELECT COUNT(*) AS count FROM ProductVariant WHERE id = ?').get(removedId)).toEqual({ count: 1 });
     expect(db.prepare('SELECT COUNT(*) AS count FROM ProductVariant WHERE productId = ?').get('product_1')).toEqual({ count: 2 });
@@ -297,6 +298,136 @@ describe('admin product catalog models', () => {
     }));
     expect(updated.status).toBe(200);
     expect(db.prepare('SELECT id FROM ProductVariant WHERE productId = ?').all('product_1')).toEqual([{ id: retained.id }]);
+  });
+
+  function at(offsetMs: number) {
+    return new Date(Date.now() + offsetMs).toISOString();
+  }
+
+  function seedVariantPromotion(input: {
+    id: string;
+    name: string;
+    status: string;
+    startsAt: string;
+    endsAt: string;
+    variantId: string | null;
+  }) {
+    const db = getTestDb();
+    db.prepare(`
+      INSERT INTO Promotion (id, name, type, value, status, startsAt, endsAt, priority, exclusive, updatedAt)
+      VALUES (?, ?, 'fixed_price', 10, ?, ?, ?, 0, 1, ?)
+    `).run(input.id, input.name, input.status, input.startsAt, input.endsAt, input.startsAt);
+    db.prepare(`
+      INSERT INTO PromotionProduct (id, promotionId, productId, variantId, groupKey)
+      VALUES (?, ?, 'product_1', ?, 'main')
+    `).run(`link_${input.id}`, input.id, input.variantId);
+  }
+
+  it('rejects deleting a variant that is still in an open promotion', async () => {
+    const hour = 60 * 60 * 1000;
+    const cases = [
+      { id: 'promo_active', name: '金秋促销', status: 'active', startsAt: at(-hour), endsAt: at(hour) },
+      { id: 'promo_upcoming', name: '开学季预告', status: 'active', startsAt: at(hour), endsAt: at(2 * hour) },
+      { id: 'promo_draft', name: '草稿活动', status: 'draft', startsAt: at(hour), endsAt: at(2 * hour) },
+      { id: 'promo_paused', name: '暂停中的活动', status: 'paused', startsAt: at(-hour), endsAt: at(hour) },
+    ];
+
+    for (const item of cases) {
+      clearAllTables(getTestDb());
+      seedAdmin(getTestDb());
+      seedProduct();
+      const { retained, removed } = await createTwoVariants();
+      seedVariantPromotion({ ...item, variantId: removed.id });
+      await expectRemovalBlocked(retained.id, removed.id, item.name, ['请先从促销中移除']);
+      const db = getTestDb();
+      expect(db.prepare('SELECT COUNT(*) AS count FROM PromotionProduct WHERE variantId = ?').get(removed.id)).toEqual({ count: 1 });
+      expect(db.prepare('SELECT name FROM Promotion WHERE id = ?').get(item.id)).toEqual({ name: item.name });
+    }
+  });
+
+  it('lists every open promotion and ignores an ended promotion on the same variant', async () => {
+    const hour = 60 * 60 * 1000;
+    const { retained, removed } = await createTwoVariants();
+    seedVariantPromotion({
+      id: 'promo_open', name: '金秋促销', status: 'active', startsAt: at(-hour), endsAt: at(hour), variantId: removed.id,
+    });
+    seedVariantPromotion({
+      id: 'promo_next', name: '开学季预告', status: 'draft', startsAt: at(hour), endsAt: at(2 * hour), variantId: removed.id,
+    });
+    seedVariantPromotion({
+      id: 'promo_closed', name: '暑期归档', status: 'ended', startsAt: at(-2 * hour), endsAt: at(hour), variantId: removed.id,
+    });
+
+    const updated = await updateProduct(updateRequest({
+      name: '不应写回',
+      variants: [{ id: retained.id, catalogNumber: 'CAT-1-50', spec: '50 µL', price: 125 }],
+    }));
+    expect(updated.status).toBe(409);
+    const body = await updated.json() as { error?: string };
+    expect(body.error).toContain('金秋促销');
+    expect(body.error).toContain('开学季预告');
+    expect(body.error).toContain('请先从这些促销中移除');
+    expect(body.error).not.toContain('暑期归档');
+    expect(getTestDb().prepare('SELECT COUNT(*) AS count FROM PromotionProduct WHERE variantId = ?').get(removed.id)).toEqual({ count: 3 });
+    expect((getTestDb().prepare('SELECT name FROM Product WHERE id = ?').get('product_1') as { name: string }).name).toBe('AKT1 Antibody');
+  });
+
+  it('still deletes a variant that only belongs to an ended promotion', async () => {
+    const hour = 60 * 60 * 1000;
+    const cases = [
+      { id: 'promo_status_ended', name: '手工结束', status: 'ended', startsAt: at(-hour), endsAt: at(hour) },
+      { id: 'promo_time_ended', name: '时间已过', status: 'active', startsAt: at(-2 * hour), endsAt: at(-hour) },
+    ];
+
+    for (const item of cases) {
+      clearAllTables(getTestDb());
+      seedAdmin(getTestDb());
+      seedProduct();
+      const { retained, removed } = await createTwoVariants();
+      seedVariantPromotion({ ...item, variantId: removed.id });
+      const updated = await updateProduct(updateRequest({
+        name: '已改名称',
+        variants: [{ id: retained.id, catalogNumber: 'CAT-1-50', spec: '50 µL', price: 125 }],
+      }));
+      expect(updated.status).toBe(200);
+      const db = getTestDb();
+      expect(db.prepare('SELECT id FROM ProductVariant WHERE productId = ?').all('product_1')).toEqual([{ id: retained.id }]);
+      expect(db.prepare('SELECT name FROM Promotion WHERE id = ?').get(item.id)).toEqual({ name: item.name });
+      expect(db.prepare('SELECT COUNT(*) AS count FROM PromotionProduct WHERE promotionId = ?').get(item.id)).toEqual({ count: 0 });
+      expect((db.prepare('SELECT name FROM Product WHERE id = ?').get('product_1') as { name: string }).name).toBe('已改名称');
+    }
+  });
+
+  it('does not treat a product-level promotion as a reason to keep a variant', async () => {
+    const hour = 60 * 60 * 1000;
+    const { retained, removed } = await createTwoVariants();
+    seedVariantPromotion({
+      id: 'promo_product', name: '全规格活动', status: 'active', startsAt: at(-hour), endsAt: at(hour), variantId: null,
+    });
+    const updated = await updateProduct(updateRequest({
+      variants: [{ id: retained.id, catalogNumber: 'CAT-1-50', spec: '50 µL', price: 125 }],
+    }));
+    expect(updated.status).toBe(200);
+    const db = getTestDb();
+    expect(db.prepare('SELECT id FROM ProductVariant WHERE productId = ?').all('product_1')).toEqual([{ id: retained.id }]);
+    expect(db.prepare('SELECT variantId FROM PromotionProduct WHERE promotionId = ?').get('promo_product')).toEqual({ variantId: null });
+    expect(db.prepare('SELECT COUNT(*) AS count FROM ProductVariant WHERE id = ?').get(removed.id)).toEqual({ count: 0 });
+  });
+
+  it('still deletes an unenrolled variant when a sibling stays in an open promotion', async () => {
+    const hour = 60 * 60 * 1000;
+    const { retained, removed } = await createTwoVariants();
+    seedVariantPromotion({
+      id: 'promo_kept', name: '金秋促销', status: 'active', startsAt: at(-hour), endsAt: at(hour), variantId: retained.id,
+    });
+    const updated = await updateProduct(updateRequest({
+      variants: [{ id: retained.id, catalogNumber: 'CAT-1-50', spec: '50 µL', price: 125 }],
+    }));
+    expect(updated.status).toBe(200);
+    const db = getTestDb();
+    expect(db.prepare('SELECT id FROM ProductVariant WHERE productId = ?').all('product_1')).toEqual([{ id: retained.id }]);
+    expect(db.prepare('SELECT variantId FROM PromotionProduct WHERE id = ?').get('link_promo_kept')).toEqual({ variantId: retained.id });
+    expect(db.prepare('SELECT COUNT(*) AS count FROM ProductVariant WHERE id = ?').get(removed.id)).toEqual({ count: 0 });
   });
 
   it('returns the aggregated product detail to administrators', async () => {
