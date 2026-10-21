@@ -13,9 +13,7 @@ import { PATCH as archivePATCH } from '@/app/api/admin/inquiries/archive/route';
 import { GET as archivedGET } from '@/app/api/admin/inquiries/archived/route';
 import { NextRequest } from 'next/server';
 import { getTestDb, closeTestDb, seedAdmin, seedUser, clearAllTables } from './db-helpers';
-import { prisma } from '@/lib/prisma';
 import { calculateOrderPoints } from '@/lib/points';
-import { refundOrderPointsProportionally } from '@/lib/points-checkout-service';
 
 function seedInquiry(db: ReturnType<typeof getTestDb>, inquiry: {
   id: string;
@@ -428,7 +426,53 @@ describe('POST /api/inquiries/[id]/quote (admin send quote)', () => {
     expect(await response.json()).toMatchObject({ error: '请选择有效的付款方式' });
   });
 
-  it('deducts combined points at quote conversion through the shared checkout path', async () => {
+  it('rejects admin point redemption without creating an order or spending customer points', async () => {
+    const db = getTestDb();
+    seedUser(db, { id: 'buyer_points', email: 'buyer-points@test.com', points: 40 });
+    db.prepare('UPDATE Inquiry SET userId = ? WHERE id = ?').run('buyer_points', 'i1');
+    await quotePOST(makeReq('i1', { items: [{ productId: 'p1', name: 'A', price: 150, quantity: 2 }] }) as NextRequest, {
+      params: Promise.resolve({ id: 'i1' }),
+    });
+    const quoteRow = db.prepare('SELECT id FROM Quote WHERE inquiryId = ?').get('i1') as { id: string };
+    const personal = await confirmQuotePOST(new NextRequest('http://localhost:3000/api/orders/i1/confirm-items', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        itemIndices: [0], quantities: { 0: 2 }, quoteId: quoteRow.id, quoteVersion: 1,
+        acceptanceAttemptId: 'accept-points-admin', paymentMethod: 'alipay', personalPoints: 40,
+      }),
+    }), { params: Promise.resolve({ id: 'i1' }) });
+    expect(personal.status).toBe(400);
+    expect(await personal.json()).toEqual({ error: '管理员代客接受报价不能使用客户积分，请由客户在结算时自行选择积分抵扣' });
+    expect(db.prepare('SELECT COUNT(*) AS count FROM "Order"').get()).toEqual({ count: 0 });
+    expect(db.prepare('SELECT COUNT(*) AS count FROM PointsLog').get()).toEqual({ count: 0 });
+    expect(db.prepare('SELECT points FROM User WHERE id = ?').get('buyer_points')).toEqual({ points: 40 });
+    expect(db.prepare('SELECT status FROM Quote').get()).toEqual({ status: 'sent' });
+  });
+
+  it('rejects admin group points and numeric strings without spending customer points', async () => {
+    const db = getTestDb();
+    seedUser(db, { id: 'buyer_points', email: 'buyer-points@test.com', points: 40 });
+    db.prepare('UPDATE Inquiry SET userId = ? WHERE id = ?').run('buyer_points', 'i1');
+    await quotePOST(makeReq('i1', { items: [{ productId: 'p1', name: 'A', price: 150, quantity: 2 }] }) as NextRequest, {
+      params: Promise.resolve({ id: 'i1' }),
+    });
+    const quoteRow = db.prepare('SELECT id FROM Quote WHERE inquiryId = ?').get('i1') as { id: string };
+    const group = await confirmQuotePOST(new NextRequest('http://localhost:3000/api/orders/i1/confirm-items', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        itemIndices: [0], quantities: { 0: 2 }, quoteId: quoteRow.id, quoteVersion: 1,
+        acceptanceAttemptId: 'accept-group-admin', paymentMethod: 'alipay', groupPoints: '10', groupId: 'g1',
+      }),
+    }), { params: Promise.resolve({ id: 'i1' }) });
+    expect(group.status).toBe(400);
+    expect(await group.json()).toEqual({ error: '管理员代客接受报价不能使用客户积分，请由客户在结算时自行选择积分抵扣' });
+    expect(db.prepare('SELECT points FROM User WHERE id = ?').get('buyer_points')).toEqual({ points: 40 });
+    expect(db.prepare('SELECT COUNT(*) AS count FROM "Order"').get()).toEqual({ count: 0 });
+  });
+
+  it('still lets an admin accept a quote when points are omitted or zero', async () => {
     const db = getTestDb();
     seedUser(db, { id: 'buyer_points', email: 'buyer-points@test.com', points: 40 });
     db.prepare('UPDATE Inquiry SET userId = ? WHERE id = ?').run('buyer_points', 'i1');
@@ -441,23 +485,19 @@ describe('POST /api/inquiries/[id]/quote (admin send quote)', () => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         itemIndices: [0], quantities: { 0: 2 }, quoteId: quoteRow.id, quoteVersion: 1,
-        acceptanceAttemptId: 'accept-points', paymentMethod: 'alipay', personalPoints: 40,
+        acceptanceAttemptId: 'accept-zero-points', paymentMethod: 'alipay', personalPoints: 0, groupPoints: 0,
       }),
     }), { params: Promise.resolve({ id: 'i1' }) });
     expect(response.status).toBe(200);
-    const order = db.prepare('SELECT id, total, pointsPersonal, pointsDiscount, pointsApplied, customerId, status FROM "Order"').get() as {
-      id: string; total: number; pointsPersonal: number; pointsDiscount: number; pointsApplied: number; customerId: string; status: string;
-    };
-    expect(order).toMatchObject({ total: 260, pointsPersonal: 40, pointsDiscount: 40, pointsApplied: 1, customerId: 'buyer_points', status: 'unpaid' });
-    expect(db.prepare('SELECT points FROM User WHERE id = ?').get('buyer_points')).toEqual({ points: 0 });
-    const refunded = await prisma.$transaction((tx) => refundOrderPointsProportionally(tx, {
-      orderId: order.id,
-      refundYuan: 300,
-      originalPaidYuan: 300,
-      actorUserId: 'buyer_points',
-      reason: '订单取消退回积分',
-    }));
-    expect(refunded).toEqual({ ok: true, personal: 40, group: 0 });
+    const order = db.prepare('SELECT total, pointsPersonal, pointsGroup, pointsDiscount, pointsApplied, customerId FROM "Order"').get();
+    expect(order).toEqual({
+      total: 300,
+      pointsPersonal: 0,
+      pointsGroup: 0,
+      pointsDiscount: 0,
+      pointsApplied: 0,
+      customerId: 'buyer_points',
+    });
     expect(db.prepare('SELECT points FROM User WHERE id = ?').get('buyer_points')).toEqual({ points: 40 });
   });
 

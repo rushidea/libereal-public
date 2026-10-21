@@ -331,6 +331,31 @@ describe('POST /api/admin/orders (admin create order)', () => {
     expect(id1.split('-').pop()).not.toBe(id2.split('-').pop());
   });
 
+  it('keeps creating the order when points fields are sent and does not deduct the customer balance', async () => {
+    const db = getTestDb();
+    seedUser(db, { id: 'cust_points', email: 'cust@test.com', points: 80 });
+    const res = await ordersPOST(makeReq({
+      customerEmail: 'cust@test.com',
+      items: [{ name: '抗体A', price: 100, quantity: 1 }],
+      paymentMethod: 'alipay',
+      personalPoints: 20,
+      groupPoints: 5,
+      groupId: 'group-1',
+    }) as NextRequest);
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    const order = db.prepare('SELECT customerId, pointsPersonal, pointsGroup, pointsDiscount, pointsApplied FROM "Order" WHERE id = ?').get(json.orderId);
+    expect(order).toEqual({
+      customerId: 'cust_points',
+      pointsPersonal: 0,
+      pointsGroup: 0,
+      pointsDiscount: 0,
+      pointsApplied: 0,
+    });
+    expect(db.prepare('SELECT points FROM User WHERE id = ?').get('cust_points')).toEqual({ points: 80 });
+    expect(db.prepare('SELECT COUNT(*) AS count FROM PointsLog').get()).toEqual({ count: 0 });
+  });
+
   it('returns 400 for empty items array', async () => {
     const res = await ordersPOST(makeReq({
       customerEmail: 'cust@test.com',

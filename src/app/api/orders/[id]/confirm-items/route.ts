@@ -10,6 +10,7 @@ import { buildCheckoutRequestFingerprint, isUniqueConstraintError, validCheckout
 import { isOrderIdUniqueConflict, ORDER_NUMBER_BUSY_ERROR, withAllocatedOrderNumber } from '@/data/order-number';
 import { verifiedEmailMatches } from '@/lib/verified-email-access';
 import { normalizeOrderPaymentMethod } from '@/data/payment-methods';
+import { adminActingPointsError } from '@/lib/admin-acting-points';
 import { normalizePointsIntent } from '@/lib/points-checkout';
 import { assertCheckoutPointsAvailable, settleCheckoutPayment } from '@/lib/checkout-payment-settlement';
 import { applyOrderPointsDeduction } from '@/lib/points-checkout-service';
@@ -82,6 +83,11 @@ export async function POST(
       return NextResponse.json({ error: 'User not found' }, { status: 404 });
     }
     const isAdmin = user.role === 'admin';
+    // 管理员代客接受报价不能代扣客户积分。未传或 0 仍可接受。不新增权限。
+    if (isAdmin) {
+      const pointsError = adminActingPointsError({ personalPoints, groupPoints, groupId });
+      if (pointsError) return NextResponse.json({ error: pointsError }, { status: 400 });
+    }
 
     const inquiry = await prisma.inquiry.findUnique({
       where: { id },

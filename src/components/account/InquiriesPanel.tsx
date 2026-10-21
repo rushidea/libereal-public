@@ -11,6 +11,7 @@ import { QuoteAcceptancePreview, QuoteQuantityEditor } from '@/components/accoun
 import DeclineQuoteDialog from '@/components/account/DeclineQuoteDialog';
 import { CheckoutPaymentFields, useCheckoutPointsBalance } from '@/components/checkout/CheckoutPaymentFields';
 import { InquiryIdDisplay } from '@/components/InquiryIdDisplay';
+import { quoteConfirmSettlementFields } from '@/lib/admin-acting-points';
 import { describeCheckoutPayable } from '@/lib/checkout-payment';
 import { startAlipayCheckout } from '@/lib/alipay-checkout-client';
 
@@ -118,6 +119,7 @@ const LINKED_ORDER_STATUS: Record<string, { label: string; color: string }> = {
 export default function InquiriesPanel() {
   const router = useRouter();
   const { data: session } = useSession();
+  const actorRole = session?.user?.role;
   const [inquiries, setInquiries] = useState<Inquiry[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedInquiry, setSelectedInquiry] = useState<Inquiry | null>(null);
@@ -266,8 +268,15 @@ export default function InquiriesPanel() {
       const requestQuantities = Object.fromEntries(itemIndices.map((idx, n) => [idx, quantityVector[n]]));
       const currentAttempt = acceptanceAttemptsRef.current[inquiryId];
       const normalizedLegalIds = [...new Set(acceptedLegalIds)].sort();
-      const groupId = pointsBalance?.group?.usable ? pointsBalance.group.id : '';
-      const paymentFingerprint = JSON.stringify({ method: quotePaymentMethod, personalPoints, groupPoints, groupId });
+      const settlement = quoteConfirmSettlementFields({
+        actorRole,
+        paymentMethod: quotePaymentMethod,
+        personalPoints,
+        groupPoints,
+        groupId: pointsBalance?.group?.usable ? pointsBalance.group.id : undefined,
+      });
+      const groupId = settlement.groupId ?? '';
+      const paymentFingerprint = JSON.stringify({ method: settlement.paymentMethod, personalPoints: settlement.personalPoints, groupPoints: settlement.groupPoints, groupId });
       const matches = currentAttempt
         && currentAttempt.quoteId === quote.id && currentAttempt.quoteVersion === quote.version
         && JSON.stringify(currentAttempt.itemIndices) === JSON.stringify(itemIndices)
@@ -292,10 +301,10 @@ export default function InquiriesPanel() {
           quoteVersion: quote.version,
           acceptanceAttemptId: attemptId,
           acceptedLegalIds,
-          paymentMethod: quotePaymentMethod || undefined,
-          personalPoints,
-          groupPoints,
-          groupId: pointsBalance?.group?.usable ? pointsBalance.group.id : undefined,
+          paymentMethod: settlement.paymentMethod || undefined,
+          personalPoints: settlement.personalPoints,
+          groupPoints: settlement.groupPoints,
+          groupId: settlement.groupId,
         }),
       });
       if (res.ok) {
@@ -646,11 +655,18 @@ export default function InquiriesPanel() {
         const selTotal = selItems.reduce((sum, { item, idx }) => {
           return sum + (item.price || 0) * getItemQty(selectedInquiry.id, idx, remainingQuantity(item));
         }, 0);
-        const payable = describeCheckoutPayable({
-          goodsSubtotal: selTotal,
+        const settlement = quoteConfirmSettlementFields({
+          actorRole,
           paymentMethod: quotePaymentMethod,
           personalPoints,
           groupPoints,
+          groupId: pointsBalance?.group?.usable ? pointsBalance.group.id : undefined,
+        });
+        const payable = describeCheckoutPayable({
+          goodsSubtotal: selTotal,
+          paymentMethod: quotePaymentMethod,
+          personalPoints: settlement.personalPoints,
+          groupPoints: settlement.groupPoints,
         });
 
         return (
@@ -658,7 +674,9 @@ export default function InquiriesPanel() {
             <div className={`mx-4 my-4 w-full max-w-2xl rounded-[var(--brand-border-radius-lg)] ${uiSurfaces.modal} p-6`}>
               <h3 className={`mb-2 text-lg font-bold ${uiSurfaces.titleText}`}>确认提交订单</h3>
               <p className={`mb-4 text-sm ${uiSurfaces.textSecondary}`}>
-                你正在接受报价 v{selectedInquiry.activeQuote?.version}。确认前请核对报价编号、商品、规格、数量与金额；本次选择将转为独立订单。数量可以多于报价，按报价单价计。
+                {actorRole === 'admin'
+                  ? `你正在代客户接受报价 v${selectedInquiry.activeQuote?.version}。请核对报价编号、商品、规格、数量与金额。本次选择将转为独立订单。数量可以多于报价，按报价单价计。积分由客户在结算时自行选择，此处不能代扣。`
+                  : `你正在接受报价 v${selectedInquiry.activeQuote?.version}。确认前请核对报价编号、商品、规格、数量与金额；本次选择将转为独立订单。数量可以多于报价，按报价单价计。积分可与支付宝或其他付款方式组合抵扣。`}
               </p>
               <QuoteAcceptancePreview lines={selItems.map(({ item, idx }) => ({
                 name: item.name || item.product?.name || '产品',
@@ -669,12 +687,13 @@ export default function InquiriesPanel() {
               <CheckoutPaymentFields
                 paymentMethod={quotePaymentMethod}
                 onPaymentMethodChange={setQuotePaymentMethod}
-                personalPoints={personalPoints}
+                personalPoints={settlement.personalPoints}
                 onPersonalPointsChange={setPersonalPoints}
-                groupPoints={groupPoints}
+                groupPoints={settlement.groupPoints}
                 onGroupPointsChange={setGroupPoints}
                 pointsBalance={pointsBalance}
                 pointsDiscount={payable.pointsDiscount}
+                showPointsSection={actorRole !== 'admin'}
                 compact
               />
               <div className="mb-4 rounded-[var(--brand-border-radius)] bg-[var(--brand-color-primary-bg)] p-3">
