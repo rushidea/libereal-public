@@ -17,6 +17,7 @@ import { redactProductCostPrice } from '@/lib/product-cost-price';
 import { getAdminPermissions, requireAdmin } from '@/lib/session';
 import { writeAuditLog } from '@/lib/audit';
 import { ProductSearchService } from '@/lib/product-search';
+import { assertVariantsCanBeRemoved, VariantRemovalBlockedError } from '@/lib/variant-removal-guard';
 
 const STOCK_QUANTITY_ERROR = '库存数量无效。请填写整数，0 表示无库存，-1 表示不限库存。';
 const STOCK_STATUS_ERROR = '库存数量为 0 时不能标为有货。请把数量改为大于 0，或改为 -1（不限库存）。';
@@ -328,11 +329,21 @@ export async function PUT(req: NextRequest) {
         });
       }
       if (variants) {
-        const existing = await tx.productVariant.findMany({ where: { productId: id }, select: { id: true, costPrice: true } });
+        const existing = await tx.productVariant.findMany({
+          where: { productId: id },
+          select: { id: true, costPrice: true, catalogNumber: true, spec: true },
+        });
         const existingIds = new Set(existing.map((item) => item.id));
         const existingCostById = new Map(existing.map((item) => [item.id, item.costPrice]));
         const retainedIds = variants.flatMap((item) => item.id && existingIds.has(item.id) ? [item.id] : []);
-        await tx.productVariant.deleteMany({ where: { productId: id, id: { notIn: retainedIds } } });
+        const retainedIdSet = new Set(retainedIds);
+        const removed = existing.filter((item) => !retainedIdSet.has(item.id));
+        // 规格没有下架字段。库存账户以及批次、预占、流水都级联挂在规格上；
+        // 订单、询价、报价和购物车只在 JSON 里保存规格 id。硬删除会拆掉这些记录，所以先阻止保存。
+        if (removed.length > 0) {
+          await assertVariantsCanBeRemoved(tx, removed);
+          await tx.productVariant.deleteMany({ where: { productId: id, id: { in: removed.map((item) => item.id) } } });
+        }
         for (const variant of variants) {
           const variantData = {
             catalogNumber: variant.catalogNumber,
@@ -426,6 +437,7 @@ export async function PUT(req: NextRequest) {
   } catch (err) {
     console.error('[admin/products PUT] error:', err);
     const message = err instanceof Error ? err.message : '';
+    if (err instanceof VariantRemovalBlockedError) return NextResponse.json({ error: err.message }, { status: 409 });
     if (message === 'PRODUCT_DELETED') return NextResponse.json({ error: '该产品已删除，不能再修改。' }, { status: 409 });
     if (message === 'STOCK_STATUS_CONFLICT') return NextResponse.json({ error: STOCK_STATUS_ERROR }, { status: 400 });
     if (message === 'INVENTORY_BELOW_RESERVED') return NextResponse.json({ error: message }, { status: 409 });
