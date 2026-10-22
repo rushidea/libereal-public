@@ -116,8 +116,11 @@ export default function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  // Next.js 16 leaves `scroll-behavior: smooth` in place during SPA transitions
+  // unless this attribute is set. The homepage is a fragment, so the router's
+  // scrollIntoView starts on the footer and that smooth scroll sticks after login.
   return (
-    <html lang="zh-CN" suppressHydrationWarning>
+    <html lang="zh-CN" suppressHydrationWarning data-scroll-behavior="smooth">
       <head />
       <body suppressHydrationWarning>
         <JsonLd data={buildOrganizationJsonLd()} />
