@@ -386,6 +386,7 @@ export function getTestDb(): Database.Database {
       host TEXT,
       applications TEXT NOT NULL DEFAULT '[]',
       reactivity TEXT NOT NULL DEFAULT '[]',
+      filterTags TEXT NOT NULL DEFAULT '[]',
       description TEXT,
       specificity TEXT,
       productUsage TEXT,
@@ -414,6 +415,7 @@ export function getTestDb(): Database.Database {
       sdsUrl TEXT,
       pmids TEXT NOT NULL DEFAULT '[]',
       stockQuantity INTEGER NOT NULL DEFAULT -1,
+      deletedAt DATETIME,
       brandRecordId TEXT,
       categoryRecordId TEXT,
       subcategoryRecordId TEXT,
@@ -421,6 +423,7 @@ export function getTestDb(): Database.Database {
       updatedAt DATETIME NOT NULL,
       UNIQUE(brand, catalogNumber)
     );
+    CREATE INDEX IF NOT EXISTS Product_deletedAt_idx ON Product(deletedAt);
     CREATE TABLE IF NOT EXISTS ProductVariant (
       id TEXT PRIMARY KEY,
       productId TEXT NOT NULL,
