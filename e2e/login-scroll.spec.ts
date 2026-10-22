@@ -1,5 +1,5 @@
 import type { Page, Route } from '@playwright/test';
-import { test, expect } from './fixtures';
+import { test, expect } from '@playwright/test';
 
 /**
  * Password, passkey, and MFA completion all client-navigate with router.push.
