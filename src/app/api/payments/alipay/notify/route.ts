@@ -25,7 +25,6 @@ function isTerminalAttemptStatus(status: string | null | undefined): boolean {
   return status === 'TRADE_CLOSED'
     || status === 'paid_terminal_reconciliation_required'
     || status === 'paid'
-    || status === ALIPAY_STOCK_SHORTFALL_STATUS
     || status === 'paid_superseded_reconciliation_required'
     || status === 'rejected_order_cancelled'
     || status === 'rejected_amount_mismatch';
