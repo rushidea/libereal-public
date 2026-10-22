@@ -40,6 +40,8 @@
   --surface-muted: color-mix(in srgb, var(--brand-color-bg-container) 92%, var(--brand-color-bg-layout));
   --surface-disabled: color-mix(in srgb, var(--brand-color-bg-container) 72%, var(--brand-color-bg-layout));
   --surface-input: color-mix(in srgb, var(--brand-color-bg-container) 96%, var(--brand-color-bg-layout));
+  /* Day mode keeps the current input border (light surface border). Night mode overrides this. */
+  --input-border: var(--surface-border);
   --surface-hover: color-mix(in srgb, var(--brand-color-bg-container) 94%, var(--brand-color-primary));
   --surface-border-muted: color-mix(in srgb, var(--brand-color-border) 64%, transparent);
   --surface-page: var(--brand-color-bg-layout);
@@ -135,6 +137,7 @@ html {
 */
 html.dark {
   color-scheme: dark;
+  --input-border: #ffffff;
   --shadow-panel: 0 8px 24px rgba(71, 85, 105, 0.28);
   --shadow-panel-strong: 0 12px 32px rgba(71, 85, 105, 0.34);
   --shadow-toolbar: 0 6px 18px rgba(71, 85, 105, 0.24);
@@ -549,7 +552,7 @@ html.dark .libereal-cart-product-list {
 
 .libereal-input {
   min-height: var(--brand-control-height);
-  border: 1px solid var(--surface-border);
+  border: 1px solid var(--input-border);
   border-radius: var(--brand-border-radius);
   background: var(--surface-input);
   color: var(--text-title);
@@ -579,6 +582,54 @@ html.dark .libereal-cart-product-list {
 .libereal-input-error:focus {
   border-color: var(--brand-color-error-hover);
   outline-color: var(--focus-ring);
+}
+
+/*
+  Night mode: every text-like form control uses a white border so it stays
+  visible on dark surfaces. This beats hardcoded Tailwind border utilities
+  (border-gray-*, dark:border-slate-*, border-[var(--surface-border)], etc.).
+  Light mode is unchanged. Focus and error states are excluded so their
+  existing border / ring colors still win.
+*/
+html.dark :where(
+  input:not(
+    [type="button"],
+    [type="checkbox"],
+    [type="color"],
+    [type="file"],
+    [type="hidden"],
+    [type="image"],
+    [type="radio"],
+    [type="range"],
+    [type="reset"],
+    [type="submit"]
+  ),
+  select,
+  textarea
+):where(
+  :not(
+    :focus,
+    :focus-visible,
+    .libereal-input-error,
+    [aria-invalid="true"],
+    [data-invalid="true"],
+    [class*="border-red"],
+    [class*="border-rose"],
+    [class*="border-destructive"]
+  )
+) {
+  border-color: var(--input-border);
+}
+
+html.dark :is(input, select, textarea):is(
+  .libereal-input-error,
+  [aria-invalid="true"],
+  [data-invalid="true"],
+  [class*="border-red"],
+  [class*="border-rose"],
+  [class*="border-destructive"]
+) {
+  border-color: var(--brand-color-error-border);
 }
 
 .libereal-badge {

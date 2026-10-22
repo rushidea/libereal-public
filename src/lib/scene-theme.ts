@@ -36,7 +36,7 @@ export const sceneSurfaceClasses = {
   section: 'rounded-brand-lg border border-[var(--surface-border)] bg-[var(--surface-panel)] shadow-[var(--shadow-panel)]',
   subPanel: 'rounded-brand border border-[var(--surface-border)] bg-[var(--surface-muted)]',
   card: 'rounded-brand border border-[var(--surface-border)] bg-[var(--surface-panel)]',
-  input: 'rounded-brand border border-[var(--surface-border)] bg-[var(--surface-input)] text-[var(--text-title)]',
+  input: 'rounded-brand border border-[var(--input-border)] bg-[var(--surface-input)] text-[var(--text-title)]',
   text: 'text-[var(--brand-color-text)]',
   mutedText: 'text-[var(--brand-color-text-secondary)]',
   focusRing: 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--brand-color-focus-ring-readable)]',
