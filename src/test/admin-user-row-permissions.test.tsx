@@ -39,7 +39,7 @@ function openEditor() {
 
 function getTierSelect() {
   return screen.getAllByRole('combobox').find((element) =>
-    Array.from((element as HTMLSelectElement).options).some((option) => option.value === '翡翠'),
+    Array.from((element as HTMLSelectElement).options).some((option) => option.value === 'standard'),
   ) as HTMLSelectElement;
 }
 

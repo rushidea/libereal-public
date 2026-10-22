@@ -55,7 +55,14 @@ describe('admin orders desktop table', () => {
   it('gives customer and institution columns the remaining width and shows the full text', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => ({
       ok: true,
-      json: async () => orders,
+      json: async () => ({
+        orders,
+        page: 1,
+        pageSize: 20,
+        total: orders.length,
+        statusCounts: { pending: 1, confirmed: 1 },
+        receivableSummary: null,
+      }),
     })));
 
     render(<AdminOrdersPage />);
