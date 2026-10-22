@@ -15,7 +15,7 @@ const user = {
   role: longRole,
   phone: longPhone,
   institutionName: longOrg,
-  tier: '帝王绿翡翠',
+  tier: 'standard',
   createdAt: '2026-01-02T00:00:00.000Z',
   lastLoginAt: '2026-03-01T08:30:00.000Z',
   sourceTemplateId: 'tpl-long',
