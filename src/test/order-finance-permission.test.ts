@@ -100,7 +100,7 @@ describe('finance permissions on payment, refund and settlement', () => {
   afterAll(() => { closeTestDb(); });
   beforeEach(() => {
     clearAllTables(getTestDb());
-    seedUser(getTestDb(), { id: 'user_1', email: 'buyer@test.com', tier: '璞玉' });
+    seedUser(getTestDb(), { id: 'user_1', email: 'buyer@test.com', tier: 'standard' });
     sessionMocks.requireAdmin.mockReset();
     sessionMocks.requireActiveSession.mockReset();
     allowExcept(null);
@@ -129,6 +129,9 @@ describe('finance permissions on payment, refund and settlement', () => {
   });
 
   it('uses orders.write to confirm or ship, and finance.write to cancel an open receivable', async () => {
+    await prisma.creditAccount.create({
+      data: { userId: 'user_1', baseLimit: 5000, usedAmount: 0, status: 'active' },
+    });
     seedOrder({ id: 'o_confirm', status: 'pending', paymentMethod: 'bank_transfer' });
     allowExcept('finance.write');
     const confirmed = await adminOrderPATCH(patch('http://localhost/api/admin/orders/o_confirm', { status: 'confirmed' }), {

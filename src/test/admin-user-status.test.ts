@@ -142,11 +142,11 @@ describe('admin user status update', () => {
       return { id: 'finance_id', email: 'finance@test.com', role: 'admin' };
     });
 
-    const res = await updateUser(makeReq({ userId: 'u_status', tier: '璞玉' }));
+    const res = await updateUser(makeReq({ userId: 'u_status', tier: 'standard' }));
     expect(res.status).toBe(200);
     expect(requireAdmin).not.toHaveBeenCalledWith('pricing.write');
     expect(requireAdmin).not.toHaveBeenCalledWith('customers.write');
-    expect((getTestDb().prepare('SELECT tier FROM User WHERE id = ?').get('u_status') as { tier: string }).tier).toBe('璞玉');
+    expect((getTestDb().prepare('SELECT tier FROM User WHERE id = ?').get('u_status') as { tier: string }).tier).toBe('standard');
   });
 
   it('requires pricing.write to change a customer tier and allows it without customers.write', async () => {
@@ -157,11 +157,11 @@ describe('admin user status update', () => {
       return { id: 'customer_admin_id', email: 'customer-admin@test.com', role: 'admin' };
     });
 
-    const denied = await updateUser(makeReq({ userId: 'u_status', tier: '翡翠' }));
+    const denied = await updateUser(makeReq({ userId: 'u_status', tier: 'tier-2' }));
     expect(denied.status).toBe(403);
     expect(requireAdmin).toHaveBeenCalledWith('pricing.write');
     expect(requireAdmin).not.toHaveBeenCalledWith('customers.write');
-    expect((getTestDb().prepare('SELECT tier FROM User WHERE id = ?').get('u_status') as { tier: string }).tier).toBe('璞玉');
+    expect((getTestDb().prepare('SELECT tier FROM User WHERE id = ?').get('u_status') as { tier: string }).tier).toBe('standard');
 
     requireAdmin.mockImplementation(async (permission?: string) => {
       if (permission === 'customers.write') {
@@ -169,9 +169,9 @@ describe('admin user status update', () => {
       }
       return { id: 'finance_id', email: 'finance@test.com', role: 'admin' };
     });
-    const allowed = await updateUser(makeReq({ userId: 'u_status', tier: '翡翠' }));
+    const allowed = await updateUser(makeReq({ userId: 'u_status', tier: 'tier-2' }));
     expect(allowed.status).toBe(200);
-    expect((getTestDb().prepare('SELECT tier FROM User WHERE id = ?').get('u_status') as { tier: string }).tier).toBe('翡翠');
+    expect((getTestDb().prepare('SELECT tier FROM User WHERE id = ?').get('u_status') as { tier: string }).tier).toBe('tier-2');
   });
 
   it('rejects a profile change without customers.write', async () => {
