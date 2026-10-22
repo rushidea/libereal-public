@@ -78,7 +78,7 @@ export default function HomeClient() {
         <>
           <div className="px-4 sm:px-6">
             <div className="mx-auto max-w-6xl">
-              <ResearchLifeMosaic />
+              <ResearchLifeMosaic parallax />
             </div>
           </div>
           <HomeCampaignHero />
