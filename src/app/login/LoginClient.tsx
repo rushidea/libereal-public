@@ -246,7 +246,7 @@ function LoginForm() {
                 type="button"
                 onClick={() => void handlePasskeySignIn()}
                 disabled={loading || googleLoading || wechatLoading || passkeyLoading}
-                className="mt-3 w-full flex items-center justify-center gap-2 border border-brand-300 hover:bg-brand-50 rounded-xl px-4 py-3 text-sm font-medium text-brand-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl border border-brand-300 px-4 py-3 text-sm font-medium text-brand-700 transition-colors hover:bg-brand-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-2 dark:border-[#4ade80] dark:text-[#a7f3d0] dark:hover:border-[#86efac] dark:focus-visible:border-[#86efac] dark:focus-visible:outline-none dark:focus-visible:ring-2 dark:focus-visible:ring-[#86efac] dark:focus-visible:ring-offset-2 dark:focus-visible:ring-offset-[var(--brand-color-bg-container)]"
               >
                 {passkeyLoading ? '验证中...' : '使用通行密钥登录'}
               </button>
