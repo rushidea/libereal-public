@@ -9,7 +9,7 @@ import CartSync from "@/context/CartSync";
 import { ThemeProvider } from "@/components/ThemeProvider";
 import ErrorBoundaryProvider from "@/components/ErrorBoundaryProvider";
 import ThemeInit from "@/components/ThemeInit";
-import ChatwayWidget from "@/components/ChatwayWidget";
+import KnocketWidget from "@/components/KnocketWidget";
 import ViewportDebug from "@/components/ViewportDebug";
 import ForcedAckOverlay from "@/components/ForcedAckOverlay";
 import JsonLd from "@/components/JsonLd";
@@ -141,7 +141,7 @@ export default function RootLayout({
             </ToastProvider>
           </ThemeProvider>
         </Providers>
-        <ChatwayWidget />
+        <KnocketWidget />
         <ViewportDebug />
       </body>
     </html>

@@ -1202,33 +1202,25 @@ header[data-fixed-header="true"] [data-nav-submenu][data-nav-open="true"] {
   pointer-events: auto;
 }
 
-/* Chatway bubble sits bottom-right with z-index ~2^31; lift above MobileBottomNav on small screens */
+/* Knocket launcher reads --contact-widget-bottom inside its shadow tree.
+   Lift it above MobileBottomNav on small screens. */
 @media (max-width: 1023px) {
-  .chatway--container .chatway--trigger-container {
-    bottom: calc(80px + env(safe-area-inset-bottom, 0px)) !important;
-  }
-
-  .chatway--container .chatway--quick--reply--container {
-    bottom: calc(160px + env(safe-area-inset-bottom, 0px)) !important;
-  }
-
-  .chatway--container .chatway--preview--only--container {
-    bottom: calc(120px + env(safe-area-inset-bottom, 0px)) !important;
-  }
-
-  body[data-mobile-bottom-popup-open="true"] .chatway--container,
-  body[data-mobile-bottom-popup-open="true"] iframe[src*="chatway.app"],
-  body[data-suppress-chatway="true"] .chatway--container,
-  body[data-suppress-chatway="true"] iframe[src*="chatway.app"] {
-    opacity: 0 !important;
-    visibility: hidden !important;
-    pointer-events: none !important;
+  #contact-widget-auto {
+    --contact-widget-bottom: calc(80px + env(safe-area-inset-bottom, 0px));
   }
 
   /* Bottom nav sheet open: keep page from rubber-banding under the overlay */
   body[data-mobile-bottom-popup-open="true"] {
     overscroll-behavior: none;
   }
+}
+
+/* Critical dialogs suppress the support launcher at every viewport width. */
+body[data-mobile-bottom-popup-open="true"] #contact-widget-auto,
+body[data-suppress-knocket="true"] #contact-widget-auto {
+  opacity: 0 !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
 }
 
 /* 首页技术支持卡片横向 marquee 动画

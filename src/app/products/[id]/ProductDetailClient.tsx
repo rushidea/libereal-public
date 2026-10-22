@@ -20,7 +20,7 @@ import { getProductImageAlt, getProductImageUrl } from '@/lib/productImage';
 import { uiSurfaces } from '@/lib/ui-surfaces';
 import { getEffectiveProductPrice } from '@/lib/product-pricing';
 import { getVariantOptionCopy, mergeProductPackageOptions } from '@/lib/product-variants';
-import { acquireChatwaySuppression } from '@/lib/suppress-chatway';
+import { acquireKnocketSuppression } from '@/lib/suppress-knocket';
 import type { ProductVariant } from '@/types/Product';
 import { getCartPromotionQualificationViews } from '@/lib/cart-promotions/detect';
 import { isEligibleMainProduct } from '@/lib/cart-promotions/matching';
@@ -183,8 +183,8 @@ export default function ProductDetailClient({ product, variants, related }: Prod
 
   useEffect(() => {
     if (!hasVariants) return;
-    // Chatway 气泡层级极高；有页内规格选择时在手机端临时隐藏，避免挡住加购区。
-    return acquireChatwaySuppression();
+    // 客服气泡会挡住手机端加购区；有页内规格选择时临时隐藏。
+    return acquireKnocketSuppression();
   }, [hasVariants]);
 
   const handleToggleCart = () => {

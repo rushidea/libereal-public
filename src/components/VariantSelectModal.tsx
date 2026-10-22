@@ -4,7 +4,7 @@ import { useEffect, useId, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Check, ShoppingCart, X } from 'lucide-react';
 import type { Product, ProductVariant } from '@/types/Product';
-import { acquireChatwaySuppression } from '@/lib/suppress-chatway';
+import { acquireKnocketSuppression } from '@/lib/suppress-knocket';
 import { uiSurfaces } from '@/lib/ui-surfaces';
 
 type VariantSelectModalProps = {
@@ -42,11 +42,11 @@ export default function VariantSelectModal({
     document.addEventListener('keydown', onKeyDown);
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
-    const releaseChatway = acquireChatwaySuppression();
+    const releaseKnocket = acquireKnocketSuppression();
     return () => {
       document.removeEventListener('keydown', onKeyDown);
       document.body.style.overflow = previousOverflow;
-      releaseChatway();
+      releaseKnocket();
     };
   }, [onClose]);
 
