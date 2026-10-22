@@ -3,11 +3,10 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 
-import { useSession } from 'next-auth/react';
-import type { Session } from 'next-auth';
 import {
   Search, Package, Archive, Check, Clock, XCircle, ChevronRight, MessageSquare,
 } from 'lucide-react';
+import { ADMIN_INQUIRY_TODO_STATUSES, notifyAdminInquiryTodoChanged } from '@/lib/admin-inquiry-todo';
 import { InquiryIdDisplay } from '@/components/InquiryIdDisplay';
 import { effectiveInquiryStatus, presentedQuoteStatus } from '@/lib/quote-expiry';
 
@@ -77,7 +76,6 @@ export default function AdminInquiriesPage() {
 
 function InquiriesPanel() {
   const router = useRouter();
-  const { data: session } = useSession();
   const [inquiries, setInquiries] = useState<Inquiry[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -223,7 +221,6 @@ function InquiriesPanel() {
                   setInquiryItems={setInquiryItems}
                   inquiryLogsExpanded={inquiryLogsExpanded}
                   setInquiryLogsExpanded={setInquiryLogsExpanded}
-                  session={session}
                   inquiryTotal={inquiryTotal}
                   fetchData={fetchData}
                   archiveInquiries={archiveInquiries}
@@ -240,7 +237,7 @@ function InquiriesPanel() {
 function InquiryRow({
   inquiry, selectedInquiry, setSelectedInquiry, selectedInquiries, setSelectedInquiries,
   inquiryItems, setInquiryItems, inquiryLogsExpanded, setInquiryLogsExpanded,
-  session, inquiryTotal, fetchData, archiveInquiries,
+  inquiryTotal, fetchData, archiveInquiries,
 }: {
   inquiry: Inquiry;
   selectedInquiry: Inquiry | null;
@@ -251,7 +248,6 @@ function InquiryRow({
   setInquiryItems: (i: InquiryItem[]) => void;
   inquiryLogsExpanded: boolean;
   setInquiryLogsExpanded: (b: boolean) => void;
-  session: Session | null;
   inquiryTotal: number;
   fetchData: () => Promise<void>;
   archiveInquiries: (ids: string[]) => Promise<void>;
@@ -323,7 +319,6 @@ function InquiryRow({
               setInquiryItems={setInquiryItems}
               inquiryLogsExpanded={inquiryLogsExpanded}
               setInquiryLogsExpanded={setInquiryLogsExpanded}
-              session={session}
               inquiryTotal={inquiryTotal}
               fetchData={fetchData}
             />
@@ -336,14 +331,13 @@ function InquiryRow({
 
 function InquiryDetailPanel({
   inquiry, inquiryItems, setInquiryItems, inquiryLogsExpanded, setInquiryLogsExpanded,
-  session, inquiryTotal, fetchData,
+  inquiryTotal, fetchData,
 }: {
   inquiry: Inquiry;
   inquiryItems: InquiryItem[];
   setInquiryItems: (i: InquiryItem[]) => void;
   inquiryLogsExpanded: boolean;
   setInquiryLogsExpanded: (b: boolean) => void;
-  session: Session | null;
   inquiryTotal: number;
   fetchData: () => Promise<void>;
 }) {
@@ -474,25 +468,35 @@ function InquiryDetailPanel({
       <div className="pt-4 border-t border-gray-200">
         <button onClick={async () => {
           if (!confirm('确定提交报价单给客户吗？')) return;
-          const patchRes = await fetch(`/api/inquiries/${inquiry.id}`, {
-            method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              items: inquiryItems,
-              adminLog: {
-                adminId: session?.user?.id || session?.user?.email || 'admin',
-                adminEmail: session?.user?.email,
-                time: new Date().toISOString(),
-                items: inquiryItems.map(it => ({ name: it.name, price: it.price, quantity: it.quantity, leadTime: it.leadTime || '' })),
-              },
-            }),
+          const alreadyRecorded = inquiry.hasUnresolvedPricing !== true
+            && Boolean(inquiry.operationLogs)
+            && inquiry.operationLogs !== '[]'
+            && inquiry.operationLogs !== '';
+          const wasAwaitingQuote = (ADMIN_INQUIRY_TODO_STATUSES as readonly string[]).includes(inquiry.status)
+            && inquiry.activeQuote?.status !== 'sent'
+            && inquiry.activeQuote?.status !== 'accepted'
+            && !alreadyRecorded;
+          const quoteRes = await fetch(`/api/inquiries/${inquiry.id}/quote`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ items: inquiryItems }),
           });
-          if (!patchRes.ok) {
-            const err = await patchRes.json();
-            alert('保存失败：' + (err.error || '未知错误'));
+          if (!quoteRes.ok) {
+            const err = await quoteRes.json().catch(() => ({}));
+            alert('提交失败：' + (err.error || '未知错误'));
             return;
           }
+          const patchRes = await fetch(`/api/inquiries/${inquiry.id}`, {
+            method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ items: inquiryItems }),
+          });
+          notifyAdminInquiryTodoChanged(wasAwaitingQuote ? -1 : undefined);
           fetchData();
-          alert('报价已记录，可继续修改');
+          if (!patchRes.ok) {
+            const err = await patchRes.json().catch(() => ({}));
+            alert('报价已提交，询价明细保存失败：' + (err.error || '未知错误'));
+            return;
+          }
+          alert('报价已提交');
         }} className="w-full py-3 bg-brand-600 text-white rounded-lg font-medium hover:bg-brand-700">
           提交报价
         </button>

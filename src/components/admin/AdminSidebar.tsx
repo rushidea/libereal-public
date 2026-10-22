@@ -12,6 +12,7 @@ import {
 import BottomPopup from '@/components/mobile/BottomPopup';
 import { uiSurfaces } from '@/lib/ui-surfaces';
 import type { AdminPermissionKey } from '@/lib/admin-permissions';
+import { ADMIN_TODO_REFRESH_EVENT } from '@/lib/admin-inquiry-todo';
 
 interface NavItem {
   href: string;
@@ -105,11 +106,12 @@ function isActive(pathname: string, item: NavItem): boolean {
   return pathname === hrefPath || pathname.startsWith(hrefPath + '/');
 }
 
-function TodoBadge({ count, compact = false }: { count: number; compact?: boolean }) {
+function TodoBadge({ count, compact = false, testId }: { count: number; compact?: boolean; testId?: string }) {
   if (count <= 0) return null;
   const label = count > 99 ? '99+' : String(count);
   return (
     <span
+      data-testid={testId}
       className={`inline-flex items-center justify-center rounded-full bg-red-500 text-white font-bold leading-none shadow-sm ${
         compact ? 'min-w-4 h-4 px-1 text-[10px]' : 'min-w-5 h-5 px-1.5 text-[11px]'
       }`}
@@ -193,11 +195,24 @@ export default function AdminSidebar({ collapsed = false }: AdminSidebarProps) {
       }
     }
 
+    function onTodoRefresh(event: Event) {
+      const delta = (event as CustomEvent<{ inquiriesDelta?: number }>).detail?.inquiriesDelta;
+      if (typeof delta === 'number' && delta !== 0) {
+        setTodoCounts((current) => ({
+          ...current,
+          inquiries: Math.max(0, current.inquiries + delta),
+        }));
+      }
+      void fetchTodos();
+    }
+
     fetchTodos();
     const timer = window.setInterval(fetchTodos, 60_000);
+    window.addEventListener(ADMIN_TODO_REFRESH_EVENT, onTodoRefresh);
     return () => {
       cancelled = true;
       window.clearInterval(timer);
+      window.removeEventListener(ADMIN_TODO_REFRESH_EVENT, onTodoRefresh);
     };
   }, []);
 
@@ -231,10 +246,10 @@ export default function AdminSidebar({ collapsed = false }: AdminSidebarProps) {
                       {!collapsed && <span className="flex-1 truncate">{item.label}</span>}
                       {collapsed ? (
                         <span className="absolute translate-x-3 -translate-y-3">
-                          <TodoBadge count={badgeByHref[item.href] || 0} compact />
+                          <TodoBadge count={badgeByHref[item.href] || 0} compact testId={item.href === '/admin/inquiries' ? 'admin-nav-badge-inquiries' : undefined} />
                         </span>
                       ) : (
-                        <TodoBadge count={badgeByHref[item.href] || 0} />
+                        <TodoBadge count={badgeByHref[item.href] || 0} testId={item.href === '/admin/inquiries' ? 'admin-nav-badge-inquiries' : undefined} />
                       )}
                     </Link>
                   );
@@ -273,7 +288,7 @@ export default function AdminSidebar({ collapsed = false }: AdminSidebarProps) {
                 <span className="relative">
                   <Icon className="w-[22px] h-[22px] mb-0.5 pointer-events-none" />
                   <span className="absolute -top-1.5 -right-2">
-                    <TodoBadge count={badgeByHref[item.href] || 0} compact />
+                    <TodoBadge count={badgeByHref[item.href] || 0} compact testId={item.href === '/admin/inquiries' ? 'admin-nav-badge-inquiries' : undefined} />
                   </span>
                 </span>
                 <span className="max-w-full truncate whitespace-nowrap text-xs font-medium">{item.label}</span>
@@ -319,7 +334,7 @@ export default function AdminSidebar({ collapsed = false }: AdminSidebarProps) {
                 >
                   <Icon className={`h-4 w-4 flex-shrink-0 ${active ? uiSurfaces.textInteractive : uiSurfaces.mutedText}`} />
                   <span className="min-w-0 flex-1 truncate">{item.label}</span>
-                  <TodoBadge count={badgeByHref[item.href] || 0} />
+                  <TodoBadge count={badgeByHref[item.href] || 0} testId={item.href === '/admin/inquiries' ? 'admin-nav-badge-inquiries' : undefined} />
                 </Link>
               );
             })}

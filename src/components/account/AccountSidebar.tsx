@@ -20,6 +20,11 @@ import {
   User,
 } from 'lucide-react';
 
+import { useCustomerNotifications } from '@/context/CustomerNotificationsContext';
+import {
+  type CustomerNotificationModule,
+  type CustomerNotificationModuleCounts,
+} from '@/lib/customer-notification-modules';
 import { uiSurfaces } from '@/lib/ui-surfaces';
 
 export type AccountTabKey =
@@ -63,14 +68,45 @@ const accountTabs: AccountTab[] = [
   { key: 'security', label: '账户安全', icon: ShieldCheck, rootHref: '/account/security', standaloneHref: '/account/security' },
 ];
 
+const SIDEBAR_NOTIFICATION_MODULE: Partial<Record<AccountTabKey, CustomerNotificationModule>> = {
+  overview: 'overview',
+  orders: 'orders',
+  inquiries: 'inquiries',
+  points: 'points',
+  recipes: 'recipes',
+  notifications: 'notifications',
+  organizations: 'organizations',
+};
+
+function formatUnreadCount(count: number): string {
+  return count > 99 ? '99+' : String(count);
+}
+
+function UnreadBadge({ count, testId }: { count: number; testId: string }) {
+  if (count <= 0) return null;
+  return (
+    <span
+      data-testid={testId}
+      className="ml-auto inline-flex h-4 min-w-4 shrink-0 items-center justify-center rounded-full bg-[var(--brand-color-error)] px-1 text-[10px] font-bold leading-none text-[var(--brand-color-text-on-primary)]"
+      aria-label={`${count} 条未读`}
+    >
+      {formatUnreadCount(count)}
+    </span>
+  );
+}
+
 export default function AccountSidebar({
   activeKey,
   onTabChange,
+  unreadCounts,
 }: {
   activeKey: string;
   onTabChange?: (key: AccountTabKey) => void;
+  unreadCounts?: Partial<CustomerNotificationModuleCounts>;
 }) {
   const { data: session } = useSession();
+  const live = useCustomerNotifications();
+  const counts = unreadCounts ?? live.unreadByModule;
   const isAdmin = (session?.user as { role?: string } | undefined)?.role === 'admin';
   const itemBaseClass = 'flex min-h-11 w-full items-center gap-2 rounded-xl px-3 py-2.5 text-left text-sm font-medium transition-colors';
   const activeClass = 'bg-brand-50 text-brand-700 dark:bg-brand-100 dark:text-brand-700';
@@ -83,12 +119,20 @@ export default function AccountSidebar({
           const Icon = tab.icon;
           const className = `${itemBaseClass} ${activeKey === tab.key ? activeClass : inactiveClass} ${tab.key === 'overview' ? 'col-span-2 lg:col-span-1' : ''}`;
           const href = onTabChange ? tab.rootHref : tab.standaloneHref;
+          const moduleName = SIDEBAR_NOTIFICATION_MODULE[tab.key];
+          const unread = moduleName ? counts[moduleName] ?? 0 : 0;
+          const content = (
+            <>
+              <Icon size={16} className="shrink-0" />
+              <span className="min-w-0 flex-1 truncate">{tab.label}</span>
+              <UnreadBadge count={unread} testId={`account-nav-badge-${tab.key}`} />
+            </>
+          );
 
           if (href) {
             return (
               <Link key={tab.key} href={href} className={className}>
-                <Icon size={16} />
-                {tab.label}
+                {content}
               </Link>
             );
           }
@@ -100,8 +144,7 @@ export default function AccountSidebar({
               onClick={() => onTabChange?.(tab.key)}
               className={`${className} ${activeKey === tab.key ? '' : 'cursor-pointer'}`}
             >
-              <Icon size={16} />
-              {tab.label}
+              {content}
             </button>
           );
         })}

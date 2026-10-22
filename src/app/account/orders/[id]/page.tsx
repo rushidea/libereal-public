@@ -11,6 +11,7 @@ import {
   User, MapPin, CreditCard
 } from 'lucide-react';
 import AdaptiveHeader from '@/components/AdaptiveHeader';
+import { useMarkNotificationModuleRead } from '@/context/CustomerNotificationsContext';
 import MobileBottomNav from '@/components/mobile/MobileBottomNav';
 import SiteFooter from '@/components/SiteFooter';
 import AlipayPaymentButton from '@/components/account/AlipayPaymentButton';
@@ -105,6 +106,7 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
   const { id } = use(params);
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const { data: session, status } = useSession();
+  useMarkNotificationModuleRead('orders');
   const router = useRouter();
   const [order, setOrder] = useState<Order | null>(null);
   const [loading, setLoading] = useState(true);
