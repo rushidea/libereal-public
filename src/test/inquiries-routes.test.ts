@@ -12,6 +12,7 @@ import { POST as confirmQuotePOST } from '@/app/api/orders/[id]/confirm-items/ro
 import { PATCH as archivePATCH } from '@/app/api/admin/inquiries/archive/route';
 import { GET as archivedGET } from '@/app/api/admin/inquiries/archived/route';
 import { NextRequest } from 'next/server';
+import { prisma } from '@/lib/prisma';
 import { getTestDb, closeTestDb, seedAdmin, seedUser, clearAllTables } from './db-helpers';
 import { calculateOrderPoints } from '@/lib/points';
 

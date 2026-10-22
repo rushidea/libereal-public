@@ -49,6 +49,8 @@ describe('quote expiry helpers', () => {
 });
 
 describe('quote.expire background task', () => {
+  const past = new Date(Date.now() - 86_400_000).toISOString();
+  const future = new Date(Date.now() + 86_400_000).toISOString();
   beforeAll(() => { getTestDb(); });
   afterAll(() => { closeTestDb(); });
   beforeEach(() => { clearAllTables(getTestDb()); });
