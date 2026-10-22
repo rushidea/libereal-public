@@ -5,6 +5,7 @@ import Image from 'next/image';
 import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { ArrowRight } from 'lucide-react';
 import HomeSectionHeader from '@/components/home/HomeSectionHeader';
+import Reveal from '@/components/home/Reveal';
 import { scenes } from '@/data/scenes';
 import { getSceneTheme } from '@/lib/scene-theme';
 import { uiSurfaces } from '@/lib/ui-surfaces';
@@ -300,7 +301,7 @@ export default function ApplicationScenes() {
 
   return (
     <section id="application-scenes" className="scroll-mt-site-header px-4 py-4 sm:py-8">
-      <div className="max-w-6xl mx-auto">
+      <Reveal className="max-w-6xl mx-auto">
         <HomeSectionHeader title="应用与场景" className="hidden sm:flex" />
         <div
           className="grid gap-4 min-[740px]:grid-cols-2 lg:grid-cols-3"
@@ -326,7 +327,7 @@ export default function ApplicationScenes() {
             <ArrowRight size={14} />
           </Link>
         </div>
-      </div>
+      </Reveal>
     </section>
   );
 }

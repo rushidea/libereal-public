@@ -15,6 +15,7 @@ import {
   RESEARCH_LIFE_AUTO_ROTATE_MS,
   RESEARCH_LIFE_SLIDES,
 } from '@/components/home/ResearchLifeCarousel';
+import { heroParallaxOffset, HERO_PARALLAX_DESKTOP_QUERY } from '@/components/home/hero-parallax';
 
 const DESKTOP_SLOTS = [
   { left: '50%', top: '48%', width: '58%', rotate: 0, zIndex: 20 },
@@ -63,12 +64,66 @@ function getMobileStyle(index: number, activeIndex: number): CSSProperties {
   };
 }
 
-export default function ResearchLifeMosaic() {
+export default function ResearchLifeMosaic({ parallax = false }: { parallax?: boolean }) {
   const [activeIndex, setActiveIndex] = useState(0);
   const [autoRotate, setAutoRotate] = useState(true);
   const [interactionPaused, setInteractionPaused] = useState(false);
   const touchStartX = useRef<number | null>(null);
+  const sectionRef = useRef<HTMLElement>(null);
   const activeSlide = RESEARCH_LIFE_SLIDES[activeIndex];
+
+  useEffect(() => {
+    if (!parallax) return;
+    const section = sectionRef.current;
+    if (!section) return;
+
+    const desktopQuery = window.matchMedia(HERO_PARALLAX_DESKTOP_QUERY);
+    const reduceQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
+    let frame = 0;
+    let listening = false;
+
+    const paint = () => {
+      frame = 0;
+      const allow = desktopQuery.matches && !reduceQuery.matches;
+      const distance = Math.max(0, -section.getBoundingClientRect().top);
+      section.querySelectorAll<HTMLElement>('[data-hero-parallax]').forEach((node) => {
+        const offset = heroParallaxOffset(distance, Number(node.dataset.heroParallax), allow);
+        node.style.transform = offset === 0 ? '' : `translate3d(0, ${offset.toFixed(2)}px, 0)`;
+      });
+    };
+
+    const onScroll = () => {
+      if (frame) return;
+      frame = window.requestAnimationFrame(paint);
+    };
+
+    const sync = () => {
+      const allow = desktopQuery.matches && !reduceQuery.matches;
+      if (allow && !listening) {
+        listening = true;
+        window.addEventListener('scroll', onScroll, { passive: true });
+      } else if (!allow && listening) {
+        listening = false;
+        window.removeEventListener('scroll', onScroll);
+        if (frame) window.cancelAnimationFrame(frame);
+        frame = 0;
+      }
+      paint();
+    };
+
+    sync();
+    desktopQuery.addEventListener('change', sync);
+    reduceQuery.addEventListener('change', sync);
+    return () => {
+      if (listening) window.removeEventListener('scroll', onScroll);
+      desktopQuery.removeEventListener('change', sync);
+      reduceQuery.removeEventListener('change', sync);
+      if (frame) window.cancelAnimationFrame(frame);
+      section.querySelectorAll<HTMLElement>('[data-hero-parallax]').forEach((node) => {
+        node.style.transform = '';
+      });
+    };
+  }, [parallax]);
 
   useEffect(() => {
     const mediaQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
@@ -111,11 +166,15 @@ export default function ResearchLifeMosaic() {
 
   return (
     <section
+      ref={sectionRef}
       className="overflow-hidden rounded-xl bg-[#ffffff] text-[#0f172a] ring-1 ring-slate-200/70 dark:bg-[var(--brand-color-bg-container)] dark:text-[var(--brand-color-text)] dark:ring-1 dark:ring-[var(--brand-color-border)]"
       aria-label="中央大图与四周小图科研生活轮播"
     >
       <div className="relative px-3 pb-5 pt-7 sm:px-8 sm:pb-7 sm:pt-9">
-        <h2 className="text-center text-2xl font-semibold leading-tight text-[#0f172a] dark:text-[var(--brand-color-text)] sm:text-3xl">
+        <h2
+          className="text-center text-2xl font-semibold leading-tight text-[#0f172a] dark:text-[var(--brand-color-text)] sm:text-3xl"
+          data-hero-parallax={parallax ? '0.05' : undefined}
+        >
           科研生活，<span className="text-[var(--brand-color-text-interactive)]">全搞定。</span>
         </h2>
 
@@ -217,6 +276,7 @@ export default function ResearchLifeMosaic() {
           </button>
         </div>
 
+        <div data-hero-parallax={parallax ? '0.03' : undefined}>
         <div className="mt-4 flex min-h-11 items-center justify-center">
           {activeSlide.href ? (
             <Link
@@ -244,6 +304,7 @@ export default function ResearchLifeMosaic() {
               aria-pressed={index === activeIndex}
             />
           ))}
+        </div>
         </div>
       </div>
     </section>

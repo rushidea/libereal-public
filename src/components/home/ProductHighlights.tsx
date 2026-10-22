@@ -7,6 +7,7 @@ import { Package } from 'lucide-react';
 import type { Product } from '@/types/Product';
 import { getCategoryGradient, getProductImageAlt, getProductImageUrl } from '@/lib/productImage';
 import HomeSectionHeader from '@/components/home/HomeSectionHeader';
+import Reveal from '@/components/home/Reveal';
 import { uiSurfaces } from '@/lib/ui-surfaces';
 
 type HotProduct = Product;
@@ -39,12 +40,14 @@ export default function ProductHighlights() {
   return (
     <section className="py-6 sm:py-10 px-4">
       <div className="max-w-6xl mx-auto">
-        <HomeSectionHeader
-          title="热门产品"
-          href="/products"
-          linkLabel="查看全部"
-        />
-        <div className={productGridClass}>
+        <Reveal>
+          <HomeSectionHeader
+            title="热门产品"
+            href="/products"
+            linkLabel="查看全部"
+          />
+        </Reveal>
+        <Reveal className={productGridClass} stagger={60}>
           {loading ? Array.from({ length: 6 }).map((_, i) => (
             <div key={i} className={`grid min-h-32 grid-cols-[7.25rem_minmax(0,1fr)] overflow-hidden rounded-lg animate-pulse sm:block ${uiSurfaces.panel} ${hotProductVisibilityClass(i)}`}>
               <div className={`sm:h-36 ${uiSurfaces.skeleton}`} />
@@ -113,7 +116,7 @@ export default function ProductHighlights() {
               </Link>
             );
           })}
-        </div>
+        </Reveal>
       </div>
     </section>
   );

@@ -15,6 +15,7 @@ import {
   ExternalLink,
 } from 'lucide-react';
 import HomeSectionHeader from '@/components/home/HomeSectionHeader';
+import Reveal from '@/components/home/Reveal';
 import { protocolSummaries, type ProtocolSummary } from '@/data/protocols-summary';
 import {
   difficultyBadgeClass,
@@ -941,11 +942,13 @@ export default function HomeResourceServices() {
   return (
     <section className="px-4 py-6 sm:py-10">
       <div className="mx-auto max-w-6xl">
-        <HomeSectionHeader
-          title="资源与服务"
-          className="mb-6 sm:mb-8"
-        />
-        <div className="grid grid-cols-1 gap-4 sm:gap-8 min-[740px]:grid-cols-2 min-[740px]:gap-4 lg:grid-cols-3 lg:gap-10 lg:[&>*:last-child]:col-span-1">
+        <Reveal>
+          <HomeSectionHeader
+            title="资源与服务"
+            className="mb-6 sm:mb-8"
+          />
+        </Reveal>
+        <Reveal className="grid grid-cols-1 gap-4 sm:gap-8 min-[740px]:grid-cols-2 min-[740px]:gap-4 lg:grid-cols-3 lg:gap-10 lg:[&>*:last-child]:col-span-1" stagger={80}>
           <ColumnShell
             title="实验方法"
             subtitle="从基础入手，熟悉流程，助您轻松科研起步。"
@@ -983,7 +986,7 @@ export default function HomeResourceServices() {
           >
             <SupportList />
           </ColumnShell>
-        </div>
+        </Reveal>
       </div>
     </section>
   );
