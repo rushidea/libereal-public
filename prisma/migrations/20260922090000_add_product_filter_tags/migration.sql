@@ -1,0 +1,1 @@
+ALTER TABLE "Product" ADD COLUMN "filterTags" TEXT NOT NULL DEFAULT '[]';
