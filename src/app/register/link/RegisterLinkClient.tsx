@@ -10,9 +10,11 @@ import { CheckCircle, AlertCircle, Link2 } from 'lucide-react';
 import AdaptiveHeader from '@/components/AdaptiveHeader';
 import MobileBottomNav from '@/components/mobile/MobileBottomNav';
 import { isGoogleLoginEnabled } from '@/lib/auth-helpers';
+import { sanitizeAuthCallbackUrl } from '@/lib/auth-callback-url';
 
 function RegisterLinkForm() {
   const searchParams = useSearchParams();
+  const returnPath = sanitizeAuthCallbackUrl(searchParams.get('callbackUrl'), '');
   const [googleLinked, setGoogleLinked] = useState(false);
   const [wechatLinked, setWechatLinked] = useState(false);
   const [linkingProvider, setLinkingProvider] = useState<'google' | 'wechat' | null>(null);
@@ -149,7 +151,7 @@ function RegisterLinkForm() {
             </div>
 
             <Link
-              href="/account"
+              href={returnPath || '/account'}
               className="block w-full text-center bg-brand-500 hover:bg-brand-600 text-white py-3 rounded-xl font-semibold transition-colors"
             >
               {allLinked ? '进入账户' : '跳过，稍后绑定'}

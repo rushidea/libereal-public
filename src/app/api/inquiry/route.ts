@@ -1,10 +1,9 @@
 import { generateId } from '@/lib/id';
 import { NextRequest, NextResponse } from 'next/server';
-import { rateLimitAsync } from '@/lib/rateLimit';
+import { rateLimitAsyncWithWindow } from '@/lib/rateLimit';
 import { prisma } from '@/lib/prisma';
 import { AMBIGUOUS_PRODUCT_CATALOG_NUMBER, CustomerUnavailableProductError, verifyAndPriceItems, type PriceLookupItem } from '@/lib/pricing';
 import { reportError } from '@/lib/errorReporting';
-import { auth } from '@/lib/auth';
 import { requireActiveSession } from '@/lib/session';
 import { sendAdminOperationalEmail } from '@/lib/mail';
 import { toInquiryItemCreates } from '@/lib/commerce-records';
@@ -12,6 +11,8 @@ import { assertNoPendingForcedAck } from '@/lib/notification-ack';
 import { resolveRecordOwnership } from '@/lib/organization-record-access';
 import { organizationRbacErrorStatus, OrganizationRbacError } from '@/lib/organization-service';
 import { buildCheckoutRequestFingerprint, isUniqueConstraintError, validCheckoutAttemptId } from '@/lib/checkout-idempotency';
+import { getTrustedClientIp } from '@/lib/trusted-client-ip';
+import { assertAllowedInquiryIdentity, identityForInquiryFromProfile, INQUIRY_IP_LIMIT_PER_WINDOW, INQUIRY_IP_WINDOW_MS } from '@/lib/inquiry-validation';
 
 const HIGH_VALUE_INQUIRY_THRESHOLD = Number(process.env.HIGH_VALUE_INQUIRY_THRESHOLD ?? 5000);
 const BATCH_INQUIRY_ITEM_THRESHOLD = Number(process.env.BATCH_INQUIRY_ITEM_THRESHOLD ?? 5);
@@ -25,10 +26,9 @@ type InquiryBody = {
 };
 
 export async function POST(req: NextRequest) {
-  const ip = req.headers.get('x-forwarded-for')?.split(',')[0].trim()
-    ?? req.headers.get('x-real-ip') ?? 'unknown';
+  const ip = getTrustedClientIp(req);
 
-  const { allowed, remaining, resetIn } = await rateLimitAsync(ip);
+  const { allowed, remaining, resetIn } = await rateLimitAsyncWithWindow(`inquiry:${ip}`, INQUIRY_IP_LIMIT_PER_WINDOW, INQUIRY_IP_WINDOW_MS);
   if (!allowed) {
     return NextResponse.json(
       { error: '请求过于频繁，请稍后再试。', retryAfter: Math.ceil(resetIn / 1000) },
@@ -37,13 +37,9 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const session = await auth();
-    let sessionUserId = session?.user?.id ?? null;
-    if (sessionUserId) {
-      const activeUser = await requireActiveSession();
-      if (activeUser instanceof NextResponse) return activeUser;
-      sessionUserId = activeUser.id;
-    }
+    const activeUser = await requireActiveSession();
+    if (activeUser instanceof NextResponse) return activeUser;
+    const sessionUserId = activeUser.id;
 
     const body = await req.json() as InquiryBody;
     const { name, email, phone, institution, department, address, notes, items, paymentMethod, identity, advisorName, advisorPhone, organizationId, honeypot } = body;
@@ -72,6 +68,13 @@ export async function POST(req: NextRequest) {
     // Validate items: must be array with at least one entry
     if (!Array.isArray(items) || items.length === 0) {
       return NextResponse.json({ error: '询价单至少包含一个商品' }, { status: 400 });
+    }
+
+    let submittedIdentity: string | null = null;
+    try {
+      submittedIdentity = assertAllowedInquiryIdentity(identity);
+    } catch {
+      return NextResponse.json({ error: '身份取值无效' }, { status: 400 });
     }
 
     // Commerce restrictions are checked before an existing keyed request can replay.
@@ -137,10 +140,11 @@ export async function POST(req: NextRequest) {
 
     // Determine initial status and check order limit for new users
     let initialStatus = '待确认';
+    let storedIdentity = submittedIdentity;
     if (sessionUserId) {
       const user = await prisma.user.findUnique({
         where: { id: sessionUserId },
-        select: { isNewUser: true, phone: true, phoneVerifiedAt: true, approvalStatus: true, isBlacklisted: true, isFrozen: true, role: true, creditAccount: { select: { status: true } } },
+        select: { isNewUser: true, phone: true, phoneVerifiedAt: true, approvalStatus: true, isBlacklisted: true, isFrozen: true, role: true, identity: true, creditAccount: { select: { status: true } } },
       });
       const forcedAckBlock = await assertNoPendingForcedAck(sessionUserId, user?.role);
       if (forcedAckBlock) return forcedAckBlock;
@@ -172,11 +176,7 @@ export async function POST(req: NextRequest) {
         }
         initialStatus = '待人工审核';
       }
-    } else if (requiresVerifiedAccount) {
-      return NextResponse.json(
-        { error: '高价值或批量询价需登录并完成手机号验证后提交。' },
-        { status: 401 }
-      );
+      storedIdentity = identityForInquiryFromProfile(user?.identity) ?? submittedIdentity;
     }
 
     try {
@@ -192,7 +192,7 @@ export async function POST(req: NextRequest) {
         notes: notes || null,
         subtotal: pricedItems.some((item) => item.quoteRequired) ? 0 : verifiedSubtotal,
         paymentMethod: paymentMethod || null,
-        identity: identity || null,
+        identity: storedIdentity,
         advisorName: advisorName || null,
         advisorPhone: advisorPhone || null,
         status: initialStatus,

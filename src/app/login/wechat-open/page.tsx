@@ -8,10 +8,11 @@ import { ArrowLeft, Copy, Check } from 'lucide-react';
 import AdaptiveHeader from '@/components/AdaptiveHeader';
 import MobileBottomNav from '@/components/mobile/MobileBottomNav';
 import { buildWeChatInAppLaunchUrl } from '@/lib/wechat-open-url';
+import { sanitizeAuthCallbackUrl } from '@/lib/auth-callback-url';
 
 function WeChatOpenContent() {
   const searchParams = useSearchParams();
-  const callbackUrl = searchParams.get('callbackUrl') ?? '/';
+  const callbackUrl = sanitizeAuthCallbackUrl(searchParams.get('callbackUrl'), '/');
   const [copied, setCopied] = useState(false);
 
   const launchUrl = useMemo(

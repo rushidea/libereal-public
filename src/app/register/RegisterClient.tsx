@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useMemo, Suspense } from 'react';
+import { useEffect, useState, useMemo, useRef, Suspense } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
 import { signIn, useSession } from 'next-auth/react';
@@ -13,6 +13,7 @@ import LegalConsentChecklist from '@/components/legal/LegalConsentChecklist';
 import AdaptiveHeader from '@/components/AdaptiveHeader';
 import MobileBottomNav from '@/components/mobile/MobileBottomNav';
 import { signInWithWeChat } from '@/lib/wechat-sign-in';
+import { appendAuthCallbackUrl, sanitizeAuthCallbackUrl, withAuthCallback } from '@/lib/auth-callback-url';
 import { getInstitutionLabels, isSchoolInstitutionType } from '@/data/institution-profile';
 import { PASSWORD_MIN_LENGTH } from '@/lib/password-policy';
 
@@ -23,6 +24,8 @@ function RegisterForm() {
   const wechat = searchParams.get('wechat');
   const oauth = searchParams.get('oauth');
   const oauthEmail = searchParams.get('email') ?? '';
+  const returnPath = sanitizeAuthCallbackUrl(searchParams.get('callbackUrl'), '');
+  const arrivedLoggedOut = useRef(false);
 
   const notice = useMemo(() => {
     if (wechat === 'unlinked') {
@@ -67,10 +70,19 @@ function RegisterForm() {
   const [emailCountdown, setEmailCountdown] = useState(0);
 
   useEffect(() => {
-    if (wechat === 'unlinked' && sessionStatus === 'authenticated') {
+    if (sessionStatus === 'unauthenticated') arrivedLoggedOut.current = true;
+  }, [sessionStatus]);
+
+  useEffect(() => {
+    if (sessionStatus !== 'authenticated' || arrivedLoggedOut.current) return;
+    if (returnPath) {
+      router.replace(returnPath);
+      return;
+    }
+    if (wechat === 'unlinked') {
       router.replace('/account');
     }
-  }, [router, sessionStatus, wechat]);
+  }, [returnPath, router, sessionStatus, wechat]);
 
   const passwordChecks = useMemo(() => ({
     length: form.password.length >= PASSWORD_MIN_LENGTH,
@@ -223,6 +235,7 @@ function RegisterForm() {
         const signInResult = await signIn('credentials', {
           email: data.email,
           password: form.password,
+          callbackUrl: returnPath || '/account',
           redirect: false,
         });
         if (signInResult?.error) {
@@ -230,13 +243,16 @@ function RegisterForm() {
           setLoading(false);
           return;
         }
-        window.location.href = '/account';
+        window.location.href = signInResult?.url?.includes('/login/mfa')
+          ? appendAuthCallbackUrl(signInResult.url, returnPath || '/account')
+          : (returnPath || '/account');
         return;
       }
 
       const signInResult = await signIn('credentials', {
         email: data.email ?? form.email,
         password: form.password,
+        callbackUrl: returnPath || '/register/link',
         redirect: false,
       });
 
@@ -248,7 +264,9 @@ function RegisterForm() {
 
       await fetch('/api/account/complete-oauth-link', { method: 'POST' });
 
-      window.location.href = '/register/link';
+      window.location.href = signInResult?.url?.includes('/login/mfa')
+        ? appendAuthCallbackUrl(signInResult.url, returnPath || '/register/link')
+        : (returnPath || '/register/link');
     } catch {
       setError('注册失败，请重试。');
       setLoading(false);
@@ -259,7 +277,10 @@ function RegisterForm() {
     setLinkingProvider(provider);
     setError('');
     try {
-      const callbackUrl = `/register?${provider === 'google' ? 'oauth=google' : 'wechat=unlinked'}`;
+      const callbackUrl = withAuthCallback(
+        `/register?${provider === 'google' ? 'oauth=google' : 'wechat=unlinked'}`,
+        returnPath,
+      );
       if (provider === 'wechat') {
         await signInWithWeChat(callbackUrl);
       } else {
@@ -273,7 +294,7 @@ function RegisterForm() {
 
   const inputClass = 'w-full border border-white/50 rounded-xl pl-10 pr-3.5 py-2.5 text-sm text-gray-800 bg-white/60 backdrop-blur-sm focus:bg-white/80 focus:ring-2 focus:ring-brand-500 focus:border-brand-500 outline-none transition-all';
 
-  if (wechat === 'unlinked' && sessionStatus === 'authenticated') {
+  if (sessionStatus === 'authenticated' && !arrivedLoggedOut.current && (returnPath || wechat === 'unlinked')) {
     return <div className="min-h-screen libereal-service-page" />;
   }
 
@@ -692,7 +713,7 @@ function RegisterForm() {
             <div className="mt-5 text-center">
               <p className="text-sm text-gray-400">
                 已有账户？{' '}
-                <Link href="/login" className="text-brand-600 hover:text-brand-700 font-medium">
+                <Link href={returnPath ? `/login?callbackUrl=${encodeURIComponent(returnPath)}` : '/login'} className="text-brand-600 hover:text-brand-700 font-medium">
                   立即登录
                 </Link>
               </p>

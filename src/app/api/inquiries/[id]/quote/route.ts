@@ -4,6 +4,7 @@ import { requireAdmin } from '@/lib/session';
 import { enqueueBackgroundTask } from '@/lib/background-tasks';
 import { quoteView } from '@/lib/quote-records';
 import { AMBIGUOUS_PRODUCT_CATALOG_NUMBER, verifyAndPriceItems } from '@/lib/pricing';
+import { mergeQuoteConstraintMetadata, packageConstraintFromVariant, readExplicitQuantityConstraint } from '@/lib/quote-acceptance';
 
 function metadataBrand(metadata: string | null | undefined): string | null {
   if (!metadata) return null;
@@ -13,6 +14,21 @@ function metadataBrand(metadata: string | null | undefined): string | null {
   } catch {
     return null;
   }
+}
+
+function metadataObject(metadata: string | null | undefined): Record<string, unknown> | null {
+  if (!metadata) return null;
+  try {
+    const parsed = JSON.parse(metadata) as unknown;
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed as Record<string, unknown> : null;
+  } catch {
+    return null;
+  }
+}
+
+function metadataVariantId(metadata: string | null | undefined): string | null {
+  const value = metadataObject(metadata)?.variantId;
+  return typeof value === 'string' && value.trim() ? value : null;
 }
 
 export async function POST(
@@ -63,9 +79,24 @@ export async function POST(
       price: Number(item.price ?? item.unitPrice),
       quantity: Math.max(1, Number(item.quantity) || 1),
     })), { customerEmail: inquiry.email, manualAdjustments, allowManualAdjustment: true });
+    const variantIds = Array.from(new Set(priced.verifiedItems
+      .map((item, position) => item.variantId
+        || (typeof (items[position] as Record<string, unknown>).variantId === 'string'
+          ? (items[position] as Record<string, unknown>).variantId as string
+          : metadataVariantId(inquiry.inquiryItems[position]?.metadata)))
+      .filter((variantId): variantId is string => Boolean(variantId))));
+    const variants = variantIds.length
+      ? await prisma.productVariant.findMany({ where: { id: { in: variantIds } }, select: { id: true, packageType: true, baseQuantity: true } })
+      : [];
+    const variantsById = new Map(variants.map((variant) => [variant.id, variant]));
     const normalizedItems = priced.verifiedItems.map((pricedItem, position) => {
       const item = items[position] as Record<string, unknown>;
       const inquiryItem = inquiry.inquiryItems[position];
+      const requestConstraint = readExplicitQuantityConstraint(item);
+      const inquiryConstraint = readExplicitQuantityConstraint(metadataObject(inquiryItem?.metadata));
+      const variantId = pricedItem.variantId
+        || (typeof item.variantId === 'string' ? item.variantId : metadataVariantId(inquiryItem?.metadata));
+      const variantConstraint = packageConstraintFromVariant(variantId ? variantsById.get(variantId) : null);
       return {
         inquiryItemId: inquiryItem?.id ?? null,
         position,
@@ -78,7 +109,10 @@ export async function POST(
         leadTime: typeof item.actualLeadTime === 'string' ? item.actualLeadTime : typeof item.leadTime === 'string' ? item.leadTime : null,
         available: item.available !== false,
         notes: typeof item.notes === 'string' ? item.notes : null,
-        metadata: typeof inquiryItem?.metadata === 'string' ? inquiryItem.metadata : null,
+        metadata: mergeQuoteConstraintMetadata(inquiryItem?.metadata, {
+          minQuantity: requestConstraint.minQuantity ?? inquiryConstraint.minQuantity ?? variantConstraint.minQuantity,
+          quantityStep: requestConstraint.quantityStep ?? inquiryConstraint.quantityStep ?? variantConstraint.quantityStep,
+        }, pricedItem.quantity),
         pricingSnapshot: pricedItem.pricingSnapshot,
       };
     });

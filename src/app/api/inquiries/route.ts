@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { requireAdmin } from '@/lib/session';
-import { inquiryItemView } from '@/lib/commerce-records';
 import { quoteView } from '@/lib/quote-records';
+import { viewInquiryItemGroups } from '@/lib/inquiry-item-brands';
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 export async function GET(_req: NextRequest) {
@@ -37,12 +37,17 @@ export async function GET(_req: NextRequest) {
         archivedAt: true,
       },
     });
-    return NextResponse.json(inquiries.map(({ inquiryItems, quotes, ...inquiry }) => ({
-      ...inquiry,
-      items: inquiryItems.map(inquiryItemView),
-      activeQuote: quotes[0] ? quoteView(quotes[0]) : null,
-      quoteVersions: quotes.map(quoteView),
-    })));
+    const itemViews = await viewInquiryItemGroups(inquiries.map((inquiry) => inquiry.inquiryItems));
+    return NextResponse.json(inquiries.map((row, index) => {
+      const { inquiryItems, quotes, ...inquiry } = row;
+      void inquiryItems;
+      return {
+        ...inquiry,
+        items: itemViews[index],
+        activeQuote: quotes[0] ? quoteView(quotes[0]) : null,
+        quoteVersions: quotes.map(quoteView),
+      };
+    }));
   } catch (err) {
     console.error('[inquiries GET] error:', err);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });

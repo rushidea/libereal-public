@@ -196,6 +196,13 @@ export function getTestDb(): Database.Database {
       createdAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
       updatedAt DATETIME NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS ResearchGroupMember (
+      id TEXT PRIMARY KEY,
+      groupId TEXT NOT NULL,
+      userId TEXT NOT NULL UNIQUE,
+      role TEXT NOT NULL DEFAULT 'member',
+      createdAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
     CREATE TABLE IF NOT EXISTS GroupPointsLog (
       id TEXT PRIMARY KEY,
       groupId TEXT NOT NULL,
@@ -592,7 +599,9 @@ export function getTestDb(): Database.Database {
     CREATE TABLE IF NOT EXISTS Quote (
       id TEXT PRIMARY KEY, inquiryId TEXT NOT NULL, version INTEGER NOT NULL,
       status TEXT NOT NULL DEFAULT 'draft', subtotal REAL NOT NULL, currency TEXT NOT NULL DEFAULT 'CNY',
-      validUntil DATETIME, sentAt DATETIME, acceptedAt DATETIME, createdBy TEXT,
+      validUntil DATETIME, sentAt DATETIME, acceptedAt DATETIME,
+      declineReasonCode TEXT, declineNote TEXT, declinedAt DATETIME, declinedByUserId TEXT, declinedByEmail TEXT,
+      createdBy TEXT,
       createdAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, updatedAt DATETIME NOT NULL,
       UNIQUE(inquiryId, version)
     );
@@ -622,6 +631,7 @@ export function getTestDb(): Database.Database {
       unitPrice REAL NOT NULL,
       clientPrice REAL,
       quantity INTEGER NOT NULL DEFAULT 1,
+      quotedQuantity INTEGER,
       shippedQty INTEGER NOT NULL DEFAULT 0,
       leadTime TEXT,
       status TEXT NOT NULL DEFAULT 'pending',

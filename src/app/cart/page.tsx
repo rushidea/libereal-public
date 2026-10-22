@@ -271,11 +271,7 @@ export default function CartPage() {
                   <div className="text-sm text-gray-500 mb-2">询价产品</div>
                   <button
                     onClick={() => {
-                      if (!session) {
-                        router.push('/login?callbackUrl=/cart');
-                      } else {
-                        router.push('/inquiry');
-                      }
+                      router.push('/inquiry');
                     }}
                     className="flex w-full items-center justify-center gap-2 rounded-full bg-amber-500 py-3 text-sm font-semibold text-white shadow-[0_12px_28px_rgba(245,158,11,0.22)] transition hover:-translate-y-px hover:bg-amber-600 active:translate-y-0"
                   >

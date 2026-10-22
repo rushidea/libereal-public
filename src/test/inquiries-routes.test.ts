@@ -12,7 +12,10 @@ import { POST as confirmQuotePOST } from '@/app/api/orders/[id]/confirm-items/ro
 import { PATCH as archivePATCH } from '@/app/api/admin/inquiries/archive/route';
 import { GET as archivedGET } from '@/app/api/admin/inquiries/archived/route';
 import { NextRequest } from 'next/server';
-import { getTestDb, closeTestDb, seedAdmin, clearAllTables } from './db-helpers';
+import { getTestDb, closeTestDb, seedAdmin, seedUser, clearAllTables } from './db-helpers';
+import { prisma } from '@/lib/prisma';
+import { calculateOrderPoints } from '@/lib/points';
+import { refundOrderPointsProportionally } from '@/lib/points-checkout-service';
 
 function seedInquiry(db: ReturnType<typeof getTestDb>, inquiry: {
   id: string;
@@ -229,8 +232,8 @@ describe('POST /api/inquiries/[id]/quote (admin send quote)', () => {
     expect(quote.acceptedAt).not.toBeNull();
     const confirmation = db.prepare('SELECT action, email FROM QuoteConfirmation').get() as { action: string; email: string };
     expect(confirmation).toEqual({ action: 'accept', email: 'admin@test.com' });
-    const orderItem = db.prepare('SELECT unitPrice, quantity FROM OrderItem').get() as { unitPrice: number; quantity: number };
-    expect(orderItem).toEqual({ unitPrice: 150, quantity: 2 });
+    const orderItem = db.prepare('SELECT unitPrice, quantity, quotedQuantity FROM OrderItem').get() as { unitPrice: number; quantity: number; quotedQuantity: number };
+    expect(orderItem).toEqual({ unitPrice: 150, quantity: 2, quotedQuantity: 2 });
   });
 
   it('round trips variant, spec, and unit metadata from inquiry to quote to order', async () => {
@@ -321,8 +324,141 @@ describe('POST /api/inquiries/[id]/quote (admin send quote)', () => {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ itemIndices: [0], quantities: { 0: 2 }, quoteId: quote.id, quoteVersion: quote.version }),
     }), { params: Promise.resolve({ id: 'i1' }) });
-    expect(changedQuantity.status).toBe(409);
-    expect(getTestDb().prepare('SELECT orderedQty FROM QuoteItem WHERE quoteId = ?').get(quote.id)).toEqual({ orderedQty: 1 });
+    expect(changedQuantity.status).toBe(200);
+    expect(getTestDb().prepare('SELECT quantity, quotedQuantity FROM OrderItem').get()).toEqual({ quantity: 2, quotedQuantity: 2 });
+    expect(getTestDb().prepare('SELECT orderedQty FROM QuoteItem WHERE quoteId = ?').get(quote.id)).toEqual({ orderedQty: 2 });
+  });
+
+  it('accepts a lower quantity and keeps the quoted quantity for audit', async () => {
+    await quotePOST(makeReq('i1', { items: [{ productId: 'p1', name: 'A', price: 1000, quantity: 2 }] }) as NextRequest, {
+      params: Promise.resolve({ id: 'i1' }),
+    });
+    const quoteRow = getTestDb().prepare('SELECT id FROM Quote WHERE inquiryId = ?').get('i1') as { id: string };
+    const response = await confirmQuotePOST(new NextRequest('http://localhost:3000/api/orders/i1/confirm-items', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ itemIndices: [0], quantities: { 0: 1 }, quoteId: quoteRow.id, quoteVersion: 1, acceptanceAttemptId: 'accept-lower-1' }),
+    }), { params: Promise.resolve({ id: 'i1' }) });
+    expect(response.status).toBe(200);
+    const db = getTestDb();
+    expect(db.prepare('SELECT subtotal, total FROM "Order"').get()).toEqual({ subtotal: 1000, total: 1000 });
+    expect(db.prepare('SELECT quantity, quotedQuantity, unitPrice FROM OrderItem').get()).toEqual({ quantity: 1, quotedQuantity: 2, unitPrice: 1000 });
+    expect(db.prepare('SELECT quantity, orderedQty FROM QuoteItem').get()).toEqual({ quantity: 2, orderedQty: 1 });
+    const confirmation = db.prepare('SELECT action, details FROM QuoteConfirmation').get() as { action: string; details: string };
+    expect(confirmation.action).toBe('partial_accept');
+    expect(JSON.parse(confirmation.details).items[0]).toMatchObject({ quotedQuantity: 2, orderedQuantity: 1, quantity: 1 });
+    const event = db.prepare('SELECT metadata FROM OrderEvent').get() as { metadata: string };
+    const metadata = JSON.parse(event.metadata) as { pointsBasisAmount: number; earnablePoints: number; pointsRedeemed: number };
+    expect(metadata.pointsBasisAmount).toBe(1000);
+    expect(metadata.earnablePoints).toBe(calculateOrderPoints(1000));
+    expect(metadata.pointsRedeemed).toBe(0);
+  });
+
+  it('accepts a quantity above the quote and caps ordered quantity', async () => {
+    await quotePOST(makeReq('i1', { items: [{ productId: 'p1', name: 'A', price: 150, quantity: 2 }] }) as NextRequest, {
+      params: Promise.resolve({ id: 'i1' }),
+    });
+    const quoteRow = getTestDb().prepare('SELECT id FROM Quote WHERE inquiryId = ?').get('i1') as { id: string };
+    const over = await confirmQuotePOST(new NextRequest('http://localhost:3000/api/orders/i1/confirm-items', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ itemIndices: [0], quantities: { 0: 5 }, quoteId: quoteRow.id, quoteVersion: 1, acceptanceAttemptId: 'accept-over' }),
+    }), { params: Promise.resolve({ id: 'i1' }) });
+    expect(over.status).toBe(200);
+    const db = getTestDb();
+    expect(db.prepare('SELECT subtotal, total FROM "Order"').get()).toEqual({ subtotal: 750, total: 750 });
+    expect(db.prepare('SELECT quantity, quotedQuantity FROM OrderItem').get()).toEqual({ quantity: 5, quotedQuantity: 2 });
+    expect(db.prepare('SELECT quantity, orderedQty FROM QuoteItem').get()).toEqual({ quantity: 2, orderedQty: 2 });
+    expect(db.prepare('SELECT status FROM Quote WHERE id = ?').get(quoteRow.id)).toEqual({ status: 'accepted' });
+  });
+
+  it('omits removed lines and enforces quote package constraints', async () => {
+    await quotePOST(makeReq('i1', {
+      items: [
+        { productId: 'p1', name: 'A', price: 10, quantity: 4 },
+        { productId: 'p2', name: 'B', price: 20, quantity: 1 },
+      ],
+    }) as NextRequest, { params: Promise.resolve({ id: 'i1' }) });
+    const db = getTestDb();
+    const quoteRow = db.prepare('SELECT id FROM Quote WHERE inquiryId = ?').get('i1') as { id: string };
+    db.prepare('UPDATE QuoteItem SET metadata = ? WHERE name = ?').run(JSON.stringify({ minQuantity: 2, quantityStep: 2 }), 'A');
+    const invalid = await confirmQuotePOST(new NextRequest('http://localhost:3000/api/orders/i1/confirm-items', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ itemIndices: [0], quantities: { 0: 1 }, quoteId: quoteRow.id, quoteVersion: 1, acceptanceAttemptId: 'accept-moq' }),
+    }), { params: Promise.resolve({ id: 'i1' }) });
+    expect(invalid.status).toBe(400);
+    const response = await confirmQuotePOST(new NextRequest('http://localhost:3000/api/orders/i1/confirm-items', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ itemIndices: [0], quantities: { 0: 2 }, quoteId: quoteRow.id, quoteVersion: 1, acceptanceAttemptId: 'accept-partial-line' }),
+    }), { params: Promise.resolve({ id: 'i1' }) });
+    expect(response.status).toBe(200);
+    expect(db.prepare('SELECT name, quantity FROM OrderItem').all()).toEqual([{ name: 'A', quantity: 2 }]);
+    expect(db.prepare('SELECT status FROM Quote WHERE id = ?').get(quoteRow.id)).toEqual({ status: 'sent' });
+  });
+
+  it('accepts Alipay and public-policy fees for a quote-converted order', async () => {
+    await quotePOST(makeReq('i1', { items: [{ productId: 'p1', name: 'A', price: 150, quantity: 2 }] }) as NextRequest, {
+      params: Promise.resolve({ id: 'i1' }),
+    });
+    const quoteRow = getTestDb().prepare('SELECT id FROM Quote WHERE inquiryId = ?').get('i1') as { id: string };
+    const alipay = await confirmQuotePOST(new NextRequest('http://localhost:3000/api/orders/i1/confirm-items', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ itemIndices: [0], quantities: { 0: 2 }, quoteId: quoteRow.id, quoteVersion: 1, acceptanceAttemptId: 'accept-alipay', paymentMethod: '支付宝' }),
+    }), { params: Promise.resolve({ id: 'i1' }) });
+    expect(alipay.status).toBe(200);
+    expect(getTestDb().prepare('SELECT paymentMethod, status, total, adjustmentTotal FROM "Order"').get()).toEqual({
+      paymentMethod: 'alipay', status: 'unpaid', total: 300, adjustmentTotal: 0,
+    });
+  });
+
+  it('rejects an unknown payment method on quote conversion', async () => {
+    await quotePOST(makeReq('i1', { items: [{ productId: 'p1', name: 'A', price: 150, quantity: 2 }] }) as NextRequest, {
+      params: Promise.resolve({ id: 'i1' }),
+    });
+    const quoteRow = getTestDb().prepare('SELECT id FROM Quote WHERE inquiryId = ?').get('i1') as { id: string };
+    const response = await confirmQuotePOST(new NextRequest('http://localhost:3000/api/orders/i1/confirm-items', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ itemIndices: [0], quantities: { 0: 2 }, quoteId: quoteRow.id, quoteVersion: 1, acceptanceAttemptId: 'accept-weixin', paymentMethod: '微信支付' }),
+    }), { params: Promise.resolve({ id: 'i1' }) });
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({ error: '请选择有效的付款方式' });
+  });
+
+  it('deducts combined points at quote conversion through the shared checkout path', async () => {
+    const db = getTestDb();
+    seedUser(db, { id: 'buyer_points', email: 'buyer-points@test.com', points: 40 });
+    db.prepare('UPDATE Inquiry SET userId = ? WHERE id = ?').run('buyer_points', 'i1');
+    await quotePOST(makeReq('i1', { items: [{ productId: 'p1', name: 'A', price: 150, quantity: 2 }] }) as NextRequest, {
+      params: Promise.resolve({ id: 'i1' }),
+    });
+    const quoteRow = db.prepare('SELECT id FROM Quote WHERE inquiryId = ?').get('i1') as { id: string };
+    const response = await confirmQuotePOST(new NextRequest('http://localhost:3000/api/orders/i1/confirm-items', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        itemIndices: [0], quantities: { 0: 2 }, quoteId: quoteRow.id, quoteVersion: 1,
+        acceptanceAttemptId: 'accept-points', paymentMethod: 'alipay', personalPoints: 40,
+      }),
+    }), { params: Promise.resolve({ id: 'i1' }) });
+    expect(response.status).toBe(200);
+    const order = db.prepare('SELECT id, total, pointsPersonal, pointsDiscount, pointsApplied, customerId, status FROM "Order"').get() as {
+      id: string; total: number; pointsPersonal: number; pointsDiscount: number; pointsApplied: number; customerId: string; status: string;
+    };
+    expect(order).toMatchObject({ total: 260, pointsPersonal: 40, pointsDiscount: 40, pointsApplied: 1, customerId: 'buyer_points', status: 'unpaid' });
+    expect(db.prepare('SELECT points FROM User WHERE id = ?').get('buyer_points')).toEqual({ points: 0 });
+    const refunded = await prisma.$transaction((tx) => refundOrderPointsProportionally(tx, {
+      orderId: order.id,
+      refundYuan: 300,
+      originalPaidYuan: 300,
+      actorUserId: 'buyer_points',
+      reason: '订单取消退回积分',
+    }));
+    expect(refunded).toEqual({ ok: true, personal: 40, group: 0 });
+    expect(db.prepare('SELECT points FROM User WHERE id = ?').get('buyer_points')).toEqual({ points: 40 });
   });
 
   it('returns 400 for invalid items JSON string', async () => {

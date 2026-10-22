@@ -10,6 +10,7 @@ import SiteFooter from '@/components/SiteFooter';
 import MobileBottomNav from '@/components/mobile/MobileBottomNav';
 
 import Breadcrumb from '@/components/Breadcrumb';
+import { InquiryIdText } from '@/components/InquiryIdDisplay';
 
 type Notification = {
   id: string;
@@ -221,9 +222,11 @@ export default function NotificationsPage() {
                           <div className="w-2 h-2 rounded-full bg-brand-500 flex-shrink-0 mt-1.5" />
                         )}
                       </div>
-                      <p className={`text-sm mt-1 leading-relaxed ${notif.isRead ? 'text-gray-400 dark:text-gray-500' : 'text-gray-600 dark:text-gray-500'}`}>
-                        {notif.content}
-                      </p>
+                      <InquiryIdText
+                        as="p"
+                        text={notif.content}
+                        className={`mt-1 text-sm leading-relaxed ${notif.isRead ? 'text-gray-400 dark:text-gray-500' : 'text-gray-600 dark:text-gray-500'}`}
+                      />
                       {notif.linkUrl && (
                         <Link
                           href={notif.linkUrl}

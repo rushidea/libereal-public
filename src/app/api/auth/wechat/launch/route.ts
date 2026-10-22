@@ -7,13 +7,14 @@ import {
   shouldUseWeChatMiniProgramLogin,
 } from '@/lib/wechat-auth';
 import { publicSiteUrl } from '@/lib/site-url';
+import { sanitizeAuthCallbackUrl } from '@/lib/auth-callback-url';
 
 /**
  * Server-side WeChat sign-in entry: picks QR (desktop) vs app OAuth (mobile)
  * and starts OAuth via Auth.js POST flow (GET /signin/{provider} is unsupported).
  */
 export async function GET(req: NextRequest) {
-  const callbackUrl = req.nextUrl.searchParams.get('callbackUrl') ?? '/';
+  const callbackUrl = sanitizeAuthCallbackUrl(req.nextUrl.searchParams.get('callbackUrl'), '/');
   const ua = req.headers.get('user-agent') ?? '';
   const inWeChat = isWeChatInAppBrowser(ua);
 

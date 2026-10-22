@@ -19,6 +19,7 @@ import {
   shouldIssueSessionForProviderLink,
 } from "./account-linking";
 import { isAdminEmail, isGoogleAuthConfigured, MERGE_VERIFIED_COOKIE, normalizeEmail, normalizeWeChatSex, resolveSessionRole, wechatProfileUpdates, WECHAT_EMAIL_DOMAIN } from "./auth-helpers";
+import { callbackPathFromAuthUrl, sanitizeAuthCallbackUrl, withAuthCallback } from "./auth-callback-url";
 import {
   isWeChatMpOAuthConfigured,
   isWeChatProvider,
@@ -79,8 +80,9 @@ async function maybeMfaRedirect(
       challengeId: challenge.id,
       provider,
     });
-    if (callbackUrl && callbackUrl.startsWith('/') && !callbackUrl.startsWith('//') && !/[\s\\]/.test(callbackUrl)) {
-      params.set('callbackUrl', callbackUrl);
+    const safeCallback = sanitizeAuthCallbackUrl(callbackUrl, '');
+    if (safeCallback) {
+      params.set('callbackUrl', safeCallback);
     }
     return `/login/mfa?${params.toString()}`;
   } catch (error) {
@@ -193,6 +195,25 @@ async function redirectWithPendingOAuth(
     oauthSex: opts.oauthSex,
   }));
   return redirectUrl;
+}
+
+async function readRequestCallbackPath(): Promise<string | undefined> {
+  try {
+    const cookieStore = await cookies();
+    const raw = cookieStore.get('__Secure-authjs.callback-url')?.value
+      ?? cookieStore.get('authjs.callback-url')?.value
+      ?? cookieStore.get('__Secure-next-auth.callback-url')?.value
+      ?? cookieStore.get('next-auth.callback-url')?.value;
+    return callbackPathFromAuthUrl(raw);
+  } catch {
+    return undefined;
+  }
+}
+
+async function resolveAuthReturnPath(explicit?: string | null): Promise<string | undefined> {
+  const fromExplicit = sanitizeAuthCallbackUrl(explicit, '');
+  if (fromExplicit) return fromExplicit;
+  return readRequestCallbackPath();
 }
 
 function applyWeChatProfileSql(
@@ -578,15 +599,25 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
     },
   },
   callbacks: {
+    async redirect({ url, baseUrl }) {
+      if (url.startsWith('/') && !url.startsWith('//')) return `${baseUrl}${url}`;
+      try {
+        const target = new URL(url);
+        if (target.origin === new URL(baseUrl).origin) return url;
+      } catch {
+        // Reject protocol-relative and malformed callback targets.
+      }
+      return baseUrl;
+    },
     async signIn({ user, account, profile }) {
       if (account?.provider === 'mfa-verify') return true;
 
       if (account?.provider === 'credentials' && (user as { mfaRequired?: boolean }).mfaRequired) {
-        return maybeMfaRedirect(user.id as string, 'credentials');
+        return maybeMfaRedirect(user.id as string, 'credentials', await resolveAuthReturnPath());
       }
 
       if (account?.provider === WECHAT_MINI_LOGIN_PROVIDER_ID) {
-        return maybeMfaRedirect(user.id as string, 'wechat-mini');
+        return maybeMfaRedirect(user.id as string, 'wechat-mini', await resolveAuthReturnPath());
       }
 
       if (account?.provider === 'google') {
@@ -627,7 +658,7 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
             user.email = currentUser.email;
             user.id = currentUser.id;
             await clearAccountLinkIntentCookie();
-            const mfaRedirect = await maybeMfaRedirect(currentUser.id, 'google', linkTarget?.callbackUrl);
+            const mfaRedirect = await maybeMfaRedirect(currentUser.id, 'google', await resolveAuthReturnPath(linkTarget?.callbackUrl));
             if (!shouldIssueSessionForProviderLink(mfaRedirect)) return mfaRedirect;
             return true;
           }
@@ -636,13 +667,14 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
             ensureAdminRoleInDb(db, linked.id, googleEmail);
             user.email = linked.email;
             user.id = linked.id;
-            return maybeMfaRedirect(linked.id, 'google');
+            return maybeMfaRedirect(linked.id, 'google', await resolveAuthReturnPath());
           }
 
+          const googleReturnPath = await resolveAuthReturnPath();
           return await redirectWithPendingOAuth(
             account,
             'google',
-            `/register?oauth=google&email=${encodeURIComponent(googleEmail)}`,
+            withAuthCallback(`/register?oauth=google&email=${encodeURIComponent(googleEmail)}`, googleReturnPath),
             { mode: 'register', oauthEmail: googleEmail, oauthName: user.name ?? undefined, oauthImage: user.image ?? undefined },
           );
         } catch (e) {
@@ -656,7 +688,7 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
       if (!account || !isWeChatProvider(account.provider)) return true;
 
       const providerAccountId = account.providerAccountId;
-      if (!providerAccountId) return '/register?wechat=unlinked';
+      if (!providerAccountId) return withAuthCallback('/register?wechat=unlinked', await resolveAuthReturnPath());
 
       const db = new Database(DB_PATH);
       try {
@@ -682,7 +714,7 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
           user.email = currentUser.email;
           user.id = currentUser.id;
           await clearAccountLinkIntentCookie();
-          const mfaRedirect = await maybeMfaRedirect(currentUser.id, 'wechat', linkTarget?.callbackUrl);
+          const mfaRedirect = await maybeMfaRedirect(currentUser.id, 'wechat', await resolveAuthReturnPath(linkTarget?.callbackUrl));
           if (!shouldIssueSessionForProviderLink(mfaRedirect)) return mfaRedirect;
           return true;
         }
@@ -690,13 +722,14 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
         if (linked) {
           user.email = linked.email;
           user.id = linked.id;
-          return maybeMfaRedirect(linked.id, 'wechat');
+          return maybeMfaRedirect(linked.id, 'wechat', await resolveAuthReturnPath());
         }
 
+        const wechatReturnPath = await resolveAuthReturnPath();
         return await redirectWithPendingOAuth(
           account,
           'wechat',
-          '/register?wechat=unlinked',
+          withAuthCallback('/register?wechat=unlinked', wechatReturnPath),
           {
             mode: 'register',
             oauthName: user.name,

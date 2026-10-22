@@ -8,12 +8,19 @@ import { orderAutoCloseAt } from '@/lib/order-auto-close';
 import { initialOrderStatus } from '@/lib/order-domain';
 import { buildCheckoutRequestFingerprint, isUniqueConstraintError, validCheckoutAttemptId } from '@/lib/checkout-idempotency';
 import { verifiedEmailMatches } from '@/lib/verified-email-access';
+import { normalizeOrderPaymentMethod } from '@/data/payment-methods';
+import { normalizePointsIntent } from '@/lib/points-checkout';
+import { assertCheckoutPointsAvailable, settleCheckoutPayment } from '@/lib/checkout-payment-settlement';
+import { applyOrderPointsDeduction } from '@/lib/points-checkout-service';
+import { assertQuoteAcceptanceCredit, assertQuoteAcceptanceStock, quoteAcceptancePointsAudit } from '@/lib/quote-acceptance-guards';
+import { acceptanceQuantityError, lineTotalForAcceptedQuantity, quoteLineFulfillment, requestedQuantityFromBody, validateAcceptedQuantity } from '@/lib/quote-acceptance';
 
 interface OrderItem {
   productId?: string | null;
   name: string;
   price: number;
   quantity: number;
+  quotedQuantity?: number | null;
   shippedQty: number;
   leadTime?: string | null;
   status: string;
@@ -36,8 +43,9 @@ export async function POST(
 
   try {
     const body = await req.json() as Record<string, unknown>;
-    const { itemIndices, quantities, quoteId, quoteVersion, acceptanceAttemptId } = body as {
+    const { itemIndices, quantities, quoteId, quoteVersion, acceptanceAttemptId, paymentMethod, personalPoints, groupPoints, groupId } = body as {
       itemIndices?: unknown; quantities?: unknown; quoteId?: unknown; quoteVersion?: unknown; acceptanceAttemptId?: unknown;
+      paymentMethod?: unknown; personalPoints?: unknown; groupPoints?: unknown; groupId?: unknown;
     };
     if (!Array.isArray(itemIndices) || itemIndices.length === 0) {
       return NextResponse.json({ error: 'itemIndices must be a non-empty array' }, { status: 400 });
@@ -49,6 +57,15 @@ export async function POST(
     if (headerAttemptId !== null && acceptanceAttemptId !== undefined && headerAttemptId !== acceptanceAttemptId) return NextResponse.json({ error: '幂等键不一致' }, { status: 400 });
     const attemptId = acceptanceAttemptId ?? headerAttemptId ?? undefined;
     if (attemptId !== undefined && !validCheckoutAttemptId(attemptId)) return NextResponse.json({ error: '报价确认幂等键格式无效' }, { status: 400 });
+    const explicitPayment = typeof paymentMethod === 'string' && paymentMethod.trim() !== '';
+    const normalizedPayment = explicitPayment ? normalizeOrderPaymentMethod(paymentMethod) : null;
+    if (explicitPayment && !normalizedPayment) {
+      return NextResponse.json({ error: '请选择有效的付款方式' }, { status: 400 });
+    }
+    const pointsIntent = normalizePointsIntent({ personalPoints, groupPoints, groupId });
+    if ((pointsIntent.personalPoints > 0 || pointsIntent.groupPoints > 0) && !normalizedPayment) {
+      return NextResponse.json({ error: '请选择有效的付款方式' }, { status: 400 });
+    }
 
     const user = await prisma.user.findUnique({
       where: { id: session.user.id as string },
@@ -109,42 +126,76 @@ export async function POST(
 
     try {
       const orderItems: OrderItem[] = [];
-      const accepted: Array<{ quoteItemId: string; quantity: number; previousOrderedQty: number }> = [];
+      const accepted: Array<{ quoteItemId: string; quantity: number; previousOrderedQty: number; nextOrderedQty: number; quotedQuantity: number }> = [];
       for (const idx of itemIndices) {
         const item = quote.items[idx];
         if (!item) return NextResponse.json({ error: '商品索引不存在' }, { status: 400 });
         if (!item.available || item.orderedQty >= item.quantity) throw new Error('QUOTE_CONFLICT');
         const remaining = item.quantity - item.orderedQty;
-        let qty = remaining;
-        if (quantities && typeof quantities === 'object') {
-          const raw = (quantities as Record<string, unknown>)[String(idx)];
-          if (raw !== undefined) {
-            const overrideQty = typeof raw === 'number' ? raw : typeof raw === 'string' && /^\d+$/.test(raw) ? Number(raw) : NaN;
-            if (!Number.isSafeInteger(overrideQty) || overrideQty <= 0) return NextResponse.json({ error: '报价商品数量必须是正整数' }, { status: 400 });
-            if (overrideQty > remaining) throw new Error('QUOTE_CONFLICT');
-            qty = overrideQty;
-          }
-        }
+        const requested = requestedQuantityFromBody(quantities, idx, remaining);
+        if (requested == null) return NextResponse.json({ error: '报价商品数量必须是正整数' }, { status: 400 });
+        const validated = validateAcceptedQuantity({
+          quotedQuantity: item.quantity,
+          orderedQty: item.orderedQty,
+          requested,
+          metadata: item.metadata,
+        });
+        if (!validated.ok) return NextResponse.json({ error: acceptanceQuantityError(validated.code) }, { status: 400 });
+        const qty = validated.quantity;
+        const fulfillment = quoteLineFulfillment({
+          quotedQuantity: item.quantity,
+          orderedQty: item.orderedQty,
+          acceptedQuantity: qty,
+        });
 
         orderItems.push({
           productId: item.productId || null,
           name: item.name,
           price: item.unitPrice,
           quantity: qty,
+          quotedQuantity: item.quantity,
           shippedQty: 0,
           leadTime: item.leadTime || null,
           status: 'pending',
           metadata: item.metadata || null,
           pricingSnapshot: item.pricingSnapshot,
         });
-        accepted.push({ quoteItemId: item.id, quantity: qty, previousOrderedQty: item.orderedQty });
+        accepted.push({
+          quoteItemId: item.id,
+          quantity: qty,
+          previousOrderedQty: item.orderedQty,
+          nextOrderedQty: fulfillment.orderedQty,
+          quotedQuantity: item.quantity,
+        });
       }
 
       if (orderItems.length === 0) {
         return NextResponse.json({ error: 'No valid items to order' }, { status: 400 });
       }
 
-      const subtotal = orderItems.reduce((sum, item) => sum + item.price * item.quantity, 0);
+      const subtotal = orderItems.reduce((sum, item) => sum + lineTotalForAcceptedQuantity(item.price, item.quantity), 0);
+      const pointsUserId = inquiry.userId ?? (isAdmin ? null : user.id);
+      if ((pointsIntent.personalPoints > 0 || pointsIntent.groupPoints > 0) && !pointsUserId) {
+        return NextResponse.json({ error: '订单缺少客户，不能使用积分抵扣' }, { status: 400 });
+      }
+      const settlement = normalizedPayment
+        ? await settleCheckoutPayment(prisma, pointsUserId ?? user.id, {
+            paymentMethod: normalizedPayment,
+            lineItems: orderItems.map((item) => ({ unitPrice: item.price, quantity: item.quantity })),
+            platformFeeBase: subtotal,
+            personalPoints: pointsIntent.personalPoints,
+            groupPoints: pointsIntent.groupPoints,
+            groupId: pointsIntent.groupId,
+          })
+        : null;
+      if (settlement && !settlement.ok) {
+        return NextResponse.json({ error: settlement.error }, { status: 400 });
+      }
+      const settled = settlement && settlement.ok ? settlement : null;
+      const orderPaymentMethod = settled?.paymentMethod ?? inquiry.paymentMethod;
+      const orderTotal = settled?.amounts.total ?? subtotal;
+      const orderSubtotal = settled?.amounts.subtotal ?? subtotal;
+      const orderAdjustmentTotal = settled?.amounts.adjustmentTotal ?? 0;
 
       const now = new Date();
       const dateStr = now.toISOString().slice(0, 10).replace(/-/g, '');
@@ -156,38 +207,64 @@ export async function POST(
       const seq = String(countToday + 1).padStart(3, '0');
       const orderId = `ORD-${dateStr}-${seq}`;
 
-      const postOrderQuantities = new Map(quote.items.map((item) => [item.id, item.orderedQty]));
-      for (const item of accepted) postOrderQuantities.set(item.quoteItemId, (postOrderQuantities.get(item.quoteItemId) ?? 0) + item.quantity);
-      let allOrdered = quote.items.every((item) => !item.available || (postOrderQuantities.get(item.id) ?? 0) >= item.quantity);
-
-      const orderStatus = initialOrderStatus(inquiry.paymentMethod);
+      let allOrdered = false;
+      const orderStatus = initialOrderStatus(orderPaymentMethod);
+      const pointsAudit = {
+        ...quoteAcceptancePointsAudit(orderTotal),
+        pointsRedeemed: (settled?.pointsBreakdown?.personalPoints ?? 0) + (settled?.pointsBreakdown?.groupPoints ?? 0),
+      };
       await prisma.$transaction(async (tx) => {
         const current = await tx.quote.findFirst({ where: { inquiryId: id }, orderBy: { version: 'desc' }, include: { items: true } });
         if (!current || current.id !== quote.id || current.version !== quote.version || current.status !== 'sent' || (current.validUntil && current.validUntil < new Date())) {
           throw new Error('QUOTE_CONFLICT');
         }
+        if (settled?.pointsBreakdown && pointsUserId) {
+          await assertCheckoutPointsAvailable(tx, pointsUserId, settled.amountsBeforePoints.total, settled.intent);
+        }
+        await assertQuoteAcceptanceStock(tx, orderItems.map((item) => ({ productId: item.productId ?? null, quantity: item.quantity })));
+        await assertQuoteAcceptanceCredit(tx, {
+          userId: inquiry.userId,
+          email: inquiry.email,
+          paymentMethod: orderPaymentMethod,
+          total: orderTotal,
+        });
         for (const item of accepted) {
           const claimed = await tx.quoteItem.updateMany({
-            where: { id: item.quoteItemId, quoteId: quote.id, available: true, orderedQty: item.previousOrderedQty, quantity: { gte: item.previousOrderedQty + item.quantity } },
-            data: { orderedQty: { increment: item.quantity } },
+            where: { id: item.quoteItemId, quoteId: quote.id, available: true, orderedQty: item.previousOrderedQty, quantity: { gte: item.nextOrderedQty } },
+            data: { orderedQty: item.nextOrderedQty },
           });
           if (claimed.count !== 1) throw new Error('QUOTE_CONFLICT');
         }
         const remainingItems = await tx.quoteItem.findMany({ where: { quoteId: quote.id } });
         allOrdered = remainingItems.every((item) => !item.available || item.orderedQty >= item.quantity);
-        await tx.order.create({ data: {
+        const created = await tx.order.create({ data: {
           id: orderId,
           inquiryId: id,
           email: inquiry.email,
           customerId: inquiry.userId,
           organizationId: inquiry.organizationId,
           ownerScope: inquiry.ownerScope,
-          subtotal,
-          total: subtotal,
+          subtotal: orderSubtotal,
+          adjustmentTotal: orderAdjustmentTotal,
+          total: orderTotal,
           status: orderStatus,
           ...(scopedAttemptId ? { checkoutAttemptId: scopedAttemptId, checkoutRequestFingerprint: fingerprint } : {}),
-          autoCloseAt: orderAutoCloseAt(inquiry.paymentMethod),
-          paymentMethod: inquiry.paymentMethod,
+          autoCloseAt: orderAutoCloseAt(orderPaymentMethod),
+          paymentMethod: orderPaymentMethod,
+          pointsPersonal: settled?.pointsBreakdown?.personalPoints ?? 0,
+          pointsGroup: settled?.pointsBreakdown?.groupPoints ?? 0,
+          pointsGroupId: settled?.pointsBreakdown?.groupId ?? null,
+          pointsDiscount: settled?.pointsBreakdown?.pointsDiscount ?? 0,
+          ...(settled && settled.adjustments.length ? {
+            adjustments: {
+              create: settled.adjustments.map((adjustment) => ({
+                type: adjustment.type,
+                label: adjustment.label,
+                amount: adjustment.amount,
+                reason: adjustment.reason ?? null,
+              })),
+            },
+          } : {}),
           orderItems: {
             create: toOrderItemCreates(orderItems as unknown as Array<Record<string, unknown>>),
           },
@@ -204,15 +281,36 @@ export async function POST(
             actorId: session.user.id as string,
             actorEmail: user.email,
             message: '客户确认报价商品并生成订单',
+            metadata: JSON.stringify({
+              ...pointsAudit,
+              items: accepted.map((item) => ({
+                quoteItemId: item.quoteItemId,
+                quotedQuantity: item.quotedQuantity,
+                orderedQuantity: item.quantity,
+                quantity: item.quantity,
+              })),
+            }),
           } },
         } });
+        if (settled?.pointsBreakdown) {
+          const applied = await applyOrderPointsDeduction(tx, created.id);
+          if (!applied.ok) throw new Error(`POINTS_APPLY:${applied.error}`);
+        }
         await tx.quoteConfirmation.create({
           data: {
             quoteId: quote.id,
             userId: session.user.id as string,
             email: user.email,
             action: allOrdered ? 'accept' : 'partial_accept',
-            details: JSON.stringify({ orderId, items: accepted }),
+            details: JSON.stringify({
+              orderId,
+              items: accepted.map((item) => ({
+                quoteItemId: item.quoteItemId,
+                quotedQuantity: item.quotedQuantity,
+                orderedQuantity: item.quantity,
+                quantity: item.quantity,
+              })),
+            }),
             ip: req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ?? req.headers.get('x-real-ip'),
             userAgent: req.headers.get('user-agent'),
           },
@@ -233,6 +331,16 @@ export async function POST(
         allOrdered,
       });
     } catch (e) {
+      if (e instanceof Error && e.message.startsWith('POINTS_')) {
+        const message = e.message.replace(/^POINTS_(PRECHECK|APPLY):/, '');
+        return NextResponse.json({ error: message }, { status: 400 });
+      }
+      if (e instanceof Error && e.message === 'INSUFFICIENT_STOCK') {
+        return NextResponse.json({ error: '库存不足', code: 'INSUFFICIENT_STOCK' }, { status: 409 });
+      }
+      if (e instanceof Error && (e.message === 'CREDIT_LIMIT_EXCEEDED' || e.message === 'CREDIT_ACCOUNT_SUSPENDED')) {
+        return NextResponse.json({ error: '授信额度不足或账户不可用', code: e.message }, { status: 403 });
+      }
       if (e instanceof Error && e.message === 'QUOTE_CONFLICT') {
         if (scopedAttemptId) {
           const winner = await prisma.order.findUnique({ where: { checkoutAttemptId: scopedAttemptId } });

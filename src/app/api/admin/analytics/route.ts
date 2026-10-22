@@ -3,6 +3,7 @@ import { prisma } from '@/lib/prisma';
 import { requireAdmin, getAdminPermissions } from '@/lib/session';
 import { formatOrderPaymentMethod, normalizeOrderPaymentMethod } from '@/data/payment-methods';
 import { INACTIVE_ORDER_STATUSES, ORDER_STATUS_LABELS } from '@/lib/order-domain';
+import { overdueInquiryWhere, pendingInquiryWhere } from '@/lib/inquiry-status';
 
 export const dynamic = 'force-dynamic';
 
@@ -174,10 +175,10 @@ export async function GET(_req: NextRequest) {
       }),
       prisma.inquiry.count({
         // 历史数据曾用中文状态「待确认」，新代码用枚举 pending_quote，两侧都兼容
-        where: { status: { in: ['pending_quote', '待确认', '待人工审核'] }, archivedAt: null },
+        where: pendingInquiryWhere(),
       }),
       prisma.inquiry.count({
-        where: { status: { in: ['pending_quote', '待确认', '待人工审核'] }, archivedAt: null, createdAt: { lt: slaThreshold } },
+        where: overdueInquiryWhere(slaThreshold),
       }),
       prisma.user.count({ where: { isNewUser: true } }),
       prisma.userCreatedRecipe.count({ where: { status: 'pending' } }),

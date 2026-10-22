@@ -5,6 +5,7 @@ import { useSession } from 'next-auth/react';
 import { usePathname } from 'next/navigation';
 import { Megaphone } from 'lucide-react';
 import { uiSurfaces } from '@/lib/ui-surfaces';
+import { InquiryIdText } from '@/components/InquiryIdDisplay';
 
 type PendingAck = {
   id: string;
@@ -97,9 +98,11 @@ export default function ForcedAckOverlay() {
             </h2>
           </div>
         </div>
-        <div className={`max-h-[50vh] overflow-y-auto whitespace-pre-wrap text-sm leading-relaxed ${uiSurfaces.textSecondary}`}>
-          {current.content}
-        </div>
+        <InquiryIdText
+          as="div"
+          text={current.content}
+          className={`max-h-[50vh] overflow-y-auto whitespace-pre-wrap text-sm leading-relaxed ${uiSurfaces.textSecondary}`}
+        />
         {current.linkUrl ? (
           <a
             href={current.linkUrl}

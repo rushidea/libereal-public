@@ -13,6 +13,7 @@ import AdaptiveHeader from '@/components/AdaptiveHeader';
 import MobileBottomNav from '@/components/mobile/MobileBottomNav';
 import { getWeChatLinkHint, getWeChatSignInButtonLabel, isWeChatMobileLoginAvailable } from '@/lib/wechat-auth';
 import { signInWithWeChat, WeChatMobileUnavailableError } from '@/lib/wechat-sign-in';
+import { appendAuthCallbackUrl, sanitizeAuthCallbackUrl } from '@/lib/auth-callback-url';
 
 function subscribeToWebAuthn(): () => void {
   return () => undefined;
@@ -21,7 +22,7 @@ function subscribeToWebAuthn(): () => void {
 function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const callbackUrl = searchParams.get('callbackUrl') ?? '/';
+  const callbackUrl = sanitizeAuthCallbackUrl(searchParams.get('callbackUrl'), '/');
   const error = searchParams.get('error');
   const errorCode = searchParams.get('code');
   const wechatParam = searchParams.get('wechat');
@@ -102,6 +103,7 @@ function LoginForm() {
       email: form.email,
       password: form.password,
       turnstileToken,
+      callbackUrl,
       redirect: false,
     });
 
@@ -109,7 +111,7 @@ function LoginForm() {
       setLocalError(result.code === 'account-frozen' ? '账户已冻结：可登录，但无法看到折扣价，也无法下单或询价。' : '邮箱或密码错误，请重试。');
       setLoading(false);
     } else if (result?.url?.includes('/login/mfa')) {
-      router.push(result.url);
+      router.push(appendAuthCallbackUrl(result.url, callbackUrl));
       router.refresh();
     } else {
       router.push(callbackUrl);
@@ -323,7 +325,7 @@ function LoginForm() {
             </form>
 
             <div className="mt-5 text-center">
-              <Link href="/register" className="text-sm text-gray-400 hover:text-brand-600">
+              <Link href={callbackUrl === '/' ? '/register' : `/register?callbackUrl=${encodeURIComponent(callbackUrl)}`} className="text-sm text-gray-400 hover:text-brand-600">
                 还没有账户？<span className="text-brand-600 font-medium">立即注册</span>
               </Link>
             </div>

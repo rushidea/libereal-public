@@ -1,7 +1,8 @@
 import { NextResponse } from 'next/server';
 import { auth } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
-import { inquiryItemView, orderItemView } from '@/lib/commerce-records';
+import { orderItemView } from '@/lib/commerce-records';
+import { viewInquiryItemGroups } from '@/lib/inquiry-item-brands';
 import { quoteView } from '@/lib/quote-records';
 import { getAlipayPaymentSummary } from '@/data/alipay-payment';
 import type { Prisma } from '@prisma/client';
@@ -78,12 +79,14 @@ export async function GET() {
       : [];
     const countMap = new Map(orderCounts.map((c) => [c.inquiryId, c._count._all]));
 
-    const inquiriesWithOrderCount = inquiries.map((inq) => {
+    const inquiryItemViews = await viewInquiryItemGroups(inquiries.map((inq) => inq.inquiryItems));
+    const inquiriesWithOrderCount = inquiries.map((inq, index) => {
       const { userId: creatorUserId, inquiryItems, quotes, ...publicInquiry } = inq;
       void creatorUserId;
+      void inquiryItems;
       return {
         ...publicInquiry,
-        items: inquiryItems.map(inquiryItemView),
+        items: inquiryItemViews[index],
         inquiryItems: undefined,
         activeQuote: quotes[0] ? quoteView(quotes[0]) : null,
         quotes: undefined,

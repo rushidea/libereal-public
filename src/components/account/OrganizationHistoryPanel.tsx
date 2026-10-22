@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
 import { ArrowLeft, Building2, FileText, Info, ReceiptText, X } from 'lucide-react';
 import { uiSurfaces } from '@/lib/ui-surfaces';
+import { InquiryIdDisplay } from '@/components/InquiryIdDisplay';
 
 type Receivable = {
   id: string;
@@ -83,6 +84,7 @@ function statusLabel(status: string): string {
     cancelled: '已取消',
     pending_quote: '待报价',
     quote_sent: '已报价',
+    declined: '已放弃',
     closed: '已关闭',
     open: '待回款',
     overdue: '已逾期',
@@ -277,7 +279,7 @@ export default function OrganizationHistoryPanel({ organizationId, view }: { org
             {data.inquiries.map((inquiry) => (
               <div key={inquiry.id} className={`flex flex-wrap items-start justify-between gap-3 rounded-xl border ${uiSurfaces.border} ${uiSurfaces.toolbar} p-4`}>
                 <div>
-                  <p className={`break-all font-mono text-sm ${uiSurfaces.titleText}`}>{inquiry.id}</p>
+                  <InquiryIdDisplay id={inquiry.id} className={uiSurfaces.titleText} />
                   <p className={`mt-1 text-xs ${uiSurfaces.mutedText}`}>{formatDate(inquiry.createdAt)} · {statusLabel(inquiry.status)}</p>
                 </div>
                 <p className={`text-sm font-semibold ${uiSurfaces.textInteractive}`}>{formatPrice(inquiry.subtotal)}</p>

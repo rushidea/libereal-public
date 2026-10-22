@@ -4,20 +4,10 @@ import { FormEvent, Suspense, useState, useSyncExternalStore } from 'react';
 import { browserSupportsWebAuthn, startAuthentication } from '@simplewebauthn/browser';
 import { signIn } from 'next-auth/react';
 import { useRouter, useSearchParams } from 'next/navigation';
+import { sanitizeAuthCallbackUrl } from '@/lib/auth-callback-url';
 
 function subscribeToWebAuthn(): () => void {
   return () => undefined;
-}
-
-function sanitizeCallbackUrl(value: string | null): string {
-  if (!value || /[\\\u0000-\u001f\u007f]/.test(value) || typeof window === 'undefined') return '/account';
-  try {
-    const target = new URL(value, window.location.origin);
-    if (target.origin !== window.location.origin) return '/account';
-    return `${target.pathname}${target.search}${target.hash}` || '/account';
-  } catch {
-    return '/account';
-  }
 }
 
 function MfaLoginContent() {
@@ -25,7 +15,7 @@ function MfaLoginContent() {
   const searchParams = useSearchParams();
   const challengeId = searchParams.get('challengeId') ?? '';
   const provider = searchParams.get('provider') ?? '';
-  const callbackUrl = sanitizeCallbackUrl(searchParams.get('callbackUrl'));
+  const callbackUrl = sanitizeAuthCallbackUrl(searchParams.get('callbackUrl'), '/account');
   const [useRecoveryCode, setUseRecoveryCode] = useState(false);
   const [code, setCode] = useState('');
   const [recoveryCode, setRecoveryCode] = useState('');
