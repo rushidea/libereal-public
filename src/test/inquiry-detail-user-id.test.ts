@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { NextRequest, NextResponse } from 'next/server';
-import { clearAllTables, closeTestDb, getTestDb } from './db-helpers';
+import { clearAllTables, closeTestDb, getTestDb, seedUser } from './db-helpers';
 
 const mocks = vi.hoisted(() => ({
   requireActiveSession: vi.fn(),
@@ -34,6 +34,7 @@ describe('GET /api/inquiries/[id] creator id', () => {
   beforeEach(() => {
     clearAllTables(getTestDb());
     seedInquiry('creator-secret-user');
+    seedUser(getTestDb(), { id: 'viewer', email: 'buyer@test.com', name: '购买人' });
     mocks.requireActiveSession.mockReset();
     mocks.requireAdmin.mockReset();
   });

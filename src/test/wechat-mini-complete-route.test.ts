@@ -2,7 +2,7 @@
 
 import { createHash } from 'node:crypto';
 import { NextRequest } from 'next/server';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const browserSecret = 'a'.repeat(43);
 const browserSecretHash = createHash('sha256').update(browserSecret).digest('hex');
@@ -44,6 +44,38 @@ vi.mock('@/lib/prisma', () => ({
 }));
 
 import { POST } from '@/app/api/auth/wechat-mini/complete/route';
+import { setAccountLinkStateStoreForTests } from '@/lib/account-linking';
+
+function memoryLinkStore() {
+  const rows = new Map<string, { value: string; expiresAt: number }>();
+  return {
+    clear() {
+      rows.clear();
+    },
+    async get(key: string) {
+      const row = rows.get(key);
+      if (!row || row.expiresAt <= Date.now()) {
+        rows.delete(key);
+        return null;
+      }
+      return row.value;
+    },
+    async set(key: string, value: string, ttlMs: number) {
+      rows.set(key, { value, expiresAt: Date.now() + ttlMs });
+    },
+    async delete(key: string) {
+      rows.delete(key);
+    },
+    async compareAndDelete(key: string, expected: string) {
+      const current = await this.get(key);
+      if (current == null || current !== expected) return false;
+      rows.delete(key);
+      return true;
+    },
+  };
+}
+
+const linkStore = memoryLinkStore();
 
 function linkedChallenge(overrides: Record<string, unknown> = {}) {
   return {
@@ -79,9 +111,15 @@ describe('wechat-mini complete route', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     cookieJar.clear();
+    linkStore.clear();
+    setAccountLinkStateStoreForTests(linkStore);
     mocks.findUnique.mockResolvedValue(linkedChallenge());
     mocks.updateMany.mockResolvedValue({ count: 1 });
     mocks.update.mockResolvedValue({});
+  });
+
+  afterEach(() => {
+    setAccountLinkStateStoreForTests(null);
   });
 
   it('returns the MFA redirect and preserves callbackUrl for the browser that started the challenge', async () => {
