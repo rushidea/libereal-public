@@ -9,6 +9,7 @@ import { applySettledQuoteExpiry, settleExpiredQuotes } from '@/lib/quote-expiry
 import { loadQuoteProductTaxonomy } from '@/lib/quote-item-taxonomy';
 import { canAccessOrganizationRecord } from '@/lib/organization-record-access';
 import { emailKeyedAccess } from '@/lib/verified-email-access';
+import { INQUIRY_STATUS_LABELS, inquiryStatusTransitionError, isInquiryStatus } from '@/lib/inquiry-status';
 
 interface LogItem {
   name: string;
@@ -63,6 +64,8 @@ export async function GET(
   });
 }
 
+/** 更新询价。权限：管理员 inquiries.write，不要求 MFA。
+ * status 只能是合法询价状态，且必须符合报价、放弃、接受和过期的流转规则；非法值或非法流转返回 400。 */
 export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -80,8 +83,21 @@ export async function PATCH(
     }
 
     const updateData: Prisma.InquiryUpdateInput = {};
+    const requestedStatus = body.status;
+    const statusProvided = requestedStatus !== undefined && requestedStatus !== null && requestedStatus !== '';
 
-    if (body.status) updateData.status = body.status;
+    if (statusProvided) {
+      const latestQuoteStatus = requestedStatus !== inquiry.status
+        ? (await prisma.quote.findFirst({
+          where: { inquiryId: id },
+          orderBy: { version: 'desc' },
+          select: { status: true },
+        }))?.status ?? null
+        : null;
+      const statusError = inquiryStatusTransitionError(inquiry.status, requestedStatus, latestQuoteStatus);
+      if (statusError) return NextResponse.json({ error: statusError }, { status: 400 });
+      updateData.status = requestedStatus;
+    }
     if (body.address !== undefined) updateData.address = body.address;
     if (body.notes !== undefined) updateData.notes = body.notes;
     if (body.paymentMethod !== undefined) updateData.paymentMethod = body.paymentMethod;
@@ -118,18 +134,10 @@ export async function PATCH(
     }
 
     // Status-change notification
-    if (body.status && body.status !== inquiry.status) {
+    if (isInquiryStatus(requestedStatus) && requestedStatus !== inquiry.status) {
       const notifTitle = '询价单状态更新';
-      let notifContent = `您的询价单状态已更新为：${body.status}`;
+      const notifContent = `您的询价单状态已更新为：${INQUIRY_STATUS_LABELS[requestedStatus]}`;
       const notifLink = `/account/inquiries?id=${id}`;
-
-      if (body.status === '已确认') {
-        notifContent = '您的询价单已确认，我们会尽快处理您的订单。';
-      } else if (body.status === '已拒绝') {
-        notifContent = '您的询价单未通过，请联系客服了解详情。';
-      } else if (body.status === '处理中') {
-        notifContent = '您的询价单正在处理中，我们会尽快与您联系。';
-      }
 
       await prisma.notification.create({
         data: {

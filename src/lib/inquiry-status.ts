@@ -9,6 +9,95 @@ import type { Prisma } from '@prisma/client';
 export const PENDING_INQUIRY_STATUSES = ['pending_quote', '待确认', '待人工审核'] as const;
 
 /**
+ * Inquiry statuses the product actually writes.
+ * Intake values come from creation (`待确认` / `待人工审核`) and the schema default
+ * (`pending_quote`). Later values follow the quote, expiry, decline, and accept flows.
+ * `expired` stays a quote status; the inquiry status for that outcome is `quote_expired`.
+ */
+export const INQUIRY_STATUSES = [
+  ...PENDING_INQUIRY_STATUSES,
+  'quote_sent',
+  'quote_expired',
+  'declined',
+  'closed',
+] as const;
+
+export type InquiryStatus = (typeof INQUIRY_STATUSES)[number];
+
+export const INQUIRY_STATUS_LABELS: Record<InquiryStatus, string> = {
+  pending_quote: '待报价',
+  待确认: '待确认',
+  待人工审核: '待人工审核',
+  quote_sent: '已发报价',
+  quote_expired: '已过期',
+  declined: '已放弃',
+  closed: '已关闭',
+};
+
+const INQUIRY_STATUS_LIST = INQUIRY_STATUSES.map((status) => {
+  const label = INQUIRY_STATUS_LABELS[status];
+  return label === status ? status : `${status}（${label}）`;
+}).join('、');
+
+/**
+ * Admin PATCH transitions.
+ * - Intake statuses may be reclassified among themselves.
+ * - 报价: intake → quote_sent, and quote_expired → quote_sent, only when the latest quote is `sent`.
+ * - 过期: quote_sent → quote_expired, only when the latest quote is `expired`.
+ * - 放弃: quote_sent or quote_expired → declined, only when the latest quote is `declined`.
+ * - 接受并关闭: quote_sent → closed, only when the latest quote is `accepted`.
+ * - declined and closed are terminal. Expiry does not return the inquiry to intake.
+ */
+const INQUIRY_STATUS_TRANSITIONS: Record<InquiryStatus, readonly InquiryStatus[]> = {
+  pending_quote: ['待确认', '待人工审核', 'quote_sent'],
+  待确认: ['pending_quote', '待人工审核', 'quote_sent'],
+  待人工审核: ['pending_quote', '待确认', 'quote_sent'],
+  quote_sent: ['quote_expired', 'declined', 'closed'],
+  quote_expired: ['quote_sent', 'declined'],
+  declined: [],
+  closed: [],
+};
+
+export function isInquiryStatus(value: unknown): value is InquiryStatus {
+  return typeof value === 'string' && (INQUIRY_STATUSES as readonly string[]).includes(value);
+}
+
+/**
+ * Chinese error for an admin inquiry status change, or null when the change is allowed.
+ * `latestQuoteStatus` is the highest-version quote, or null when the inquiry has no quote.
+ * A same-status update of a legal status does not consult the quote.
+ */
+export function inquiryStatusTransitionError(
+  from: string,
+  to: unknown,
+  latestQuoteStatus: string | null,
+): string | null {
+  if (!isInquiryStatus(to)) {
+    return `询价状态无效。可用状态：${INQUIRY_STATUS_LIST}。`;
+  }
+  if (!isInquiryStatus(from)) {
+    return '当前询价状态不在可流转范围内，不能修改状态。';
+  }
+  if (from === to) return null;
+  if (!INQUIRY_STATUS_TRANSITIONS[from].includes(to)) {
+    return `询价不能从「${INQUIRY_STATUS_LABELS[from]}」改为「${INQUIRY_STATUS_LABELS[to]}」。`;
+  }
+  if (to === 'quote_sent' && latestQuoteStatus !== 'sent') {
+    return '当前没有已发送的报价，不能改为已发报价。';
+  }
+  if (to === 'quote_expired' && latestQuoteStatus !== 'expired') {
+    return '报价尚未过期，不能把询价改为已过期。';
+  }
+  if (to === 'declined' && latestQuoteStatus !== 'declined') {
+    return '报价尚未放弃，不能把询价改为已放弃。';
+  }
+  if (to === 'closed' && latestQuoteStatus !== 'accepted') {
+    return '报价尚未接受，不能关闭询价。';
+  }
+  return null;
+}
+
+/**
  * Statuses that may receive a newly published quote.
  * `quote_sent` and `quote_expired` stay quotable so an admin can republish
  * (new version, previous draft/sent quote superseded). Expiry moves the inquiry
