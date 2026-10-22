@@ -102,9 +102,6 @@ const nextConfig: NextConfig = {
       { protocol: 'https', hostname: 'abcepta.com.cn' },
       // Fallback image source
       { protocol: 'https', hostname: 'images.unsplash.com' },
-      // Abcepta product images
-      { protocol: 'https', hostname: 'www.abcepta.com.cn' },
-      { protocol: 'https', hostname: 'abcepta.com.cn' },
     ],
   },
 };
