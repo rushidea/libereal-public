@@ -1,11 +1,11 @@
-const SUPPRESS_ATTR = 'data-suppress-chatway';
-const SUPPRESS_COUNT_ATTR = 'data-suppress-chatway-count';
+const SUPPRESS_ATTR = 'data-suppress-knocket';
+const SUPPRESS_COUNT_ATTR = 'data-suppress-knocket-count';
 
 /**
- * Chatway 气泡 z-index 极高，无法压过。需要规格选择等关键 UI 可见时，临时隐藏聊天气泡。
+ * 客服气泡会盖住规格选择等关键操作。需要这些界面可见时，临时隐藏聊天气泡。
  * 返回释放函数，支持多层嵌套调用。
  */
-export function acquireChatwaySuppression(): () => void {
+export function acquireKnocketSuppression(): () => void {
   if (typeof document === 'undefined') return () => {};
 
   const next = Number(document.body.getAttribute(SUPPRESS_COUNT_ATTR) || '0') + 1;

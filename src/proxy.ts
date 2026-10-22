@@ -12,17 +12,43 @@ import type { NextRequest } from 'next/server';
  */
 export function buildCsp(isProd: boolean): string {
   const scriptSrc = isProd
-    ? "'self' 'unsafe-inline' https://challenges.cloudflare.com https://cdn.chatway.app"
-    : "'self' 'unsafe-inline' 'unsafe-eval' https://challenges.cloudflare.com https://cdn.chatway.app";
+    ? "'self' 'unsafe-inline' https://challenges.cloudflare.com https://trtc.io"
+    : "'self' 'unsafe-inline' 'unsafe-eval' https://challenges.cloudflare.com https://trtc.io";
+  // Knocket loads sdk.js and sdk.css from trtc.io, then calls api.trtc.io.
+  // Live chat uses Tencent IM (China production hosts). Dynamic backups replace
+  // the leading * with an app id or random prefix on *.my-imcloud.com / *.my-cpaas.com.
+  const connectSrc = [
+    "'self'",
+    'https://challenges.cloudflare.com',
+    'https://api.minimaxi.com',
+    'https://www.jbr-pub.org.cn',
+    'https://nature.com',
+    'https://www.sciencenet.cn',
+    'https://trtc.io',
+    'https://api.trtc.io',
+    'https://events.im.qcloud.com',
+    'https://web.sdk.qcloud.com',
+    'https://web.sdk.cloud.tencent.cn',
+    'https://web.sdk.tencent.cn',
+    'https://*.my-imcloud.com',
+    'wss://wss.im.qcloud.com',
+    'wss://wssv6.im.qcloud.com',
+    'wss://wss.tim.qq.com',
+    'wss://wss.im.tencent.cn',
+    'wss://162.14.13.203',
+    'wss://*.my-imcloud.com',
+    'wss://*.my-cpaas.com',
+  ].join(' ');
 
   return [
     "default-src 'self'",
     `script-src ${scriptSrc}`,
-    "style-src 'self' 'unsafe-inline' https://cdn.chatway.app",
+    "style-src 'self' 'unsafe-inline' https://trtc.io",
     "img-src 'self' data: blob: https:",
-    "font-src 'self' data:",
-    "connect-src 'self' https://challenges.cloudflare.com https://api.minimaxi.com https://www.jbr-pub.org.cn https://nature.com https://www.sciencenet.cn https://chatway.app https://*.chatway.app wss://*.chatway.app",
-    "frame-src 'self' https://challenges.cloudflare.com https://chatway.app https://*.chatway.app",
+    "font-src 'self' data: https://fonts.gstatic.com https://console.trtc.io",
+    "media-src 'self' https://console.trtc.io",
+    `connect-src ${connectSrc}`,
+    "frame-src 'self' https://challenges.cloudflare.com",
     "worker-src 'self' blob:",
     "manifest-src 'self'",
     "base-uri 'self'",
