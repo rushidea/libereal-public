@@ -18,6 +18,12 @@ describe('proxy admin hide', () => {
     expect(response.headers.get('x-middleware-rewrite')).toBeNull();
   });
 
+  it('does not require a session to open /mail', () => {
+    const response = proxy(new NextRequest('http://localhost/mail'));
+    expect(response.headers.get('location')).toBeNull();
+    expect(response.status).toBe(200);
+  });
+
   it('lets a session cookie continue into /admin', () => {
     const response = proxy(new NextRequest('http://localhost/admin', {
       headers: { cookie: 'authjs.session-token=test-token' },

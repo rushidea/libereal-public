@@ -34,6 +34,11 @@ describe('public SEO URL rules', () => {
     expect(isPrivateSeoPath('/products/9272S?brand=CST')).toBe(false);
   });
 
+  it('publishes the LIBEREAL MAIL homepage and keeps it out of private SEO paths', () => {
+    expect(STATIC_SITEMAP_PATHS).toContain('/mail');
+    expect(isPrivateSeoPath('/mail')).toBe(false);
+  });
+
   it('keeps public static paths out of the private list', () => {
     for (const path of STATIC_SITEMAP_PATHS) {
       expect(isPrivateSeoPath(path)).toBe(false);

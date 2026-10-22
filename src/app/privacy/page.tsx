@@ -142,8 +142,45 @@ export default function PrivacyPage() {
             </p>
           </section>
 
+          <section id="libereal-mail">
+            <h2 className="text-lg font-semibold text-gray-800 mb-3">十、LIBEREAL MAIL 与 Google 用户数据</h2>
+            <p className="text-sm text-gray-600 leading-relaxed mb-3">
+              LIBEREAL MAIL（<a href="https://mail.libereal.cn" className="text-brand-600 hover:underline">https://mail.libereal.cn</a>）是南京天放生物科技有限公司为 Libereal 内部使用而运营的邮件管理系统。应用说明见 <Link href="/mail" className="text-brand-600 hover:underline">LIBEREAL MAIL 主页</Link>。用户可以使用 Google 账号登录，该登录只用于核验身份。
+            </p>
+            <p className="text-sm text-gray-600 leading-relaxed mb-3">
+              通过 Google 登录访问的用户数据限于 openid、email、profile 范围：
+            </p>
+            <ul className="list-disc pl-5 text-sm text-gray-600 space-y-1.5 mb-3">
+              <li>姓名</li>
+              <li>电子邮件地址</li>
+              <li>Google 账号标识</li>
+            </ul>
+            <p className="text-sm text-gray-600 leading-relaxed mb-3">这些数据的用途如下：</p>
+            <ul className="list-disc pl-5 text-sm text-gray-600 space-y-1.5 mb-3">
+              <li>确认登录者身份，并将其与内部邮件账户对应</li>
+              <li>不用于广告，包括个性化广告、再营销或基于兴趣的广告</li>
+              <li>不出售、不出租，也不向第三方共享；法律要求或提供本服务所必需的处理除外</li>
+            </ul>
+            <p className="text-sm text-gray-600 leading-relaxed mb-3">保存期限与删除：</p>
+            <ul className="list-disc pl-5 text-sm text-gray-600 space-y-1.5 mb-3">
+              <li>姓名、电子邮件地址和 Google 账号标识，在该人员持有内部 LIBEREAL MAIL 账户期间保留</li>
+              <li>账户关闭后，或我们核实删除请求后，相关 Google 用户数据在 30 日内删除或做匿名化处理；法律要求保留的除外</li>
+              <li>删除请求请发送至 <a href="mailto:legal@libereal.cn" className="text-brand-600 hover:underline">legal@libereal.cn</a>，并注明 Google 账号邮箱。我们会先核实身份，再删除并回复处理结果</li>
+            </ul>
+            <p className="text-sm text-gray-600 leading-relaxed mb-3">
+              我们遵守 Google API Services User Data Policy，包括其中的 Limited Use 要求：
+            </p>
+            <ul className="list-disc pl-5 text-sm text-gray-600 space-y-1.5">
+              <li>Google 用户数据只用于向用户提供或改进 LIBEREAL MAIL 中面向用户的身份核验功能，或用于该政策允许的安全与合规用途</li>
+              <li>不将 Google 用户数据用于广告</li>
+              <li>不向第三方出售 Google 用户数据</li>
+              <li>不向第三方传输 Google 用户数据，除非为提供或改进上述用户可见功能所必需、为遵守适用法律、在合并或收购中已向用户说明，或已获得用户明确同意</li>
+              <li>不允许人工读取 Google 用户数据，除非已获得用户明确同意、为调查滥用或安全问题、为遵守适用法律，或数据已汇总用于内部运营且无法识别个人</li>
+            </ul>
+          </section>
+
           <section>
-            <h2 className="text-lg font-semibold text-gray-800 mb-3">十、联系我们</h2>
+            <h2 className="text-lg font-semibold text-gray-800 mb-3">十一、联系我们</h2>
             <div className="bg-gray-50 rounded-xl p-5 space-y-2 text-sm text-gray-600">
               <p><strong>公司名称：</strong>南京天放生物科技有限公司</p>
               <p><strong>地址：</strong>南京市雨花台区西善桥南路108号</p>

@@ -35,7 +35,11 @@ describe('robots.txt for Bing and Sogou', () => {
     expect(body).toContain('Disallow: /checkout');
     expect(body).toContain('Disallow: /reset-password');
     expect(body).toContain('Disallow: /forgot-password');
+    expect(body).toContain('Allow: /mail');
+    expect(body).not.toContain('Disallow: /mail');
     expect(body).toContain('Sitemap: https://libereal.cn/sitemap.xml');
+    const published = readFileSync(join(process.cwd(), 'public/robots.txt'), 'utf8');
+    expect(published).toBe(body);
     expect(body).toContain('Host: https://libereal.cn');
   });
 
