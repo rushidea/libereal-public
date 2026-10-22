@@ -11,6 +11,7 @@ import {
   Building2, MapPin, MessageSquare
 } from 'lucide-react';
 import AdaptiveHeader from '@/components/AdaptiveHeader';
+import { useMarkNotificationModuleRead } from '@/context/CustomerNotificationsContext';
 import { InquiryIdDisplay } from '@/components/InquiryIdDisplay';
 import SiteFooter from '@/components/SiteFooter';
 import MobileBottomNav from '@/components/mobile/MobileBottomNav';
@@ -106,6 +107,7 @@ export default function InquiryDetailPage({ params }: { params: Promise<{ id: st
   const { id } = use(params);
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const { data: session, status } = useSession();
+  useMarkNotificationModuleRead('inquiries');
   const searchParams = useSearchParams();
   const router = useRouter();
   const [inquiry, setInquiry] = useState<Inquiry | null>(null);

@@ -1331,3 +1331,36 @@ header[data-fixed-header="true"] [data-nav-submenu][data-nav-open="true"] {
   animation-delay: calc(var(--hero-delay, 0) * 120ms);
   will-change: transform, opacity, filter;
 }
+
+@keyframes notification-bell-pulse {
+  0%,
+  100% {
+    transform: rotate(0deg);
+  }
+  15% {
+    transform: rotate(14deg);
+  }
+  30% {
+    transform: rotate(-12deg);
+  }
+  45% {
+    transform: rotate(8deg);
+  }
+  60% {
+    transform: rotate(-5deg);
+  }
+  75% {
+    transform: rotate(2deg);
+  }
+}
+
+.notification-bell-pulse {
+  animation: notification-bell-pulse 0.9s ease-in-out;
+  transform-origin: top center;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .notification-bell-pulse {
+    animation: none;
+  }
+}

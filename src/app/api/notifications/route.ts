@@ -2,12 +2,27 @@ import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
 import {
+  getCustomerUnreadByModule,
+  markCustomerNotificationModuleRead,
+} from '@/lib/customer-notification-inbox';
+import { isCustomerNotificationModule } from '@/lib/customer-notification-modules';
+import {
   markBroadcastReceiptsRead,
   NOTIFICATION_SCOPE_BROADCAST,
   NOTIFICATION_SCOPE_PERSONAL,
 } from '@/lib/notification-ack';
 import { ensurePendingOrganizationApprovalNotifications } from '@/lib/organization-service';
 import { verifiedStoredEmail } from '@/lib/verified-email-access';
+
+/**
+ * AI Ops permission matrix — customer inbox, not an ADMIN_PERMISSION_KEYS entry.
+ * GET: session. Customers read email-scoped personal rows and broadcasts.
+ *      Admins read role=admin rows. Anonymous callers receive `{ notifications: [] }`.
+ *      Customer responses include `unreadByModule` (full unread counts, not the 50-row cap).
+ * PATCH: session. Customers update only their own personal rows and broadcast receipts.
+ *        `{ module }` clears one sidebar module and cannot be combined with `ids` or `markAll`.
+ *        Admins update only role=admin rows and do not accept `module`.
+ */
 
 type NotificationRow = {
   id: string;
@@ -112,7 +127,8 @@ export async function GET(_req: NextRequest) {
       ...broadcasts.map((row) => serializeNotification(row, row.receipts[0] ?? null)),
     ].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 
-    return NextResponse.json({ notifications: merged.slice(0, 50) });
+    const unreadByModule = await getCustomerUnreadByModule(user.email, user.id);
+    return NextResponse.json({ notifications: merged.slice(0, 50), unreadByModule });
   } catch (err) {
     console.error('[notifications GET] error:', err);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
@@ -136,9 +152,21 @@ export async function PATCH(req: NextRequest) {
     const mailbox = verifiedStoredEmail(user);
 
     const body = await req.json();
-    const { ids, markAll } = body;
+    const { ids, markAll, module: moduleName } = body as {
+      ids?: unknown;
+      markAll?: unknown;
+      module?: unknown;
+    };
+    const hasIds = Array.isArray(ids) && ids.length > 0;
+    const hasModule = typeof moduleName === 'string' && moduleName.length > 0;
+    if (hasModule && (hasIds || markAll === true)) {
+      return NextResponse.json({ error: 'module cannot be combined with ids or markAll' }, { status: 400 });
+    }
 
     if (user.role === 'admin') {
+      if (hasModule) {
+        return NextResponse.json({ error: 'module is only supported for customer notifications' }, { status: 400 });
+      }
       if (markAll) {
         await prisma.notification.updateMany({
           where: { role: 'admin', isRead: false, deletedAt: null },
@@ -153,6 +181,18 @@ export async function PATCH(req: NextRequest) {
         return NextResponse.json({ error: 'ids or markAll is required' }, { status: 400 });
       }
       return NextResponse.json({ success: true });
+    }
+
+    if (!user.email) {
+      return NextResponse.json({ error: 'User not found' }, { status: 404 });
+    }
+
+    if (hasModule) {
+      if (!isCustomerNotificationModule(moduleName)) {
+        return NextResponse.json({ error: 'invalid module' }, { status: 400 });
+      }
+      await markCustomerNotificationModuleRead(user.email, user.id, moduleName);
+      return NextResponse.json({ success: true, module: moduleName });
     }
 
     if (markAll) {

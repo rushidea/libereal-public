@@ -3,7 +3,7 @@ import { prisma } from '@/lib/prisma';
 import { requireAdmin, getAdminPermissions } from '@/lib/session';
 import { formatOrderPaymentMethod, normalizeOrderPaymentMethod } from '@/data/payment-methods';
 import { INACTIVE_ORDER_STATUSES, ORDER_STATUS_LABELS } from '@/lib/order-domain';
-import { overdueInquiryWhere, pendingInquiryWhere } from '@/lib/inquiry-status';
+import { countAdminInquiryTodos } from '@/lib/admin-inquiry-todo-count';
 
 export const dynamic = 'force-dynamic';
 
@@ -173,13 +173,9 @@ export async function GET(_req: NextRequest) {
       prisma.order.count({
         where: { status: 'pending', archivedAt: null, createdAt: { lt: slaThreshold } },
       }),
-      prisma.inquiry.count({
-        // 历史数据曾用中文状态「待确认」，新代码用枚举 pending_quote，两侧都兼容
-        where: pendingInquiryWhere(),
-      }),
-      prisma.inquiry.count({
-        where: overdueInquiryWhere(slaThreshold),
-      }),
+      // 只统计仍待报价的询价。已发报价，或员工已在「提交报价」里记过完整报价的，不再计入。
+      countAdminInquiryTodos(),
+      countAdminInquiryTodos(slaThreshold),
       prisma.user.count({ where: { isNewUser: true } }),
       prisma.userCreatedRecipe.count({ where: { status: 'pending' } }),
       prisma.organization.count({ where: { status: 'pending' } }),

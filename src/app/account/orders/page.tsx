@@ -6,6 +6,7 @@ import { useSession } from 'next-auth/react';
 
 import { Package, Search, Filter, Check, Truck, Eye, XCircle, RotateCcw } from 'lucide-react';
 import AdaptiveHeader from '@/components/AdaptiveHeader';
+import { useMarkNotificationModuleRead } from '@/context/CustomerNotificationsContext';
 import SiteFooter from '@/components/SiteFooter';
 import MobileBottomNav from '@/components/mobile/MobileBottomNav';
 
@@ -125,6 +126,7 @@ function OrdersContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { status } = useSession();
+  useMarkNotificationModuleRead('orders');
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');

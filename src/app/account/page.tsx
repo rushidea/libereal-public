@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 
@@ -21,6 +21,8 @@ import { ProtocolsPanel, RecipesPanel } from '@/components/community/Panels';
 import OrdersPanel from '@/components/account/OrdersPanel';
 import InquiriesPanel from '@/components/account/InquiriesPanel';
 import AccountSidebar from '@/components/account/AccountSidebar';
+import { useCustomerNotifications, useMarkNotificationModuleRead } from '@/context/CustomerNotificationsContext';
+import { dashboardTabNotificationModule } from '@/lib/customer-notification-modules';
 import { uiSurfaces } from '@/lib/ui-surfaces';
 import { InquiryIdText } from '@/components/InquiryIdDisplay';
 
@@ -121,6 +123,7 @@ export default function AccountPage() {
   const [userSubTab, setUserSubTab] = useState(
     requestedTab && DASHBOARD_TAB_KEYS.includes(requestedTab) ? requestedTab : 'overview',
   );
+  useMarkNotificationModuleRead(dashboardTabNotificationModule(userSubTab));
 
   return (
     <div className={`flex min-h-screen flex-col ${uiSurfaces.servicePage}`}>
@@ -348,24 +351,43 @@ function UserDashboard({ activeTab, setActiveTab, tier, points }: { activeTab: s
 }
 
 function NotificationsPanel() {
+  const { markIdsRead, markAllRead, unreadByModule } = useCustomerNotifications();
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<'all' | 'unread'>('all');
+  const previousNotificationUnread = useRef(unreadByModule.notifications);
 
   useEffect(() => {
-    fetch('/api/notifications').then(r => r.json()).then(data => {
-      setNotifications(data.notifications || []);
-      setLoading(false);
-    }).catch(() => setLoading(false));
+    let cancelled = false;
+    const load = () => {
+      fetch('/api/notifications').then(r => r.json()).then(data => {
+        if (cancelled) return;
+        setNotifications(data.notifications || []);
+        setLoading(false);
+      }).catch(() => {
+        if (!cancelled) setLoading(false);
+      });
+    };
+    load();
+    return () => { cancelled = true; };
   }, []);
 
+  useEffect(() => {
+    const previousCount = previousNotificationUnread.current;
+    previousNotificationUnread.current = unreadByModule.notifications;
+    if (previousCount <= 0 || unreadByModule.notifications !== 0) return;
+    fetch('/api/notifications').then(r => r.json()).then(data => {
+      setNotifications(data.notifications || []);
+    }).catch(() => undefined);
+  }, [unreadByModule.notifications]);
+
   async function markAsRead(id: string) {
-    await fetch('/api/notifications', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids: [id] }) });
+    await markIdsRead([id]);
     setNotifications(prev => prev.map(n => n.id === id ? { ...n, isRead: true } : n));
   }
 
   async function markAllAsRead() {
-    await fetch('/api/notifications', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ markAll: true }) });
+    await markAllRead();
     setNotifications(prev => prev.map(n => ({ ...n, isRead: true })));
   }
 

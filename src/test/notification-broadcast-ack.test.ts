@@ -254,6 +254,120 @@ describe('notification broadcast + forced ack', () => {
     expect(receipt2?.acknowledgedAt).toBeNull();
   });
 
+  it('customer unreadByModule splits quotes and module clear does not mark other modules', async () => {
+    await prisma.notification.create({
+      data: {
+        email: 'customer@example.com',
+        role: 'customer',
+        type: 'quote_received',
+        title: '询价报价',
+        content: '已报价',
+        scope: 'personal',
+        linkUrl: '/account/inquiries',
+        metadata: JSON.stringify({ inquiryId: 'inq_1' }),
+      },
+    });
+    const orderQuote = await prisma.notification.create({
+      data: {
+        email: 'customer@example.com',
+        role: 'customer',
+        type: 'quote_received',
+        title: '订单报价',
+        content: '已报价',
+        scope: 'personal',
+        linkUrl: '/account/orders',
+        metadata: JSON.stringify({ orderId: 'ord_1' }),
+      },
+    });
+    await prisma.notification.create({
+      data: {
+        email: 'customer@example.com',
+        role: 'customer',
+        type: 'shipping_notification',
+        title: '已发货',
+        content: '运输中',
+        scope: 'personal',
+        isRead: true,
+        metadata: JSON.stringify({ orderId: 'ord_1' }),
+      },
+    });
+    await prisma.notification.create({
+      data: {
+        email: 'other@example.com',
+        role: 'customer',
+        type: 'quote_received',
+        title: '别人的报价',
+        content: '不可见',
+        scope: 'personal',
+        metadata: JSON.stringify({ inquiryId: 'inq_other' }),
+      },
+    });
+    const broadcast = await createForcedBroadcast('公共公告');
+
+    const list = await notificationsGet(new NextRequest('http://localhost/api/notifications'));
+    const listData = await list.json();
+    expect(listData.unreadByModule).toMatchObject({
+      inquiries: 1,
+      orders: 1,
+      notifications: 1,
+      points: 0,
+      organizations: 0,
+    });
+
+    const clearInquiries = await notificationsPatch(
+      new NextRequest('http://localhost/api/notifications', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ module: 'inquiries' }),
+      }),
+    );
+    expect(clearInquiries.status).toBe(200);
+
+    const inquiryRow = await prisma.notification.findFirst({
+      where: { email: 'customer@example.com', title: '询价报价' },
+    });
+    const orderRow = await prisma.notification.findUnique({ where: { id: orderQuote.id } });
+    const otherRow = await prisma.notification.findFirst({ where: { email: 'other@example.com' } });
+    expect(inquiryRow?.isRead).toBe(true);
+    expect(orderRow?.isRead).toBe(false);
+    expect(otherRow?.isRead).toBe(false);
+
+    const clearAnnouncements = await notificationsPatch(
+      new NextRequest('http://localhost/api/notifications', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ module: 'notifications' }),
+      }),
+    );
+    expect(clearAnnouncements.status).toBe(200);
+    const receipt = await prisma.notificationReceipt.findUnique({
+      where: { notificationId_userId: { notificationId: broadcast.id, userId: 'customer_1' } },
+    });
+    expect(receipt?.isRead).toBe(true);
+    expect(receipt?.acknowledgedAt).toBeNull();
+    expect(await hasPendingForcedAck('customer_1')).toBe(true);
+
+    const invalid = await notificationsPatch(
+      new NextRequest('http://localhost/api/notifications', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ module: 'wishlist' }),
+      }),
+    );
+    expect(invalid.status).toBe(400);
+
+    const mixed = await notificationsPatch(
+      new NextRequest('http://localhost/api/notifications', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ module: 'orders', ids: [orderQuote.id] }),
+      }),
+    );
+    expect(mixed.status).toBe(400);
+    const orderAfter = await prisma.notification.findUnique({ where: { id: orderQuote.id } });
+    expect(orderAfter?.isRead).toBe(false);
+  });
+
   it('soft-deleted notifications are hidden from customer list', async () => {
     const broadcast = await createForcedBroadcast();
     await prisma.notification.update({

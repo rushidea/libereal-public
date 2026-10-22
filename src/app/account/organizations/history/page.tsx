@@ -1,4 +1,5 @@
 import AdaptiveHeader from '@/components/AdaptiveHeader';
+import MarkNotificationModuleRead from '@/components/account/MarkNotificationModuleRead';
 import Breadcrumb from '@/components/Breadcrumb';
 import MobileBottomNav from '@/components/mobile/MobileBottomNav';
 import OrganizationHistoryPanel from '@/components/account/OrganizationHistoryPanel';
@@ -14,6 +15,7 @@ export default async function OrganizationHistoryPage({ searchParams }: PageProp
   const selectedView = view === 'payables' || view === 'receivables' ? 'payables' : view === 'inquiries' ? 'inquiries' : 'orders';
   return (
     <div className={`flex min-h-screen flex-col ${uiSurfaces.servicePage}`}>
+      <MarkNotificationModuleRead module="organizations" />
       <AdaptiveHeader />
       <main className="flex-1">
         <div className="mx-auto max-w-6xl px-4 pb-12 sm:px-6">

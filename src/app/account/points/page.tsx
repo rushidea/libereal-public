@@ -7,6 +7,7 @@ import { Coins, Filter, Package, FileText, AlertCircle, Info, Wallet } from 'luc
 import { formatPoints } from '@/lib/points';
 import { uiSurfaces } from '@/lib/ui-surfaces';
 import AdaptiveHeader from '@/components/AdaptiveHeader';
+import { useMarkNotificationModuleRead } from '@/context/CustomerNotificationsContext';
 import SiteFooter from '@/components/SiteFooter';
 import MobileBottomNav from '@/components/mobile/MobileBottomNav';
 import PointsProductCard from '@/components/points/PointsProductCard';
@@ -58,6 +59,7 @@ function MyPointsPage() {
   const { data: session, status } = useSession();
   const searchParams = useSearchParams();
   const router = useRouter();
+  useMarkNotificationModuleRead('points');
   const tabParam = searchParams.get('tab');
   const initialTab = (
     tabParam === 'history' || tabParam === 'redemptions' || tabParam === 'topup' || tabParam === 'shop'

@@ -5,7 +5,7 @@ import Link from 'next/link';
 import Image from 'next/image';
 import { Bell, Menu, Plus, Search, X, User, ChevronDown, ChevronRight, LogOut, Package, Sun, Moon, Sunset, ArrowLeft, Shield } from 'lucide-react';
 import { useSession, signOut } from 'next-auth/react';
-import { usePathname, useRouter } from 'next/navigation';
+import { useRouter } from 'next/navigation';
 import { useTheme } from './ThemeProvider';
 import CartPopover from './CartPopover';
 import QuickOrderModal from './QuickOrderModal';
@@ -15,6 +15,7 @@ import DesktopSiteNavigation from './DesktopSiteNavigation';
 import MobileSiteMenu from './mobile/MobileSiteMenu';
 import type { SiteNavigationId } from '@/data/site-navigation';
 import { uiSurfaces } from '@/lib/ui-surfaces';
+import { useCustomerNotifications } from '@/context/CustomerNotificationsContext';
 import { InquiryIdText } from '@/components/InquiryIdDisplay';
 
 const headerMutedText = 'text-[var(--brand-color-text-secondary)] dark:text-[var(--brand-color-header-nav)]';
@@ -50,16 +51,6 @@ interface AdaptiveHeaderProps {
   onHoverL2OpenChange?: (open: boolean) => void;
 }
 
-interface Notification {
-  id: string;
-  type: string;
-  title: string;
-  content: string;
-  isRead: boolean;
-  linkUrl?: string;
-  createdAt: string;
-}
-
 export default function AdaptiveHeader({
   showNav = true,
   onSearch,
@@ -81,11 +72,10 @@ export default function AdaptiveHeader({
   onHoverL2OpenChange,
 }: AdaptiveHeaderProps) {
   const router = useRouter();
-  const pathname = usePathname();
   const { data: session } = useSession();
   const { theme, mounted, toggleTheme } = useTheme();
-  const [unreadCount, setUnreadCount] = useState(0);
-  const [recentNotifs, setRecentNotifs] = useState<Notification[]>([]);
+  const { unreadTotal: unreadCount, recentUnread: recentNotifs, bellPulse } = useCustomerNotifications();
+  const bellClass = `${headerIconText}${bellPulse ? ' notification-bell-pulse' : ''}`;
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [showNotifMenu, setShowNotifMenu] = useState(false);
   const [showQuickOrderModal, setShowQuickOrderModal] = useState(false);
@@ -202,35 +192,6 @@ export default function AdaptiveHeader({
       .then(data => setRole(data.role ?? 'customer'))
       .catch(() => setRole('customer'));
   }, [session]);
-
-  useEffect(() => {
-    if (!session?.user) return;
-
-    let cancelled = false;
-    const loadNotifications = async () => {
-      try {
-        const response = await fetch('/api/notifications', { cache: 'no-store' });
-        const data = await response.json();
-        if (cancelled) return;
-        const notifs: Notification[] = data.notifications || [];
-        const unread = notifs.filter((n: Notification) => !n.isRead);
-        setUnreadCount(unread.length);
-        setRecentNotifs(unread.slice(0, 5));
-      } catch {
-        // Notification refresh is best effort and must not interrupt page navigation.
-      }
-    };
-
-    void loadNotifications();
-    const timer = window.setInterval(() => { void loadNotifications(); }, 30_000);
-    const handleFocus = () => { void loadNotifications(); };
-    window.addEventListener('focus', handleFocus);
-    return () => {
-      cancelled = true;
-      window.clearInterval(timer);
-      window.removeEventListener('focus', handleFocus);
-    };
-  }, [session, pathname]);
 
   useEffect(() => {
     const handleClick = (e: MouseEvent) => {
@@ -395,7 +356,7 @@ export default function AdaptiveHeader({
                       className={`relative flex min-h-[44px] min-w-[44px] items-center justify-center ${headerAction} -webkit-tap-highlight-transparent`}
                       aria-label="通知"
                     >
-                      <Bell size={18} className={headerIconText} />
+                      <Bell size={18} className={bellClass} />
                       {unreadCount > 0 && (
                         <span className={notificationBadge}>
                           {unreadCount > 99 ? '99+' : unreadCount}
@@ -451,7 +412,7 @@ export default function AdaptiveHeader({
                       className={`relative flex min-h-[44px] min-w-[44px] items-center justify-center ${headerAction} -webkit-tap-highlight-transparent`}
                       aria-label="通知"
                     >
-                      <Bell size={18} className={headerIconText} />
+                      <Bell size={18} className={bellClass} />
                       {unreadCount > 0 && (
                         <span className={notificationBadge}>
                           {unreadCount > 99 ? '99+' : unreadCount}
@@ -506,7 +467,7 @@ export default function AdaptiveHeader({
                     className={`relative rounded-[var(--brand-border-radius)] p-1.5 transition-colors hover:bg-[var(--brand-color-bg-hover)] ${uiSurfaces.focusRing}`}
                     title="消息中心"
                   >
-                    <Bell size={18} className={headerIconText} />
+                    <Bell size={18} className={bellClass} />
                     {unreadCount > 0 && (
                       <span className={notificationBadge}>
                         {unreadCount > 99 ? '99+' : unreadCount}
@@ -526,7 +487,7 @@ export default function AdaptiveHeader({
                         <div data-header-popup-body className={`px-4 py-8 text-center text-sm ${uiSurfaces.mutedText}`}>暂无未读消息</div>
                       ) : (
                         <div data-header-popup-body className="py-1 max-h-80 overflow-y-auto">
-                          {recentNotifs.map((n: Notification) => (
+                          {recentNotifs.map((n) => (
                             <Link
                               key={n.id}
                               href={n.linkUrl || '/account/notifications'}

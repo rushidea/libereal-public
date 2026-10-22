@@ -1,4 +1,5 @@
 import AdaptiveHeader from '@/components/AdaptiveHeader';
+import MarkNotificationModuleRead from '@/components/account/MarkNotificationModuleRead';
 import AccountSidebar from '@/components/account/AccountSidebar';
 import Breadcrumb from '@/components/Breadcrumb';
 import MobileBottomNav from '@/components/mobile/MobileBottomNav';
@@ -9,6 +10,7 @@ import { uiSurfaces } from '@/lib/ui-surfaces';
 export default function OrganizationsPage() {
   return (
     <div className={`flex min-h-screen flex-col ${uiSurfaces.servicePage}`}>
+      <MarkNotificationModuleRead module="organizations" />
       <AdaptiveHeader />
       <main className="flex-1">
         <div className="mx-auto max-w-7xl px-4 pb-12 sm:px-6">

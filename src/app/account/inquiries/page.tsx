@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Package, FileText, Check, Clock, ExternalLink, X } from 'lucide-react';
 import AdaptiveHeader from '@/components/AdaptiveHeader';
+import { useMarkNotificationModuleRead } from '@/context/CustomerNotificationsContext';
 import SiteFooter from '@/components/SiteFooter';
 import MobileBottomNav from '@/components/mobile/MobileBottomNav';
 import LegalConsentModal from '@/components/legal/LegalConsentModal';
@@ -117,6 +118,7 @@ function removeAcceptanceSnapshots(inquiryId: string) {
 export default function MyInquiriesPage() {
   const router = useRouter();
   const { data: session, status } = useSession();
+  useMarkNotificationModuleRead('inquiries');
   const actorRole = session?.user?.role;
   const [inquiries, setInquiries] = useState<Inquiry[]>([]);
   const [loading, setLoading] = useState(true);

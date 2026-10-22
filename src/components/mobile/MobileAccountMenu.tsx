@@ -4,6 +4,7 @@ import { useSession } from 'next-auth/react';
 import Link from 'next/link';
 import { User, Package, FileText, Bell, MapPin, Key, LogOut, Building2 } from 'lucide-react';
 import { signOut } from 'next-auth/react';
+import { useCustomerNotifications } from '@/context/CustomerNotificationsContext';
 import { uiSurfaces } from '@/lib/ui-surfaces';
 import BottomPopup from './BottomPopup';
 
@@ -12,8 +13,21 @@ interface MobileAccountMenuProps {
   onClose: () => void;
 }
 
+function MobileUnreadBadge({ count }: { count: number }) {
+  if (count <= 0) return null;
+  return (
+    <span
+      className="ml-auto inline-flex h-4 min-w-4 shrink-0 items-center justify-center rounded-full bg-[var(--brand-color-error)] px-1 text-[10px] font-bold leading-none text-[var(--brand-color-text-on-primary)]"
+      aria-label={`${count} 条未读`}
+    >
+      {count > 99 ? '99+' : count}
+    </span>
+  );
+}
+
 export default function MobileAccountMenu({ isOpen, onClose }: MobileAccountMenuProps) {
   const { status } = useSession();
+  const { unreadByModule } = useCustomerNotifications();
 
   if (!isOpen) return null;
 
@@ -65,15 +79,18 @@ export default function MobileAccountMenu({ isOpen, onClose }: MobileAccountMenu
         </Link>
         <Link href="/account/orders" onClick={onClose} className={`flex w-full items-center gap-3 border-0 bg-transparent px-4 py-3 transition-colors hover:bg-[var(--surface-hover)] ${uiSurfaces.focusRing}`}>
           <Package size={18} className={uiSurfaces.textInteractive} />
-          <span className={`text-sm ${uiSurfaces.textInteractive} ${uiSurfaces.textInteractiveHover} ${uiSurfaces.textInteractiveActive}`}>我的订单</span>
+          <span className={`min-w-0 flex-1 text-sm ${uiSurfaces.textInteractive} ${uiSurfaces.textInteractiveHover} ${uiSurfaces.textInteractiveActive}`}>我的订单</span>
+          <MobileUnreadBadge count={unreadByModule.orders} />
         </Link>
         <Link href="/account/inquiries" onClick={onClose} className={`flex w-full items-center gap-3 border-0 bg-transparent px-4 py-3 transition-colors hover:bg-[var(--surface-hover)] ${uiSurfaces.focusRing}`}>
           <FileText size={18} className={uiSurfaces.textInteractive} />
-          <span className={`text-sm ${uiSurfaces.textInteractive} ${uiSurfaces.textInteractiveHover} ${uiSurfaces.textInteractiveActive}`}>我的询价</span>
+          <span className={`min-w-0 flex-1 text-sm ${uiSurfaces.textInteractive} ${uiSurfaces.textInteractiveHover} ${uiSurfaces.textInteractiveActive}`}>我的询价</span>
+          <MobileUnreadBadge count={unreadByModule.inquiries} />
         </Link>
         <Link href="/account/notifications" onClick={onClose} className={`flex w-full items-center gap-3 border-0 bg-transparent px-4 py-3 transition-colors hover:bg-[var(--surface-hover)] ${uiSurfaces.focusRing}`}>
           <Bell size={18} className={uiSurfaces.textInteractive} />
-          <span className={`text-sm ${uiSurfaces.textInteractive} ${uiSurfaces.textInteractiveHover} ${uiSurfaces.textInteractiveActive}`}>消息中心</span>
+          <span className={`min-w-0 flex-1 text-sm ${uiSurfaces.textInteractive} ${uiSurfaces.textInteractiveHover} ${uiSurfaces.textInteractiveActive}`}>消息中心</span>
+          <MobileUnreadBadge count={unreadByModule.notifications} />
         </Link>
         <Link href="/account/addresses" onClick={onClose} className={`flex w-full items-center gap-3 border-0 bg-transparent px-4 py-3 transition-colors hover:bg-[var(--surface-hover)] ${uiSurfaces.focusRing}`}>
           <MapPin size={18} className={uiSurfaces.textInteractive} />
@@ -85,7 +102,8 @@ export default function MobileAccountMenu({ isOpen, onClose }: MobileAccountMenu
         </Link>
         <Link href="/account/organizations" onClick={onClose} className={`flex w-full items-center gap-3 border-0 bg-transparent px-4 py-3 transition-colors hover:bg-[var(--surface-hover)] ${uiSurfaces.focusRing}`}>
           <Building2 size={18} className={uiSurfaces.textInteractive} />
-          <span className={`text-sm ${uiSurfaces.textInteractive} ${uiSurfaces.textInteractiveHover} ${uiSurfaces.textInteractiveActive}`}>组织管理</span>
+          <span className={`min-w-0 flex-1 text-sm ${uiSurfaces.textInteractive} ${uiSurfaces.textInteractiveHover} ${uiSurfaces.textInteractiveActive}`}>组织管理</span>
+          <MobileUnreadBadge count={unreadByModule.organizations} />
         </Link>
       </div>
       <div className={`border-t pt-2 ${uiSurfaces.border}`}>

@@ -1,11 +1,12 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useSession } from 'next-auth/react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Bell, Check, CheckCheck, Package, FileText, Truck, ExternalLink } from 'lucide-react';
 import AdaptiveHeader from '@/components/AdaptiveHeader';
+import { useCustomerNotifications, useMarkNotificationModuleRead } from '@/context/CustomerNotificationsContext';
 import SiteFooter from '@/components/SiteFooter';
 import MobileBottomNav from '@/components/mobile/MobileBottomNav';
 
@@ -53,10 +54,13 @@ function formatTime(dateStr: string) {
 export default function NotificationsPage() {
   const { data: session, status } = useSession();
   const router = useRouter();
+  const { markIdsRead, markAllRead, unreadByModule } = useCustomerNotifications();
+  useMarkNotificationModuleRead('notifications');
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<'all' | 'unread'>('all');
   const [marking, setMarking] = useState(false);
+  const previousNotificationUnread = useRef(unreadByModule.notifications);
 
   useEffect(() => {
     if (status === 'unauthenticated') {
@@ -69,6 +73,15 @@ export default function NotificationsPage() {
       fetchNotifications();
     }
   }, [status]);
+
+  useEffect(() => {
+    const previousCount = previousNotificationUnread.current;
+    previousNotificationUnread.current = unreadByModule.notifications;
+    if (status !== 'authenticated' || previousCount <= 0 || unreadByModule.notifications !== 0) return;
+    fetch('/api/notifications').then((response) => response.json()).then((data) => {
+      setNotifications(data.notifications || []);
+    }).catch(() => undefined);
+  }, [status, unreadByModule.notifications]);
 
   async function fetchNotifications() {
     setLoading(true);
@@ -84,11 +97,7 @@ export default function NotificationsPage() {
   }
 
   async function markAsRead(id: string) {
-    await fetch('/api/notifications', {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ids: [id] }),
-    });
+    await markIdsRead([id]);
     setNotifications(prev =>
       prev.map(n => n.id === id ? { ...n, isRead: true } : n)
     );
@@ -97,11 +106,7 @@ export default function NotificationsPage() {
   async function markAllAsRead() {
     setMarking(true);
     try {
-      await fetch('/api/notifications', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ markAll: true }),
-      });
+      await markAllRead();
       setNotifications(prev => prev.map(n => ({ ...n, isRead: true })));
     } finally {
       setMarking(false);
