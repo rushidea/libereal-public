@@ -1,5 +1,5 @@
-import { generateId } from '@/lib/id';
 import { NextRequest, NextResponse } from 'next/server';
+import { withUniqueInquiryPublicId } from '@/data/inquiry-order-number';
 import { rateLimitAsyncWithWindow } from '@/lib/rateLimit';
 import { prisma } from '@/lib/prisma';
 import { AMBIGUOUS_PRODUCT_CATALOG_NUMBER, CustomerUnavailableProductError, verifyAndPriceItems, type PriceLookupItem } from '@/lib/pricing';
@@ -104,7 +104,6 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    const id = generateId();
     const itemsArray = Array.isArray(items) ? items : [];
     // Server-side price verification: never trust client-submitted prices
     const { verifiedItems, verifiedSubtotal, mismatchedCount } = await verifyAndPriceItems(itemsArray, { userId: sessionUserId, allowQuoteRequired: true });
@@ -201,35 +200,39 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    let id = '';
     try {
-      await prisma.inquiry.create({
-      data: {
-        id,
-        name,
-        email,
-        phone,
-        institution,
-        department: department || null,
-        address: address || null,
-        notes: notes || null,
-        subtotal: pricedItems.some((item) => item.quoteRequired) ? 0 : verifiedSubtotal,
-        paymentMethod: paymentMethod || null,
-        identity: storedIdentity,
-        advisorName: storedAdvisorName,
-        advisorPhone: storedAdvisorPhone,
-        status: initialStatus,
-        ip,
-        userAgent: ua,
-        userId: sessionUserId,
-        organizationId: ownership.organizationId,
-        ownerScope: ownership.ownerScope,
-        checkoutAttemptId: checkoutAttemptId ?? null,
-        checkoutRequestFingerprint: requestFingerprint,
-        hasUnresolvedPricing: pricedItems.some((item) => item.quoteRequired),
-        inquiryItems: {
-          create: toInquiryItemCreates(pricedItems),
-        },
-      },
+      id = await withUniqueInquiryPublicId(prisma, async (tx, inquiryId) => {
+        await tx.inquiry.create({
+          data: {
+            id: inquiryId,
+            name,
+            email,
+            phone,
+            institution,
+            department: department || null,
+            address: address || null,
+            notes: notes || null,
+            subtotal: pricedItems.some((item) => item.quoteRequired) ? 0 : verifiedSubtotal,
+            paymentMethod: paymentMethod || null,
+            identity: storedIdentity,
+            advisorName: storedAdvisorName,
+            advisorPhone: storedAdvisorPhone,
+            status: initialStatus,
+            ip,
+            userAgent: ua,
+            userId: sessionUserId,
+            organizationId: ownership.organizationId,
+            ownerScope: ownership.ownerScope,
+            checkoutAttemptId: checkoutAttemptId ?? null,
+            checkoutRequestFingerprint: requestFingerprint,
+            hasUnresolvedPricing: pricedItems.some((item) => item.quoteRequired),
+            inquiryItems: {
+              create: toInquiryItemCreates(pricedItems),
+            },
+          },
+        });
+        return inquiryId;
       });
     } catch (error) {
       if (isUniqueConstraintError(error) && checkoutAttemptId) {

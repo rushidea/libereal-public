@@ -585,6 +585,98 @@ describe('POST /api/inquiries/[id]/quote (admin send quote)', () => {
     expect(db.prepare('SELECT status FROM Quote WHERE id = ?').get(quoteRow.id)).toEqual({ status: 'accepted' });
   });
 
+  async function confirmSelection(
+    quoteId: string,
+    attemptId: string,
+    itemIndices: number[],
+    quantities: Record<string, number>,
+  ) {
+    return confirmQuotePOST(new NextRequest('http://localhost:3000/api/orders/i1/confirm-items', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        itemIndices,
+        quantities,
+        quoteId,
+        quoteVersion: 1,
+        acceptanceAttemptId: attemptId,
+        acceptedLegalIds: ['site-sales-terms', 'customer-purchase'],
+      }),
+    }), { params: Promise.resolve({ id: 'i1' }) });
+  }
+
+  it('creates a separate order for each partial confirmation and closes the inquiry only when every line is done', async () => {
+    await quotePOST(makeReq('i1', {
+      items: [
+        { productId: 'p1', name: 'A', price: 10, quantity: 2 },
+        { productId: 'p2', name: 'B', price: 20, quantity: 1 },
+      ],
+    }) as NextRequest, { params: Promise.resolve({ id: 'i1' }) });
+    const db = getTestDb();
+    const quoteRow = db.prepare('SELECT id FROM Quote WHERE inquiryId = ?').get('i1') as { id: string };
+
+    const first = await confirmSelection(quoteRow.id, 'batch-1', [0], { 0: 1 });
+    expect(first.status).toBe(200);
+    expect(await first.json()).toMatchObject({ allOrdered: false });
+    expect(db.prepare('SELECT status FROM Inquiry WHERE id = ?').get('i1')).toEqual({ status: 'quote_sent' });
+    expect(db.prepare('SELECT status FROM Quote WHERE id = ?').get(quoteRow.id)).toEqual({ status: 'sent' });
+
+    const second = await confirmSelection(quoteRow.id, 'batch-2', [0], { 0: 1 });
+    expect(second.status).toBe(200);
+    expect(await second.json()).toMatchObject({ allOrdered: false });
+    expect(db.prepare('SELECT status FROM Inquiry WHERE id = ?').get('i1')).toEqual({ status: 'quote_sent' });
+    expect(db.prepare('SELECT orderedQty FROM QuoteItem WHERE name = ?').get('A')).toEqual({ orderedQty: 2 });
+    expect(db.prepare('SELECT orderedQty FROM QuoteItem WHERE name = ?').get('B')).toEqual({ orderedQty: 0 });
+
+    const third = await confirmSelection(quoteRow.id, 'batch-3', [1], { 1: 1 });
+    expect(third.status).toBe(200);
+    expect(await third.json()).toMatchObject({ allOrdered: true });
+    expect(db.prepare('SELECT status FROM Inquiry WHERE id = ?').get('i1')).toEqual({ status: 'closed' });
+    expect(db.prepare('SELECT status FROM Quote WHERE id = ?').get(quoteRow.id)).toEqual({ status: 'accepted' });
+
+    const orders = db.prepare('SELECT id, inquiry_order_seq FROM "Order" ORDER BY inquiry_order_seq').all() as Array<{ id: string; inquiry_order_seq: number }>;
+    expect(orders.map((order) => order.inquiry_order_seq)).toEqual([1, 2, 3]);
+    const suffixes = orders.map((order) => {
+      expect(order.id.startsWith('i1-')).toBe(true);
+      expect(order.id).not.toMatch(/^ORD-\d{8}-\d+$/);
+      return order.id.slice('i1-'.length);
+    });
+    expect(new Set(suffixes).size).toBe(3);
+    for (const [index, suffix] of suffixes.entries()) {
+      expect(suffix).toMatch(/^[ABCDEFGHJKLMNPQRSTUVWXYZ23456789]{4}$/);
+      expect(suffix).not.toBe(String(index + 1).padStart(4, '0'));
+    }
+
+    const again = await confirmSelection(quoteRow.id, 'batch-4', [1], { 1: 1 });
+    expect(again.status).toBe(409);
+    expect(db.prepare('SELECT COUNT(*) AS count FROM "Order"').get()).toEqual({ count: 3 });
+  });
+
+  it('refuses confirmation when the inquiry is declined, closed, or archived even if the quote is still sent', async () => {
+    await quotePOST(makeReq('i1', { items: [{ productId: 'p1', name: 'A', price: 10, quantity: 1 }] }) as NextRequest, {
+      params: Promise.resolve({ id: 'i1' }),
+    });
+    const db = getTestDb();
+    const quoteRow = db.prepare('SELECT id FROM Quote WHERE inquiryId = ?').get('i1') as { id: string };
+
+    db.prepare(`UPDATE Inquiry SET status = 'declined' WHERE id = 'i1'`).run();
+    const declined = await confirmSelection(quoteRow.id, 'block-declined', [0], { 0: 1 });
+    expect(declined.status).toBe(409);
+    expect(await declined.json()).toMatchObject({ code: 'INQUIRY_DECLINED' });
+
+    db.prepare(`UPDATE Inquiry SET status = 'closed' WHERE id = 'i1'`).run();
+    const closed = await confirmSelection(quoteRow.id, 'block-closed', [0], { 0: 1 });
+    expect(closed.status).toBe(409);
+    expect(await closed.json()).toMatchObject({ code: 'INQUIRY_CLOSED' });
+
+    db.prepare(`UPDATE Inquiry SET status = 'quote_sent', archivedAt = datetime('now') WHERE id = 'i1'`).run();
+    const archived = await confirmSelection(quoteRow.id, 'block-archived', [0], { 0: 1 });
+    expect(archived.status).toBe(409);
+    expect(await archived.json()).toMatchObject({ code: 'INQUIRY_ARCHIVED' });
+    expect(db.prepare('SELECT COUNT(*) AS count FROM "Order"').get()).toEqual({ count: 0 });
+    expect(db.prepare('SELECT status FROM Quote WHERE id = ?').get(quoteRow.id)).toEqual({ status: 'sent' });
+  });
+
   it('omits removed lines and enforces quote package constraints', async () => {
     await quotePOST(makeReq('i1', {
       items: [

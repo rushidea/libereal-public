@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { InquiryIdDisplay, InquiryIdText, abbreviateInquiryId, splitInquiryIdText } from '@/components/InquiryIdDisplay';
+import { generateInquiryPublicId, orderNumberSharesInquiry } from '@/data/inquiry-order-number';
 
 const ID = 'id_68011acc-6134-4f0a-9c2b-111111111111';
 const OTHER_ID = 'id_aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
@@ -109,6 +110,7 @@ describe('abbreviateInquiryId', () => {
   it('leaves short ids unchanged', () => {
     expect(abbreviateInquiryId('id_short')).toBe('id_short');
     expect(abbreviateInquiryId('id_68011acc111111')).toBe('id_68011acc111111');
+    expect(abbreviateInquiryId('INQ-7K3M9Q2P')).toBe('INQ-7K3M9Q2P');
   });
 
   it('abbreviates once the id is longer than the prefix, suffix, and ellipsis', () => {
@@ -144,6 +146,31 @@ describe('splitInquiryIdText', () => {
     expect(splitInquiryIdText(order)).toEqual([{ type: 'text', value: order }]);
     expect(splitInquiryIdText(user)).toEqual([{ type: 'text', value: user }]);
     expect(splitInquiryIdText('编号 id_not-a-uuid')).toEqual([{ type: 'text', value: '编号 id_not-a-uuid' }]);
+  });
+
+  it('recognizes a linked inquiry id and leaves the derived order number intact', () => {
+    const linked = 'INQ-7K3M9Q2P';
+    const legacyOrder = `${ID}-K7MP`;
+    const linkedOrder = `${linked}-K7MP`;
+    expect(splitInquiryIdText(`新询价单 ${linked}，客户：甲`)).toEqual([
+      { type: 'text', value: '新询价单 ' },
+      { type: 'id', value: linked },
+      { type: 'text', value: '，客户：甲' },
+    ]);
+    expect(splitInquiryIdText(`订单 ${legacyOrder}`)).toEqual([{ type: 'text', value: `订单 ${legacyOrder}` }]);
+    expect(splitInquiryIdText(`订单 ${linkedOrder}`)).toEqual([{ type: 'text', value: `订单 ${linkedOrder}` }]);
+  });
+
+  it('recognizes a generated inquiry id and does not treat its order number as an inquiry id', () => {
+    const id = generateInquiryPublicId();
+    const orderId = `${id}-K7MP`;
+    expect(orderNumberSharesInquiry(id, orderId)).toBe(true);
+    expect(splitInquiryIdText(`询价 ${id} 完成`)).toEqual([
+      { type: 'text', value: '询价 ' },
+      { type: 'id', value: id },
+      { type: 'text', value: ' 完成' },
+    ]);
+    expect(splitInquiryIdText(`订单 ${orderId}`)).toEqual([{ type: 'text', value: `订单 ${orderId}` }]);
   });
 });
 

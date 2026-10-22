@@ -93,6 +93,7 @@ describe('POST /api/inquiry', () => {
     const json = await res.json();
 
     expect(res.status).toBe(200);
+    expect(json.id).toMatch(/^INQ-[ABCDEFGHJKLMNPQRSTUVWXYZ23456789]{8}$/);
     expect(json.status).toBe('待人工审核');
 
     const row = db.prepare('SELECT id, userId, status, subtotal FROM Inquiry WHERE email = ? ORDER BY createdAt DESC LIMIT 1')
