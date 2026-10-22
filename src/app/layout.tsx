@@ -17,8 +17,8 @@ import { buildSearchEngineOtherMeta } from "@/lib/seo/crawlers";
 import { buildOrganizationJsonLd, buildWebSiteJsonLd } from "@/lib/seo/json-ld";
 import {
   SITE_BRAND_NAME,
+  SITE_DEFAULT_DESCRIPTION,
   SITE_DISPLAY_NAME,
-  SITE_HOME_DESCRIPTION,
   SITE_LEGAL_NAME,
 } from "@/lib/seo/site-identity";
 import { getCanonicalSiteOrigin } from "@/lib/site-url";
@@ -32,7 +32,7 @@ export const metadata: Metadata = {
     default: SITE_DISPLAY_NAME,
     template: '%s | LIBEREAL',
   },
-  description: SITE_HOME_DESCRIPTION,
+  description: SITE_DEFAULT_DESCRIPTION,
   keywords: [
     "biological reagents",
     "antibodies",
@@ -62,7 +62,7 @@ export const metadata: Metadata = {
     url: SITE_URL,
     siteName: SITE_DISPLAY_NAME,
     title: SITE_DISPLAY_NAME,
-    description: SITE_HOME_DESCRIPTION,
+    description: SITE_DEFAULT_DESCRIPTION,
     images: [
       {
         url: "/og-image.jpg",
@@ -75,7 +75,7 @@ export const metadata: Metadata = {
   twitter: {
     card: "summary_large_image",
     title: SITE_DISPLAY_NAME,
-    description: SITE_HOME_DESCRIPTION,
+    description: SITE_DEFAULT_DESCRIPTION,
     images: ["/og-image.jpg"],
   },
   robots: {
