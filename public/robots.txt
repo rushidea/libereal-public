@@ -1,5 +1,6 @@
 User-agent: *
 Allow: /
+Allow: /mail
 Disallow: /api/
 Disallow: /admin/
 Disallow: /account/
@@ -13,6 +14,7 @@ Disallow: /forgot-password
 
 User-agent: bingbot
 Allow: /
+Allow: /mail
 Disallow: /api/
 Disallow: /admin/
 Disallow: /account/
@@ -26,6 +28,7 @@ Disallow: /forgot-password
 
 User-agent: msnbot
 Allow: /
+Allow: /mail
 Disallow: /api/
 Disallow: /admin/
 Disallow: /account/
@@ -39,6 +42,7 @@ Disallow: /forgot-password
 
 User-agent: BingPreview
 Allow: /
+Allow: /mail
 Disallow: /api/
 Disallow: /admin/
 Disallow: /account/
@@ -52,6 +56,7 @@ Disallow: /forgot-password
 
 User-agent: Sogou web spider
 Allow: /
+Allow: /mail
 Disallow: /api/
 Disallow: /admin/
 Disallow: /account/
@@ -65,6 +70,7 @@ Disallow: /forgot-password
 
 User-agent: Sogou inst spider
 Allow: /
+Allow: /mail
 Disallow: /api/
 Disallow: /admin/
 Disallow: /account/
@@ -78,6 +84,7 @@ Disallow: /forgot-password
 
 User-agent: Sogou News Spider
 Allow: /
+Allow: /mail
 Disallow: /api/
 Disallow: /admin/
 Disallow: /account/
@@ -91,6 +98,7 @@ Disallow: /forgot-password
 
 User-agent: Sogou Orion spider
 Allow: /
+Allow: /mail
 Disallow: /api/
 Disallow: /admin/
 Disallow: /account/

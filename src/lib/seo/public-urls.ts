@@ -78,6 +78,7 @@ export const STATIC_SITEMAP_PATHS = [
   '/legal/sales-terms',
   '/privacy',
   '/terms',
+  '/mail',
   '/cookies',
   '/promise',
 ] as const;
