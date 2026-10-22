@@ -1005,6 +1005,7 @@ model Product {
   host            String?
   applications    String   @default("[]") // JSON array
   reactivity      String   @default("[]") // JSON array
+  filterTags      String   @default("[]") // JSON array
   description     String?
   specificity     String?
   productUsage    String?
@@ -1035,6 +1036,7 @@ model Product {
   sdsUrl          String?  // SDS 安全表下载链接
   pmids           String   @default("[]")  // JSON 引用文献 PMID 列表
   stockQuantity   Int      @default(-1)  // 库存数量，-1 = 无限
+  deletedAt       DateTime? // 后台软删除；非空则从目录和管理列表隐藏，订单与库存记录保留
   brandRecordId   String?
   categoryRecordId String?
   subcategoryRecordId String?
@@ -1063,6 +1065,7 @@ model Product {
   @@index([catalogNumber])
   @@index([casNumber])
   @@index([stockQuantity])
+  @@index([deletedAt])
   @@index([pricingMode])
   @@index([brandRecordId])
   @@index([categoryRecordId])
