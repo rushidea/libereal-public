@@ -42,11 +42,8 @@ export default function ViewportDebug() {
 
   return (
     <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, zIndex: 99999, pointerEvents: 'none', fontFamily: 'monospace' }}>
-      {/* 顶部安全区色条 */}
       <div style={{ position: 'fixed', top: 0, left: 0, right: 0, height: '6px', background: '#ff4d4f', zIndex: 1 }} />
-      {/* 底部安全区色条 */}
       <div style={{ position: 'fixed', bottom: 0, left: 0, right: 0, height: '6px', background: '#1677ff', zIndex: 1 }} />
-      {/* 数据面板 */}
       <div style={{ position: 'fixed', top: 10, right: 10, zIndex: 2, background: 'rgba(0,0,0,0.85)', color: '#fff', padding: '10px 12px', borderRadius: 8, fontSize: 12, lineHeight: 1.6, pointerEvents: 'auto', maxWidth: '70vw' }}>
         <div style={{ fontWeight: 700, marginBottom: 4, color: '#7dd3fc' }}>Viewport Debug (?vt=1)</div>
         {Object.entries(data).map(([k, v]) => (

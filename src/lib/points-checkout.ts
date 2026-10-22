@@ -1,6 +1,6 @@
 /** 结账积分抵扣：1 分 = 1 元 */
 
-export const POINTS_YUAN_RATE = 1; // 1 point = 1 CNY
+export const POINTS_YUAN_RATE = 1;
 
 export type PointsRedeemIntent = {
   personalPoints: number;

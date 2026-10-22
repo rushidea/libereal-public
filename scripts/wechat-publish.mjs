@@ -27,9 +27,7 @@ import { existsSync } from 'node:fs';
 import { join, dirname, basename, resolve } from 'node:path';
 import { createRequire } from 'node:module';
 
-// ---------------------------------------------------------------------------
 // Load .env manually (no dotenv dependency)
-// ---------------------------------------------------------------------------
 
 async function loadEnv() {
   const envPath = join(process.cwd(), '.env');
@@ -45,17 +43,12 @@ async function loadEnv() {
     if (eqIdx === -1) continue;
     const key = trimmed.slice(0, eqIdx).trim();
     let value = trimmed.slice(eqIdx + 1).trim();
-    // Strip quotes
     if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
       value = value.slice(1, -1);
     }
     if (!process.env[key]) process.env[key] = value;
   }
 }
-
-// ---------------------------------------------------------------------------
-// Parse CLI args
-// ---------------------------------------------------------------------------
 
 function parseArgs() {
   const args = process.argv.slice(2);
@@ -70,10 +63,6 @@ function parseArgs() {
   }
   return opts;
 }
-
-// ---------------------------------------------------------------------------
-// WeChat API
-// ---------------------------------------------------------------------------
 
 const API_BASE = 'https://api.weixin.qq.com/cgi-bin';
 
@@ -176,10 +165,6 @@ async function publishDraft(accessToken, mediaId) {
   }
   return data.publish_id;
 }
-
-// ---------------------------------------------------------------------------
-// Markdown → WeChat HTML
-// ---------------------------------------------------------------------------
 
 const STYLE_P = 'margin:0 0 1em;padding:0;font-size:16px;line-height:1.8;color:#3f3f3f;letter-spacing:0.5px;text-align:left;';
 const STYLE_H2 = 'margin:1.8em 0 0.6em;padding:0;font-size:19px;font-weight:bold;color:#1a1a1a;border-bottom:1px solid #e8e8e8;padding-bottom:6px;text-align:left;';
@@ -316,10 +301,6 @@ function markdownToWechatHtml(md) {
   return htmlParts.join('\n');
 }
 
-// ---------------------------------------------------------------------------
-// Parse article markdown
-// ---------------------------------------------------------------------------
-
 function parseArticle(md) {
   const lines = md.split('\n');
   let title = '';
@@ -353,10 +334,6 @@ function parseArticle(md) {
   return { title, digest: digest || title, bodyHtml, creditsHtml, html: bodyHtml + '\n' + creditsHtml };
 }
 
-// ---------------------------------------------------------------------------
-// Main
-// ---------------------------------------------------------------------------
-
 async function main() {
   await loadEnv();
   const opts = parseArgs();
@@ -372,7 +349,6 @@ async function main() {
     process.exit(1);
   }
 
-  // Auto-detect cover image if not specified
   let coverPath = opts.coverPath;
   if (!coverPath) {
     const base = articlePath.replace(/\.md$/, '');
@@ -419,28 +395,23 @@ async function main() {
   console.log(`Publish: ${opts.publish}`);
   console.log('');
 
-  // 1. Read article
   const md = await readFile(articlePath, 'utf-8');
   console.log(`Title:   (parsing...)`);
   console.log('');
 
-  // 2. Get access_token
   console.log('1/5 获取 access_token...');
   const accessToken = await getAccessToken(appId, secret);
   console.log('   OK');
 
-  // 3. Upload inline content images (replace local paths with WeChat URLs)
   console.log('2/5 上传正文图片...');
   const articleDir = dirname(articlePath);
   const processedMd = await processInlineImages(md, accessToken, articleDir);
   console.log('   OK');
 
-  // 4. Parse article (now with WeChat image URLs)
   const parsed = parseArticle(processedMd);
   console.log(`   Title:  ${parsed.title}`);
   console.log(`   Digest: ${parsed.digest}`);
 
-  // 4b. Upload brand logos: English logo goes to header, footer image goes to footer
   let headerHtml = '';
   const logoEnPath = join(articleDir, 'logo-libereal-en.png');
   if (existsSync(logoEnPath)) {
@@ -460,7 +431,6 @@ async function main() {
   parsed.html = headerHtml + '\n' + parsed.bodyHtml + '\n' + footerHtml + '\n' + parsed.creditsHtml;
   console.log('');
 
-  // 5. Cover image: reuse an existing permanent material, or upload a new one
   let thumbMediaId;
   if (opts.thumbMediaId) {
     console.log('3/5 复用已有封面素材...');
@@ -473,7 +443,6 @@ async function main() {
     console.log(`   OK (media_id: ${thumbMediaId})`);
   }
 
-  // 6. Create draft
   console.log('4/5 创建草稿...');
   const draftMediaId = await createDraft(accessToken, {
     title: parsed.title,
@@ -487,7 +456,6 @@ async function main() {
   });
   console.log(`   OK (draft media_id: ${draftMediaId})`);
 
-  // 7. Optionally publish
   if (opts.publish) {
     console.log('5/5 发布...');
     const publishId = await publishDraft(accessToken, draftMediaId);

@@ -74,7 +74,6 @@ export default function SceneBundleSelector({ bundles, theme, sceneTitle }: Prop
         </div>
       </div>
 
-      {/* 等级 + 意图选择 */}
       <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:gap-4">
         <div className={`flex gap-1 rounded-brand border p-1 ${sceneSurfaceClasses.subPanel}`}>
           {LEVELS.map((lv) => (
@@ -110,7 +109,6 @@ export default function SceneBundleSelector({ bundles, theme, sceneTitle }: Prop
         </div>
       </div>
 
-      {/* Bundle 内容 */}
       <div className={`p-4 ${sceneSurfaceClasses.subPanel}`}>
         <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div>
@@ -128,7 +126,6 @@ export default function SceneBundleSelector({ bundles, theme, sceneTitle }: Prop
         </div>
 
         <div className="grid gap-3 sm:grid-cols-3">
-          {/* 必买 */}
           <div className={`p-3 ${sceneSurfaceClasses.card}`}>
             <div className="mb-2 flex items-center gap-1.5">
               <CheckCircle2 className={`h-4 w-4 ${t.sectionIcon}`} />
@@ -144,7 +141,6 @@ export default function SceneBundleSelector({ bundles, theme, sceneTitle }: Prop
             </ul>
           </div>
 
-          {/* 推荐配置 */}
           <div className={`p-3 ${sceneSurfaceClasses.card}`}>
             <div className="mb-2 flex items-center gap-1.5">
               <Star className="h-4 w-4 text-amber-500" />
@@ -160,7 +156,6 @@ export default function SceneBundleSelector({ bundles, theme, sceneTitle }: Prop
             </ul>
           </div>
 
-          {/* 可选升级 */}
           <div className={`p-3 ${sceneSurfaceClasses.card}`}>
             <div className="mb-2 flex items-center gap-1.5">
               <ExternalLink className="h-4 w-4 text-slate-400" />
@@ -177,7 +172,6 @@ export default function SceneBundleSelector({ bundles, theme, sceneTitle }: Prop
           </div>
         </div>
 
-        {/* 产品类目链接 */}
         {bundle.productLinks.length > 0 && (
           <div className="mt-3 flex flex-wrap items-center gap-2">
             <p className={`text-xs ${sceneSurfaceClasses.mutedText}`}>产品中心：</p>

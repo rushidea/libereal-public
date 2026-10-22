@@ -33,10 +33,6 @@ export function getSubcategoryQueryValues(subcategory: string): string[] {
   return [...new Set(values.filter(Boolean))];
 }
 
-export function getDisplaySubcategoryAliases(subcategory: string): string[] {
-  return SUBCATEGORY_ALIASES[subcategory] ?? [];
-}
-
 /** 旧子分类名若只对应一个现行名称，则返回该名称；一对多时返回空。 */
 export function uniqueCanonicalSubcategory(name: string): string | null {
   const trimmed = name.trim();

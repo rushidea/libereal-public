@@ -205,7 +205,6 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
 
       <main className="flex-1 max-w-6xl mx-auto w-full px-4 py-8 space-y-5">
 
-        {/* Status + Shipping */}
         <div className="bg-white dark:bg-slate-200/65 rounded-2xl shadow-sm border border-gray-100 dark:border-slate-400 p-6">
           <div className="flex items-start justify-between mb-5">
             <div>
@@ -256,7 +255,6 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
 
-          {/* Left: Contact + Shipping */}
           <div className="lg:col-span-1 space-y-5">
             {order.inquiry && (
               <div className="bg-white dark:bg-slate-200/65 rounded-2xl shadow-sm border border-gray-100 dark:border-slate-400 p-5">
@@ -350,7 +348,6 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
             </div>
           </div>
 
-          {/* Right: Product List */}
           <div className="lg:col-span-2">
             <div className="bg-white dark:bg-slate-200/65 rounded-2xl shadow-sm border border-gray-100 dark:border-slate-400 overflow-hidden">
               <div className="px-5 py-4 border-b border-gray-100 dark:border-slate-400 bg-gray-50/50 dark:bg-slate-200/55">

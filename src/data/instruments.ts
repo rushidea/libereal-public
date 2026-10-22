@@ -1,12 +1,10 @@
-// 流式细胞仪预设配置
-
 export interface FilterBand {
-  name: string;       // 滤波器名称，如 "FL1"
+  name: string;
   center: number;    // 中心波长 (nm)
   bandwidth: number; // 带宽 (nm)
   min: number;       // 最小波长
   max: number;       // 最大波长
-  color: string;     // 显示颜色
+  color: string;
 }
 
 interface LaserConfig {
@@ -24,7 +22,6 @@ export interface Instrument {
   category: 'classic' | 'compact' | 'research' | 'highend';
 }
 
-// 激光器配置
 const laserConfigs: Record<number, LaserConfig> = {
   405: { wavelength: 405, name: 'Violet', color: '#8B00FF' },
   488: { wavelength: 488, name: 'Blue', color: '#00BFFF' },
@@ -33,7 +30,6 @@ const laserConfigs: Record<number, LaserConfig> = {
   785: { wavelength: 785, name: 'Near-IR', color: '#800080' },
 };
 
-// BD 通道定义（标准配置）
 const bdChannels: FilterBand[] = [
   { name: 'FL1', center: 530, bandwidth: 30, min: 515, max: 545, color: '#00FF00' },
   { name: 'FL2', center: 585, bandwidth: 42, min: 564, max: 606, color: '#FFA500' },
@@ -45,7 +41,6 @@ const bdChannels: FilterBand[] = [
   { name: 'FL8', center: 525, bandwidth: 50, min: 500, max: 550, color: '#00CED1' },
 ];
 
-// Beckman 通道定义
 const beckmanChannels: FilterBand[] = [
   { name: 'FL1', center: 525, bandwidth: 30, min: 510, max: 540, color: '#00FF00' },
   { name: 'FL2', center: 575, bandwidth: 25, min: 562.5, max: 587.5, color: '#FFA500' },
@@ -57,9 +52,7 @@ const beckmanChannels: FilterBand[] = [
   { name: 'FL8', center: 550, bandwidth: 40, min: 530, max: 570, color: '#00CED1' },
 ];
 
-// 11 个预设仪器
 export const instruments: Instrument[] = [
-  // 经典科研款 - BD LSR II
   {
     id: 'bd_lsr2',
     name: 'BD LSR II',
@@ -75,7 +68,6 @@ export const instruments: Instrument[] = [
     ],
     category: 'classic',
   },
-  // 经典分选款 - BD FACSAria III
   {
     id: 'bd_facsaria3',
     name: 'BD FACSAria III',
@@ -84,7 +76,6 @@ export const instruments: Instrument[] = [
     filters: [...bdChannels],
     category: 'classic',
   },
-  // 经典桌面款 - BD FACSCalibur
   {
     id: 'bd_facscalibur',
     name: 'BD FACSCalibur',
@@ -98,7 +89,6 @@ export const instruments: Instrument[] = [
     ],
     category: 'classic',
   },
-  // 紧凑入门款 - BD Accuri C6 Plus
   {
     id: 'bd_accuri_c6',
     name: 'BD Accuri C6 Plus',
@@ -112,7 +102,6 @@ export const instruments: Instrument[] = [
     ],
     category: 'compact',
   },
-  // 科研主力款 - BD LSRFortessa
   {
     id: 'bd_lsrfortessa',
     name: 'BD LSRFortessa',
@@ -121,7 +110,6 @@ export const instruments: Instrument[] = [
     filters: [...bdChannels],
     category: 'research',
   },
-  // 高端光谱款 - BD FACSymphony
   {
     id: 'bd_facsymphony',
     name: 'BD FACSymphony',
@@ -130,7 +118,6 @@ export const instruments: Instrument[] = [
     filters: [...bdChannels, { name: 'FL9', center: 820, bandwidth: 60, min: 790, max: 850, color: '#4B0082' }],
     category: 'highend',
   },
-  // 分选入门款 - BD FACSMelody
   {
     id: 'bd_facsmelody',
     name: 'BD FACSMelody',
@@ -139,7 +126,6 @@ export const instruments: Instrument[] = [
     filters: [...bdChannels],
     category: 'compact',
   },
-  // 最新光谱分选款 - BD FACSDiscover S8
   {
     id: 'bd_facsdiscover_s8',
     name: 'BD FACSDiscover S8',
@@ -148,7 +134,6 @@ export const instruments: Instrument[] = [
     filters: [...bdChannels, { name: 'FL9', center: 820, bandwidth: 60, min: 790, max: 850, color: '#4B0082' }],
     category: 'highend',
   },
-  // Beckman 紧凑款 - Beckman CytoFLEX
   {
     id: 'beckman_cytflex',
     name: 'Beckman CytoFLEX',
@@ -157,7 +142,6 @@ export const instruments: Instrument[] = [
     filters: [...beckmanChannels],
     category: 'research',
   },
-  // Millipore 紧凑款 - Millipore Guava easyCyte
   {
     id: 'millipore_guava',
     name: 'Millipore Guava easyCyte',
@@ -173,7 +157,6 @@ export const instruments: Instrument[] = [
     ],
     category: 'compact',
   },
-  // 高性价比款 - ACEA NovoExpress
   {
     id: 'acea_novoexpress',
     name: 'ACEA NovoExpress',
@@ -191,7 +174,6 @@ export const instruments: Instrument[] = [
   },
 ];
 
-// 预设分类标签
 export const categoryLabels: Record<Instrument['category'], string> = {
   classic: '经典款',
   compact: '紧凑款',
@@ -199,17 +181,14 @@ export const categoryLabels: Record<Instrument['category'], string> = {
   highend: '高端款',
 };
 
-// 检查染料与仪器的兼容性
 export function checkDyeCompatibility(
   dye: { laserLine: number[]; emissionPeak: number },
   instrument: Instrument
 ): { laserCompatible: boolean; filterCompatible: boolean; matchingFilters: FilterBand[] } {
-  // 检查激光线兼容性
   const laserCompatible = dye.laserLine.some(wl =>
     instrument.lasers.some(l => l.wavelength === wl)
   );
 
-  // 检查滤波器兼容性（发射峰是否在滤波器通带内）
   const matchingFilters = instrument.filters.filter(f =>
     dye.emissionPeak >= f.min && dye.emissionPeak <= f.max
   );
@@ -218,23 +197,7 @@ export function checkDyeCompatibility(
   return { laserCompatible, filterCompatible, matchingFilters };
 }
 
-// 检查染料是否完全兼容仪器
-export function isDyeCompatible(
-  dye: { laserLine: number[]; emissionPeak: number },
-  instrument: Instrument
-): boolean {
-  const { laserCompatible, filterCompatible } = checkDyeCompatibility(dye, instrument);
-  return laserCompatible && filterCompatible;
-}
-
-// 手动选择配置接口
 export interface ManualConfig {
   lasers: number[];
   filters: FilterBand[];
 }
-
-// 默认手动配置（全激光 + BD 标准通道）
-export const defaultManualConfig: ManualConfig = {
-  lasers: [405, 488, 561, 640, 785],
-  filters: [...bdChannels],
-};

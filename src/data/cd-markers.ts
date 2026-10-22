@@ -1,5 +1,4 @@
 // Auto-generated from Beckman Coulter CD Marker Wall Poster Chart
-// Total markers: 438
 
 export type CellType =
   | 'tCells'

@@ -4,8 +4,6 @@ import { STOREFRONT_HIDDEN_HAZARDOUS } from '@/lib/product-visibility';
 import { canonicalSiteUrl, getCanonicalSiteOrigin } from '@/lib/site-url';
 
 export const SITEMAP_URL_LIMIT = 40_000;
-export const SITEMAP_SEARCH_ENGINE_URL_LIMIT = 50_000;
-export const SITEMAP_UNCOMPRESSED_BYTE_LIMIT = 50 * 1024 * 1024;
 
 export function isCanonicalSitemapUrl(loc: string): boolean {
   try {

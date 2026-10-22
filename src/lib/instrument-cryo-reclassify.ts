@@ -33,7 +33,6 @@ function includesAny(text: string, markers: readonly string[]): boolean {
   return markers.some((marker) => lower.includes(marker.toLowerCase()));
 }
 
-/** 判断产品是否应归入仪器设备「液氮储存」。 */
 export function matchesLiquidNitrogenStorage(product: InstrumentCryoCandidate): boolean {
   if (includesAny(product.name, LN2_EXCLUDE_MARKERS)) return false;
 
@@ -46,7 +45,6 @@ export function matchesLiquidNitrogenStorage(product: InstrumentCryoCandidate): 
   return includesAny(product.name, LN2_NAME_MARKERS);
 }
 
-/** 判断产品是否应归入仪器设备「低温冰箱」。 */
 export function matchesLowTempFreezer(product: InstrumentCryoCandidate): boolean {
   if (product.subcategory === '低温冰箱') {
     return product.category === '仪器设备' || includesAny(product.name, FREEZER_NAME_MARKERS);

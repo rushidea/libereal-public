@@ -25,7 +25,7 @@ import { getTestDb, closeTestDb, seedUser, seedAdmin } from './db-helpers';
 
 describe('POST /api/admin/points/adjust', () => {
   beforeAll(() => {
-    getTestDb(); // 初始化 singleton + 设 env var
+    getTestDb();
   });
   afterAll(() => {
     closeTestDb();

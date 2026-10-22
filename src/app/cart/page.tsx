@@ -48,7 +48,6 @@ export default function CartPage() {
   const formatPrice = (price: number) =>
     new Intl.NumberFormat('zh-CN', { style: 'currency', currency: 'CNY' }).format(price);
 
-  // Direct purchase: create order for priced products only
   if (items.length === 0) {
     return (
       <div className={`flex min-h-screen flex-col ${uiSurfaces.servicePage}`}>
@@ -102,7 +101,6 @@ export default function CartPage() {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           <div className="lg:col-span-2 space-y-4">
 
-{/* Priced products - direct purchase */}
             {pricedItems.length > 0 && (
               <div>
                 <div className="flex items-center justify-between mb-3">
@@ -136,7 +134,6 @@ export default function CartPage() {
               </div>
             )}
 
-            {/* Unpriced products - inquiry flow */}
             {unpricedItems.length > 0 && (
               <div className="mt-6">
                 <div className="flex items-center justify-between mb-3">
@@ -231,7 +228,6 @@ export default function CartPage() {
 
 
           </div>
-          {/* Action summary */}
           <div className="lg:col-span-1">
             <div className={`sticky top-20 rounded-[1.15rem] p-5 ${uiSurfaces.panelStrong}`}>
               <h2 className="font-semibold text-gray-900 mb-4">订单操作</h2>

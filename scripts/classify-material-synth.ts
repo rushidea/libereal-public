@@ -1,4 +1,3 @@
-/* eslint-disable no-console */
 /**
  * 给 "材料合成" 下 Labselect + Biosharp 共 3903 条产品按 name 关键词分配
  * subcategory（二级大类）和 type（三级细分）。

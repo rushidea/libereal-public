@@ -88,7 +88,6 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: '商品库存不足' }, { status: 400 });
     }
 
-    // Parse variants from metadata
     let variants: { name: string; cost: number }[] = [];
     if (product.metadata) {
       try {

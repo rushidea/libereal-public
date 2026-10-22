@@ -69,7 +69,6 @@ export default function NewOrderPage() {
   const [error, setError] = useState('');
 
 
-  // Load customers
   useEffect(() => {
     fetch('/api/admin/customers')
       .then(r => r.json())
@@ -98,7 +97,6 @@ export default function NewOrderPage() {
     setCustomerSearch('');
   };
 
-  // Close dropdown on outside click
   useEffect(() => {
     if (!showCustomerDropdown) return;
     const handler = (e: MouseEvent) => {
@@ -176,7 +174,6 @@ export default function NewOrderPage() {
 
   return (
     <div className="max-w-3xl">
-        {/* Step indicator */}
         <div className="mb-8 w-full overflow-x-auto pb-1">
           <div className="flex min-w-max items-center gap-2">
             {STEP_ORDER.map((step, idx) => {
@@ -209,7 +206,6 @@ export default function NewOrderPage() {
           </div>
         </div>
 
-        {/* Step 1: Customer */}
         <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6 mb-4">
           <div className="flex items-center gap-2 mb-4">
             <Users className="w-5 h-5 text-brand-600" />
@@ -281,7 +277,6 @@ export default function NewOrderPage() {
           </div>
         </div>
 
-        {/* Step 2: Address */}
         <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6 mb-4">
           <div className="flex items-center gap-2 mb-4">
             <MapPin className="w-5 h-5 text-brand-600" />
@@ -320,7 +315,6 @@ export default function NewOrderPage() {
           )}
         </div>
 
-        {/* Step 3: Payment */}
         <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6 mb-4">
           <div className="flex items-center gap-2 mb-4">
             <CreditCard className="w-5 h-5 text-brand-600" />
@@ -349,14 +343,12 @@ export default function NewOrderPage() {
           </div>
         </div>
 
-        {/* Step 4: Confirm */}
         <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6 mb-4">
           <div className="flex items-center gap-2 mb-4">
             <Package className="w-5 h-5 text-brand-600" />
             <h2 className="text-lg font-semibold text-gray-900">确认订单</h2>
           </div>
 
-          {/* Order summary */}
           <div className="bg-gray-50 rounded-xl p-4 mb-4">
             <div className="flex items-center gap-2 mb-3">
               <Users className="w-4 h-4 text-gray-400" />
@@ -381,7 +373,6 @@ export default function NewOrderPage() {
             </div>
           </div>
 
-          {/* Product list */}
           {productItems.length === 0 ? (
             <div className="text-center py-6">
               <ShoppingCart className="w-10 h-10 text-gray-300 mx-auto mb-2" />
@@ -408,7 +399,6 @@ export default function NewOrderPage() {
             </div>
           )}
 
-          {/* Total */}
           {productItems.length > 0 && (
             <div className="mt-4 pt-4 border-t border-gray-100">
               <div className="flex items-center justify-between mb-2">
@@ -440,7 +430,6 @@ export default function NewOrderPage() {
           )}
         </div>
 
-        {/* Submit button */}
         <div className="flex items-center gap-3 mt-6">
           <Link
             href="/cart"

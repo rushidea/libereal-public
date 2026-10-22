@@ -122,7 +122,6 @@ describe('PATCH /api/admin/users/[id]', () => {
       params: Promise.resolve({ id: 'u1' }),
     });
     expect(res.status).toBe(200);
-    // u1 unchanged
     const db = getTestDb();
     const u1 = db.prepare('SELECT tier, points FROM User WHERE id = ?').get('u1') as { tier: string; points: number };
     expect(u1.tier).toBe('standard');
@@ -150,7 +149,6 @@ describe('GET /api/admin/users/[id]', () => {
   });
 
   it('returns brandDiscounts parsed to object', async () => {
-    // seed u1 with brandDiscounts
     const db = getTestDb();
     db.prepare('UPDATE User SET brandDiscounts = ? WHERE id = ?').run('{"CST":0.85}', 'u1');
 

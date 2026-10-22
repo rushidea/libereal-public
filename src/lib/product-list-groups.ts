@@ -7,7 +7,6 @@ export type ProductSubcategoryGroup = {
   products: Product[];
 };
 
-/** Group products by subcategory for list-view sections. */
 export function groupProductsForListView(
   products: Product[],
   fallbackTitle = '产品列表',

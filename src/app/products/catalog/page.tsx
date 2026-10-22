@@ -608,7 +608,6 @@ function ProductsContent() {
             </h1>
           </div>
 
-          {/* 当前筛选 Chips —— 轻量展现 */}
           {activeChips.length > 0 && (
             <div className="mb-4 flex flex-wrap items-center gap-1.5">
               {activeChips.map((chip) => (
@@ -627,9 +626,7 @@ function ProductsContent() {
             </div>
           )}
 
-          {/* 工具条:移动端抽屉 + 桌面端 pills/视图/排序/对比 */}
           <div className="flex items-center justify-between gap-3 flex-wrap">
-            {/* 左侧:抽屉按钮(移动端) + 子分类 pills(桌面端) */}
             <button
               onClick={() => setSidebarOpen(true)}
               className={`lg:hidden flex items-center gap-1.5 ${uiSurfaces.ghostPill}`}
@@ -644,7 +641,6 @@ function ProductsContent() {
               {renderL3Pills('contents')}
             </div>
 
-            {/* 右侧:视图切换 + 对比 + 排序 */}
             <div className="flex items-center gap-2 ml-auto">
               <div className={`flex items-center gap-0.5 rounded-full p-0.5 ${uiSurfaces.panel}`}>
                 <button
@@ -694,12 +690,10 @@ function ProductsContent() {
         </div>
         </section>
 
-        {/* 移动端筛选 pills */}
         {renderSubPills('lg:hidden flex flex-wrap gap-1.5 mb-3')}
         {renderL3Pills('lg:hidden flex flex-wrap gap-1.5 mb-3')}
 
         <div className="flex gap-7">
-          {/* 桌面端筛选侧边栏 —— 规范设计语言 */}
           <aside className="hidden lg:block w-52 flex-shrink-0">
             <div className={`sticky top-32 rounded-[1.15rem] p-3.5 ${uiSurfaces.panelStrong}`}>
               <div className="flex items-center justify-between mb-3">

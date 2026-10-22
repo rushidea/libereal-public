@@ -28,7 +28,6 @@ export default function HelpPage() {
           <p className="text-sm text-gray-500">常见问题与解答，如仍有疑问欢迎联系我们</p>
         </div>
 
-        {/* Contact shortcuts */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8 max-w-xl mx-auto">
           <Link href="/contact" className="bg-white rounded-2xl border border-gray-100 p-5 text-center hover:shadow-md transition-shadow">
             <div className="bg-brand-50 rounded-xl p-3 w-fit mx-auto mb-3">
@@ -46,7 +45,6 @@ export default function HelpPage() {
           </Link>
         </div>
 
-        {/* Quick links */}
         <div className="bg-white rounded-2xl border border-gray-100 p-6 mb-8">
           <h2 className="text-sm font-semibold text-gray-800 mb-4">快捷链接</h2>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
@@ -64,7 +62,6 @@ export default function HelpPage() {
           </div>
         </div>
 
-        {/* FAQ */}
         <div className="bg-white rounded-2xl border border-gray-100 divide-y divide-gray-100">
           <h2 className="text-sm font-semibold text-gray-800 px-6 py-4">常见问题</h2>
           {helpFaqs.map(({ q, a }, i) => {

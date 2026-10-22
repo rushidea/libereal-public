@@ -228,7 +228,6 @@ describe('PATCH /api/admin/orders/archive', () => {
   });
 
   it('unarchives orders (sets archivedAt to NULL)', async () => {
-    // 先归档
     const db = getTestDb();
     db.prepare('UPDATE "Order" SET archivedAt = datetime(\'now\') WHERE id IN (?, ?)').run('o1', 'o2');
 

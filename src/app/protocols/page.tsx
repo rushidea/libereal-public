@@ -70,7 +70,6 @@ function ProtocolsContent() {
     setExpandedId(null);
   };
 
-  // Fetch community recipes when community tab is selected
   useEffect(() => {
     if (activeTab === 'community' && communityRecipes.length === 0) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -123,7 +122,6 @@ function ProtocolsContent() {
 
       <div className="min-h-screen libereal-service-page pb-16 lg:pb-0">
       <main className="max-w-6xl mx-auto px-4 sm:px-6 py-8">
-        {/* Header */}
         <div className="flex items-center gap-4 mb-6">
           <Link
             href="/"
@@ -140,7 +138,6 @@ function ProtocolsContent() {
           </div>
         </div>
 
-        {/* Search Input */}
         <div className="bg-white/70 backdrop-blur-md border border-white/70 rounded-lg p-4 mb-4">
           <div className="relative">
             <Search size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-brand-600" />
@@ -166,7 +163,6 @@ function ProtocolsContent() {
           </div>
         </div>
 
-        {/* Tab Switcher */}
         <div className="mb-4 flex gap-2 overflow-x-auto pb-1">
           <button
             onClick={() => handleTabChange('protocols')}
@@ -220,7 +216,6 @@ function ProtocolsContent() {
           </button>
         </div>
 
-        {/* Category Pills - only show for protocols/buffers tabs */}
         {activeTab !== 'calculators' && activeTab !== 'community' && (
           <>
             <div className="flex flex-wrap gap-2 mb-6">
@@ -245,7 +240,6 @@ function ProtocolsContent() {
               })}
             </div>
 
-            {/* Results Info */}
             {(searchQuery || selectedCategory !== '全部') && (
               <div className="mb-4 text-sm text-gray-500">
                 {searchQuery && <span>搜索 &quot;{searchQuery}&quot;，</span>}
@@ -255,14 +249,12 @@ function ProtocolsContent() {
           </>
         )}
 
-        {/* Calculators Panel - only show for calculators tab */}
         {activeTab === 'calculators' ? (
           <CalculatorsPanel />
         ) : activeTab === 'spectra' ? (
           <SpectrumViewer />
         ) : activeTab === 'community' ? (
           <div>
-            {/* Sub-type filter */}
             <div className="flex gap-2 mb-4">
               {(['all', 'protocol', 'buffer'] as const).map(t => {
                 const labels = { all: '全部', protocol: '实验方案', buffer: '缓冲液/配方' };
@@ -346,7 +338,6 @@ function ProtocolsContent() {
           </div>
         ) : (
           <>
-            {/* Cards Grid */}
             {currentItems.length > 0 ? (
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                 {currentItems.map((item: ProtocolSummary | BufferSummary) => (
@@ -388,7 +379,6 @@ function ProtocolsContent() {
       <MobileBottomNav />
       <SiteFooter />
 
-      {/* Detail Modal */}
       {expandedItem && (
         <ProtocolDetailModal
           item={expandedItem}

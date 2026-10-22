@@ -123,7 +123,6 @@ export default function AdaptiveHeader({
   });
   const submitSearch = () => handleSearch(searchDraft);
 
-  // Auto-expand search bar on tablet (768px - 1023px)
   useEffect(() => {
     const checkWidth = () => {
       const w = window.innerWidth;

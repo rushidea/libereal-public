@@ -87,7 +87,6 @@ export const buyNGetMStrategy: RuleStrategy<BuyNGetMRuleConfig> = {
       summary,
       details: { totalQty, groupSize, freeCount, freeSlots: freeIndexes.size, discountTotal },
       adjustments,
-      // 独占锁：参与买免的主品行
       exclusiveLines: config.exclusive
         ? Array.from(byLine.keys()).map((l) => l.product.catalogNumber)
         : undefined,

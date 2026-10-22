@@ -35,7 +35,6 @@ export default function BufferDetailPage() {
       <AdaptiveHeader showNav={true} />
 
       <main className="max-w-4xl mx-auto px-4 sm:px-6 py-8">
-        {/* Back Button */}
         <Link
           href={`/protocols${backParams ? `?${backParams}` : ''}`}
           className="inline-flex items-center gap-2 px-4 py-2 mb-6 rounded-lg bg-white/50 backdrop-blur-sm hover:bg-white/70 border border-gray-200/50 transition-colors"
@@ -44,7 +43,6 @@ export default function BufferDetailPage() {
           <span className="text-sm font-medium text-gray-600">返回方案库</span>
         </Link>
 
-        {/* Header */}
         <div className="bg-white/70 backdrop-blur-md border border-white/70 rounded-2xl p-6 mb-6">
           <div className="flex items-start gap-4">
             <div className={`p-4 rounded-xl ${buffer.bgColor}`}>
@@ -62,7 +60,6 @@ export default function BufferDetailPage() {
           </div>
         </div>
 
-        {/* Components */}
         <div className="bg-white/70 backdrop-blur-md border border-white/70 rounded-2xl p-6 mb-6">
           <h2 className="text-lg font-semibold text-gray-800 mb-4 flex items-center gap-2">
             <span className="w-8 h-8 rounded-full bg-emerald-100 text-emerald-600 text-sm font-bold flex items-center justify-center">1</span>
@@ -86,7 +83,6 @@ export default function BufferDetailPage() {
           </table>
         </div>
 
-        {/* Preparation */}
         <div className="bg-white/70 backdrop-blur-md border border-white/70 rounded-2xl p-6 mb-6">
           <h2 className="text-lg font-semibold text-gray-800 mb-4 flex items-center gap-2">
             <span className="w-8 h-8 rounded-full bg-emerald-100 text-emerald-600 text-sm font-bold flex items-center justify-center">2</span>
@@ -104,7 +100,6 @@ export default function BufferDetailPage() {
           </ol>
         </div>
 
-        {/* Storage */}
         {buffer.storage && (
           <div className="bg-blue-50/50 backdrop-blur-md border border-blue-200/50 rounded-2xl p-6 mb-6">
             <h2 className="text-lg font-semibold text-gray-800 mb-2 flex items-center gap-2">
@@ -115,7 +110,6 @@ export default function BufferDetailPage() {
           </div>
         )}
 
-        {/* Notes */}
         {buffer.notes && buffer.notes.length > 0 && (
           <div className="bg-amber-50/50 backdrop-blur-md border border-amber-200/50 rounded-2xl p-6">
             <h2 className="text-lg font-semibold text-gray-800 mb-4 flex items-center gap-2">

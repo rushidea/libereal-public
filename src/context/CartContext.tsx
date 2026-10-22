@@ -144,7 +144,6 @@ export function CartProvider({ children }: { children: ReactNode }) {
   }, [toast]);
 
   useEffect(() => {
-    // Mount-time initialization: load guest cart from localStorage.
     try {
       const stored = localStorage.getItem(GUEST_CART_KEY);
       if (stored) {

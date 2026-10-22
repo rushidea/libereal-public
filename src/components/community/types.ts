@@ -1,4 +1,3 @@
-// Data structures for user-created content (protocols & recipes/buffers)
 import { uiSurfaces } from '@/lib/ui-surfaces';
 
 export type ProtocolContent = {

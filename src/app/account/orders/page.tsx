@@ -382,7 +382,6 @@ function OrdersContent() {
                         <tr>
                           <td colSpan={7} className="bg-brand-100/70 dark:bg-brand-900/30 p-4 border-b border-brand-200 dark:border-brand-700">
                             <div className="bg-white dark:bg-slate-200/65 rounded-lg border border-brand-300 dark:border-brand-700 shadow-sm p-4 space-y-4">
-                              {/* 配送信息 */}
                               <div className="space-y-2">
                                 <p className="text-xs text-gray-600 dark:text-gray-400 font-medium">发货记录</p>
                                 {selectedOrder.shipments.length === 0 ? <p className="text-sm text-gray-500">暂未发货</p> : selectedOrder.shipments.map((shipment) => (
@@ -393,7 +392,6 @@ function OrdersContent() {
                                 ))}
                               </div>
 
-                              {/* 产品清单 */}
                               <div>
                                 <p className="text-xs text-gray-600 dark:text-gray-400 mb-2 font-medium">产品清单</p>
                                 <div className="space-y-3">
@@ -437,7 +435,6 @@ function OrdersContent() {
                                 </div>
                               </div>
 
-                              {/* 总计 + 付款方式 */}
                               <div className="space-y-2 border-t border-gray-200 pt-4 dark:border-slate-400">
                                 <div className="flex justify-between text-sm">
                                   <span className="text-gray-600 dark:text-gray-400">商品合计</span>
@@ -484,7 +481,6 @@ function OrdersContent() {
               </table>
             </div>
 
-            {/* Mobile card list */}
             <div className="md:hidden divide-y divide-gray-100 dark:divide-gray-700">
               {filtered.length === 0 ? (
                 <div className="text-center py-12 text-gray-600 dark:text-gray-400">暂无订单</div>

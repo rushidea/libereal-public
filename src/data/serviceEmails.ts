@@ -12,5 +12,3 @@ export const SERVICE_EMAILS = {
 export function getSupportEmail(): string {
   return process.env.SUPPORT_EMAIL?.trim() || SERVICE_EMAILS.support;
 }
-
-export { DEFAULT_CLOUD_MAIL_URL, getCloudMailUrl } from '@/lib/cloud-mail';

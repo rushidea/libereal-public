@@ -26,10 +26,10 @@ model User {
   advisorPhone  String?
 
   // === 注册资料结构化字段 (锁定) ===
-  school        String?  // 学校
-  college       String?  // 学院
+  school        String?
+  college       String?
   major         String?  // 学系
-  building      String?  // 楼号
+  building      String?
   piLab         String?  // PI 实验室（导师的实验室，锁定）
   affiliatedLab String?  // 依托实验室（注册人实际所在实验室，选填）
   points        Int       @default(0)   // 累计积分
@@ -39,16 +39,16 @@ model User {
   avatar        String?   // 用户头像（Google/Alipay等通用）
   googleEmail   String?   // 绑定的Google账号邮箱
   alipayId      String?   // 支付宝用户唯一标识
-  alipayAvatar  String?   // 支付宝头像
-  alipayNickname String?  // 支付宝昵称
+  alipayAvatar  String?
+  alipayNickname String?
   alipayGender  String?   // 支付宝性别：m/f/null
-  alipayCity    String?   // 支付宝城市
-  alipayProvince String? // 支付宝省份
+  alipayCity    String?
+  alipayProvince String?
   isNewUser    Boolean  @default(true)  // 首单需人工审核
   approvalStatus String  @default("approved")  // approved | rejected (新字段; 旧 user 通过 default 兼容)
-  resetToken       String?  // 密码重置 token
-  resetTokenExpiry DateTime? // 密码重置过期时间 (新字段; 旧 user 通过 default 兼容)
-  isBlacklisted Boolean @default(false) // 黑名单用户
+  resetToken       String?
+  resetTokenExpiry DateTime?
+  isBlacklisted Boolean @default(false)
   isFrozen     Boolean @default(false) // 冻结后可登录，但看不到折扣价且不可下单/询价
   tier         String    @default("璞玉")
   wechatNickname String?  // 微信昵称（用户贡献时显示用）
@@ -514,7 +514,7 @@ model Inquiry {
   archivedAt   DateTime? // 归档时间，非null表示已归档
   user         User?    @relation(fields: [userId], references: [id])
   organization Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
-  orders       Order[]  // 该询价单关联的所有订单
+  orders       Order[]
   inquiryItems InquiryItem[]
   quotes       Quote[]
 
@@ -540,7 +540,7 @@ model Order {
   customerId      String?
   // 后台代客下单的管理员。客户自行下单以及本字段加入前的订单为空。
   createdByAdminId String? @map("created_by_admin_id")
-  subtotal        Float    // 商品小计
+  subtotal        Float
   adjustmentTotal Float    @default(0)
   total           Float    @default(0)
   status          String   @default("pending")  // unpaid | pending | confirmed | partially_shipped | shipped | completed | cancelled | closed
@@ -555,8 +555,8 @@ model Order {
   // 自动关闭时刻：unpaid/pending 超时后应被系统自动关闭的时间点（= createdAt + AUTO_CLOSE_HOURS）。
   // 订单离开 unpaid/pending（付款进入待确认、确认、取消、关闭、归档）时置 null。定时任务按 autoCloseAt < now 查询处理。
   autoCloseAt     DateTime? @map("auto_close_at")
-  quoteSent       Boolean  @default(false) // 报价已发送
-  quoteSentAt     DateTime? // 报价发送时间
+  quoteSent       Boolean  @default(false)
+  quoteSentAt     DateTime?
   addressSnapshot OrderAddressSnapshot?
   orderItems      OrderItem[]
   statusHistory   OrderStatusHistory[]
@@ -795,7 +795,6 @@ model UserTierHistory {
   @@index([toTier])
 }
 
-// 询价商品关系表。Inquiry.items 暂时保留为兼容快照。
 model InquiryItem {
   id            String   @id @default(cuid())
   inquiryId     String
@@ -894,7 +893,6 @@ model QuoteConfirmation {
   @@index([email])
 }
 
-// 订单商品关系表。Order.items 暂时保留为成交快照。
 model OrderItem {
   id            String   @id @default(cuid())
   orderId       String
@@ -945,7 +943,7 @@ model Notification {
   userId          String?   // null for admin notifications (all admins see them)
   email           String    // customer's email for routing, or 'admin' / 'broadcast'
   role            String    // 'customer' | 'admin'
-  type            String    // notification type
+  type            String
   title           String
   content         String
   isRead          Boolean   @default(false)
@@ -995,7 +993,7 @@ model Address {
   id          String   @id @default(cuid())
   userId      String
   name        String   // 收货人姓名
-  phone       String   // 手机号
+  phone       String
   address     String   // 收货地址（地址栏1，必填）
   institution String?  // 单位/实验室（地址栏2，选填）
   label       String?  // 标签（如"家"/"公司"）
@@ -1040,17 +1038,16 @@ model Product {
   casNumber       String?
   hazardous       Boolean  @default(false)  // 危险化学品标记
 
-  // === P2-1: 生物医药专业字段 ===
   leadTime        String?  // 货期/交货时间（如 "1-2 周" / "现货"）
   storageTemp     String?  // 储存温度（如 "-20°C" / "4°C" / "室温"）
   storageBuffer   String?  // 储存缓冲液/条件
   expiryDate      String?  // 有效期/保质期
-  lotNumber       String?  // 批号
+  lotNumber       String?
   cloneNumber     String?  // 克隆号（抗体）/ 目录株号
   purity          String?  // 纯度（如 ">95%" / "HPLC"）
   molecularWeight Float?   // 分子量 (kDa)
   isoelectricPoint Float?  // 等电点 (pI)
-  concentration   String?  // 浓度
+  concentration   String?
   cofaUrl         String?  // CoA 证书 PDF 下载链接
   sdsUrl          String?  // SDS 安全表下载链接
   pmids           String   @default("[]")  // JSON 引用文献 PMID 列表
@@ -1425,8 +1422,6 @@ model Wishlist {
   @@index([productId])
 }
 
-// ============ 积分系统 ============
-
 // 课题组（一人仅可加入一个课题组；成员自动共享课题组积分）
 // status: pending 待审核 | active 已通过 | archived 已归档
 // 用户创建为 pending；管理员审核通过后 locked=true；不通过则删除记录
@@ -1522,7 +1517,6 @@ model PointsLog {
   @@index([undoOfId])
 }
 
-// 积分商城商品
 model PointsProduct {
   id          String   @id @default(cuid())
   name        String
@@ -1540,7 +1534,6 @@ model PointsProduct {
   @@index([category])
 }
 
-// 兑换记录
 model PointsRedemption {
   id             String   @id @default(cuid())
   userId         String
@@ -1612,7 +1605,6 @@ model Coupon {
   approvalStatus   String @default("auto") // auto（满减券直接生效）| pending | approved | rejected
   approvedBy       String?
   approvedAt       DateTime?
-  // 有效期与总量
   validFrom   DateTime @default(now())
   validUntil  DateTime?
   maxUses     Int      @default(0) // 0=不限；>0=模板累计发放上限

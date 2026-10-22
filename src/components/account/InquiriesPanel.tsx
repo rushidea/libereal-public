@@ -418,7 +418,6 @@ export default function InquiriesPanel() {
 
                 {selectedInquiry?.id === inquiry.id && (
                   <div className={`space-y-3 border-t p-6 ${uiSurfaces.border} bg-[var(--surface-muted)]`}>
-                    {/* Quote received banner */}
                     {quoteExpired && inquiry.activeQuote && (
                       <div className="rounded-[var(--brand-border-radius)] border border-amber-200 bg-amber-50 p-4">
                         <div className="mb-2 flex items-center gap-2 text-amber-800">
@@ -443,7 +442,6 @@ export default function InquiriesPanel() {
                       </div>
                     )}
 
-                    {/* Linked Orders */}
                     {linkedOrders.length > 0 && (
                       <div>
                         <p className={`mb-2 text-sm font-medium ${uiSurfaces.titleText}`}>已生成的订单</p>
@@ -474,7 +472,6 @@ export default function InquiriesPanel() {
                       </div>
                     )}
 
-                    {/* Product selection controls */}
                     {quoteOpen && (
                       <div className="flex items-center justify-between">
                         <p className={`text-sm font-medium ${uiSurfaces.titleText}`}>
@@ -497,7 +494,6 @@ export default function InquiriesPanel() {
                       </div>
                     )}
 
-                    {/* Products */}
                     <div className="space-y-3">
                       {items.map((item, i) => {
                         // 支持两种数据结构：
@@ -535,7 +531,6 @@ export default function InquiriesPanel() {
                             }`}
                             onClick={() => canSelect && !acceptanceAttempts[inquiry.id] ? toggleItem(inquiry.id, i) : undefined}
                           >
-                            {/* 顶部：复选框 + 产品名 + 状态徽章 */}
                             <div className="p-4 flex items-center gap-3">
                               {canSelect && (
                                 <div className={`flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-[var(--brand-border-radius-sm)] border-2 transition-colors ${
@@ -572,7 +567,6 @@ export default function InquiriesPanel() {
                               </div>
                             </div>
 
-                            {/* 底部：单价 / 数量 / 货期 三栏 */}
                             <div className={`grid grid-cols-4 gap-3 border-t px-4 pb-4 pt-3 text-sm ${uiSurfaces.border}`}>
                               <div>
                                 <p className={`mb-1 text-xs ${uiSurfaces.mutedText}`}>单价</p>
@@ -611,7 +605,6 @@ export default function InquiriesPanel() {
                       })}
                     </div>
 
-                    {/* Bottom: Submit selected items as order */}
                     {quoteExpired && inquiry.activeQuote && (
                       <div className={`mt-4 border-t pt-4 ${uiSurfaces.border}`}>
                         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -687,7 +680,6 @@ export default function InquiriesPanel() {
         </div>
       )}
 
-      {/* Confirm Submit Modal */}
       {showConfirmModal && selectedInquiry && (() => {
         const items = parseItems(selectedInquiry.activeQuote?.items ?? selectedInquiry.items);
         const selId = selectedItems[selectedInquiry.id];
@@ -799,6 +791,3 @@ export default function InquiriesPanel() {
     </div>
   );
 }
-
-
-// Last modified: Thu Jun  4 11:37:29 CST 202 

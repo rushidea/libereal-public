@@ -7,7 +7,6 @@ import { PrismaBetterSqlite3 } from '@prisma/adapter-better-sqlite3';
 
 const dbPath = process.env.DATABASE_PATH || resolve(process.cwd(), 'prisma/ci.db');
 const adapter = new PrismaBetterSqlite3({ url: `file:${dbPath}` });
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 const prisma = new PrismaClient({ adapter } as any);
 
 async function main() {

@@ -15,16 +15,6 @@ import {
   parseArticleMarkdown,
 } from '@/lib/wechat-publish';
 
-// ---------------------------------------------------------------------------
-// POST — Upload article to WeChat draft box (and optionally publish)
-// Accepts multipart/form-data:
-//   - article: text file (markdown)
-//   - cover: image file (png/jpg)
-//   - author: string (optional, default "天放生物")
-//   - digest: string (optional, auto-extracted)
-//   - publish: string "true" | "false" (optional, default "false")
-//   - saveCopy: string "true" | "false" (optional, default "true") — save to content/wechat/
-// ---------------------------------------------------------------------------
 
 export async function POST(request: NextRequest) {
   const admin = await requireAdmin('content.write');
@@ -46,7 +36,6 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: '缺少 cover 图片' }, { status: 400 });
     }
 
-    // Read article markdown
     const md = await articleFile.text();
     const parsed = parseArticleMarkdown(md);
 
@@ -78,10 +67,8 @@ export async function POST(request: NextRequest) {
     await mkdir(tmpDir, { recursive: true });
     await writeFile(publishPaths.tempCoverPath, coverBuffer);
 
-    // 1. Upload cover image to WeChat
     const uploadResult = await uploadCoverImage(publishPaths.tempCoverPath);
 
-    // 2. Create draft
     const draft = await createDraft({
       title: parsed.title,
       content: parsed.html,
@@ -122,9 +109,6 @@ export async function POST(request: NextRequest) {
   }
 }
 
-// ---------------------------------------------------------------------------
-// GET — List drafts from WeChat
-// ---------------------------------------------------------------------------
 
 export async function GET(request: NextRequest) {
   const admin = await requireAdmin('content.read');
@@ -144,9 +128,6 @@ export async function GET(request: NextRequest) {
   }
 }
 
-// ---------------------------------------------------------------------------
-// DELETE — Delete a draft
-// ---------------------------------------------------------------------------
 
 export async function DELETE(request: NextRequest) {
   const admin = await requireAdmin('content.write');

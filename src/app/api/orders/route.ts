@@ -85,7 +85,6 @@ export async function GET(_req: NextRequest) {
     });
 
     const settlementViews = await ownerPrepaySettlementViews(prisma, orders);
-    // Hydrate with user/inquiry info
     const enriched = await Promise.all(
       orders.map(async (o) => {
         const { paymentAttempts, ...order } = o;
@@ -552,7 +551,6 @@ export async function POST(req: NextRequest) {
       throw error;
     }
 
-    // Create admin notification
     await prisma.notification.create({
       data: {
         email: 'admin',

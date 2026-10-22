@@ -129,7 +129,6 @@ export const addonStrategy: RuleStrategy<AddonRuleConfig> = {
       summary,
       details: { mainCount, quota, usedQuota: invalidSelectionQuantity ? quota + 1 : used, remainingQuota, shortfall, sharedQuotaGroup: config.sharedQuotaGroup, overSharedQuota: overSharedQuota || invalidSelectionQuantity },
       adjustments,
-      // 独占锁：主品范围行
       exclusiveLines: config.exclusive
         ? ctx.items
             .filter(

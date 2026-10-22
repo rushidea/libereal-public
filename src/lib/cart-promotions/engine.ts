@@ -80,7 +80,6 @@ export class PromotionEngine {
    * 4. 整单优惠（无 catalogNumber，如组合折扣）始终保留。
    */
   dedupeAdjustments(evaluations: RuleEvaluation[]): PriceAdjustment[] {
-    // 1. 收集独占规则锁定的主品行货号
     const exclusiveLines = new Set<string>();
     for (const ev of evaluations) {
       if (!ev.rule.exclusive) continue;
@@ -94,27 +93,23 @@ export class PromotionEngine {
       }
     }
 
-    const kept: PriceAdjustment[] = []; // 叠加型调整
-    const global: PriceAdjustment[] = []; // 整单优惠
-    const byLine = new Map<string, PriceAdjustment>(); // 互斥竞争（取最大）
+    const kept: PriceAdjustment[] = [];
+    const global: PriceAdjustment[] = [];
+    const byLine = new Map<string, PriceAdjustment>();
 
     for (const ev of evaluations) {
       for (const adj of ev.adjustments) {
         if (!adj.catalogNumber) {
-          // 整单优惠（组合折扣等）始终保留
           global.push(adj);
           continue;
         }
         if (ev.rule.stackable && !ev.rule.exclusive) {
-          // 叠加型：全部保留
           kept.push(adj);
           continue;
         }
         if (!ev.rule.exclusive && exclusiveLines.has(adj.catalogNumber)) {
-          // 该行被独占规则锁定，互斥/其他规则的优惠剔除
           continue;
         }
-        // 互斥（默认）或独占规则自身：同货号取最大
         const key = adj.lineId ?? adj.catalogNumber;
         const prev = byLine.get(key);
         if (!prev || adj.amount > prev.amount) byLine.set(key, adj);

@@ -10,9 +10,7 @@ export default function OpenPlatformPage() {
       <AdaptiveHeader showNav={true} />
 
       <main className="flex-1 max-w-6xl mx-auto w-full px-4 pb-10">
-        {/* Hero Section */}
         <section className="relative py-12 sm:py-16 mb-8">
-          {/* Decorative blur orbs */}
           <div className="absolute inset-0 overflow-hidden pointer-events-none">
             <div className="absolute -top-24 -right-24 w-96 h-96 bg-brand-200/20 rounded-full blur-3xl" />
             <div className="absolute -bottom-24 -left-24 w-96 h-96 bg-purple-200/20 rounded-full blur-3xl" />
@@ -28,7 +26,6 @@ export default function OpenPlatformPage() {
           </div>
         </section>
 
-        {/* Section 1: 厂家直供 */}
         <section className="mb-6">
           <div className="bg-white/70 backdrop-blur-md border border-white/70 rounded-3xl p-6 sm:p-8 shadow-xl shadow-black/5">
             <div className="flex items-center gap-4 mb-6">
@@ -60,7 +57,6 @@ export default function OpenPlatformPage() {
           </div>
         </section>
 
-        {/* Section 2: 数据对接 */}
         <section className="mb-6">
           <div className="bg-white/70 backdrop-blur-md border border-white/70 rounded-3xl p-6 sm:p-8 shadow-xl shadow-black/5">
             <div className="flex items-center gap-4 mb-6">
@@ -91,7 +87,6 @@ export default function OpenPlatformPage() {
           </div>
         </section>
 
-        {/* Section 3: 合作履约 */}
         <section className="mb-6">
           <div className="bg-white/70 backdrop-blur-md border border-white/70 rounded-3xl p-6 sm:p-8 shadow-xl shadow-black/5">
             <div className="flex items-center gap-4 mb-6">
@@ -117,7 +112,6 @@ export default function OpenPlatformPage() {
           </div>
         </section>
 
-        {/* Section 4: 入驻支持 */}
         <section className="mb-8">
           <div className="bg-white/70 backdrop-blur-md border border-white/70 rounded-3xl p-6 sm:p-8 shadow-xl shadow-black/5">
             <div className="flex items-center gap-4 mb-6">
@@ -151,7 +145,6 @@ export default function OpenPlatformPage() {
 
         <OpenPlatformLegalDownloads />
 
-        {/* Contact Section */}
         <section>
           <div className="bg-gradient-to-br from-brand-600 to-emerald-600 rounded-3xl p-8 text-white shadow-xl shadow-brand-200/20">
             <h2 className="text-xl font-bold mb-4">申请厂家入驻 / 发送合作邮件</h2>

@@ -799,7 +799,6 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
              }
            } catch {}
         } else {
-           // Credentials login uses the DB ID directly
            token.id = user.id as string;
         }
       } else if (token.email && !token.id) {
@@ -824,7 +823,6 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
     async session({ session, token }) {
       if (session.user) {
         session.user.id = token.id as string;
-        // Also expose email in session
         session.user.email = token.email as string;
         session.user.image = typeof token.picture === 'string' ? token.picture : null;
         session.user.authLevel = token.authLevel === 'mfa_verified' ? 'mfa_verified' : 'primary_verified';
@@ -839,7 +837,6 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
           if (!roleUser && token.email) {
              const normalizedEmail = normalizeEmail(token.email as string);
              roleUser = db.prepare('SELECT role, avatar, displayAvatarUrl FROM User WHERE lower(email) = ?').get(normalizedEmail) as { role: string; avatar: string | null; displayAvatarUrl: string | null } | undefined;
-             // If we found by email, update session ID too
              if (roleUser) {
                 const idUser = db.prepare('SELECT id FROM User WHERE lower(email) = ?').get(normalizedEmail) as { id: string } | undefined;
                 if (idUser) session.user.id = idUser.id;

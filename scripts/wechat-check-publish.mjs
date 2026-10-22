@@ -55,7 +55,6 @@ async function main() {
   const token = await getAccessToken(appId, secret);
   console.log('=== AccessToken 获取成功 ===\n');
 
-  // 1. 查询特定 publish_id 的状态 (002 重新发布后的 publish_id)
   const publishId = '2247483736';
   console.log(`=== 查询 publish_id=${publishId} 的发布状态 ===`);
   const checkUrl = new URL(`${API_BASE}/freepublish/get`);
@@ -69,7 +68,6 @@ async function main() {
   console.log(JSON.stringify(checkData, null, 2));
   console.log('');
 
-  // 2. 查询已发表内容列表
   console.log('=== 查询已发表内容列表 (freepublish/batchget) ===');
   const listUrl = new URL(`${API_BASE}/freepublish/batchget`);
   listUrl.searchParams.set('access_token', token);
@@ -97,7 +95,6 @@ async function main() {
     console.log('已发表内容列表为空！');
   }
 
-  // 3. 也查询草稿列表
   console.log('\n=== 查询草稿列表 (draft/batchget) ===');
   const draftUrl = new URL(`${API_BASE}/draft/batchget`);
   draftUrl.searchParams.set('access_token', token);

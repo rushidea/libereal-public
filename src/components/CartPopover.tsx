@@ -21,7 +21,6 @@ export default function CartPopover() {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
-  // Close on outside click
   useEffect(() => {
     const handler = (e: MouseEvent) => {
       if (ref.current && !ref.current.contains(e.target as Node)) {
@@ -37,7 +36,6 @@ export default function CartPopover() {
 
   return (
     <div ref={ref} className="relative z-[100]">
-      {/* Cart button */}
       <button
         onClick={() => setOpen((v) => !v)}
         className={`relative cursor-pointer ${cartIconButtonClass}`}
@@ -51,10 +49,8 @@ export default function CartPopover() {
         )}
       </button>
 
-      {/* Popover */}
       {open && (
         <div data-header-popup className={`absolute right-0 top-full z-50 mt-2 w-80 max-w-[calc(100vw-2rem)] overflow-hidden rounded-[var(--brand-border-radius-lg)] ${uiSurfaces.panelStrong}`}>
-          {/* Header */}
           <div data-header-popup-section className="flex items-center justify-between border-b border-[var(--brand-color-border)] px-4 py-3">
             <span className={`text-sm font-semibold ${uiSurfaces.titleText}`}>购物车 ({totalItems})</span>
             <button
@@ -65,7 +61,6 @@ export default function CartPopover() {
             </button>
           </div>
 
-          {/* Items */}
           <div data-header-popup-body className="max-h-72 overflow-y-auto">
             {items.length === 0 ? (
               <div data-header-popup-body className={`py-8 text-center text-sm ${uiSurfaces.textQuaternary}`}>
@@ -125,7 +120,6 @@ export default function CartPopover() {
             )}
           </div>
 
-          {/* Footer */}
           {items.length > 0 && (
             <div data-header-popup-section className="border-t border-[var(--brand-color-border)] px-4 py-3">
               <Link

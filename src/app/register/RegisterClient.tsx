@@ -52,7 +52,6 @@ function RegisterForm() {
     department: '',
     institutionFacility: '',
     piLab: '',
-    // === 选填：依托实验室 ===
     showAffiliatedLab: false,
     affiliatedLab: '',
   });
@@ -570,7 +569,6 @@ function RegisterForm() {
                 <p className="mt-1 text-xs text-gray-400">请填写您的导师姓名及其实验室名称，注册后不可修改</p>
               </div>
 
-              {/* ➕ 依托实验室（选填） */}
               <div className="mt-2">
                 <button
                   type="button"

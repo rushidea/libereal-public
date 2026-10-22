@@ -24,7 +24,6 @@ export async function GET(req: NextRequest) {
       include: { user: { select: { name: true, email: true } } },
     });
 
-    // Reshape to flat with userName/userEmail and expose whether an adjustment was undone.
     const adjustmentIds = logs.filter((log) => log.type === 'admin_adjust').map((log) => log.id);
     const undoneLogs = adjustmentIds.length === 0
       ? []

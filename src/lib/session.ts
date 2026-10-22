@@ -1,10 +1,3 @@
-// 统一的 session 访问 helpers —— 替代散落各处的 `(session.user as DbUser).xxx` 强转
-//
-// 用法：
-//   const user = await requireAdmin();
-//   if (user instanceof NextResponse) return user;
-//   // use user.id, user.email, user.role
-
 import { NextResponse } from 'next/server';
 import type { Session } from 'next-auth';
 import { auth } from './auth';

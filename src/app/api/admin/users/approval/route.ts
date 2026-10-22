@@ -35,7 +35,6 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "无效操作" }, { status: 400 });
     }
 
-    // Notify user of approval result
     if (action === 'approve') {
       await prisma.notification.create({
         data: {

@@ -103,7 +103,6 @@ export function proxy(request: NextRequest) {
     });
   }
 
-  // Generate a fresh per-request nonce
   const nonce = Buffer.from(crypto.randomUUID()).toString('base64');
   const isProd = process.env.NODE_ENV === 'production';
 
@@ -122,7 +121,6 @@ export function proxy(request: NextRequest) {
     return NextResponse.redirect(loginUrl);
   }
 
-  // Forward nonce to downstream via request header (consumed by Next.js)
   const requestHeaders = new Headers(request.headers);
   requestHeaders.set('x-nonce', nonce);
 

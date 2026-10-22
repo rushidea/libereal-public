@@ -159,7 +159,6 @@ export default function AccountPage() {
         <div className="flex flex-col gap-4 lg:flex-row lg:gap-6">
           <AccountSidebar activeKey={userSubTab} onTabChange={setUserSubTab} />
 
-          {/* Content */}
           <div className="min-w-0 flex-1 space-y-6">
             <UserDashboard activeTab={userSubTab} setActiveTab={setUserSubTab} tier={tier} points={points} />
           </div>
@@ -187,8 +186,6 @@ type Address = {
 
 function UserDashboard({ activeTab, setActiveTab, tier, points }: { activeTab: string; setActiveTab: (tab: string) => void; tier: string; points: number }) {
   const { wishlist } = useWishlist();
-  // IME 中文输入跟踪：composition 期间不要 setState（React 18+ 修复了大部分场景，但 Edge + 某些 IME 仍有问题）
-  // composingRef 已移除（之前是 IME 处理用的，但简化后不需要）
   const [userProfile, setUserProfile] = useState({ name: '', email: '', tel: '', company: '', identity: '', advisorName: '', advisorPhone: '' });
   const [myOrders, setMyOrders] = useState<Order[]>([]);
   const [addresses, setAddresses] = useState<Address[]>([]);

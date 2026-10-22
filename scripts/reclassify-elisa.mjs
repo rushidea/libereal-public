@@ -19,9 +19,7 @@ const dbPath = join(__dirname, '..', 'prisma', 'dev.db');
 const db = new Database(dbPath);
 db.pragma('journal_mode = WAL');
 
-// ============================================================
 // 分类规则
-// ============================================================
 
 /** 判断是否为微孔板检测试剂盒 */
 function isMicroplateAssay(name) {
@@ -282,9 +280,7 @@ function classifyAuxiliary(name) {
   return '其他辅助试剂';
 }
 
-// ============================================================
 // 执行分类
-// ============================================================
 
 const products = db.prepare(`
   SELECT id, name, brand, catalogNumber, subcategory
@@ -406,9 +402,7 @@ for (const row of verify) {
 db.close();
 console.log('\n分类完成。');
 
-// ============================================================
 // 辅助函数
-// ============================================================
 
 function classifyMicroplateType(name) {
   const lower = name.toLowerCase();

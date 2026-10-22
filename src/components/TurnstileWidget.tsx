@@ -17,7 +17,6 @@ export default function TurnstileWidget({ onVerify, onExpire, theme = 'auto', si
   const resetTimerRef = useRef<number | null>(null);
   const [errorCode, setErrorCode] = useState<string | null>(null);
 
-  // Keep refs up to date
   useEffect(() => { onVerifyRef.current = onVerify; });
   useEffect(() => { onExpireRef.current = onExpire; });
 
@@ -79,7 +78,6 @@ export default function TurnstileWidget({ onVerify, onExpire, theme = 'auto', si
       }
     };
 
-    // Avoid loading the script multiple times
     const existingScript = document.querySelector('script[src*="cloudflare.com/turnstile"]');
     if (existingScript) {
       if (window.turnstile) {

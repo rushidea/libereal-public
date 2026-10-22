@@ -143,7 +143,6 @@ describe('POST /api/auth/register', () => {
     expect(u.password).not.toBe('password123');
     expect(u.password.length).toBeGreaterThan(20); // bcrypt hash
 
-    // admin notification
     const notifs = db.prepare("SELECT * FROM Notification WHERE email = 'admin'").all() as Array<{ type: string; title: string }>;
     expect(notifs).toHaveLength(1);
     expect(notifs[0].title).toMatch(/新用户/);

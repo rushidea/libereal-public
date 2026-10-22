@@ -84,7 +84,6 @@ export async function DELETE(request: NextRequest) {
       return NextResponse.json({ error: 'Missing buffer ID' }, { status: 400 });
     }
 
-    // Verify ownership
     const buffer = await prisma.userSavedBuffer.findFirst({
       where: { id, userId, ownerScope: 'personal' },
       select: { id: true },

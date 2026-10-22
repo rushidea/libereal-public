@@ -123,10 +123,6 @@ export default function LegalConsentChecklist({
   );
 }
 
-export function useLegalConsentComplete(context: 'register' | 'checkout', acceptedIds: string[], documentsCount: number | null) {
-  return documentsCount === null || (documentsCount > 0 && acceptedIds.length >= documentsCount);
-}
-
 type LegalDocumentDownloadsProps = {
   documents: LegalDocumentPublic[];
   title?: string;

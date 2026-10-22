@@ -62,7 +62,6 @@ export default function UserBufferDetailPage() {
           <span className="text-sm font-medium text-gray-600">返回方案库</span>
         </Link>
 
-        {/* Header */}
         <div className="bg-white/70 backdrop-blur-md border border-white/70 rounded-2xl p-6 mb-6">
           <div className="flex items-start gap-4">
             <div className="p-4 rounded-xl bg-emerald-50">
@@ -80,7 +79,6 @@ export default function UserBufferDetailPage() {
                 <p className="text-gray-600 mt-3 leading-relaxed">{content.description}</p>
               )}
 
-              {/* Contributor info */}
               <div className="mt-4 pt-4 border-t border-gray-100 flex items-center gap-2">
                 <div className="w-8 h-8 rounded-full bg-gradient-to-br from-brand-400 to-brand-600 flex items-center justify-center text-white text-xs font-medium flex-shrink-0 overflow-hidden">
                   {recipe.displayAvatarUrl ? (
@@ -100,7 +98,6 @@ export default function UserBufferDetailPage() {
           </div>
         </div>
 
-        {/* Components */}
         {content.components && content.components.length > 0 && content.components.some(c => c.name.trim()) && (
           <div className="bg-white/70 backdrop-blur-md border border-white/70 rounded-2xl p-6 mb-6">
             <h2 className="text-lg font-semibold text-gray-800 mb-4">组分</h2>
@@ -125,7 +122,6 @@ export default function UserBufferDetailPage() {
           </div>
         )}
 
-        {/* Preparation */}
         {content.preparation && content.preparation.length > 0 && content.preparation.some(p => p.trim()) && (
           <div className="bg-white/70 backdrop-blur-md border border-white/70 rounded-2xl p-6 mb-6">
             <h2 className="text-lg font-semibold text-gray-800 mb-4">配制步骤</h2>
@@ -142,7 +138,6 @@ export default function UserBufferDetailPage() {
           </div>
         )}
 
-        {/* Storage */}
         {content.storage && (
           <div className="bg-white/70 backdrop-blur-md border border-white/70 rounded-2xl p-6 mb-6">
             <h2 className="text-lg font-semibold text-gray-800 mb-2">储存方式</h2>
@@ -150,7 +145,6 @@ export default function UserBufferDetailPage() {
           </div>
         )}
 
-        {/* Notes */}
         {content.notes && (
           <div className="bg-white/70 backdrop-blur-md border border-white/70 rounded-2xl p-6 mb-6">
             <h2 className="text-lg font-semibold text-gray-800 mb-2">备注</h2>
@@ -158,7 +152,6 @@ export default function UserBufferDetailPage() {
           </div>
         )}
 
-        {/* Related Products */}
         {content.relatedProducts && content.relatedProducts.length > 0 && (
           <div className="bg-white/70 backdrop-blur-md border border-white/70 rounded-2xl p-6">
             <h2 className="text-lg font-semibold text-gray-800 mb-4">相关产品</h2>

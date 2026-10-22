@@ -100,7 +100,6 @@ export const fixedPriceStrategy: RuleStrategy<FixedPriceRuleConfig> = {
       summary,
       details: { hitCount, discountTotal },
       adjustments,
-      // 独占锁：命中的主品行（fixed-price 调整即落在主品行）
       exclusiveLines: config.exclusive
         ? adjustments.map((a) => a.catalogNumber).filter((c): c is string => Boolean(c))
         : undefined,

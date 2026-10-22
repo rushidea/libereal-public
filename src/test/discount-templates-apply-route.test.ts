@@ -66,10 +66,8 @@ describe('POST /api/admin/discount-templates/apply', () => {
   });
 
   it('overwrites previous template source when applying new template', async () => {
-    // 第一次：套 tpl_1
     await POST(makeRequest({ templateId: 'tpl_1', userIds: ['user_1'] }) as NextRequest);
 
-    // 创建 tpl_2 + 套用
     const db = getTestDb();
     db.prepare(`
       INSERT INTO DiscountTemplate (id, name, discountRate, brandDiscounts, createdAt, updatedAt)

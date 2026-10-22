@@ -193,7 +193,6 @@ export default async function ProductDetailPage({ params, searchParams }: PagePr
     ? getCstBaseCatalogNumber(product.catalogNumber)
     : product.catalogNumber;
 
-  // 1) Try ProductVariant table (Biosharp merged variants)
   const productVariants = await prisma.productVariant.findMany({
     where: { productId: product.id },
     orderBy: { catalogNumber: 'asc' },
@@ -240,7 +239,6 @@ export default async function ProductDetailPage({ params, searchParams }: PagePr
   }> = [];
 
   if (productVariants.length > 0) {
-    // ProductVariant rows: build Product-like records sharing main product fields
     variants = productVariants.map((v) => {
       const stockQuantity = v.inventoryAccounts[0]?.availableQuantity ?? product.stockQuantity;
       return {
@@ -319,7 +317,6 @@ export default async function ProductDetailPage({ params, searchParams }: PagePr
     stockQuantity: product.stockQuantity,
   };
 
-  // Parse all variants (including current product)
   const parsedVariants: Product[] = variants.map(p => ({
     id: p.id,
     variantId: p.variantId,
@@ -347,7 +344,6 @@ export default async function ProductDetailPage({ params, searchParams }: PagePr
     leadTime: p.leadTime ?? undefined,
   }));
 
-  // Filter out current product from related variants
   const relatedVariants = parsedVariants.filter(v => v.id !== parsedProduct.id);
 
   const relatedProducts = await prisma.product.findMany({

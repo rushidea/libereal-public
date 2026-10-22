@@ -75,7 +75,6 @@ export default function AdminDiscountsApplyPage() {
   const [appliedMsg, setAppliedMsg] = useState('');
   const [error, setError] = useState('');
 
-  // 拉模板列表
   useEffect(() => {
     fetch('/api/admin/discount-templates')
       .then(r => r.ok ? r.json() : [])
@@ -228,7 +227,6 @@ export default function AdminDiscountsApplyPage() {
         </div>
       )}
 
-      {/* 筛选面板 */}
       <div className="bg-white/70 backdrop-blur-md rounded-2xl border border-white/70 p-4 space-y-3">
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
           <div>
@@ -309,7 +307,6 @@ export default function AdminDiscountsApplyPage() {
         </div>
       </div>
 
-      {/* 用户列表 */}
       <div className="bg-white/70 backdrop-blur-md rounded-2xl border border-white/70 overflow-hidden">
         {loading ? (
           <div className="flex items-center justify-center py-12 text-gray-400">
@@ -394,7 +391,6 @@ export default function AdminDiscountsApplyPage() {
         )}
       </div>
 
-      {/* 分页 + 应用操作栏（底部固定感） */}
       <div className="sticky bottom-[calc(var(--mobile-bottom-nav-height)+0.5rem)] z-40 flex flex-wrap items-center gap-3 rounded-2xl border border-white/70 bg-white/70 p-3 backdrop-blur-md lg:bottom-0">
         {totalPages > 1 && (
           <div className="flex items-center gap-1">
@@ -438,7 +434,6 @@ export default function AdminDiscountsApplyPage() {
         </div>
       </div>
 
-      {/* 智能检查 + 确认弹窗 */}
       {confirm && (
         <div className="fixed inset-0 z-site-overlay flex justify-center overflow-y-auto bg-black/40 px-4 pb-4 pt-[calc(var(--site-header-height)+var(--site-header-gap))]">
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-md">

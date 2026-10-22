@@ -70,7 +70,6 @@ export default function QuickOrderModal({ onClose }: QuickOrderModalProps) {
     // Try formats: "Brand | Cat# | Name" or "Brand · Cat# · Name" or tab/comma separated
     const cleaned = line.trim().replace(/\r$/, '');
     if (!cleaned) return {};
-    // Split by common separators
     const parts = cleaned.split(/[\t|，,·]/).map(p => p.trim()).filter(Boolean);
     if (parts.length >= 3) {
       return { brand: parts[0], catalogNumber: parts[1], name: parts.slice(2).join(' ') };
@@ -130,7 +129,6 @@ export default function QuickOrderModal({ onClose }: QuickOrderModalProps) {
   return (
     <div className={`${uiSurfaces.overlay} ${uiSurfaces.modalBackdrop}`}>
       <div className={`my-auto max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-[var(--brand-border-radius-lg)] ${uiSurfaces.modal}`}>
-        {/* Header */}
         <div className="flex items-center justify-between border-b border-[var(--brand-color-border)] px-6 py-4">
           <div>
             <h2 className={`text-lg font-bold ${uiSurfaces.titleText}`}>快速下单</h2>
@@ -141,7 +139,6 @@ export default function QuickOrderModal({ onClose }: QuickOrderModalProps) {
           </button>
         </div>
 
-        {/* Mode toggle */}
         <div className="flex gap-1 px-6 pt-4">
           <button
             onClick={() => { setMode('single'); setBatchText(''); setParsedItems([]); }}
@@ -161,7 +158,6 @@ export default function QuickOrderModal({ onClose }: QuickOrderModalProps) {
           </button>
         </div>
 
-        {/* Single form */}
         {mode === 'single' && (
           <form onSubmit={handleSubmit} className="p-6 space-y-4">
             <div>
@@ -245,7 +241,6 @@ export default function QuickOrderModal({ onClose }: QuickOrderModalProps) {
           </form>
         )}
 
-        {/* Batch paste mode */}
         {mode === 'batch' && (
           <div className="p-6 space-y-4">
             {parsedItems.length === 0 ? (
@@ -350,7 +345,6 @@ export default function QuickOrderModal({ onClose }: QuickOrderModalProps) {
           </div>
         )}
 
-        {/* Tips */}
         <div className="px-6 pb-6">
           <div className="rounded-[var(--brand-border-radius)] border border-[var(--brand-color-warning-border)] bg-[var(--brand-color-warning-bg)] p-4">
             <p className="text-xs text-[var(--brand-color-warning-text)]">

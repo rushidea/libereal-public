@@ -45,7 +45,6 @@ export const atomicWeights: Record<string, number> = {
   U: 238.03,
 };
 
-// 化学基团分子量表
 export const functionalGroups: Record<string, { name: string; mw: number }> = {
   '-OH': { name: '羟基', mw: 17.008 },
   '-COOH': { name: '羧基', mw: 45.018 },
@@ -72,7 +71,6 @@ export const functionalGroups: Record<string, { name: string; mw: number }> = {
   '-SO2NH2': { name: '磺酰胺基', mw: 80.062 },
 };
 
-// 缓冲体系组分信息
 interface BufferComponent {
   name: string;
   formula?: string;
@@ -84,10 +82,10 @@ export interface BufferSystem {
   pKa: number[];
   适用pH: string;
   standardConc?: number; // 标准浓度 (mM)，如 50 表示 50mM
-  acid: BufferComponent; // 酸形式
-  base: BufferComponent; // 共轭碱形式
-  type: 'acid-base' | 'salt'; // 类型：酸碱对 或 盐溶液
-  saltRecipe?: { // 对于盐溶液类型的特殊配方
+  acid: BufferComponent;
+  base: BufferComponent;
+  type: 'acid-base' | 'salt';
+  saltRecipe?: {
     components: { name: string; formula: string; mw: number; amount: string }[];
   };
 }
@@ -293,12 +291,10 @@ export const bufferSystems: BufferSystem[] = [
   },
 ];
 
-// 根据 pH 选择合适的 pKa
 function getAppropriatePKa(buffer: BufferSystem, targetPH: number): number {
   const pKas = buffer.pKa;
   if (pKas.length === 1) return pKas[0];
 
-  // 选择最接近目标 pH 的 pKa
   let closest = pKas[0];
   let minDiff = Math.abs(targetPH - pKas[0]);
 
@@ -312,7 +308,6 @@ function getAppropriatePKa(buffer: BufferSystem, targetPH: number): number {
   return closest;
 }
 
-// 计算缓冲液配制
 export interface BufferCalculationResult {
   success: boolean;
   components: { name: string; mass: number; volume?: number }[];
@@ -330,11 +325,9 @@ export function calculateBuffer(
     return { success: false, components: [], notes: '未找到该缓冲体系' };
   }
 
-  // 体积转为升
   const volumeL = volumeML / 1000;
   const totalMoles = concentrationM * volumeL;
 
-  // 如果是盐溶液类型（如 PBS），返回固定配方
   if (buffer.type === 'salt' && buffer.saltRecipe) {
     // PBS 的浓度倍数直接对应目标工作浓度
     // 标准 1X PBS = 10mM PB, 137mM NaCl, 2.7mM KCl
@@ -358,7 +351,6 @@ export function calculateBuffer(
     };
   }
 
-  // 酸碱缓冲体系计算
   const pKa = getAppropriatePKa(buffer, targetPH);
 
   // Henderson-Hasselbalch: pH = pKa + log([A-]/[HA])
@@ -395,7 +387,6 @@ export function calculateBuffer(
   };
 }
 
-// 单位换算表
 export const concentrationUnits: Record<string, { name: string; factor: number }> = {
   M: { name: 'M', factor: 1 },
   mM: { name: 'mM', factor: 1e-3 },
@@ -709,7 +700,6 @@ export function calculateElisaFit(standards: ElisaStandardInput[], samples: Elis
   };
 }
 
-// 计算器历史记录类型
 export interface CalculatorHistory {
   type: 'dilution' | 'buffer' | 'mw' | 'unit' | 'solution' | 'elisa';
   inputs: Record<string, number | string>;
@@ -718,23 +708,19 @@ export interface CalculatorHistory {
   timestamp: number;
 }
 
-// localStorage key
 const CALCULATOR_HISTORY_KEY = 'libereal_calculator_history';
 const MAX_HISTORY_ITEMS = 20;
 
-// 保存计算器历史
 export function saveCalculatorHistory(history: CalculatorHistory): void {
   try {
     const existing = localStorage.getItem(CALCULATOR_HISTORY_KEY);
     const items: CalculatorHistory[] = existing ? JSON.parse(existing) : [];
     items.unshift(history);
-    // 限制最多 20 条
     const trimmed = items.slice(0, MAX_HISTORY_ITEMS);
     localStorage.setItem(CALCULATOR_HISTORY_KEY, JSON.stringify(trimmed));
   } catch {}
 }
 
-// 获取计算器历史
 export function getCalculatorHistory(): CalculatorHistory[] {
   try {
     const existing = localStorage.getItem(CALCULATOR_HISTORY_KEY);
@@ -744,17 +730,14 @@ export function getCalculatorHistory(): CalculatorHistory[] {
   }
 }
 
-// 清除计算器历史
 export function clearCalculatorHistory(): void {
   localStorage.removeItem(CALCULATOR_HISTORY_KEY);
 }
 
-// 计算分子量
 export function calculateMolecularWeight(formula: string): { mw: number; composition: Record<string, number> } {
   const composition: Record<string, number> = {};
   let mw = 0;
 
-  // 匹配原子和数量的正则
   const regex = /([A-Z][a-z]?)(\d*)/g;
   let match;
 
@@ -773,21 +756,16 @@ export function calculateMolecularWeight(formula: string): { mw: number; composi
 
 // 计算溶液稀释 C1V1 = C2V2
 export function calculateDilution(c1?: number, v1?: number, c2?: number, v2?: number): Record<string, number | null> {
-  // C1 * V1 = C2 * V2
   if (c1 && v1 && c2) {
-    // 求 V2
     return { v2: (c1 * v1) / c2, c1, v1, c2 };
   }
   if (c1 && v1 && v2) {
-    // 求 C2
     return { c2: (c1 * v1) / v2, c1, v1, v2 };
   }
   if (c1 && c2 && v2) {
-    // 求 V1
     return { v1: (c2 * v2) / c1, c1, c2, v2 };
   }
   if (v1 && c2 && v2) {
-    // 求 C1
     return { c1: (c2 * v2) / v1, v1, c2, v2 };
   }
   return { c1: null, v1: null, c2: null, v2: null };
@@ -807,5 +785,3 @@ export function calculateSolution(mass?: number, mw?: number, volume?: number, t
   }
   return { molarity: null, mass: null, mw: null, volume: null };
 }
-
-// 单位换算

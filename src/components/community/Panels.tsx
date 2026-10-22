@@ -36,7 +36,6 @@ export function ProtocolsPanel() {
   const handleSave = async (data: { name: string; description: string; content: ProtocolContent; submit: boolean }) => {
     try {
       if (editing) {
-        // Update existing
         const status = data.submit ? 'pending' : 'draft';
         const res = await fetch(`/api/user/recipes?id=${editing.id}`, {
           method: 'PUT',
@@ -45,7 +44,6 @@ export function ProtocolsPanel() {
         });
         if (!res.ok) throw new Error('保存失败');
       } else {
-        // Create new
         const status = data.submit ? 'pending' : 'draft';
         const res = await fetch('/api/user/recipes', {
           method: 'POST',

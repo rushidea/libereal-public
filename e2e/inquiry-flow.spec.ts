@@ -47,7 +47,6 @@ test.describe('Inquiry full flow (e2e API)', () => {
       return;
     }
 
-    // 找一个产品
     const db = getDevDb();
     const p = db.prepare("SELECT id FROM Product LIMIT 1").get() as { id: string } | undefined;
     db.close();
@@ -57,7 +56,6 @@ test.describe('Inquiry full flow (e2e API)', () => {
     }
     productId = p.id;
 
-    // 建两个独立的 request context（共享 cookie jar）
     customerCtx = await request.newContext({ baseURL: BASE_URL });
     adminCtx = await request.newContext({ baseURL: BASE_URL });
   });
@@ -70,7 +68,6 @@ test.describe('Inquiry full flow (e2e API)', () => {
   test('full flow: customer submits inquiry (e2e API smoke)', async () => {
     test.skip(!customerUser, 'no test user');
 
-    // Step 1: customer 提交询价
     const inquiryRes = await customerCtx.post('/api/inquiry', {
       data: {
         name: 'E2E 测试用户',
@@ -92,13 +89,11 @@ test.describe('Inquiry full flow (e2e API)', () => {
       return;
     }
 
-    // 如果返 200/201，验证 body 有 id
     if (inquiryRes.status() === 200 || inquiryRes.status() === 201) {
       const inquiryBody = await inquiryRes.json();
       const inquiryId = inquiryBody.inquiry?.id || inquiryBody.id;
       expect(inquiryId).toBeTruthy();
 
-      // 验证 DB 写入
       const db = getDevDb();
       const inq = db.prepare('SELECT id, email, status FROM Inquiry WHERE id = ?').get(inquiryId) as { id: string; email: string; status: string } | undefined;
       db.close();
@@ -106,7 +101,6 @@ test.describe('Inquiry full flow (e2e API)', () => {
         expect(inq.email).toBe(customerUser.email);
         expect(inq.status).toMatch(/pending_quote|quote_sent|待确认|待人工审核/);
 
-        // Step 2: admin sees the inquiry in admin list
         const listRes = await adminCtx.get('/api/inquiries');
         if (listRes.status() === 200) {
           const list = await listRes.json();
@@ -114,7 +108,6 @@ test.describe('Inquiry full flow (e2e API)', () => {
           expect(found).toBe(true);
         }
 
-        // Step 3: admin sends a quote
         const quoteRes = await adminCtx.post(`/api/inquiries/${inquiryId}/quote`, {
           data: {
             items: [
@@ -127,7 +120,6 @@ test.describe('Inquiry full flow (e2e API)', () => {
         expect([200, 201, 401, 403]).toContain(quoteRes.status());
 
         if (quoteRes.status() === 200 || quoteRes.status() === 201) {
-          // Step 4: verify DB state changed
           const db = getDevDb();
           const updated = db.prepare('SELECT status, operationLogs FROM Inquiry WHERE id = ?').get(inquiryId) as { status: string; operationLogs: string | null } | undefined;
           db.close();

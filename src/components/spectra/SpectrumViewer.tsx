@@ -48,14 +48,12 @@ export default function SpectrumViewer({ userId }: SpectrumViewerProps) {
   const exportMenuRef = useRef<HTMLDivElement>(null);
   const instrumentMenuRef = useRef<HTMLDivElement>(null);
 
-  // 加载保存的组合
   useEffect(() => {
     // Mount-time init: load saved dye sets from localStorage.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setSavedSets(getSavedDyeSets());
   }, []);
 
-  // 点击外部关闭菜单
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
       if (exportMenuRef.current && !exportMenuRef.current.contains(e.target as Node)) {
@@ -69,17 +67,14 @@ export default function SpectrumViewer({ userId }: SpectrumViewerProps) {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  // 获取当前激光线
   const currentLasers = configMode === 'preset'
     ? selectedInstrument.lasers
     : manualConfig.lasers.map(wl => ({ wavelength: wl, name: '', color: '' }));
 
-  // 获取当前滤波器
   const currentFilters = configMode === 'preset'
     ? selectedInstrument.filters
     : manualConfig.filters;
 
-  // 切换激光选择
   const toggleLaser = useCallback((wl: number) => {
     setManualConfig(prev => ({
       ...prev,
@@ -89,7 +84,6 @@ export default function SpectrumViewer({ userId }: SpectrumViewerProps) {
     }));
   }, []);
 
-  // 切换滤波器选择
   const toggleFilter = useCallback((filter: FilterBand) => {
     setManualConfig(prev => {
       const exists = prev.filters.some(f => f.name === filter.name);
@@ -167,7 +161,6 @@ export default function SpectrumViewer({ userId }: SpectrumViewerProps) {
     URL.revokeObjectURL(link.href);
   }, [selectedIds]);
 
-  // 计算染料兼容性
   const dyeCompatibilities = useMemo(() => {
     const config = configMode === 'preset' ? selectedInstrument : {
       lasers: manualConfig.lasers.map(wl => ({ wavelength: wl })),
@@ -180,7 +173,6 @@ export default function SpectrumViewer({ userId }: SpectrumViewerProps) {
     return result;
   }, [configMode, selectedInstrument, manualConfig]);
 
-  // 生成图表数据
   const spectraRaw = selectedIds.map(id => {
     const dye = fluorescenceDyes.find(d => d.id === id);
     if (!dye) return null;
@@ -192,7 +184,6 @@ export default function SpectrumViewer({ userId }: SpectrumViewerProps) {
 
   return (
     <div className={`${uiSurfaces.panel} rounded-brand ${uiSurfaces.border}`}>
-      {/* 顶部工具栏 */}
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--surface-border)] p-4">
         <div className="flex items-center gap-2">
           <h3 className={`font-medium ${uiSurfaces.titleText}`}>荧光光谱查看器</h3>
@@ -214,7 +205,6 @@ export default function SpectrumViewer({ userId }: SpectrumViewerProps) {
             保存当前组合
           </button>
 
-          {/* 导出菜单 */}
           <div className="relative" ref={exportMenuRef}>
             <button
               onClick={() => {
@@ -296,12 +286,9 @@ export default function SpectrumViewer({ userId }: SpectrumViewerProps) {
         </div>
       </div>
 
-      {/* 仪器选择器 */}
       <div className="px-4 py-3 bg-gray-50 dark:bg-gray-800/50 border-b border-gray-200 dark:border-gray-700">
         <div className="flex flex-wrap items-center justify-between gap-4">
-          {/* 左侧：模式切换 + 仪器选择 */}
           <div className="flex flex-wrap items-center gap-4">
-            {/* 模式切换 */}
             <div className="flex items-center gap-1 bg-white dark:bg-gray-700 rounded-lg p-1">
               <button
                 onClick={() => setConfigMode('preset')}
@@ -325,7 +312,6 @@ export default function SpectrumViewer({ userId }: SpectrumViewerProps) {
               </button>
             </div>
 
-            {/* 预设仪器选择 */}
             {configMode === 'preset' ? (
               <div className="relative" ref={instrumentMenuRef}>
                 <select
@@ -349,7 +335,6 @@ export default function SpectrumViewer({ userId }: SpectrumViewerProps) {
               </div>
             ) : (
               <div className="flex flex-wrap items-center gap-3">
-                {/* 激光器选择 */}
                 <div className="flex items-center gap-2">
                   <span className="text-xs text-gray-500 dark:text-gray-400">激光:</span>
                   {[405, 488, 561, 640, 785].map(wl => (
@@ -366,7 +351,6 @@ export default function SpectrumViewer({ userId }: SpectrumViewerProps) {
                     </button>
                   ))}
                 </div>
-                {/* 滤波器选择 */}
                 <div className="flex items-center gap-2">
                   <span className="text-xs text-gray-500 dark:text-gray-400">通道:</span>
                   <div className="flex flex-wrap gap-1">
@@ -396,7 +380,6 @@ export default function SpectrumViewer({ userId }: SpectrumViewerProps) {
               </div>
             )}
 
-            {/* 当前配置摘要 */}
             <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
               <span>
                 {currentLasers.map(l => l.wavelength || l).join('+')}nm
@@ -406,14 +389,12 @@ export default function SpectrumViewer({ userId }: SpectrumViewerProps) {
             </div>
           </div>
 
-          {/* 右侧：提示文字 */}
           <span className="text-xs text-gray-400">
             💡 不兼容染料显示红色标记
           </span>
         </div>
       </div>
 
-      {/* 光谱图表 */}
       <div ref={chartRef} className={`spectra-chart ${uiSurfaces.panel} p-4`}>
         <SpectrumChart
           spectra={spectra}
@@ -421,7 +402,6 @@ export default function SpectrumViewer({ userId }: SpectrumViewerProps) {
         />
       </div>
 
-      {/* 已选染料列表 */}
       {selectedIds.length > 0 && (
         <div className="px-4 py-3 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50">
           <div className="flex items-center justify-between mb-2">
@@ -470,7 +450,6 @@ export default function SpectrumViewer({ userId }: SpectrumViewerProps) {
         </div>
       )}
 
-      {/* 染料选择器 */}
       <div className="p-4 border-t border-gray-200 dark:border-gray-700 max-h-96 overflow-y-auto">
         <DyeSelector
           dyes={fluorescenceDyes}
@@ -480,7 +459,6 @@ export default function SpectrumViewer({ userId }: SpectrumViewerProps) {
         />
       </div>
 
-      {/* 保存组合弹窗 */}
       {showSaveModal && (
         <div className={`${uiSurfaces.overlay} ${uiSurfaces.modalBackdrop}`}>
           <div className={`${uiSurfaces.modal} mx-4 w-full max-w-md rounded-brand p-6 shadow-[var(--shadow-panel-strong)]`}>
@@ -541,7 +519,6 @@ export default function SpectrumViewer({ userId }: SpectrumViewerProps) {
         </div>
       )}
 
-      {/* 加载组合弹窗 */}
       {showLoadModal && (
         <div className={`${uiSurfaces.overlay} ${uiSurfaces.modalBackdrop}`}>
           <div className={`${uiSurfaces.modal} mx-4 flex max-h-[80vh] w-full max-w-md flex-col rounded-brand p-6 shadow-[var(--shadow-panel-strong)]`}>

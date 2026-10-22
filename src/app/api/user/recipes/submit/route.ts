@@ -17,7 +17,6 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Missing recipe ID' }, { status: 400 });
     }
 
-    // Verify ownership and status
     const recipe = await prisma.userCreatedRecipe.findFirst({
       where: { id: recipeId, userId },
       select: { status: true },
