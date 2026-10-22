@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { requireActiveSession, requireAdmin } from '@/lib/session';
 import type { Prisma } from '@prisma/client';
-import { inquiryItemView, toInquiryItemCreates } from '@/lib/commerce-records';
+import { toInquiryItemCreates } from '@/lib/commerce-records';
+import { viewInquiryItems } from '@/lib/inquiry-item-brands';
 import { quoteView } from '@/lib/quote-records';
 import { canAccessOrganizationRecord } from '@/lib/organization-record-access';
 import { emailKeyedAccess } from '@/lib/verified-email-access';
@@ -52,7 +53,7 @@ export async function GET(
   void creatorUserId;
   return NextResponse.json({
     ...publicInquiry,
-    items: inquiryItems.map(inquiryItemView),
+    items: await viewInquiryItems(inquiryItems),
     activeQuote: quotes[0] ? quoteView(quotes[0]) : null,
   });
 }

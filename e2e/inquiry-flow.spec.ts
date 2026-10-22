@@ -167,3 +167,36 @@ test.describe('Inquiry full flow (e2e API)', () => {
     expect([400, 401, 403, 429, 500]).toContain(res.status());
   });
 });
+
+test.describe('Guest cart inquiry', () => {
+  test('提交询价 stays on /inquiry, shows the banner, and opens the submit modal', async ({ page }) => {
+    const guestItem = {
+      isQuickOrder: true,
+      quickId: 'e2e-guest-inquiry',
+      name: 'E2E 询价试剂',
+      brand: 'CST',
+      catalogNumber: 'E2E-INQ-1',
+      quantity: 1,
+      unit: '支',
+    };
+
+    await page.addInitScript((item) => {
+      localStorage.setItem('libereal_guest_cart', JSON.stringify([item]));
+    }, guestItem);
+
+    await page.goto('/cart');
+    await page.getByRole('button', { name: '提交询价' }).click();
+
+    await expect.poll(() => new URL(page.url()).pathname).toBe('/inquiry');
+    expect(page.url()).not.toContain('/login');
+
+    await page.getByRole('button', { name: '下一步：填写询价信息' }).click();
+    await expect(page.getByText('提交询价需要先登录或注册')).toBeVisible();
+
+    await page.locator('form select').selectOption({ label: '支付宝' });
+    await page.getByRole('button', { name: '提交询价请求' }).click();
+    await expect(page.getByRole('dialog', { name: '提交询价需要先登录或注册' })).toBeVisible();
+    expect(new URL(page.url()).pathname).toBe('/inquiry');
+    expect(page.url()).not.toContain('/login');
+  });
+});

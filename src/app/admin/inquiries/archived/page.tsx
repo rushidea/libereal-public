@@ -7,6 +7,7 @@ import {
   Package, Search, Eye, Check, Clock, XCircle,
   RotateCcw,
 } from 'lucide-react';
+import { InquiryIdDisplay } from '@/components/InquiryIdDisplay';
 
 
 interface InquiryItem {
@@ -151,7 +152,9 @@ const [loading, setLoading] = useState(true);
                         className={`border-b border-gray-100 cursor-pointer ${selectedInquiry?.id === inquiry.id ? 'bg-purple-100/50 hover:bg-purple-100/50' : 'hover:bg-gray-50/50'}`}
                         onClick={() => setSelectedInquiry(selectedInquiry?.id === inquiry.id ? null : inquiry)}
                       >
-                        <td className="px-4 py-3 font-mono text-xs text-gray-600 break-all">{inquiry.id}</td>
+                        <td className="w-[34%] min-w-[11rem] px-4 py-3 align-top lg:min-w-[22rem]">
+                          <InquiryIdDisplay id={inquiry.id} size="compact" className="text-gray-700" />
+                        </td>
                         <td className="px-4 py-3">
                           <div className="font-medium text-gray-900">{inquiry.name}（{inquiry.email}）</div>
                         </td>
@@ -162,12 +165,14 @@ const [loading, setLoading] = useState(true);
                             inquiry.status === 'closed' ? 'bg-gray-100 text-gray-600' :
                             inquiry.status === 'pending_quote' ? 'bg-yellow-100 text-yellow-700' :
                             inquiry.status === 'quote_sent' ? 'bg-blue-100 text-blue-700' :
+                            inquiry.status === 'declined' ? 'bg-gray-100 text-gray-600' :
                             'bg-green-100 text-green-700'
                           }`}>
-                            {inquiry.status === 'closed' ? <XCircle className="w-3 h-3" /> :
+                            {inquiry.status === 'closed' || inquiry.status === 'declined' ? <XCircle className="w-3 h-3" /> :
                              inquiry.status === 'pending_quote' ? <Clock className="w-3 h-3" /> :
                              <Check className="w-3 h-3" />}
                             {inquiry.status === 'closed' ? '已关闭' :
+                             inquiry.status === 'declined' ? '已放弃' :
                              inquiry.status === 'pending_quote' ? '待报价' :
                              inquiry.status === 'quote_sent' ? '已发报价' :
                              inquiry.status}
@@ -198,7 +203,11 @@ const [loading, setLoading] = useState(true);
                         <tr>
                           <td colSpan={7} className="bg-purple-100/70 p-4 border-b border-purple-200">
                             <div className="bg-white rounded-lg border border-purple-300 shadow-sm p-4 space-y-4">
-                              <div className="grid grid-cols-2 gap-4">
+                              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                                <div className="sm:col-span-2">
+                                  <p className="text-xs text-gray-600 mb-1">询价编号</p>
+                                  <InquiryIdDisplay id={selectedInquiry.id} className="text-gray-800" />
+                                </div>
                                 <div>
                                   <p className="text-xs text-gray-600 mb-1">客户姓名</p>
                                   <p className="font-medium text-gray-800">{selectedInquiry.name}</p>

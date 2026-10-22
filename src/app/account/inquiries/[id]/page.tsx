@@ -7,10 +7,11 @@ import { useRouter } from 'next/navigation';
 import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import {
-  ArrowLeft, FileText, Clock, Check,
+  ArrowLeft, FileText, Clock, Check, X,
   Building2, MapPin, MessageSquare
 } from 'lucide-react';
 import AdaptiveHeader from '@/components/AdaptiveHeader';
+import { InquiryIdDisplay } from '@/components/InquiryIdDisplay';
 import SiteFooter from '@/components/SiteFooter';
 import MobileBottomNav from '@/components/mobile/MobileBottomNav';
 
@@ -78,6 +79,7 @@ const STATUS_CONFIG: Record<string, { label: string; color: string; bg: string; 
   'pending_quote': { label: '待报价', color: 'text-amber-700 dark:text-amber-300', bg: 'bg-amber-50 dark:bg-amber-500/20', icon: Clock },
   'quote_sent': { label: '已报价', color: 'text-brand-700 dark:text-brand-300', bg: 'bg-brand-50 dark:bg-brand-500/20', icon: FileText },
   'closed': { label: '已关闭', color: 'text-gray-500 dark:text-gray-400', bg: 'bg-gray-100 dark:bg-gray-500/20', icon: Check },
+  'declined': { label: '已放弃', color: 'text-gray-600 dark:text-gray-400', bg: 'bg-gray-100 dark:bg-gray-500/20', icon: X },
 };
 
 const formatPrice = (price: number) =>
@@ -156,13 +158,13 @@ export default function InquiryDetailPage({ params }: { params: Promise<{ id: st
 
       <main className="flex-1 max-w-6xl mx-auto w-full px-4 py-8 space-y-5">
         {/* Header */}
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-3">
           <Link href="/account/inquiries" className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700/50">
             <ArrowLeft className="w-5 h-5 text-gray-600 dark:text-gray-400" />
           </Link>
-          <div>
+          <div className="min-w-0 flex-1">
             <h1 className="text-xl font-bold text-gray-900 dark:text-slate-900">询价单详情</h1>
-            <p className="text-xs font-mono text-gray-400">{inquiry.id}</p>
+            <InquiryIdDisplay id={inquiry.id} className="text-gray-400" />
           </div>
           <span className={`ml-auto inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium ${s.bg} ${s.color}`}>
             <s.icon size={14} />

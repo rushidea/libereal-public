@@ -4,11 +4,17 @@ import { useState, useEffect, useRef } from 'react';
 import { useSession } from 'next-auth/react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Package, FileText, Check, Clock, ExternalLink } from 'lucide-react';
+import { Package, FileText, Check, Clock, ExternalLink, X } from 'lucide-react';
 import AdaptiveHeader from '@/components/AdaptiveHeader';
 import SiteFooter from '@/components/SiteFooter';
 import MobileBottomNav from '@/components/mobile/MobileBottomNav';
 import LegalConsentModal from '@/components/legal/LegalConsentModal';
+import { QuoteAcceptancePreview, QuoteQuantityEditor } from '@/components/account/QuoteQuantityEditor';
+import DeclineQuoteDialog from '@/components/account/DeclineQuoteDialog';
+import { CheckoutPaymentFields, useCheckoutPointsBalance } from '@/components/checkout/CheckoutPaymentFields';
+import { InquiryIdDisplay } from '@/components/InquiryIdDisplay';
+import { describeCheckoutPayable } from '@/lib/checkout-payment';
+import { startAlipayCheckout } from '@/lib/alipay-checkout-client';
 
 import Breadcrumb from '@/components/Breadcrumb';
 import { ORDER_STATUS_LABELS } from '@/lib/order-domain';
@@ -36,6 +42,8 @@ interface InquiryItem {
   available?: boolean | null;
   ordered?: boolean;
   locked?: boolean;
+  minQuantity?: number | null;
+  quantityStep?: number | null;
 }
 
 interface Order {
@@ -71,9 +79,10 @@ const STATUS_CONFIG: Record<string, { label: string; color: string; icon: React.
   'pending_quote': { label: '待报价', color: 'bg-amber-100 text-amber-700', icon: Clock },
   'quote_sent': { label: '已报价', color: 'bg-brand-100 text-brand-700', icon: FileText },
   'closed': { label: '待报价', color: 'bg-amber-100 text-amber-700', icon: Clock },
+  'declined': { label: '已放弃', color: 'bg-gray-100 text-gray-600', icon: X },
 };
 
-type AcceptanceSnapshot = { inquiryId: string; quoteId: string; quoteVersion: number; itemIndices: number[]; itemIds: string[]; quantities: number[]; acceptedLegalIds: string[]; actorScope: string; attemptId: string; createdAt: string };
+type AcceptanceSnapshot = { inquiryId: string; quoteId: string; quoteVersion: number; itemIndices: number[]; itemIds: string[]; quantities: number[]; acceptedLegalIds: string[]; actorScope: string; attemptId: string; createdAt: string; paymentFingerprint?: string };
 const ACCEPTANCE_STORAGE_PREFIX = 'libereal:pending-acceptance:';
 function remainingQuantity(item: InquiryItem) {
   const quoted = item.quantity || 1;
@@ -108,6 +117,11 @@ export default function MyInquiriesPage() {
   const [acceptanceAttempts, setAcceptanceAttempts] = useState<Record<string, AcceptanceSnapshot>>({});
   const acceptanceAttemptsRef = useRef<Record<string, AcceptanceSnapshot>>({});
   const [submitting, setSubmitting] = useState(false);
+  const [quotePaymentMethod, setQuotePaymentMethod] = useState('');
+  const [personalPoints, setPersonalPoints] = useState(0);
+  const [groupPoints, setGroupPoints] = useState(0);
+  const [showDecline, setShowDecline] = useState(false);
+  const pointsBalance = useCheckoutPointsBalance();
   const [selectedItems, setSelectedItems] = useState<Record<string, Set<number>>>({});
   const [editedQuantities, setEditedQuantities] = useState<Record<string, Record<number, number>>>({});
   const [inquiryOrders, setInquiryOrders] = useState<Record<string, Order[]>>({});
@@ -242,14 +256,17 @@ export default function MyInquiriesPage() {
       const requestQuantities = Object.fromEntries(itemIndices.map((idx, n) => [idx, quantityVector[n]]));
       const currentAttempt = acceptanceAttemptsRef.current[inquiryId];
       const normalizedLegalIds = [...new Set(acceptedLegalIds)].sort();
+      const groupId = pointsBalance?.group?.usable ? pointsBalance.group.id : '';
+      const paymentFingerprint = JSON.stringify({ method: quotePaymentMethod, personalPoints, groupPoints, groupId });
       const matches = currentAttempt
         && currentAttempt.quoteId === quote.id && currentAttempt.quoteVersion === quote.version
         && JSON.stringify(currentAttempt.itemIndices) === JSON.stringify(itemIndices)
         && JSON.stringify(currentAttempt.quantities) === JSON.stringify(quantityVector)
-        && JSON.stringify(currentAttempt.acceptedLegalIds) === JSON.stringify(normalizedLegalIds);
+        && JSON.stringify(currentAttempt.acceptedLegalIds) === JSON.stringify(normalizedLegalIds)
+        && currentAttempt.paymentFingerprint === paymentFingerprint;
       const attemptId = matches ? currentAttempt.attemptId : `quote-${inquiryId}-${quote.id}-${quote.version}-${crypto.randomUUID()}`;
       if (!matches) {
-        const attempt = { inquiryId, quoteId: quote.id, quoteVersion: quote.version, itemIndices: [...itemIndices], itemIds: itemIndices.map((idx) => quote.items[idx]?.id ?? String(idx)), quantities: [...quantityVector], acceptedLegalIds: normalizedLegalIds, actorScope: actorScope(inquiries.find((inq) => inq.id === inquiryId) || ({ ownerScope: 'personal' } as Inquiry)), attemptId, createdAt: new Date().toISOString() };
+        const attempt = { inquiryId, quoteId: quote.id, quoteVersion: quote.version, itemIndices: [...itemIndices], itemIds: itemIndices.map((idx) => quote.items[idx]?.id ?? String(idx)), quantities: [...quantityVector], acceptedLegalIds: normalizedLegalIds, actorScope: actorScope(inquiries.find((inq) => inq.id === inquiryId) || ({ ownerScope: 'personal' } as Inquiry)), attemptId, createdAt: new Date().toISOString(), paymentFingerprint };
         removeAcceptanceSnapshots(inquiryId);
         try { window.sessionStorage.setItem(acceptanceStorageKey(attempt), JSON.stringify(attempt)); } catch {}
         acceptanceAttemptsRef.current[inquiryId] = attempt;
@@ -258,7 +275,18 @@ export default function MyInquiriesPage() {
       const res = await fetch(`/api/orders/${inquiryId}/confirm-items`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Idempotency-Key': attemptId },
-        body: JSON.stringify({ itemIndices, quantities: requestQuantities, quoteId: quote?.id, quoteVersion: quote?.version, acceptanceAttemptId: attemptId, acceptedLegalIds }),
+        body: JSON.stringify({
+          itemIndices,
+          quantities: requestQuantities,
+          quoteId: quote?.id,
+          quoteVersion: quote?.version,
+          acceptanceAttemptId: attemptId,
+          acceptedLegalIds,
+          paymentMethod: quotePaymentMethod || undefined,
+          personalPoints,
+          groupPoints,
+          groupId: pointsBalance?.group?.usable ? pointsBalance.group.id : undefined,
+        }),
       });
       if (res.ok) {
         const data = await res.json() as { orderId?: string };
@@ -266,6 +294,14 @@ export default function MyInquiriesPage() {
         delete acceptanceAttemptsRef.current[inquiryId];
         setAcceptanceAttempts(prev => { const next = { ...prev }; delete next[inquiryId]; return next; });
         clearSelection(inquiryId, true);
+        if (data.orderId && quotePaymentMethod === 'alipay') {
+          try {
+            await startAlipayCheckout(data.orderId);
+            return;
+          } catch (payError) {
+            alert(payError instanceof Error ? payError.message : '支付宝支付创建失败');
+          }
+        }
         if (data.orderId) router.push(`/account/orders/${encodeURIComponent(data.orderId)}`);
         else await fetchInquiries();
       } else {
@@ -361,7 +397,7 @@ export default function MyInquiriesPage() {
                     <div className="flex items-start justify-between mb-4">
                       <div>
                         <div className="flex items-center gap-2 mb-1">
-                          <span className="text-sm font-medium text-gray-800 dark:text-slate-900">{inquiry.id.slice(0, 16)}...</span>
+                          <InquiryIdDisplay id={inquiry.id} className="text-gray-800 dark:text-slate-900" />
                           <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${statusCfg.color}`}>
                             {statusCfg.label}
                           </span>
@@ -541,18 +577,15 @@ export default function MyInquiriesPage() {
                                 <div>
                                   <p className="text-xs text-gray-400 dark:text-gray-500 mb-1">数量</p>
                                   {canEdit ? (
-                                    <input
-                                      type="number"
-                                      min="1"
-                                      max={remaining}
+                                    <QuoteQuantityEditor
+                                      quotedQuantity={quotedQty}
+                                      orderedQty={alreadyAccepted}
+                                      minQuantity={item.minQuantity}
+                                      quantityStep={item.quantityStep}
                                       value={finalQty}
                                       disabled={Boolean(acceptanceAttempts[inquiry.id])}
-                                      onChange={e => {
-                                        e.stopPropagation();
-                                        setItemQty(inquiry.id, i, Math.min(remaining, parseInt(e.target.value) || 1));
-                                      }}
-                                      onClick={e => e.stopPropagation()}
-                                      className="w-16 px-2 py-1 border border-gray-200 dark:border-slate-400 rounded-lg text-sm font-medium text-gray-700 dark:text-slate-900 focus:outline-none focus:ring-2 focus:ring-brand-400"
+                                      onChange={(qty) => setItemQty(inquiry.id, i, qty)}
+                                      className="w-20 px-2 py-1 border border-gray-200 dark:border-slate-400 rounded-lg text-sm font-medium text-gray-700 dark:text-slate-900 focus:outline-none focus:ring-2 focus:ring-brand-400"
                                     />
                                   ) : (
                                     <p className="font-medium text-gray-700 dark:text-slate-900">{finalQty}</p>
@@ -561,7 +594,6 @@ export default function MyInquiriesPage() {
                                 <div>
                                   <p className="text-xs text-gray-400 dark:text-gray-500 mb-1">接受情况</p>
                                   <p className="text-xs font-medium text-gray-600 dark:text-gray-500">报价 {quotedQty} · 已接受 {alreadyAccepted} · 剩余 {remaining}</p>
-                                  {canEdit && <p className="text-xs text-brand-600 dark:text-brand-500">本次接受 ≤ {remaining}</p>}
                                 </div>
                                 <div>
                                   <p className="text-xs text-gray-400 dark:text-gray-500 mb-1">货期</p>
@@ -603,6 +635,15 @@ export default function MyInquiriesPage() {
                                       清除选择
                                     </button>
                                   )}
+                                  {inquiry.activeQuote?.status === 'sent' && linkedOrders.length === 0 && items.every((line) => (line.orderedQty ?? (line.ordered ? line.quantity || 1 : 0)) === 0) && (
+                                    <button
+                                      type="button"
+                                      onClick={(e) => { e.stopPropagation(); setSelectedInquiry(inquiry); setShowDecline(true); }}
+                                      className="text-sm text-gray-600 underline"
+                                    >
+                                      放弃报价
+                                    </button>
+                                  )}
                                   <button
                                     onClick={(e) => { e.stopPropagation(); setShowConfirmModal(true); }}
                                     disabled={selCount === 0}
@@ -633,17 +674,40 @@ export default function MyInquiriesPage() {
         const selTotal = selItems.reduce((sum, { item, idx }) => {
           return sum + (item.price || 0) * getItemQty(selectedInquiry.id, idx, remainingQuantity(item));
         }, 0);
+        const payable = describeCheckoutPayable({
+          goodsSubtotal: selTotal,
+          paymentMethod: quotePaymentMethod,
+          personalPoints,
+          groupPoints,
+        });
 
         return (
           <div className="fixed inset-0 z-site-overlay flex justify-center overflow-y-auto bg-black/40 px-4 pb-4 pt-[calc(var(--site-header-height)+var(--site-header-gap))]">
-            <div className="bg-white dark:bg-slate-200/65 rounded-2xl shadow-xl p-6 max-w-sm w-full mx-4">
+            <div className="bg-white dark:bg-slate-200/65 rounded-2xl shadow-xl p-6 max-w-2xl w-full mx-4 my-4">
               <h3 className="text-lg font-bold text-gray-900 dark:text-slate-900 mb-2">确认提交订单</h3>
               <p className="text-sm text-gray-600 dark:text-gray-500 mb-4">
-                你正在接受报价 v{selectedInquiry.activeQuote?.version}。确认前请核对报价编号、商品、规格、数量与金额；本次选择将转为独立订单。
+                你正在接受报价 v{selectedInquiry.activeQuote?.version}。确认前请核对报价编号、商品、规格、数量与金额；本次选择将转为独立订单。数量可以多于报价，按报价单价计。
               </p>
+              <QuoteAcceptancePreview lines={selItems.map(({ item, idx }) => ({
+                name: item.name || item.product?.name || '产品',
+                quotedQuantity: item.quantity || 1,
+                quantity: getItemQty(selectedInquiry.id, idx, remainingQuantity(item)),
+                unitPrice: item.price || 0,
+              }))} />
+              <CheckoutPaymentFields
+                paymentMethod={quotePaymentMethod}
+                onPaymentMethodChange={setQuotePaymentMethod}
+                personalPoints={personalPoints}
+                onPersonalPointsChange={setPersonalPoints}
+                groupPoints={groupPoints}
+                onGroupPointsChange={setGroupPoints}
+                pointsBalance={pointsBalance}
+                pointsDiscount={payable.pointsDiscount}
+                compact
+              />
               <div className="bg-brand-50 dark:bg-brand-500/20 rounded-xl p-3 mb-4">
                 <p className="text-sm text-brand-700 dark:text-brand-600">
-                  报价 {selectedInquiry.activeQuote?.id} · 本次接受金额：<span className="font-bold">{formatPrice(selTotal)}</span>
+                  报价 {selectedInquiry.activeQuote?.id} · 商品 {formatPrice(selTotal)} · 应付 <span className="font-bold">{formatPrice(payable.payable)}</span>
                 </p>
               </div>
               <div className="flex gap-3">
@@ -655,7 +719,7 @@ export default function MyInquiriesPage() {
                 </button>
                 <button
                   onClick={() => { setShowConfirmModal(false); setShowLegalModal(true); }}
-                  disabled={submitting}
+                  disabled={submitting || !quotePaymentMethod}
                   className="flex-1 py-2.5 rounded-xl bg-brand-500 hover:bg-brand-600 disabled:bg-brand-300 text-white text-sm font-medium transition-colors"
                 >
                   {submitting ? '提交中...' : '确认提交'}
@@ -678,6 +742,16 @@ export default function MyInquiriesPage() {
         }}
         submitting={submitting}
       />
+
+      {showDecline && selectedInquiry?.activeQuote && (
+        <DeclineQuoteDialog
+          inquiryId={selectedInquiry.id}
+          quoteId={selectedInquiry.activeQuote.id}
+          quoteVersion={selectedInquiry.activeQuote.version}
+          onClose={() => setShowDecline(false)}
+          onDeclined={() => { setShowDecline(false); void fetchInquiries(); }}
+        />
+      )}
 
       <SiteFooter />
       <MobileBottomNav />

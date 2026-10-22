@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Bell, Megaphone, Trash2, Loader2, Search } from 'lucide-react';
 import { uiSurfaces } from '@/lib/ui-surfaces';
+import { InquiryIdText } from '@/components/InquiryIdDisplay';
 
 type AdminNotification = {
   id: string;
@@ -256,7 +257,7 @@ export default function AdminNotificationsManager() {
                       </span>
                     ) : null}
                   </div>
-                  <p className="mt-1 line-clamp-2 text-sm text-gray-600">{n.content}</p>
+                  <InquiryIdText text={n.content} className="mt-1 line-clamp-2 text-sm text-gray-600" />
                   <p className={`mt-1 text-xs ${uiSurfaces.mutedText}`}>
                     {n.type}
                     {n.scope === 'personal' ? ` · ${n.email}` : ''}

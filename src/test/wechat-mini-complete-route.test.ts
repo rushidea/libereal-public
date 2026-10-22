@@ -232,7 +232,7 @@ describe('wechat-mini complete route', () => {
     expect(await response.json()).toEqual({
       ok: true,
       status: 'unlinked',
-      redirectUrl: '/register?wechat=unlinked',
+      redirectUrl: '/register?wechat=unlinked&callbackUrl=%2Forders',
     });
     expect(mocks.signIn).not.toHaveBeenCalled();
     expect(mocks.updateMany).toHaveBeenCalledWith({

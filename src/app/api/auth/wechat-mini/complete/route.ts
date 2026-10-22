@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { sanitizeAuthCallbackUrl, withAuthCallback } from '@/lib/auth-callback-url';
 import { signIn } from '@/lib/auth';
 import { createPendingOAuthLink, setPendingOAuthLinkCookie } from '@/lib/account-linking';
 import {
@@ -17,9 +18,7 @@ type CompletePayload = {
 };
 
 function normalizeCallbackUrl(callbackUrl: string | undefined): string {
-  if (!callbackUrl?.trim()) return '/account';
-  if (!callbackUrl.startsWith('/') || callbackUrl.startsWith('//')) return '/account';
-  return callbackUrl;
+  return sanitizeAuthCallbackUrl(callbackUrl, '/account');
 }
 
 function clearBrowserSecretCookie(response: NextResponse, challengeId: string) {
@@ -111,7 +110,9 @@ export async function POST(req: NextRequest) {
     const response = NextResponse.json({
       ok: true,
       status: WECHAT_MINI_CHALLENGE_STATUSES.unlinked,
-      redirectUrl: '/register?wechat=unlinked',
+      redirectUrl: callbackUrl === '/account'
+        ? '/register?wechat=unlinked'
+        : withAuthCallback('/register?wechat=unlinked', callbackUrl),
     });
     clearBrowserSecretCookie(response, decision.challenge.id);
     return response;

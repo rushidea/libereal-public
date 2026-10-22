@@ -22,6 +22,7 @@ import OrdersPanel from '@/components/account/OrdersPanel';
 import InquiriesPanel from '@/components/account/InquiriesPanel';
 import AccountSidebar from '@/components/account/AccountSidebar';
 import { uiSurfaces } from '@/lib/ui-surfaces';
+import { InquiryIdText } from '@/components/InquiryIdDisplay';
 
 interface Order {
   id: string;
@@ -418,7 +419,11 @@ function NotificationsPanel() {
                       </div>
                       {!notif.isRead && <div className="w-2 h-2 rounded-full bg-brand-500 flex-shrink-0 mt-1.5" />}
                     </div>
-                    <p className={`text-sm mt-1 leading-relaxed ${notif.isRead ? 'text-gray-400 dark:text-gray-500' : 'text-gray-600 dark:text-gray-600'}`}>{notif.content}</p>
+                    <InquiryIdText
+                      as="p"
+                      text={notif.content}
+                      className={`mt-1 text-sm leading-relaxed ${notif.isRead ? 'text-gray-400 dark:text-gray-500' : 'text-gray-600 dark:text-gray-600'}`}
+                    />
                   </div>
                   {!notif.isRead && <button onClick={() => markAsRead(notif.id)} className="p-1.5 text-gray-400 dark:text-gray-500 hover:text-brand-600 dark:hover:text-brand-500 rounded-lg transition-colors flex-shrink-0" title="标记为已读"><Check className="w-4 h-4" /></button>}
                 </div>

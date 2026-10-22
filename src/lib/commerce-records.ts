@@ -20,6 +20,21 @@ function nonNegativeInteger(value: unknown): number {
   return Number.isInteger(parsed) && parsed >= 0 ? parsed : 0;
 }
 
+function positiveIntegerOrNull(value: unknown): number | null {
+  const parsed = typeof value === 'number' ? value : Number(value);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
+}
+
+export function inquiryItemStoredBrand(metadata: string | null | undefined): string | null {
+  if (!metadata) return null;
+  try {
+    const parsed = JSON.parse(metadata) as Record<string, unknown>;
+    return text(parsed.brand);
+  } catch {
+    return null;
+  }
+}
+
 function itemName(item: ItemRecord): string {
   const product = item.product && typeof item.product === 'object'
     ? item.product as ItemRecord
@@ -66,6 +81,7 @@ export function toOrderItemCreates(items: ItemRecord[]): Prisma.OrderItemCreateW
     unitPrice: number(item.price) ?? number(item.unitPrice) ?? 0,
     clientPrice: number(item.clientPrice),
     quantity: positiveInteger(item.quantity),
+    quotedQuantity: positiveIntegerOrNull(item.quotedQuantity),
     shippedQty: nonNegativeInteger(item.shippedQty),
     leadTime: text(item.actualLeadTime) ?? text(item.leadTime),
     status: text(item.status) ?? 'pending',
@@ -108,6 +124,7 @@ type OrderItemView = {
   unitPrice: number;
   clientPrice: number | null;
   quantity: number;
+  quotedQuantity?: number | null;
   shippedQty: number;
   leadTime: string | null;
   status: string;
@@ -115,7 +132,7 @@ type OrderItemView = {
   metadata?: string | null;
 };
 
-export function inquiryItemView(item: InquiryItemView) {
+export function inquiryItemView(item: InquiryItemView, options?: { productBrand?: string | null }) {
   let variantId: string | null = null;
   let spec: string | null = null;
   let unit: string | null = null;
@@ -131,6 +148,7 @@ export function inquiryItemView(item: InquiryItemView) {
     productId: item.productId,
     catalogNumber: item.catalogNumber,
     name: item.name,
+    brand: inquiryItemStoredBrand(item.metadata) ?? text(options?.productBrand),
     price: item.unitPrice,
     clientPrice: item.clientPrice,
     quantity: item.quantity,
@@ -167,6 +185,7 @@ export function orderItemView(item: OrderItemView) {
     price: item.unitPrice,
     clientPrice: item.clientPrice,
     quantity: item.quantity,
+    quotedQuantity: item.quotedQuantity ?? null,
     shippedQty: item.shippedQty,
     leadTime: item.leadTime,
     status: item.status,

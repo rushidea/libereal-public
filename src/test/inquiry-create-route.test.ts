@@ -187,6 +187,11 @@ describe('POST /api/inquiry', () => {
 
   it('marks inquiry pricing as unresolved and leaves the unit price null', async () => {
     const db = getTestDb();
+    seedUser(db, { id: 'priced_user', email: 'buyer@test.com', role: 'customer' });
+    authMock.mockResolvedValue({
+      user: { id: 'priced_user', email: 'buyer@test.com', name: 'Buyer', role: 'customer', sessionId: 'priced-session' },
+      expires: new Date(Date.now() + 86400000).toISOString(),
+    });
     db.prepare("UPDATE Product SET pricingMode = 'inquiry' WHERE id = 'prod_1'").run();
     const response = await inquiryPOST(makeReq(validBody(), '10.0.0.7'));
     expect(response.status).toBe(200);

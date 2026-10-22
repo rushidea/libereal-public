@@ -506,7 +506,7 @@ model Inquiry {
   identity     String?
   advisorName  String?
   advisorPhone String?
-  status       String   @default("pending_quote")  // pending_quote | quote_sent | closed
+  status       String   @default("pending_quote")  // pending_quote | quote_sent | declined | closed
   operationLogs String  @default("[]")  // JSON: [{adminId, adminEmail, time, items: [{name, price, quantity, leadTime}]}]
   ip           String?
   userAgent    String?
@@ -822,12 +822,17 @@ model Quote {
   id            String    @id @default(cuid())
   inquiryId     String
   version       Int
-  status        String    @default("draft")
+  status        String    @default("draft") // draft | sent | superseded | accepted | expired | declined
   subtotal      Float
   currency      String    @default("CNY")
   validUntil    DateTime?
   sentAt        DateTime?
   acceptedAt    DateTime?
+  declineReasonCode String?
+  declineNote       String?
+  declinedAt        DateTime?
+  declinedByUserId  String?
+  declinedByEmail   String?
   createdBy     String?
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
@@ -896,6 +901,7 @@ model OrderItem {
   unitPrice     Float
   clientPrice   Float?
   quantity      Int      @default(1)
+  quotedQuantity Int?    // 报价行原始数量；实际下单数量见 quantity
   shippedQty    Int      @default(0)
   leadTime      String?
   status        String   @default("pending")

@@ -65,13 +65,21 @@ export function rateLimit(ip: string): { allowed: boolean; remaining: number; re
 }
 
 export async function rateLimitAsync(identifier: string): Promise<{ allowed: boolean; remaining: number; resetIn: number }> {
+  return rateLimitAsyncWithWindow(identifier, MAX_REQUESTS, WINDOW_MS);
+}
+
+export async function rateLimitAsyncWithWindow(
+  identifier: string,
+  maxRequests: number,
+  windowMs: number,
+): Promise<{ allowed: boolean; remaining: number; resetIn: number }> {
   const now = Date.now();
-  const windowStart = now - (now % WINDOW_MS);
-  const resetIn = windowStart + WINDOW_MS - now;
+  const windowStart = now - (now % windowMs);
+  const resetIn = windowStart + windowMs - now;
   const count = await getEphemeralStore().increment(`rate-limit:${identifier}:${windowStart}`, resetIn);
   return {
-    allowed: count <= MAX_REQUESTS,
-    remaining: Math.max(MAX_REQUESTS - count, 0),
+    allowed: count <= maxRequests,
+    remaining: Math.max(maxRequests - count, 0),
     resetIn,
   };
 }

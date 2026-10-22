@@ -15,6 +15,7 @@ import DesktopSiteNavigation from './DesktopSiteNavigation';
 import MobileSiteMenu from './mobile/MobileSiteMenu';
 import type { SiteNavigationId } from '@/data/site-navigation';
 import { uiSurfaces } from '@/lib/ui-surfaces';
+import { InquiryIdText } from '@/components/InquiryIdDisplay';
 
 const headerMutedText = 'text-[var(--brand-color-text-secondary)] dark:text-[var(--brand-color-header-nav)]';
 const headerPrimaryText = 'text-[var(--brand-color-text)] dark:text-[var(--brand-color-header-nav)]';
@@ -535,7 +536,7 @@ export default function AdaptiveHeader({
                               <div className="mt-1.5 h-2 w-2 flex-shrink-0 rounded-[var(--brand-border-radius-pill)] bg-[var(--brand-color-error)]" />
                               <div className="min-w-0 flex-1">
                                 <p className="truncate text-sm font-medium">{n.title}</p>
-                                <p className={`mt-0.5 truncate text-xs ${uiSurfaces.mutedText}`}>{n.content}</p>
+                                <InquiryIdText text={n.content} className={`mt-0.5 block text-xs ${uiSurfaces.mutedText}`} />
                               </div>
                             </Link>
                           ))}

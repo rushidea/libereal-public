@@ -14,6 +14,7 @@ import AdaptiveHeader from '@/components/AdaptiveHeader';
 import MobileBottomNav from '@/components/mobile/MobileBottomNav';
 import SiteFooter from '@/components/SiteFooter';
 import AlipayPaymentButton from '@/components/account/AlipayPaymentButton';
+import { InquiryIdDisplay } from '@/components/InquiryIdDisplay';
 import { formatOrderPaymentMethod } from '@/data/payment-methods';
 import type { AlipayPaymentSummary } from '@/data/alipay-payment';
 import PricingBreakdown from '@/components/order/PricingBreakdown';
@@ -293,9 +294,15 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
                 {order.quoteOrigin && (
                   <div className="rounded-lg border border-brand-200 bg-brand-50/60 p-3 dark:border-brand-500/30 dark:bg-brand-500/10">
                     <p className="text-xs font-semibold text-brand-700 dark:text-brand-500">报价来源追溯</p>
-                    <Link href={`/account/inquiries/${encodeURIComponent(order.quoteOrigin.inquiryId)}?quoteId=${encodeURIComponent(order.quoteOrigin.quoteId)}&version=${order.quoteOrigin.quoteVersion}`} className="mt-2 block text-xs leading-5 text-gray-700 underline decoration-brand-300 underline-offset-2 dark:text-slate-700">
-                      询价 {order.quoteOrigin.inquiryId} → 报价 {order.quoteOrigin.quoteId} · v{order.quoteOrigin.quoteVersion} → 订单 {order.id}
-                    </Link>
+                    <div className="mt-2 space-y-1 text-xs leading-5 text-gray-700 dark:text-slate-700">
+                      <div className="flex flex-wrap items-start gap-1">
+                        <span className="pt-1">询价</span>
+                        <InquiryIdDisplay id={order.quoteOrigin.inquiryId} size="compact" />
+                      </div>
+                      <Link href={`/account/inquiries/${encodeURIComponent(order.quoteOrigin.inquiryId)}?quoteId=${encodeURIComponent(order.quoteOrigin.quoteId)}&version=${order.quoteOrigin.quoteVersion}`} className="block break-all font-mono underline decoration-brand-300 underline-offset-2">
+                        报价 {order.quoteOrigin.quoteId} · v{order.quoteOrigin.quoteVersion} → 订单 {order.id}
+                      </Link>
+                    </div>
                   </div>
                 )}
                 <div className="flex justify-between items-start border-b border-gray-50 dark:border-slate-400 pb-2">
@@ -307,9 +314,9 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
                   <span className="text-gray-800 dark:text-slate-900 text-right">{new Date(order.createdAt).toLocaleString('zh-CN')}</span>
                 </div>
                 {order.inquiryId && (
-                  <div className="flex justify-between items-start border-b border-gray-50 dark:border-slate-400 pb-2">
-                    <span className="text-gray-500 dark:text-gray-500">关联询价</span>
-                    <span className="text-gray-800 dark:text-slate-900 text-right font-mono text-xs">{order.inquiryId.slice(0, 16)}...</span>
+                  <div className="flex flex-wrap items-start justify-between gap-2 border-b border-gray-50 pb-2 dark:border-slate-400">
+                    <span className="shrink-0 pt-1 text-gray-500 dark:text-gray-500">关联询价</span>
+                    <InquiryIdDisplay id={order.inquiryId} size="compact" className="max-w-full text-gray-800 dark:text-slate-900 sm:max-w-[70%] sm:justify-end" />
                   </div>
                 )}
                 <AlipayPaymentButton order={order} payment={order.payment} className="pt-1" />

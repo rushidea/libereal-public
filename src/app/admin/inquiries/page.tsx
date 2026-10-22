@@ -8,6 +8,7 @@ import type { Session } from 'next-auth';
 import {
   Search, Package, Archive, Check, Clock, XCircle, ChevronRight, MessageSquare,
 } from 'lucide-react';
+import { InquiryIdDisplay } from '@/components/InquiryIdDisplay';
 
 interface Inquiry {
   id: string;
@@ -270,7 +271,9 @@ function InquiryRow({
             }}
             className="w-4 h-4 text-brand-600 rounded border-gray-300" />
         </td>
-        <td className="px-4 py-3 font-mono text-xs text-gray-600 break-all">{inquiry.id}</td>
+        <td className="w-[34%] min-w-[11rem] px-4 py-3 align-top lg:min-w-[22rem]">
+          <InquiryIdDisplay id={inquiry.id} size="compact" className="text-gray-700" />
+        </td>
         <td className="px-4 py-3">
           <div className="font-medium text-gray-900">{inquiry.name}（{inquiry.email}）</div>
         </td>
@@ -281,12 +284,14 @@ function InquiryRow({
             inquiry.status === 'closed' ? 'bg-gray-100 text-gray-600' :
             inquiry.status === 'pending_quote' ? 'bg-yellow-100 text-yellow-700' :
             inquiry.status === 'quote_sent' ? 'bg-blue-100 text-blue-700' :
+            inquiry.status === 'declined' ? 'bg-gray-100 text-gray-600' :
             'bg-green-100 text-green-700'
           }`}>
-            {inquiry.status === 'closed' ? <XCircle className="w-3 h-3" /> :
+            {inquiry.status === 'closed' || inquiry.status === 'declined' ? <XCircle className="w-3 h-3" /> :
              inquiry.status === 'pending_quote' ? <Clock className="w-3 h-3" /> :
              <Check className="w-3 h-3" />}
             {inquiry.status === 'closed' ? '已关闭' :
+             inquiry.status === 'declined' ? '已放弃' :
              inquiry.status === 'pending_quote' ? '待报价' :
              inquiry.status === 'quote_sent' ? '已发报价' : inquiry.status}
           </span>
@@ -336,7 +341,11 @@ function InquiryDetailPanel({
 }) {
   return (
     <div className="bg-white rounded-lg border border-brand-300 shadow-sm p-4 space-y-4">
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <div className="sm:col-span-2">
+          <p className="text-xs text-gray-600 mb-1">询价编号</p>
+          <InquiryIdDisplay id={inquiry.id} className="text-gray-800" />
+        </div>
         <div><p className="text-xs text-gray-600 mb-1">客户姓名</p><p className="font-medium text-gray-800">{inquiry.name}</p></div>
         <div><p className="text-xs text-gray-600 mb-1">邮箱</p><p className="text-sm text-gray-700">{inquiry.email}</p></div>
         <div><p className="text-xs text-gray-600 mb-1">电话</p><p className="text-sm text-gray-700">{inquiry.phone}</p></div>
@@ -361,10 +370,11 @@ function InquiryDetailPanel({
               <option value="对公转账">对公转账</option>
               <option value="锐竞平台">锐竞平台</option>
               <option value="喀斯玛平台">喀斯玛平台</option>
+              <option value="支付宝">支付宝</option>
             </select>
           </div>
         )}
-        <div className="col-span-2">
+        <div className="sm:col-span-2">
           <label className="text-xs text-gray-600 mb-1 block">通讯地址</label>
           <input type="text" value={inquiry.address || ''}
             onChange={async e => {
@@ -377,7 +387,7 @@ function InquiryDetailPanel({
             }}
             className="text-sm px-2 py-1 border border-gray-200 rounded w-full text-gray-900" />
         </div>
-        <div className="col-span-2">
+        <div className="sm:col-span-2">
           <label className="text-xs text-gray-600 mb-1 block">备注</label>
           <textarea value={inquiry.notes || ''}
             onChange={async e => {

@@ -13,7 +13,17 @@ import AdaptiveHeader from '@/components/AdaptiveHeader';
 import { uiSurfaces } from '@/lib/ui-surfaces';
 import { isPricedProduct } from '@/lib/product-pricing';
 import OrganizationContextSelect from '@/components/account/OrganizationContextSelect';
+import InquiryAuthGate from '@/components/inquiry/InquiryAuthGate';
 import { clearCheckoutAttempt, getOrCreateCheckoutAttempt } from '@/lib/checkout-attempt';
+import {
+  clearInquiryDraft,
+  leadTimesForDraft,
+  mergeInquiryContact,
+  normalizeInquiryContact,
+  normalizeInquiryLeadTimes,
+  readInquiryDraft,
+  writeInquiryDraft,
+} from '@/lib/inquiry-draft';
 
 type Step = 'confirm' | 'form' | 'success';
 
@@ -76,12 +86,9 @@ export default function InquiryPage() {
     notes: '',
     honeypot: '',
   });
-
-  useEffect(() => {
-    if (status === 'unauthenticated') {
-      router.replace('/login?callbackUrl=/inquiry');
-    }
-  }, [status, router]);
+  const [hydrated, setHydrated] = useState(false);
+  const [showAuthGate, setShowAuthGate] = useState(false);
+  const [draftLeadTimes, setDraftLeadTimes] = useState<Record<number, string>>({});
 
   const productItems = useMemo(
     () => items.filter(i => !i.isQuickOrder && !isPricedProduct(i.product)),
@@ -95,17 +102,48 @@ export default function InquiryPage() {
 
 
   useEffect(() => {
-    if (unpricedItems.length === 0 && step === 'confirm' && status === 'authenticated') {
+    const draft = readInquiryDraft();
+    if (draft) {
+      if (draft.step === 'form' || draft.step === 'confirm') setStep(draft.step);
+      if (draft.confirmedItems && draft.confirmedItems.length > 0) {
+        setConfirmedItems(draft.confirmedItems.map((item) => ({
+          name: item.name,
+          brand: item.brand,
+          catalogNumber: item.catalogNumber,
+          quantity: item.quantity,
+          unit: item.unit,
+          maxLeadTime: item.maxLeadTime,
+          isQuickOrder: item.isQuickOrder,
+          itemId: item.itemId,
+        })));
+      }
+      const contact = normalizeInquiryContact(draft.contact);
+      setForm((prev) => ({
+        ...prev,
+        ...contact,
+        paymentMethod: draft.paymentMethod || prev.paymentMethod,
+        notes: draft.notes ?? prev.notes,
+      }));
+      const restoredLeadTimes = normalizeInquiryLeadTimes(draft.leadTimes);
+      if (Object.keys(restoredLeadTimes).length > 0) {
+        setDraftLeadTimes(Object.fromEntries(Object.entries(restoredLeadTimes).map(([key, value]) => [Number(key), value])));
+      }
+    }
+    setHydrated(true);
+  }, []);
+
+  useEffect(() => {
+    if (unpricedItems.length === 0 && step === 'confirm' && status === 'authenticated' && hydrated) {
       router.replace('/cart');
     }
-  }, [unpricedItems.length, step, status, router]);
+  }, [unpricedItems.length, step, status, router, hydrated]);
 
   useEffect(() => {
     setEditStates((prev) => unpricedItems.map((item, index) => ({
       quantity: item.quantity,
-      maxLeadTime: prev[index]?.maxLeadTime ?? '',
+      maxLeadTime: prev[index]?.maxLeadTime || draftLeadTimes[index] || '',
     })));
-  }, [unpricedItems]);
+  }, [unpricedItems, draftLeadTimes]);
 
   useEffect(() => {
     if (status !== 'authenticated') return;
@@ -113,17 +151,23 @@ export default function InquiryPage() {
       .then(r => r.json())
       .then(data => {
         if (data.profile) {
-          setForm(prev => ({
-            ...prev,
-            name: prev.name || data.profile.name || '',
-            email: prev.email || data.profile.email || '',
-            phone: prev.phone || data.profile.phone || '',
-            institution: prev.institution || data.profile.institution || '',
-            department: prev.department || data.profile.department || '',
-            identity: prev.identity || data.profile.identity || '',
-            advisorName: prev.advisorName || data.profile.advisorName || '',
-            advisorPhone: prev.advisorPhone || data.profile.advisorPhone || '',
-          }));
+          setForm(prev => {
+            const contact = mergeInquiryContact({
+              name: data.profile.name || '',
+              email: data.profile.email || '',
+              phone: data.profile.phone || '',
+              institution: data.profile.institution || '',
+              department: data.profile.department || '',
+              address: prev.address,
+            }, prev);
+            return {
+              ...prev,
+              ...contact,
+              identity: data.profile.identity || prev.identity,
+              advisorName: data.profile.advisorName || prev.advisorName,
+              advisorPhone: data.profile.advisorPhone || prev.advisorPhone,
+            };
+          });
         }
       })
       .catch(() => {});
@@ -160,18 +204,37 @@ export default function InquiryPage() {
     };
   }, [status]);
 
-  if (status === 'loading') {
+  useEffect(() => {
+    if (!hydrated || step === 'success') return;
+    const leadTimes: Record<string, string> = {};
+    editStates.forEach((state, index) => {
+      if (state?.maxLeadTime) leadTimes[String(index)] = state.maxLeadTime;
+    });
+    writeInquiryDraft({
+      step: step === 'form' ? 'form' : 'confirm',
+      confirmedItems: confirmedItems.length > 0 ? confirmedItems : undefined,
+      paymentMethod: form.paymentMethod,
+      notes: form.notes,
+      contact: {
+        name: form.name,
+        email: form.email,
+        phone: form.phone,
+        institution: form.institution,
+        department: form.department,
+        address: form.address,
+      },
+      leadTimes: leadTimesForDraft(leadTimes),
+    });
+  }, [hydrated, step, confirmedItems, form, editStates]);
+
+  if (status === 'loading' || !hydrated) {
     return (
       <div className={`flex min-h-screen items-center justify-center ${uiSurfaces.servicePage}`}>
         <div className="text-gray-400">加载中...</div>
       </div>
     );
   }
-  if (status === 'unauthenticated') {
-    return null;
-  }
-
-  if (unpricedItems.length === 0 && step === 'confirm') {
+  if (unpricedItems.length === 0 && step === 'confirm' && status === 'authenticated') {
     return null;
   }
 
@@ -212,6 +275,10 @@ export default function InquiryPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (status !== 'authenticated') {
+      setShowAuthGate(true);
+      return;
+    }
 
     if (form.identity === '学生') {
       const phoneDigits = form.phone.replace(/\D/g, '');
@@ -309,6 +376,7 @@ export default function InquiryPage() {
 
     setSubmitting(false);
     clearCheckoutAttempt('inquiry');
+    clearInquiryDraft();
     setStep('success');
     unpricedItems.forEach(item => {
       if ('product' in item) {
@@ -367,6 +435,7 @@ export default function InquiryPage() {
           ]} />
 
           <h1 className="text-2xl font-bold text-gray-900 mb-2">询价产品确认</h1>
+          {status !== 'authenticated' && <div className="mb-4"><InquiryAuthGate variant="banner" /></div>}
 
           <div className={`mb-6 rounded-[1.15rem] p-5 ${uiSurfaces.panelStrong}`}>
             <div className="space-y-4">
@@ -469,6 +538,7 @@ export default function InquiryPage() {
 
         <SiteFooter />
         <MobileBottomNav />
+        {showAuthGate && <InquiryAuthGate variant="modal" onClose={() => setShowAuthGate(false)} />}
       </div>
     );
   }
@@ -484,6 +554,7 @@ export default function InquiryPage() {
           </div>
           <div>
             <h1 className="text-2xl font-bold text-gray-900">提交询价</h1>
+            {status !== 'authenticated' && <div className="mt-3"><InquiryAuthGate variant="banner" /></div>}
           </div>
         </div>
 
@@ -594,6 +665,7 @@ export default function InquiryPage() {
                   <option value="对公转账">对公转账</option>
                   <option value="锐竞平台">锐竞平台</option>
                   <option value="喀斯玛平台">喀斯玛平台</option>
+                  <option value="支付宝">支付宝</option>
                 </select>
               </div>
 
@@ -609,7 +681,14 @@ export default function InquiryPage() {
               )}
 
               <div className="pt-2">
-                <button type="submit" disabled={submitting}
+                <button
+                  type="submit"
+                  disabled={submitting}
+                  onClick={(event) => {
+                    if (status === 'authenticated') return;
+                    event.preventDefault();
+                    setShowAuthGate(true);
+                  }}
                   className={`${uiSurfaces.primaryButton} w-full py-3.5 disabled:bg-brand-300`}>
                   {submitting ? (
                     <><span className="animate-spin inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full" /> 提交中...</>
@@ -639,6 +718,7 @@ export default function InquiryPage() {
       <MobileBottomNav />
 
       <SiteFooter />
+      {showAuthGate && <InquiryAuthGate variant="modal" onClose={() => setShowAuthGate(false)} />}
     </div>
   );
 }

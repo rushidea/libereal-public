@@ -7,6 +7,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { ArrowLeft, Check, Copy, Loader2, RefreshCw, Smartphone } from 'lucide-react';
 import AdaptiveHeader from '@/components/AdaptiveHeader';
 import MobileBottomNav from '@/components/mobile/MobileBottomNav';
+import { sanitizeAuthCallbackUrl } from '@/lib/auth-callback-url';
 
 type ChallengeResponse = {
   challengeId: string;
@@ -37,7 +38,7 @@ type CompleteResponse = {
 function WeChatMiniLoginContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const callbackUrl = searchParams.get('callbackUrl') || '/account';
+  const callbackUrl = sanitizeAuthCallbackUrl(searchParams.get('callbackUrl'), '/account');
   const [challenge, setChallenge] = useState<ChallengeResponse | null>(null);
   const [statusText, setStatusText] = useState('正在创建微信小程序登录请求...');
   const [error, setError] = useState<string | null>(null);
