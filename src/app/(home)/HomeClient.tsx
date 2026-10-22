@@ -83,12 +83,10 @@ export default function HomeClient() {
           </div>
           <HomeCampaignHero />
 
-          {/* Application Scenes Grid */}
           <ApplicationScenes />
 
           <HomeResourceServices />
 
-          {/* Product Highlights - Glassmorphism Cards */}
           <ProductHighlights />
         </>
       ) : (

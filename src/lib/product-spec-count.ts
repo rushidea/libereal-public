@@ -69,7 +69,6 @@ export async function getFeaturedProductsForHome(limit: number = 10) {
       },
     });
 
-    // 打乱后取需要的个数
     const shuffled = rows.sort(() => Math.random() - 0.5);
     const picked = shuffled.slice(0, slot.count);
     results.push(...picked);
@@ -111,7 +110,6 @@ export async function getFeaturedProductsForHome(limit: number = 10) {
     }
   }
 
-  // prisma null → undefined（Product type 期望 undefined）
   return results.slice(0, limit).map((p) => ({
     id: p.id,
     catalogNumber: p.catalogNumber,

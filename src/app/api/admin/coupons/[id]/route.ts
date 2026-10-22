@@ -57,7 +57,6 @@ export async function PATCH(
       return NextResponse.json({ success: true, message: action === 'approve' ? '券已授权发放' : '券已驳回' });
     }
 
-    // 模板审批
     const coupon = await prisma.coupon.findUnique({ where: { id } });
     if (!coupon) return NextResponse.json({ error: '券模板不存在' }, { status: 404 });
     await prisma.coupon.update({

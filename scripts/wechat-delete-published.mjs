@@ -85,7 +85,6 @@ async function main() {
   const token = await getAccessToken(appId, secret);
   console.log('AccessToken 获取成功\n');
 
-  // 1. 查询已发表内容列表
   console.log('=== 查询已发表内容列表 ===');
   const listUrl = new URL(`${API_BASE}/freepublish/batchget`);
   listUrl.searchParams.set('access_token', token);
@@ -102,7 +101,6 @@ async function main() {
     return;
   }
 
-  // 2. 列出所有已发表内容
   console.log('所有已发表内容:');
   const target = findPublishedArticleMatch(listData.item, keyword);
   for (const item of listData.item) {
@@ -122,7 +120,6 @@ async function main() {
 
   console.log(`\n即将删除: "${target.title}" (article_id: ${target.articleId}, index: ${target.index})`);
 
-  // 3. 删除已发表内容
   const deleteUrl = new URL(`${API_BASE}/freepublish/delete`);
   deleteUrl.searchParams.set('access_token', token);
   const deleteRes = await fetch(deleteUrl, {

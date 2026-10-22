@@ -159,7 +159,6 @@ export default function NotificationsPage() {
             )}
           </div>
         </div>
-        {/* Filter tabs */}
         <div className="flex gap-2 mb-4">
           {[
             { key: 'all', label: '全部', count: notifications.length },
@@ -184,7 +183,6 @@ export default function NotificationsPage() {
           ))}
         </div>
 
-        {/* Notification list */}
         {filtered.length === 0 ? (
           <div className="bg-white dark:bg-slate-200/65 rounded-2xl shadow-sm p-12 text-center">
             <Bell className="w-12 h-12 text-gray-300 dark:text-gray-500 mx-auto mb-4" />
@@ -204,12 +202,10 @@ export default function NotificationsPage() {
  }`}
                 >
                   <div className="p-4 flex items-start gap-3">
-                    {/* Icon */}
                     <div className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 ${cfg.color}`}>
                       <Icon className="w-5 h-5" />
                     </div>
 
-                    {/* Content */}
                     <div className="flex-1 min-w-0">
                       <div className="flex items-start justify-between gap-2">
                         <div>
@@ -242,7 +238,6 @@ export default function NotificationsPage() {
                       )}
                     </div>
 
-                    {/* Mark as read button */}
                     {!notif.isRead && (
                       <button
                         onClick={() => markAsRead(notif.id)}

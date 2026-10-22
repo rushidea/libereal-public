@@ -171,7 +171,6 @@ export default function MyInquiriesPage() {
         }
       });
 
-      // Fetch orders for each inquiry that has associated orders
       const ordersMap: Record<string, Order[]> = {};
       const inqsWithOrders = freshInquiries.filter((inq: Inquiry) => (inq.orderCount || 0) > 0);
       await Promise.all(inqsWithOrders.map(async (inq: Inquiry) => {
@@ -412,7 +411,6 @@ export default function MyInquiriesPage() {
                   key={inquiry.id}
                   className="bg-white dark:bg-slate-200/65 rounded-2xl shadow-sm border border-gray-100 dark:border-slate-400 overflow-hidden hover:shadow-md transition-shadow"
                 >
-                  {/* Header */}
                   <div
                     className="p-6 cursor-pointer"
                     onClick={() => setSelectedInquiry(selectedInquiry?.id === inquiry.id ? null : inquiry)}
@@ -442,10 +440,8 @@ export default function MyInquiriesPage() {
                     <p className="text-sm text-gray-600 dark:text-gray-500">{inquiry.institution}</p>
                   </div>
 
-                  {/* Expanded Details */}
                   {selectedInquiry?.id === inquiry.id && (
                     <div className="border-t border-gray-100 dark:border-slate-400 bg-gray-50/50 dark:bg-gray-700/30 p-6">
-                      {/* Quote received banner */}
                       {quoteExpired && inquiry.activeQuote && (
                         <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 p-4 dark:border-amber-400/40 dark:bg-amber-500/15">
                           <div className="mb-2 flex items-center gap-2 text-amber-800 dark:text-amber-100">
@@ -470,7 +466,6 @@ export default function MyInquiriesPage() {
                         </div>
                       )}
 
-                      {/* Linked Orders */}
                       {linkedOrders.length > 0 && (
                         <div className="mb-4">
                           <p className="text-sm font-medium text-gray-700 dark:text-gray-600 mb-2">已生成的订单</p>
@@ -503,7 +498,6 @@ export default function MyInquiriesPage() {
                         </div>
                       )}
 
-                      {/* Product selection controls */}
                       {quoteOpen && (
                         <div className="mb-3 flex items-center justify-between">
                           <p className="text-sm font-medium text-gray-700 dark:text-gray-600">
@@ -526,7 +520,6 @@ export default function MyInquiriesPage() {
                         </div>
                       )}
 
-                      {/* Products */}
                       <div className="space-y-3">
                         {items.map((item, i) => {
                           // 支持两种数据结构：
@@ -564,7 +557,6 @@ export default function MyInquiriesPage() {
  }`}
                               onClick={() => canSelect && !acceptanceAttempts[inquiry.id] ? toggleItem(inquiry.id, i) : undefined}
                             >
-                              {/* 顶部：复选框 + 产品名 + 状态徽章 */}
                               <div className="p-4 flex items-center gap-3">
                                 {canSelect && (
                                   <div className={`w-5 h-5 rounded border-2 flex items-center justify-center flex-shrink-0 transition-colors ${
@@ -601,7 +593,6 @@ export default function MyInquiriesPage() {
                                 </div>
                               </div>
 
-                              {/* 底部：单价 / 数量 / 货期 三栏 */}
                               <div className="grid grid-cols-4 gap-3 px-4 pb-4 text-sm border-t border-gray-100 dark:border-slate-400 pt-3">
                                 <div>
                                   <p className="text-xs text-gray-400 dark:text-gray-500 mb-1">单价</p>
@@ -640,7 +631,6 @@ export default function MyInquiriesPage() {
                         })}
                       </div>
 
-                      {/* Bottom: Submit selected items as order */}
                       {quoteExpired && inquiry.activeQuote && (
                         <div className="mt-4 border-t border-gray-200 pt-4 dark:border-slate-400">
                           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -717,7 +707,6 @@ export default function MyInquiriesPage() {
         )}
       </main>
 
-      {/* Confirm Submit Modal */}
       {showConfirmModal && selectedInquiry && (() => {
         const items = parseItems(selectedInquiry.activeQuote?.items ?? selectedInquiry.items);
         const selId = selectedItems[selectedInquiry.id];

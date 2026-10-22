@@ -207,7 +207,6 @@ function LoginForm() {
               </div>
             )}
 
-            {/* OAuth */}
             <div className="space-y-3">
               {wechatHint && (
                 <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2">
@@ -261,7 +260,6 @@ function LoginForm() {
               </div>
             </div>
 
-            {/* Email login */}
             <form onSubmit={handleSubmit} className="space-y-4">
               <TurnstileWidget
                 onVerify={(token) => setTurnstileToken(token)}

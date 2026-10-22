@@ -86,7 +86,6 @@ export async function DELETE(
       return NextResponse.json({ error: '商品不存在' }, { status: 404 });
     }
 
-    // Check for pending redemptions
     const pendingCount = await prisma.pointsRedemption.count({
       where: { productId: id, status: { in: ['pending', 'shipped'] } },
     });

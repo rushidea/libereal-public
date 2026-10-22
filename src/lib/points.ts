@@ -1,5 +1,3 @@
-// 积分系统工具函数
-
 export type PointsLogType =
   | 'admin_adjust'
   | 'order_credit'
@@ -35,26 +33,16 @@ export const POINTS_LOG_TYPE_COLORS: Record<PointsLogType, string> = {
   admin_inject: 'bg-indigo-100 text-indigo-700',
 };
 
-/**
- * 计算订单完成时应获得的积分（基于金额）
- * @param amount 订单金额（元）
- */
 export function calculateOrderPoints(amount: number, _pointsPerYuan = 0.001, active = true): number {
   if (!active) return 0;
   if (amount <= 0) return 0;
   return Math.floor(amount / 1000);
 }
 
-/**
- * 检查用户积分是否足够兑换
- */
 export function canRedeem(userPoints: number, cost: number): boolean {
   return userPoints >= cost && cost > 0;
 }
 
-/**
- * 验证积分变动值
- */
 export function validatePointsDelta(delta: number): { valid: boolean; error?: string } {
   if (!Number.isInteger(delta)) {
     return { valid: false, error: '积分变动必须为整数' };
@@ -82,16 +70,10 @@ export function validatePointsTarget(points: number): { valid: boolean; error?: 
   return { valid: true };
 }
 
-/**
- * 格式化积分显示
- */
 export function formatPoints(points: number): string {
   return new Intl.NumberFormat('zh-CN').format(points);
 }
 
-/**
- * 根据积分获取推荐分类
- */
 export type ProductCategory = 'tool' | 'digital' | 'physical';
 
 export const PRODUCT_CATEGORY_LABELS: Record<ProductCategory, string> = {

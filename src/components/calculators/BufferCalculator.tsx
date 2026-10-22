@@ -29,7 +29,6 @@ export default function BufferCalculator({ onSave }: BufferCalculatorProps) {
   const [showSave, setShowSave] = useState(false);
   const [saveName, setSaveName] = useState('');
 
-  // Derived state: compute buffer result from inputs
   const result = useMemo<BufferCalculationResult | null>(() => {
     if (!selectedBuffer || !targetPH || !totalVolume) return null;
     const ph = parseFloat(targetPH);
@@ -85,7 +84,6 @@ export default function BufferCalculator({ onSave }: BufferCalculatorProps) {
       <div className={`${calculatorPanelClass} p-4`}>
         <h3 className="text-sm font-semibold text-gray-700 mb-3">缓冲液配制计算器</h3>
 
-        {/* 缓冲体系选择 */}
         <div className="mb-3">
           <label className="block text-xs text-gray-500 mb-1">缓冲体系</label>
           <div className="relative">
@@ -142,7 +140,6 @@ export default function BufferCalculator({ onSave }: BufferCalculatorProps) {
           </div>
         </div>
 
-        {/* 浓度倍数选择 */}
         <div>
           <label className="block text-xs text-gray-500 mb-1">浓度倍数 (标准浓度: {standardConc}mM)</label>
           <div className="flex gap-2">

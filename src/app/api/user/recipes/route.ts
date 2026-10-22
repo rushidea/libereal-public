@@ -129,7 +129,6 @@ export async function PUT(request: NextRequest) {
       return NextResponse.json({ error: 'Missing recipe ID' }, { status: 400 });
     }
 
-    // Verify ownership
     const existing = await prisma.userCreatedRecipe.findFirst({
       where: { id, userId, ownerScope: 'personal' },
       select: { id: true },
@@ -167,7 +166,6 @@ export async function DELETE(request: NextRequest) {
       return NextResponse.json({ error: 'Missing recipe ID' }, { status: 400 });
     }
 
-    // Verify ownership
     const existing = await prisma.userCreatedRecipe.findFirst({
       where: { id, userId, ownerScope: 'personal' },
       select: { id: true },

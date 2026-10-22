@@ -47,7 +47,6 @@ export default function CalculatorsPanel({ onSave, initialType }: CalculatorsPan
     if (onSave) {
       onSave(activeType, name, result);
     }
-    // 刷新历史
     setHistory(getCalculatorHistory());
   };
 
@@ -106,7 +105,6 @@ export default function CalculatorsPanel({ onSave, initialType }: CalculatorsPan
 
   return (
     <div className="space-y-4">
-      {/* 计算器选择器 */}
       <CalculatorSelector activeType={activeType} onSelect={setActiveType} />
 
       {/* 计算器内容 - wrapped in ErrorBoundary so one calculator's bug
@@ -117,7 +115,6 @@ export default function CalculatorsPanel({ onSave, initialType }: CalculatorsPan
         </ErrorBoundary>
       </div>
 
-      {/* 历史记录 */}
       <div className={`${uiSurfaces.panel} rounded-brand overflow-hidden`}>
         <button
           onClick={() => setShowHistory(!showHistory)}

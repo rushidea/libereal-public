@@ -82,20 +82,15 @@ const WIDE_MOBILE_MEDIA_QUERY = '(min-width: 740px) and (max-width: 1023px)';
 const TOOL_LIST_VIEWPORT_HEIGHT = `calc(${TOOL_ROWS_VISIBLE} * ${TOOL_ROW_HEIGHT} + ${TOOL_ROWS_VISIBLE - 1} * 0.5rem)`;
 /** Space below list so page controls clear the last row edge */
 const LIST_INDICATOR_SPACING = 'mt-8';
-/** 自动轮播间隔 */
 const SUPPORT_ADVANCE_MS = 4500;
 const PROTOCOL_ADVANCE_MS = 5600;
 const TOOL_ADVANCE_MS = 5200;
-/** 切换动画时长 */
 const SUPPORT_TRANSITION_MS = 500;
 const PROTOCOL_TRANSITION_MS = 520;
 const TOOL_TRANSITION_MS = 520;
-/** 触屏 swipe 调参：水平滑动方向 */
 const SWIPE_MIN_DELTA_PX = 40;
 const SWIPE_MAX_DURATION_MS = 400;
-/** 触屏 touch 后暂停多久才恢复 */
 const TOUCH_RESUME_DELAY_MS = 8000;
-/** 鼠标 hover 后暂停多久才恢复 */
 const HOVER_RESUME_DELAY_MS = 1500;
 
 function ColumnShell({
@@ -126,12 +121,10 @@ function ColumnShell({
   children: React.ReactNode;
 }) {
   return (
-    // 外层托盘（Double-Bezel 外壳）：柔和漫射阴影 + 发丝级描边，营造悬浮硬件质感
     <div
       className={`group/card h-full rounded-brand-lg p-1.5 transition-[transform,box-shadow] duration-700 ease-[cubic-bezier(0.32,0.72,0,1)] hover:-translate-y-1 sm:p-2 ${uiSurfaces.panelStrong} ${className ?? ''}`}
       data-nosnippet={preventSnippet ? '' : undefined}
     >
-      {/* 内层核心（玻璃面板）：同心较小圆角 + 顶部内高光 */}
       <div className={`flex h-full flex-col overflow-hidden rounded-brand ${uiSurfaces.panel}`}>
         <div
           className="relative min-h-[5.75rem] overflow-hidden p-3.5 sm:p-5"
@@ -725,7 +718,6 @@ function PublicToolLibraryList() {
 
 function SupportListItem({ item }: { item: (typeof SUPPORT_ITEMS)[number] }) {
   const Icon = item.icon;
-  // Row 布局：icon 在左 + label/desc 在右，与实验方案/品牌卡片字号一致
   return (
     <Link
       href={item.href}
@@ -751,7 +743,6 @@ function SupportListItem({ item }: { item: (typeof SUPPORT_ITEMS)[number] }) {
 }
 
 function SupportList() {
-  // 每页固定三项；末页不足时从首项循环补齐，避免轮播产生大块空白。
   const pages: (typeof SUPPORT_ITEMS)[] = [];
   for (let i = 0; i < SUPPORT_ITEMS.length; i += SUPPORT_ROWS_VISIBLE) {
     const page = SUPPORT_ITEMS.slice(i, i + SUPPORT_ROWS_VISIBLE);
@@ -788,7 +779,6 @@ function SupportList() {
     return () => window.clearInterval(id);
   }, [reducedMotion, isPaused, totalPages]);
 
-  // 组件卸载时清理恢复 timer，避免 setState on unmounted
   useEffect(() => {
     return () => {
       if (resumeTimerRef.current !== null) {
@@ -816,7 +806,6 @@ function SupportList() {
     }
   };
 
-  // 触屏：暂停 + 水平 swipe 翻页（左滑看下一页 / 右滑看上一页）
   const handleTouchStart = (event: React.TouchEvent<HTMLDivElement>) => {
     touchStartXRef.current = event.touches[0].clientX;
     touchStartTimeRef.current = Date.now();
@@ -833,16 +822,13 @@ function SupportList() {
     // 快速 + 大幅的 swipe 才翻页，慢拖动视为 page scroll
     if (Math.abs(deltaX) >= SWIPE_MIN_DELTA_PX && elapsed <= SWIPE_MAX_DURATION_MS) {
       if (deltaX > 0) {
-        // 左滑 → 下一页
         setCurrentPage((p) => (p + 1) % totalPages);
       } else {
-        // 右滑 → 上一页
         setCurrentPage((p) => (p - 1 + totalPages) % totalPages);
       }
     }
   };
 
-  // 鼠标 hover 暂停 + 离开后短暂延迟再恢复
   const handleMouseEnter = () => scheduleResume(HOVER_RESUME_DELAY_MS);
   const handleMouseLeave = () => {
     if (resumeTimerRef.current !== null) {
@@ -909,7 +895,6 @@ function SupportList() {
     >
       <div
         className="-mr-1 overflow-hidden pr-1"
-        // 固定高度：4 行 row 卡片纵向堆叠（3.75rem × 4 + gap × 3）
         style={{ height: SUPPORT_LIST_VIEWPORT_HEIGHT }}
       >
         <div

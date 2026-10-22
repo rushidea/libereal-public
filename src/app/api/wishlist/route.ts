@@ -80,7 +80,6 @@ export async function POST(req: NextRequest) {
 
     const userId = session.user.id as string;
 
-    // Verify product exists
     const product = await prisma.product.findUnique({
       where: { id: productId },
       select: { id: true, deletedAt: true },
@@ -89,7 +88,6 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Product not found' }, { status: 404 });
     }
 
-    // Upsert to handle duplicates gracefully
     await prisma.wishlist.upsert({
       where: { userId_productId: { userId, productId } },
       create: { userId, productId },

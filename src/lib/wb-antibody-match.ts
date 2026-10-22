@@ -61,13 +61,6 @@ export function phosphoBaseTarget(target: string): string | null {
 
 const PRIMARY_EXCLUDE_NAME = /inhibitor|抑制剂|antagonist|agonist|protein standard|recombinant.*protein|重组.*蛋白|elisa kit|试剂盒/i;
 
-export function resolvePrimarySelection(candidates: Product[], selectedId: string): Product | null {
-  if (!selectedId) return null;
-  return (
-    candidates.find((product) => product.id === selectedId || product.catalogNumber === selectedId) ?? null
-  );
-}
-
 export function inferAntibodyHostFromProduct(product: Product | null | undefined): string | null {
   if (!product) return null;
 
@@ -104,10 +97,6 @@ export function normalizeAntibodyHost(host: string | null | undefined): string |
   return trimmed.charAt(0).toUpperCase() + trimmed.slice(1);
 }
 
-export function hostToCatalogKey(host: string): string {
-  return host.replace(/\s+/g, '-').toLowerCase();
-}
-
 /** Display / note only — actual API fetch uses {@link buildPrimaryFetchPlans}. */
 export function buildWbPrimarySearchQuery(target: string, species: string): string {
   const normalizedTarget = target.trim();
@@ -127,17 +116,6 @@ export function buildWbSecondarySearchQuery(host: string): string {
   const normalizedHost = normalizeAntibodyHost(host);
   if (!normalizedHost) return 'HRP secondary antibody';
   return `Anti-${normalizedHost} IgG HRP`;
-}
-
-export function buildWbPrimarySlots(targetMolecules: string[], species: string): WbPrimarySlot[] {
-  return targetMolecules
-    .map((target) => target.trim())
-    .filter(Boolean)
-    .map((target, index) => ({
-      target,
-      catalogNumber: `SCENE-WB-PRIMARY-${index}`,
-      searchQuery: buildWbPrimarySearchQuery(target, species),
-    }));
 }
 
 export function isLikelyWbPrimaryAntibody(product: Product, target: string): boolean {
@@ -261,12 +239,6 @@ function scoreSecondaryCandidate(product: Product, hostLower: string): number {
   if (product.subcategory === 'HRP偶联二抗') score += 2;
   if (product.inStock) score += 1;
   return score;
-}
-
-export function formatPrimaryOptionLabel(product: Product): string {
-  const host = product.host ? ` · ${product.host}` : '';
-  const spec = product.spec ? ` · ${product.spec}` : '';
-  return `${product.brand} · ${product.catalogNumber} · ${product.name}${host}${spec}`;
 }
 
 function escapeRegExp(value: string): string {

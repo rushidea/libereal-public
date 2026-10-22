@@ -1,6 +1,3 @@
-// 「应用与场景」顶部导航下拉菜单数据
-// 结构：全部应用（总入口）+ 各应用类型（按大类分组）
-
 export type ScenesNavLink = {
   slug: string;
   label: string;
@@ -9,13 +6,6 @@ export type ScenesNavLink = {
 export type ScenesNavGroup = {
   title: string;
   links: ScenesNavLink[];
-};
-
-// 全部应用（总入口）
-export const scenesNavOverview = {
-  label: '全部应用',
-  description: '按实验目标浏览全部应用场景',
-  href: '/scenes',
 };
 
 // 应用类型（按大类分组，顺序与 scenes 页 sceneGroups 一致）

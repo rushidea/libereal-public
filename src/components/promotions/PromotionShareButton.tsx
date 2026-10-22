@@ -185,7 +185,6 @@ export default function PromotionShareButton({
       return;
     }
 
-    // 原生分享（iOS Safari / Android Chrome / 桌面 Chrome / Edge 等）
     if (typeof navigator !== 'undefined' && 'share' in navigator) {
       try {
         await navigator.share({ title, text: description, url: shareUrl() });

@@ -30,7 +30,6 @@ export default function AboutPage() {
           <p className="text-sm text-gray-500">南京天放生物科技有限公司</p>
         </div>
 
-        {/* Story */}
         <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-8 mb-5">
           <h2 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
             <Target className="w-5 h-5 text-brand-500" />
@@ -45,7 +44,6 @@ export default function AboutPage() {
           </p>
         </div>
 
-        {/* Values */}
         <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-8 mb-5">
           <h2 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
             <Heart className="w-5 h-5 text-brand-500" />
@@ -74,7 +72,6 @@ export default function AboutPage() {
           </div>
         </div>
 
-        {/* Team */}
         <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-8 mb-5">
           <h2 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
             <Users className="w-5 h-5 text-brand-500" />
@@ -96,7 +93,6 @@ export default function AboutPage() {
           </div>
         </div>
 
-        {/* Contact */}
         <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-8">
           <h2 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
             <Award className="w-5 h-5 text-brand-500" />

@@ -21,7 +21,6 @@ export default function SolutionCalculator({ onSave }: SolutionCalculatorProps) 
   const [showSave, setShowSave] = useState(false);
   const [saveName, setSaveName] = useState('');
 
-  // Derived state: compute solution result from inputs (pure)
   const result = useMemo<Record<string, number | null>>(() => {
     if (mode === 'mass-to-molarity') {
       const massVal = parseFloat(mass);
@@ -43,7 +42,6 @@ export default function SolutionCalculator({ onSave }: SolutionCalculatorProps) 
     return {};
   }, [mode, mass, mw, volume, molarity]);
 
-  // Persist history when result changes
   useEffect(() => {
     if (Object.keys(result).length === 0) return;
     saveCalculatorHistory({
@@ -87,7 +85,6 @@ export default function SolutionCalculator({ onSave }: SolutionCalculatorProps) 
       <div className={`${calculatorPanelClass} p-4`}>
         <h3 className="text-sm font-semibold text-gray-700 mb-3">溶液配制计算器</h3>
 
-        {/* 模式切换 */}
         <div className="flex gap-2 mb-4">
           <button
             onClick={() => setMode('mass-to-molarity')}
@@ -111,7 +108,6 @@ export default function SolutionCalculator({ onSave }: SolutionCalculatorProps) 
           </button>
         </div>
 
-        {/* 输入字段 */}
         {mode === 'mass-to-molarity' ? (
           <div className="grid grid-cols-3 gap-3">
             <div>

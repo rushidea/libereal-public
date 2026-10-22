@@ -54,7 +54,6 @@ export async function POST(req: NextRequest) {
       });
       if (!target) return { status: 404 as const, error: '用户不存在' };
 
-      // Reverse the delta: +100 becomes -100, -50 becomes +50.
       const reverseDelta = -log.delta;
       const newPoints = target.points + reverseDelta;
       if (newPoints < 0) {

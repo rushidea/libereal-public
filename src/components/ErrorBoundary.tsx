@@ -14,19 +14,6 @@ interface State {
   error: Error | null;
 }
 
-/**
- * React Error Boundary. Catches render-phase errors in the wrapped subtree
- * and displays a fallback UI instead of crashing the whole app.
- *
- * Usage:
- *   <ErrorBoundary>
- *     <SomeRiskyComponent />
- *   </ErrorBoundary>
- *
- *   <ErrorBoundary fallback={<p>Custom error</p>}>
- *     <AnotherComponent />
- *   </ErrorBoundary>
- */
 export default class ErrorBoundary extends Component<Props, State> {
   constructor(props: Props) {
     super(props);
@@ -38,7 +25,6 @@ export default class ErrorBoundary extends Component<Props, State> {
   }
 
   componentDidCatch(error: Error, errorInfo: ErrorInfo): void {
-    // Log to console + report to Sentry (when SENTRY_DSN is set)
     console.error('[ErrorBoundary] Caught error:', error, errorInfo);
     reportError(error, { tags: { source: 'ErrorBoundary' }, extra: { componentStack: errorInfo.componentStack ?? undefined } });
     this.props.onError?.(error, errorInfo);

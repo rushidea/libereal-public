@@ -13,7 +13,6 @@ export function getTestDb(): Database.Database {
   _db.pragma('journal_mode = WAL');
   _db.pragma('foreign_keys = ON');
 
-  // 关键表（按 libereal schema 完整定义）
   _db.exec(`
     CREATE TABLE IF NOT EXISTS User (
       id TEXT PRIMARY KEY,

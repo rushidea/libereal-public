@@ -26,7 +26,6 @@ export default function ContactPage() {
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-5 max-w-3xl mx-auto">
-          {/* Email */}
           <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 text-center">
             <div className="bg-brand-50 rounded-xl p-4 w-fit mx-auto mb-4">
               <Mail className="w-6 h-6 text-brand-600" />
@@ -46,7 +45,6 @@ export default function ContactPage() {
             </p>
           </div>
 
-          {/* WeChat */}
           <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 text-center">
             <div className="bg-brand-50 rounded-xl p-4 w-fit mx-auto mb-4">
               <MessageCircle className="w-6 h-6 text-brand-600" />
@@ -56,7 +54,6 @@ export default function ContactPage() {
             <p className="text-base font-medium text-gray-900">搜索：天放生物</p>
           </div>
 
-          {/* Xiaohongshu */}
           <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 text-center">
             <div className="bg-brand-50 rounded-xl p-4 w-fit mx-auto mb-4">
               <svg className="w-6 h-6 text-brand-600" viewBox="0 0 24 24" fill="currentColor">

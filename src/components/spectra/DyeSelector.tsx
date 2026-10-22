@@ -36,7 +36,6 @@ export default function DyeSelector({ dyes, selectedIds, onToggle, disabled, dye
 
   return (
     <div className="space-y-4">
-      {/* 已选计数 */}
       <div className="flex items-center justify-between text-sm">
         <span className={uiSurfaces.textSecondary}>
           已选 {selectedCount}/{MAX_DYES_DISPLAY} 条光谱
@@ -46,7 +45,6 @@ export default function DyeSelector({ dyes, selectedIds, onToggle, disabled, dye
         )}
       </div>
 
-      {/* 分类染料列表 */}
       {categoryOrder.map(category => {
         const categoryDyes = groupedDyes[category];
         if (categoryDyes.length === 0) return null;
@@ -81,14 +79,12 @@ export default function DyeSelector({ dyes, selectedIds, onToggle, disabled, dye
                       }
                     `}
                   >
-                    {/* 颜色指示条 */}
                     <div
                       className="absolute top-0 left-0 right-0 h-1 rounded-t-lg"
                       style={{ backgroundColor: dye.color }}
                     />
 
                     <div className="flex items-center gap-2 mt-1">
-                      {/* 颜色圆点 */}
                       <div
                         className="w-3 h-3 rounded-full flex-shrink-0"
                         style={{ backgroundColor: dye.color }}
@@ -103,7 +99,6 @@ export default function DyeSelector({ dyes, selectedIds, onToggle, disabled, dye
                       </div>
                     </div>
 
-                    {/* 兼容性/通道标签 */}
                     <div className="mt-1 flex items-center justify-between">
                       {compat && (
                         <span className={`text-[10px] px-1 py-0.5 rounded ${

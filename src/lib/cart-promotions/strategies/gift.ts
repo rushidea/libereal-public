@@ -125,7 +125,6 @@ export const giftStrategy: RuleStrategy<GiftRuleConfig> = {
       summary,
       details: { mainCount, giftQuota, usedGifts: used, remainingGifts, shortfall },
       adjustments,
-      // 独占锁：主品范围行（exclusive 规则命中后这些行不参与其他促销）
       exclusiveLines: config.exclusive
         ? mainLines.map((i) => i.product.catalogNumber)
         : undefined,

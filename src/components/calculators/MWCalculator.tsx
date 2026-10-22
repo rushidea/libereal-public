@@ -19,13 +19,11 @@ export default function MWCalculator({ onSave }: MWCalculatorProps) {
   const [showGroupList, setShowGroupList] = useState(false);
   const [groupSearch, setGroupSearch] = useState('');
 
-  // Derived state: compute MW from formula (pure)
   const result = useMemo<{ mw: number; composition: Record<string, number> } | null>(() => {
     if (!formula.trim()) return null;
     return calculateMolecularWeight(formula);
   }, [formula]);
 
-  // Persist history when result changes
   useEffect(() => {
     if (!result) return;
     saveCalculatorHistory({
@@ -82,7 +80,6 @@ export default function MWCalculator({ onSave }: MWCalculatorProps) {
       <div className={`${calculatorPanelClass} p-4`}>
         <h3 className="text-sm font-semibold text-gray-700 mb-3">分子量计算器</h3>
 
-        {/* 化学式输入 */}
         <div className="mb-3">
           <label className="block text-xs text-gray-500 mb-1">化学式</label>
           <input
@@ -94,7 +91,6 @@ export default function MWCalculator({ onSave }: MWCalculatorProps) {
           />
         </div>
 
-        {/* 常用基团快捷插入 */}
         <div className="relative mb-3">
           <button
             onClick={() => setShowGroupList(!showGroupList)}
@@ -128,7 +124,6 @@ export default function MWCalculator({ onSave }: MWCalculatorProps) {
           )}
         </div>
 
-        {/* 常用示例 */}
         <div className="flex flex-wrap gap-2">
           {['H2O', 'NaCl', 'C6H12O6', 'Tris', 'EDTA'].map((ex) => (
             <button

@@ -230,7 +230,6 @@ function MyPointsPage() {
       <AdaptiveHeader />
 
       <main className="flex-1 max-w-6xl mx-auto w-full px-4 pb-8">
-        {/* Blind-box notice */}
         <div className="mb-4 p-3 bg-amber-50 border border-amber-200 rounded-xl flex items-start gap-2 text-sm text-amber-800">
           <Info className="w-4 h-4 flex-shrink-0 mt-0.5" />
           <p>
@@ -245,7 +244,6 @@ function MyPointsPage() {
           </div>
         )}
 
-        {/* Header: Points card */}
         <div className="bg-emerald-500 rounded-2xl shadow-xl p-6 mb-6 text-white">
           <div className="flex items-center gap-3 mb-2">
             <Coins className="w-6 h-6" />
@@ -268,7 +266,6 @@ function MyPointsPage() {
           )}
         </div>
 
-        {/* Tabs */}
         <div className="flex items-center gap-2 mb-6 bg-white/60 backdrop-blur-md rounded-xl p-1.5 w-fit flex-wrap">
           {[
             { key: 'shop' as const, label: '积分商城', icon: Package },
@@ -295,7 +292,6 @@ function MyPointsPage() {
           <PointsTopupSection balance={pointsBalance} onBalanceChange={fetchBalance} />
         )}
 
-        {/* Shop tab */}
         {tab === 'shop' && (
           <div>
             <div className="flex items-center gap-2 mb-4 flex-wrap">
@@ -348,7 +344,6 @@ function MyPointsPage() {
           </div>
         )}
 
-        {/* History tab */}
         {tab === 'history' && (
           <div className="space-y-6">
             {loadingLogs ? (
@@ -370,7 +365,6 @@ function MyPointsPage() {
           </div>
         )}
 
-        {/* Redemptions tab */}
         {tab === 'redemptions' && (
           <div>
             {loadingRedemptions ? (

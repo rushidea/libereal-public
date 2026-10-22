@@ -1,23 +1,21 @@
-// 荧光染料数据 - 流式细胞术常用染料
 // 核心染料使用真实峰形参数，其他使用模拟高斯峰
 
 export interface FluorescenceDye {
   id: string;
-  name: string;           // 全名
-  abbr: string;           // 缩写
+  name: string;
+  abbr: string;
   excitationPeak: number;  // 激发波长 (nm)
   emissionPeak: number;    // 发射波长 (nm)
   fwhm: number;           // 半峰宽 (nm)，用于高斯峰模拟
   secondaryPeak?: number; // 次级峰波长 (nm)，用于双峰染料
   secondaryFwhm?: number;  // 次级峰半峰宽
   laserLine: number[];     // 适用激光线 (nm)
-  channel: string;        // BD 通道
-  color: string;          // 显示颜色 (hex)
+  channel: string;
+  color: string;
   category: 'blue' | 'violet' | 'green' | 'yellow' | 'red' | 'far-red';
 }
 
 export const fluorescenceDyes: FluorescenceDye[] = [
-  // 蓝光激光 (488nm) 染料
   {
     id: 'fitc',
     name: 'FITC (Fluorescein isothiocyanate)',
@@ -140,7 +138,6 @@ export const fluorescenceDyes: FluorescenceDye[] = [
     color: '#8B0000',
     category: 'violet',
   },
-  // 黄绿激光 (561nm) 染料
   {
     id: 'pe-dazzle',
     name: 'PE/Dazzle 594',
@@ -225,7 +222,6 @@ export const fluorescenceDyes: FluorescenceDye[] = [
     color: '#FFA500',
     category: 'yellow',
   },
-  // 红光激光 (640nm) 染料
   {
     id: 'apc',
     name: 'APC (Allophycocyanin)',
@@ -288,7 +284,6 @@ export const fluorescenceDyes: FluorescenceDye[] = [
     color: '#800000',
     category: 'far-red',
   },
-  // 其他常用染料
   {
     id: 'efluor450',
     name: 'eFluor 450',
@@ -421,7 +416,6 @@ export const fluorescenceDyes: FluorescenceDye[] = [
     color: '#800080',
     category: 'far-red',
   },
-  // 常用流式染料补充
   {
     id: 'af488',
     name: 'Alexa Fluor 488',
@@ -508,9 +502,6 @@ export const fluorescenceDyes: FluorescenceDye[] = [
   },
 ];
 
-// 根据波长范围获取对应通道
-
-// 生成高斯峰光谱数据（支持双峰）
 function generateGaussianSpectrum(
   peakWavelength: number,
   fwhm: number,
@@ -541,7 +532,6 @@ function generateGaussianSpectrum(
   return points;
 }
 
-// 生成完整光谱数据
 export function generateDyeSpectrum(dye: FluorescenceDye) {
   return {
     id: dye.id,
@@ -555,7 +545,6 @@ export function generateDyeSpectrum(dye: FluorescenceDye) {
   };
 }
 
-// 保存的染料组合类型
 export interface SavedDyeSet {
   id: string;
   name: string;
@@ -566,7 +555,6 @@ export interface SavedDyeSet {
 const SAVED_DYE_SETS_KEY = 'libereal_fluorescence_saved';
 export const MAX_DYES_DISPLAY = 8;
 
-// 获取保存的染料组合
 export function getSavedDyeSets(): SavedDyeSet[] {
   if (typeof window === 'undefined') return [];
   try {
@@ -577,7 +565,6 @@ export function getSavedDyeSets(): SavedDyeSet[] {
   }
 }
 
-// 保存染料组合
 export function saveDyeSet(name: string, dyeIds: string[]): SavedDyeSet {
   const sets = getSavedDyeSets();
   const newSet: SavedDyeSet = {
@@ -591,7 +578,6 @@ export function saveDyeSet(name: string, dyeIds: string[]): SavedDyeSet {
   return newSet;
 }
 
-// 删除染料组合
 export function deleteDyeSet(id: string): void {
   const sets = getSavedDyeSets();
   const filtered = sets.filter(s => s.id !== id);

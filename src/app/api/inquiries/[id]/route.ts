@@ -112,7 +112,6 @@ export async function PATCH(
         create: toInquiryItemCreates(itemsArray as Array<Record<string, unknown>>),
       };
 
-      // Append operation log entry
       const logEntry: LogEntry = {
         adminId: user.id,
         adminEmail: user.email,
@@ -133,7 +132,6 @@ export async function PATCH(
       await prisma.inquiry.update({ where: { id }, data: updateData });
     }
 
-    // Status-change notification
     if (isInquiryStatus(requestedStatus) && requestedStatus !== inquiry.status) {
       const notifTitle = '询价单状态更新';
       const notifContent = `您的询价单状态已更新为：${INQUIRY_STATUS_LABELS[requestedStatus]}`;
@@ -151,7 +149,6 @@ export async function PATCH(
       });
     }
 
-    // Lead-time update notification
     if (body.items !== undefined) {
       const items = body.items as Array<Record<string, unknown>>;
       const hasActualLeadTime = items.some((i) => i.actualLeadTime);

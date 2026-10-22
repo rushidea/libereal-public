@@ -2330,9 +2330,7 @@ export default function ScenePrepListBuilder({ sceneSlug, theme, ui }: ScenePrep
       </div>
 
       {sceneSlug === 'western-blot' ? (
-        /* WB 单列紧凑布局 */
         <div className="space-y-4">
-          {/* 条件组：横向三列 */}
           <div className={`${sceneSurfaceClasses.card} p-4`}>
             <div className="mb-3">
               <p className={`text-sm font-semibold ${sceneSurfaceClasses.text}`}>{ui.conditionsTitle}</p>
@@ -2367,7 +2365,6 @@ export default function ScenePrepListBuilder({ sceneSlug, theme, ui }: ScenePrep
             </div>
           </div>
 
-          {/* 参数 + 即时指标 */}
           <div className={`${sceneSurfaceClasses.subPanel} p-4`}>
             <div className="mb-3 flex items-center gap-2">
               <Calculator className={`h-4 w-4 ${t.sectionIcon}`} />
@@ -2419,7 +2416,6 @@ export default function ScenePrepListBuilder({ sceneSlug, theme, ui }: ScenePrep
                 />
               </label>
             </div>
-            {/* 即时估算指标 */}
             <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
               {estimate.metrics.map((metric) => (
                 <div key={metric.label} className={`rounded-brand px-3 py-2 ${t.softBg}`}>
@@ -2521,7 +2517,6 @@ export default function ScenePrepListBuilder({ sceneSlug, theme, ui }: ScenePrep
           {procurementListBlock}
         </div>
       ) : (
-        /* ELISA 两栏布局（参数多，左右均衡） */
         <div className="grid gap-5 lg:grid-cols-[0.78fr_1.22fr] lg:items-start">
           <div className={`${sceneSurfaceClasses.subPanel} p-4`}>
             <div className="mb-4">

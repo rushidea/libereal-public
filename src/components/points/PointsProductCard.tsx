@@ -53,7 +53,6 @@ export default function PointsProductCard({ product, userPoints, onRedeem }: Pro
 
   return (
     <div className={`${uiSurfaces.panel} rounded-brand overflow-hidden border-[var(--surface-border)] shadow-[var(--shadow-panel)] transition-all hover:shadow-[var(--shadow-panel-strong)]`}>
-      {/* Image area */}
       <div className="h-36 bg-gradient-to-br from-emerald-50/60 to-violet-100/60 flex items-center justify-center relative">
         {product.imageUrl ? (
           <Image src={product.imageUrl} alt={product.name} width={300} height={144} className="w-full h-full object-cover" suppressHydrationWarning />
@@ -72,14 +71,12 @@ export default function PointsProductCard({ product, userPoints, onRedeem }: Pro
         )}
       </div>
 
-      {/* Content */}
       <div className="p-4">
         <h3 className={`mb-1 line-clamp-1 font-bold ${uiSurfaces.titleText}`}>{product.name}</h3>
         {product.description && (
           <p className={`mb-2 h-8 line-clamp-2 text-xs ${uiSurfaces.mutedText}`}>{product.description}</p>
         )}
 
-        {/* Variant picker */}
         {hasVariants && (
           <div className="flex flex-wrap gap-1.5 mb-2">
             {variants.map((v, i) => (

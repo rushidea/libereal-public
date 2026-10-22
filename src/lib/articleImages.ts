@@ -167,28 +167,3 @@ export function extractArticleImageFromHtml(html: string, articleUrl: string): s
 
   return null;
 }
-
-export async function fetchArticleImage(articleUrl: string): Promise<string | null> {
-  try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 10000);
-
-    const response = await fetch(articleUrl, {
-      signal: controller.signal,
-      headers: {
-        'User-Agent':
-          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        Accept: 'text/html,application/xhtml+xml',
-      },
-    });
-
-    clearTimeout(timeout);
-
-    if (!response.ok) return null;
-
-    const html = await response.text();
-    return extractArticleImageFromHtml(html, articleUrl);
-  } catch {
-    return null;
-  }
-}

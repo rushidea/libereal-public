@@ -57,7 +57,6 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: true, message: 'Inquiry received' });
     }
 
-    // Validate required fields
     if (!name || !email || !phone || !institution) {
       return NextResponse.json({ error: '缺少必填字段' }, { status: 400 });
     }
@@ -66,7 +65,6 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: '邮箱格式无效' }, { status: 400 });
     }
 
-    // Validate items: must be array with at least one entry
     if (!Array.isArray(items) || items.length === 0) {
       return NextResponse.json({ error: '询价单至少包含一个商品' }, { status: 400 });
     }
@@ -247,7 +245,6 @@ export async function POST(req: NextRequest) {
       throw error;
     }
 
-    // Notify admin of new inquiry
     await prisma.notification.create({
       data: {
         email: 'admin',

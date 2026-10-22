@@ -5,7 +5,6 @@
 
 import { uiSurfaces } from '@/lib/ui-surfaces';
 
-// 双轴折线：左轴金额、右轴订单数（近 30 天）
 export function DualAxisLineChart({
   data,
   className,
@@ -70,7 +69,6 @@ export function DualAxisLineChart({
   );
 }
 
-// 环形图：支付方式分布（近 90 天金额）
 const DONUT_COLORS = ['#0d9488', '#0284c7', '#d97706', '#7c3aed', '#dc2626', '#64748b'];
 
 export function PaymentMethodDonut({
@@ -134,7 +132,6 @@ export function PaymentMethodDonut({
   );
 }
 
-// 漏斗图：询价转化（近 30 天）
 export function InquiryFunnel({
   data,
   className,
@@ -191,7 +188,6 @@ export function InquiryFunnel({
   );
 }
 
-// 条形图：待收款账期分段（逾期红色高亮）
 export function ReceivableAgingBar({
   data,
   total,

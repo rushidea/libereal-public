@@ -27,7 +27,6 @@ export default function DilutionCalculator({ onSave }: DilutionCalculatorProps) 
     { key: 'v2', label: 'V₂', value: v2, setValue: setV2, placeholder: '目标体积', unit: 'mL' },
   ];
 
-  // Derived state: compute dilution result from inputs (pure)
   const result = useMemo<Record<string, number | null>>(() => {
     const c1Val = parseFloat(c1);
     const v1Val = parseFloat(v1);
@@ -45,7 +44,6 @@ export default function DilutionCalculator({ onSave }: DilutionCalculatorProps) 
     return {};
   }, [c1, v1, c2, v2]);
 
-  // Persist history as side-effect when result changes
   useEffect(() => {
     if (Object.keys(result).length === 0) return;
     const c1Val = parseFloat(c1);

@@ -28,11 +28,19 @@ const nextConfig: NextConfig = {
   // 关闭 React strict mode (dev mode) — 修复 input keydown 在 Mac WebKit/Edge 被拦截的 bug
   // 严格 hydration + double-invoke 在 Next 16 + Turbopack + React 19 组合下触发 input 不可交互
   reactStrictMode: false,
-  // 避免部署后浏览器/CDN 长期缓存旧版 HTML 壳（与新版 JS 不匹配导致显示异常）
+  // HTML shells stay uncacheable so a deploy cannot leave browsers/CDNs on an old
+  // document that points at removed hashed chunks. Later rules override this for
+  // public media. /_next/static and /_next/image are excluded: a custom
+  // Cache-Control whose source starts with /_next/ warns and, because it is
+  // applied first, blocks Next from setting its own header. With none set,
+  // production serves /_next/static as `public, max-age=31536000, immutable`
+  // and dev keeps `no-cache, must-revalidate`. /_next/image sets its own TTL.
+  // `/:path*` does not match `/`; homepage revalidate=3600 is unchanged.
   async headers() {
+    const publicAssetCache = 'public, max-age=86400, stale-while-revalidate=604800';
     return [
       {
-        source: '/:path*',
+        source: '/:path((?!_next/static|_next/image).+)',
         headers: [
           { key: 'Cache-Control', value: 'no-store, must-revalidate' },
         ],
@@ -40,13 +48,37 @@ const nextConfig: NextConfig = {
       {
         source: '/video/:path*',
         headers: [
-          { key: 'Cache-Control', value: 'public, max-age=86400, stale-while-revalidate=604800' },
+          { key: 'Cache-Control', value: publicAssetCache },
         ],
       },
       {
-        source: '/images/home/:path*',
+        source: '/images/:path*',
         headers: [
-          { key: 'Cache-Control', value: 'public, max-age=86400, stale-while-revalidate=604800' },
+          { key: 'Cache-Control', value: publicAssetCache },
+        ],
+      },
+      {
+        source: '/fonts/:path*',
+        headers: [
+          { key: 'Cache-Control', value: publicAssetCache },
+        ],
+      },
+      {
+        source: '/brand/:path*',
+        headers: [
+          { key: 'Cache-Control', value: publicAssetCache },
+        ],
+      },
+      {
+        source: '/wechat/:path*',
+        headers: [
+          { key: 'Cache-Control', value: publicAssetCache },
+        ],
+      },
+      {
+        source: '/:file(favicon\\.ico|favicon\\.png|og-image\\.jpg|libereal-wordmark\\.svg|brand-logo-email\\.png|brand-logo-transparent\\.png|footer-logo\\.png)',
+        headers: [
+          { key: 'Cache-Control', value: publicAssetCache },
         ],
       },
       {
@@ -67,8 +99,6 @@ const nextConfig: NextConfig = {
           { key: 'Cache-Control', value: 'public, max-age=300, s-maxage=3600' },
         ],
       },
-      // Hashed /_next/static/* assets already get immutable long-cache headers from
-      // Next.js in production; a custom rule here is ignored and triggers a dev warning.
     ];
   },
   // Allow <Image> to load from these external hosts (news thumbnails, etc.)

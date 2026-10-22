@@ -217,7 +217,6 @@ export default function OrdersPanel() {
                             ))}
                           </div>
 
-                          {/* 产品清单 */}
                           <div>
                             <p className={`mb-2 text-xs font-medium ${uiSurfaces.textSecondary}`}>产品清单</p>
                             <div className="space-y-3">
@@ -263,7 +262,6 @@ export default function OrdersPanel() {
                             </div>
                           </div>
 
-                          {/* 总计 + 付款方式 */}
                           <div className={`flex items-center justify-between border-t pt-4 ${uiSurfaces.border}`}>
                             <span className={`font-medium ${uiSurfaces.titleText}`}>订单总计</span>
                             <span className={`text-xl font-bold ${uiSurfaces.textInteractive}`}>{formatPrice(order.subtotal)}</span>

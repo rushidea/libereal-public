@@ -12,14 +12,12 @@ export default function CartSync() {
   const { data: session, status } = useSession();
   const { syncFromDb } = useCart();
 
-  // When session becomes authenticated, load cart from DB
   useEffect(() => {
     if (status === 'authenticated' && session?.user?.id) {
       syncFromDb();
     }
   }, [status, session?.user?.id, syncFromDb]);
 
-  // When session becomes unauthenticated, clear local cart
   useEffect(() => {
     if (status === 'unauthenticated') {
       syncFromDb();

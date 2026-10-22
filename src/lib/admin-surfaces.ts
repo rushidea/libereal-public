@@ -1,6 +1,5 @@
 import { uiSurfaces } from '@/lib/ui-surfaces';
 
-/** Shared semantic surfaces for admin and points workspaces. */
 export const adminSurfaceClasses = {
   panel: `${uiSurfaces.panel} rounded-brand border-[var(--surface-border)]`,
   panelStrong: `${uiSurfaces.panelStrong} rounded-brand border-[var(--surface-border)]`,

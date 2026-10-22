@@ -106,7 +106,6 @@ export default function BufferCard({
             </div>
           ) : detailData ? (
             <div className="py-4 space-y-4">
-              {/* 浓度选择器 */}
               {hasConcentrationSelector && (
                 <div className={`${uiSurfaces.panelStrong} rounded-brand p-3`}>
                   <div className="flex items-center justify-between mb-2">
@@ -136,7 +135,6 @@ export default function BufferCard({
                 </div>
               )}
 
-              {/* 配方成分 */}
               <div>
                 <h4 className={`mb-2 flex items-center gap-2 text-sm font-semibold ${uiSurfaces.text}`}>
                   <span className="w-6 h-6 rounded-full bg-emerald-100 text-emerald-600 text-xs font-bold flex items-center justify-center">1</span>
@@ -158,7 +156,6 @@ export default function BufferCard({
                 </table>
               </div>
 
-              {/* 配制步骤 */}
               <div>
                 <h4 className={`mb-2 flex items-center gap-2 text-sm font-semibold ${uiSurfaces.text}`}>
                   <span className="w-6 h-6 rounded-full bg-emerald-100 text-emerald-600 text-xs font-bold flex items-center justify-center">2</span>

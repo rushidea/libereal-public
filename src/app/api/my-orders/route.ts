@@ -70,7 +70,6 @@ export async function GET() {
       }),
     ]);
 
-    // Add orderCount to each inquiry
     const inquiryIds = inquiries.map((i) => i.id);
     const orderCounts = inquiryIds.length
       ? await prisma.order.groupBy({

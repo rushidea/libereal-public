@@ -81,7 +81,6 @@ export default function SpectrumChart({
     (window as unknown as Record<string, unknown>).__spectrumSvg = svgRef;
   }, []);
 
-  // 监听 viewport 宽度变化（横竖屏切换、浏览器 resize）实时更新 isMobile
   useEffect(() => {
     const mq = window.matchMedia('(max-width: 639px)');
     const onChange = (event: MediaQueryListEvent) => setIsMobile(event.matches);
@@ -104,10 +103,8 @@ export default function SpectrumChart({
     const svg = d3.select(svgRef.current);
     const container = containerRef.current;
     const width = container.clientWidth || 800;
-    // Mobile 时高度略小 —— legend 已移到 chart 下方 React 渲染，不需要给右侧留空间
     const height = isMobile ? 320 : 340;
 
-    // Mobile 不在 SVG 内画 legend：right margin 缩到 20，腾出空间给光谱曲线
     const margin = { top: 20, right: isMobile ? 20 : 120, bottom: 70, left: 50 };
     const innerWidth = width - margin.left - margin.right;
     const innerHeight = height - margin.top - margin.bottom;
@@ -253,8 +250,6 @@ export default function SpectrumChart({
         .attr('stroke-linejoin', 'round');
     });
 
-    // Legend：桌面端在 SVG 右侧绘制；移动端跳过，由下方 React 组件渲染
-    // （移动端 SVG 右侧空间宝贵，光谱曲线需要更多横向空间）
     if (!isMobile) {
       const legendX = innerWidth + 15;
       const legend = g.append('g')
@@ -425,8 +420,6 @@ export default function SpectrumChart({
         <svg ref={svgRef} style={{ width: '100%', height: '100%' }} />
       </div>
       {isMobile && spectra.length > 0 && (
-        // 移动端 SVG legend 占位已让给光谱曲线 —— 这里 React 渲染 flex-wrap 染料图例
-        // 每个 chip：实线（Em）+ 虚线（Ex）+ 染料缩写 + 通道
         <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1.5 px-1 text-xs">
           {spectra.map((spectrum) => (
             <div key={spectrum.id} className="flex items-center gap-1.5">

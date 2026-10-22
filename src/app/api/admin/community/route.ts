@@ -89,13 +89,11 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: 'Invalid action' }, { status: 400 });
     }
 
-    // Look up author email for notification
     const author = await prisma.user.findUnique({
       where: { id: recipe.userId },
       select: { email: true },
     });
 
-    // Update recipe
     await prisma.userCreatedRecipe.update({
       where: { id: recipeId },
       data: {
@@ -106,7 +104,6 @@ export async function POST(request: NextRequest) {
       },
     });
 
-    // Send notification to user
     if (author) {
       let notifTitle = '';
       let notifContent = '';

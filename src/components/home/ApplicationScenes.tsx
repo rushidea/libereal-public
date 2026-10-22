@@ -260,8 +260,6 @@ export default function ApplicationScenes() {
   );
   const sceneSlotCount = isWideMobile ? WIDE_MOBILE_SCENE_SLOT_COUNT : BASE_SCENE_SLOT_COUNT;
   const [paused, setPaused] = useState(false);
-  // Each slot has an independent scene + a rotation key (counter)
-  // The key changes when the scene rotates in, triggering the enter animation
   const [rotation, setRotation] = useState(() => ({
     slots: allScenes.slice(0, WIDE_MOBILE_SCENE_SLOT_COUNT).map((scene) => ({
       scene,

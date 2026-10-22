@@ -167,7 +167,6 @@ export default function InquiryDetailPage({ params }: { params: Promise<{ id: st
       <AdaptiveHeader />
 
       <main className="flex-1 max-w-6xl mx-auto w-full px-4 py-8 space-y-5">
-        {/* Header */}
           <div className="flex flex-wrap items-center gap-3">
           <Link href="/account/inquiries" className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700/50">
             <ArrowLeft className="w-5 h-5 text-gray-600 dark:text-gray-400" />
@@ -210,7 +209,6 @@ export default function InquiryDetailPage({ params }: { params: Promise<{ id: st
         </section>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
-          {/* Left: Contact Info */}
           <div className="lg:col-span-1 space-y-5">
             <div className="bg-white dark:bg-slate-200/65 rounded-2xl shadow-sm border border-gray-100 dark:border-slate-400 p-5">
               <h2 className="font-semibold text-gray-800 dark:text-slate-900 mb-4 flex items-center gap-2">
@@ -319,7 +317,6 @@ export default function InquiryDetailPage({ params }: { params: Promise<{ id: st
               )}
             </div>
 
-            {/* Operation Logs */}
             {parsedLogs.length > 0 && (
               <div className="bg-white dark:bg-slate-200/65 rounded-2xl shadow-sm border border-gray-100 dark:border-slate-400 p-5">
                 <h2 className="font-semibold text-gray-800 dark:text-slate-900 mb-4 flex items-center gap-2">
@@ -346,7 +343,6 @@ export default function InquiryDetailPage({ params }: { params: Promise<{ id: st
             )}
           </div>
 
-          {/* Right: Item List */}
           <div className="lg:col-span-2">
             <div className="bg-white dark:bg-slate-200/65 rounded-2xl shadow-sm border border-gray-100 dark:border-slate-400 overflow-hidden">
               <div className="px-5 py-4 border-b border-gray-100 dark:border-slate-400 bg-gray-50/50 dark:bg-gray-700/30">

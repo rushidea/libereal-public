@@ -22,7 +22,6 @@ export async function GET(req: NextRequest) {
       include: { user: { select: { name: true, email: true } } },
     });
 
-    // Reshape to flat structure with userName/userEmail
     const flat = redemptions.map((r) => ({
       ...r,
       userName: r.user?.name ?? null,

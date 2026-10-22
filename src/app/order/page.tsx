@@ -583,7 +583,6 @@ export default function OrderCheckoutPage() {
           </div>
         )}
 
-        {/* Product list */}
         <div className={`mb-6 rounded-xl p-5 ${uiSurfaces.panelStrong}`}>
           <h2 className="mb-4 flex items-center gap-2 font-semibold text-gray-900 dark:text-slate-900">
             <Package className="w-5 h-5 text-brand-600" />
@@ -674,7 +673,6 @@ export default function OrderCheckoutPage() {
                 <span className="text-brand-700">- {formatPrice(promoDiscount)}</span>
               </div>
             )}
-            {/* 优惠券 */}
             {usableCoupons.length > 0 && (
               <div className="mt-3 space-y-1">
                 <p className="text-xs text-gray-500 dark:text-slate-600">选择优惠券</p>
@@ -752,7 +750,6 @@ export default function OrderCheckoutPage() {
           </div>
         </div>
 
-        {/* Promotion and fulfillment review */}
         <section aria-label="活动与履约复核" className={`mb-6 rounded-xl p-5 ${uiSurfaces.panelStrong}`}>
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
@@ -818,7 +815,6 @@ export default function OrderCheckoutPage() {
           </div>
         </section>
 
-        {/* Address section */}
         <div className={`mb-6 rounded-xl p-5 ${uiSurfaces.panelStrong}`}>
           <h2 className="mb-4 flex items-center gap-2 font-semibold text-gray-900 dark:text-slate-900">
             <MapPin className="w-5 h-5 text-brand-600" />
@@ -827,7 +823,6 @@ export default function OrderCheckoutPage() {
 
           {!showNewAddress ? (
             <>
-              {/* Saved addresses */}
               {addresses.length > 0 ? (
                 <div className="space-y-3 mb-4">
                   {addresses.map(addr => (
@@ -876,7 +871,6 @@ export default function OrderCheckoutPage() {
             </>
           ) : (
             <>
-              {/* New address form */}
               <div className="space-y-4">
                 <div className="grid grid-cols-2 gap-4">
                   <div>
@@ -937,7 +931,6 @@ export default function OrderCheckoutPage() {
           )}
         </div>
 
-        {/* Points redeem */}
         <div className={`mb-8 rounded-xl p-5 ${uiSurfaces.panelStrong}`}>
           <h2 className="mb-4 flex items-center gap-2 font-semibold text-gray-900 dark:text-slate-900">
             <Coins className="w-5 h-5 text-brand-600" />
@@ -1006,7 +999,6 @@ export default function OrderCheckoutPage() {
           )}
         </div>
 
-        {/* Payment method */}
         <div className={`mb-8 rounded-xl p-5 ${uiSurfaces.panelStrong}`}>
           <h2 className="mb-4 flex items-center gap-2 font-semibold text-gray-900 dark:text-slate-900">
             <CreditCard className="w-5 h-5 text-brand-600" />
@@ -1047,7 +1039,6 @@ export default function OrderCheckoutPage() {
           )}
         </div>
 
-        {/* Submit button */}
         <button
           onClick={handleSubmit}
           disabled={submitting || pricingLoading || (spotItems.length > 0 && !pricingPreview) || (!selectedAddressId && !showNewAddress) || !paymentMethod}
@@ -1064,7 +1055,6 @@ export default function OrderCheckoutPage() {
       <SiteFooter />
       <MobileBottomNav />
 
-      {/* Inquiry Confirmation Modal */}
       {showInquiryModal && (
         <div className="fixed inset-0 z-site-overlay flex justify-center overflow-y-auto bg-black/50 px-4 pb-4 pt-[calc(var(--site-header-height)+var(--site-header-gap))]">
           <div className={`flex max-h-[80vh] w-full max-w-md flex-col overflow-hidden rounded-2xl shadow-xl ${uiSurfaces.panelStrong}`}>

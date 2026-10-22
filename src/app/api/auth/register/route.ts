@@ -159,7 +159,6 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "缺少必填信息" }, { status: 400 });
     }
 
-    // === 注册资料结构化字段必填校验 ===
     // 学校/学院/学系/楼号/PI实验室 注册后锁定，必须如实填写
     if (!institutionProfile.institutionType || !institutionProfile.institutionName || !institutionProfile.institutionUnit || !institutionProfile.department || !institutionProfile.institutionFacility || !institutionProfile.piLab) {
       return NextResponse.json({
@@ -192,7 +191,6 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // Check IP registration limit
     const { allowed } = await rateLimitAsync(`register:${ip}`);
     if (!allowed) {
       return NextResponse.json(
@@ -362,7 +360,6 @@ export async function POST(req: NextRequest) {
       },
     });
 
-    // Notify admin of new user registration
     await prisma.notification.create({
       data: {
         email: 'admin',

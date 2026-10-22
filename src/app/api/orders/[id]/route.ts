@@ -311,7 +311,6 @@ export async function PATCH(
       }
     }
 
-    // Status-change notification
     if (body.status && body.status !== order.status) {
       const statusLabel = (ORDER_STATUS_LABELS as Record<string, string>)[body.status] || body.status;
       await prisma.notification.create({

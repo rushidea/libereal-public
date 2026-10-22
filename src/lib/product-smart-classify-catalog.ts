@@ -4,8 +4,6 @@ import {
   classifyProduct,
   type ProductClassifyExample,
   type ProductClassifyIndex,
-  type ProductClassifyInput,
-  type ProductClassifyResult,
 } from '@/data/product-smart-classify';
 
 const EXAMPLE_SELECT = {
@@ -28,14 +26,6 @@ export async function loadProductClassifyIndex(options?: {
     select: EXAMPLE_SELECT,
   });
   return buildProductClassifyIndex(examples as ProductClassifyExample[]);
-}
-
-export async function classifyCatalogProduct(
-  input: ProductClassifyInput,
-  index?: ProductClassifyIndex,
-): Promise<ProductClassifyResult> {
-  const resolved = index ?? await loadProductClassifyIndex(input.brand ? { brand: input.brand } : undefined);
-  return classifyProduct(input, { index: resolved });
 }
 
 export const MAX_CLASSIFY_PREVIEW = 200;

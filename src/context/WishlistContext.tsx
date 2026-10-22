@@ -44,7 +44,6 @@ export function WishlistProvider({ children }: { children: ReactNode }) {
   const [isLoading, setIsLoading] = useState(true);
   const [isSyncing, setIsSyncing] = useState(false);
 
-  // Initial load from localStorage
   useEffect(() => {
     setWishlist(loadFromLocal());
     setIsLoading(false);
@@ -84,7 +83,6 @@ export function WishlistProvider({ children }: { children: ReactNode }) {
     }
   }, [status, session?.user?.id]);
 
-  // Sync from DB when authenticated
   const syncFromDb = useCallback(async () => {
     if (status !== 'authenticated' || !session?.user?.id) return;
     setIsSyncing(true);
@@ -101,7 +99,6 @@ export function WishlistProvider({ children }: { children: ReactNode }) {
     }
   }, [status, session?.user?.id]);
 
-  // When session changes
   useEffect(() => {
     if (status === 'authenticated' && session?.user?.id) {
       flushLocalToDb().then(() => syncFromDb());
@@ -113,9 +110,7 @@ export function WishlistProvider({ children }: { children: ReactNode }) {
   }, [status, session?.user?.id, flushLocalToDb, syncFromDb]);
 
   const addToWishlist = useCallback(async (product: Product) => {
-    // Optimistic local update
     setWishlist(prev => prev.some(p => p.id === product.id) ? prev : [...prev, product]);
-    // Sync to DB if authenticated
     if (status === 'authenticated') {
       try {
         await fetch('/api/wishlist', {
@@ -130,9 +125,7 @@ export function WishlistProvider({ children }: { children: ReactNode }) {
   }, [status]);
 
   const removeFromWishlist = useCallback(async (productId: string) => {
-    // Optimistic local update
     setWishlist(prev => prev.filter(p => p.id !== productId));
-    // Sync to DB if authenticated
     if (status === 'authenticated') {
       try {
         await fetch(`/api/wishlist/${productId}`, { method: 'DELETE' });

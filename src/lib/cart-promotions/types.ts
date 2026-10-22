@@ -14,12 +14,10 @@
 /** 活动类型枚举。新增类型时在此登记 + 新建 strategies/<type>.ts。 */
 export type RuleType = 'addon' | 'gift' | 'bundle' | 'buy-n-get-m' | 'fixed-price' | 'stack-discount' | 'coupon';
 
-/** 所有规则共有的基础字段 */
 export interface BaseRuleConfig {
   /** 规则唯一 id（同时用于购物车促销标记 promoMark.ruleId） */
   id: string;
   type: RuleType;
-  /** 活动名称 */
   name: string;
   /** 是否启用（管理员下架 = false，视为活动终止） */
   enabled: boolean;
@@ -182,7 +180,6 @@ export interface CouponRuleConfig extends BaseRuleConfig {
   scope?: import('@/lib/coupon-scope').CouponScope;
 }
 
-/** 规则配置联合类型 */
 export type RuleConfig =
   | AddonRuleConfig
   | GiftRuleConfig

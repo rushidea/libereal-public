@@ -261,7 +261,6 @@ export default function AdminUsersPage() {
         </div>
       )}
 
-      {/* Stats Overview */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
         <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 flex items-center gap-3">
           <div className="w-9 h-9 bg-amber-100 rounded-full flex items-center justify-center">
@@ -292,7 +291,6 @@ export default function AdminUsersPage() {
         </div>
       </div>
 
-      {/* Search */}
       <div className="flex items-center gap-3">
         <div className="relative flex-1 max-w-md">
           <Search className="w-4 h-4 text-gray-600 absolute left-3 top-1/2 -translate-y-1/2" />
@@ -411,7 +409,6 @@ export default function AdminUsersPage() {
       </div>
       )}
 
-      {/* Selected users actions */}
       {visibleSelectedIds.length > 0 && (
         <div className="bg-brand-50 border border-brand-200 rounded-xl px-4 py-3 flex items-center gap-3 flex-wrap">
           <span className="text-sm text-brand-700 font-medium">

@@ -9,7 +9,6 @@ test.describe('Homepage', () => {
   test('loads with libereal branding', async ({ page }) => {
     await page.goto('/');
     await expect(page).toHaveTitle(/libereal/i);
-    // Logo in header (SVG wordmark)
     await expect(page.locator('header').getByAltText('libereal').first()).toBeVisible();
   });
 
@@ -31,7 +30,6 @@ test.describe('Products page', () => {
   test('loads products grid', async ({ page }) => {
     await page.goto('/products');
     await page.waitForLoadState('networkidle');
-    // 至少有一个产品卡片或 grid container
     const grid = page.locator('main').first();
     await expect(grid).toBeVisible();
   });
@@ -39,14 +37,12 @@ test.describe('Products page', () => {
   test('filter by category 一抗 (antibody) works', async ({ page }) => {
     await page.goto('/products?cat=一抗');
     await page.waitForLoadState('networkidle');
-    // 页面应包含分类标识
     await expect(page.locator('main')).toContainText(/一抗|抗体/i);
   });
 
   test('search by catalog number shows results', async ({ page }) => {
     await page.goto('/products?q=MA121315');
     await page.waitForLoadState('networkidle');
-    // 结果页应至少有 1 个匹配，或显示"无结果"提示
     const main = page.locator('main').first();
     await expect(main).toBeVisible();
   });
@@ -57,7 +53,6 @@ test.describe('Product detail page', () => {
     // 用 dev.db 里真实的产品 catalog number
     await page.goto('/products/MA121315');
     await page.waitForLoadState('domcontentloaded');
-    // 详情页应有产品名
     const main = page.locator('main').first();
     await expect(main).toBeVisible();
   });

@@ -31,9 +31,7 @@ const DB_PATH = process.env.DATABASE_PATH || path.join(process.cwd(), 'prisma', 
 
 const db = new Database(DB_PATH);
 
-// ============================================================
 // 种属提取
-// ============================================================
 
 // Biosharp 货号前缀 → 种属
 const BIOSHARP_PREFIX_SPECIES = {
@@ -102,9 +100,7 @@ function extractSpecies(name, catalogNumber, brand) {
   return '通用';
 }
 
-// ============================================================
 // 三级分类 (subcategory)
-// ============================================================
 
 function classifySubcategory(name, brand) {
   const lower = name.toLowerCase();
@@ -145,9 +141,7 @@ function classifySubcategory(name, brand) {
   return '夹心法ELISA';
 }
 
-// ============================================================
 // 四级-应用 (type)
-// ============================================================
 
 function classifyType(name) {
   const lower = name.toLowerCase();
@@ -232,9 +226,7 @@ function classifyType(name) {
   return '其他检测试剂盒';
 }
 
-// ============================================================
 // 主逻辑
-// ============================================================
 
 const products = db.prepare(`
   SELECT id, catalogNumber, name, brand, subcategory, type, speciesReactivity

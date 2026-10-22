@@ -40,14 +40,6 @@ export function brandPageHref(dbBrand: string): string {
   return `/brands/${encodeURIComponent(dbBrand)}`;
 }
 
-export const featuredBrands: { dbName: string; color: string }[] = [
-  { dbName: 'Abcepta', color: 'from-emerald-500 to-teal-500' },
-  { dbName: 'Thermo Fisher', color: 'from-blue-500 to-cyan-500' },
-  { dbName: 'Abcam', color: 'from-red-500 to-pink-500' },
-  { dbName: 'Sigma-Aldrich', color: 'from-amber-500 to-orange-500' },
-  { dbName: 'CST', color: 'from-violet-500 to-purple-500' },
-];
-
 export const brandDescriptions: Record<string, BrandDescription> = {
   'Abcepta': {
     name: 'Abcepta',

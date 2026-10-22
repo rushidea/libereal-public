@@ -1,13 +1,9 @@
 import { readFile } from 'node:fs/promises';
 import { getWechatAccessToken, getWechatOfficialAccountConfig } from '@/lib/wechat-jssdk';
 
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
-
 export interface WechatArticle {
   title: string;
-  content: string; // HTML
+  content: string;
   thumbMediaId: string;
   author?: string;
   digest?: string;
@@ -28,10 +24,6 @@ export interface CreateDraftResult {
 export interface PublishResult {
   publishId: string;
 }
-
-// ---------------------------------------------------------------------------
-// API helpers
-// ---------------------------------------------------------------------------
 
 const WECHAT_API_BASE = 'https://api.weixin.qq.com/cgi-bin';
 
@@ -55,10 +47,7 @@ async function wechatPost(path: string, body: unknown, searchParams?: Record<str
   return data;
 }
 
-// ---------------------------------------------------------------------------
-// Upload cover image as permanent material (material/add_material?type=image)
 // Returns { media_id, url } — media_id is used as thumb_media_id in draft
-// ---------------------------------------------------------------------------
 
 export async function uploadCoverImage(imagePath: string): Promise<UploadImageResult> {
   const accessToken = await getWechatAccessToken();
@@ -80,19 +69,12 @@ export async function uploadCoverImage(imagePath: string): Promise<UploadImageRe
   return { mediaId: data.media_id, url: data.url ?? '' };
 }
 
-// ---------------------------------------------------------------------------
 // Upload image for use inside article content (media/uploadimg, same endpoint)
-// Returns the URL to embed in HTML
-// ---------------------------------------------------------------------------
 
 export async function uploadContentImage(imagePath: string): Promise<string> {
   const result = await uploadCoverImage(imagePath);
   return result.url;
 }
-
-// ---------------------------------------------------------------------------
-// Create draft (draft/add)
-// ---------------------------------------------------------------------------
 
 export async function createDraft(article: WechatArticle): Promise<CreateDraftResult> {
   const data = await wechatPost('/draft/add', {
@@ -112,35 +94,20 @@ export async function createDraft(article: WechatArticle): Promise<CreateDraftRe
   return { mediaId: (data as { media_id: string }).media_id };
 }
 
-// ---------------------------------------------------------------------------
-// Publish draft (freepublish/submit)
-// ---------------------------------------------------------------------------
-
 export async function publishDraft(mediaId: string): Promise<PublishResult> {
   const data = await wechatPost('/freepublish/submit', { media_id: mediaId });
   return { publishId: (data as { publish_id: string }).publish_id };
 }
 
-// ---------------------------------------------------------------------------
-// Get draft list (draft/batchget)
-// ---------------------------------------------------------------------------
-
 export async function getDraftList(offset = 0, count = 20): Promise<unknown> {
   return wechatPost('/draft/batchget', { offset, count, no_content: 1 });
 }
-
-// ---------------------------------------------------------------------------
-// Delete draft (draft/delete)
-// ---------------------------------------------------------------------------
 
 export async function deleteDraft(mediaId: string): Promise<void> {
   await wechatPost('/draft/delete', { media_id: mediaId });
 }
 
-// ---------------------------------------------------------------------------
-// Markdown → WeChat HTML converter
 // WeChat strips external CSS, so all styles must be inline.
-// ---------------------------------------------------------------------------
 
 const STYLE_P = 'margin:0 0 1em;padding:0;font-size:16px;line-height:1.8;color:#3f3f3f;letter-spacing:0.5px;';
 const STYLE_H2 = 'margin:1.8em 0 0.6em;padding:0;font-size:19px;font-weight:bold;color:#1a1a1a;border-bottom:1px solid #e8e8e8;padding-bottom:6px;';
@@ -162,13 +129,10 @@ function escapeHtml(text: string): string {
 
 function processInline(text: string): string {
   let result = escapeHtml(text);
-  // Bold: **text**
   result = result.replace(/\*\*(.+?)\*\*/g, `<strong style="${STYLE_STRONG}">$1</strong>`);
   // Italic: *text* (but not ** which is bold)
   result = result.replace(/(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)/g, '<em>$1</em>');
-  // Inline code: `text`
   result = result.replace(/`(.+?)`/g, '<code style="background:#f0f0f0;padding:2px 5px;border-radius:3px;font-size:14px;">$1</code>');
-  // Links: [text](url)
   result = result.replace(/\[(.+?)\]\((https?:\/\/[^\s)]+)\)/g, `<a href="$2" style="${STYLE_A}">$1</a>`);
   return result;
 }
@@ -216,10 +180,6 @@ export function markdownToWechatHtml(md: string): string {
     // Skip the first H1 (it's the title, handled separately)
     if (i === 0 && trimmed.startsWith('# ')) continue;
 
-    // Skip metadata blockquote (> 主题：...) — we'll skip the first blockquote
-    // Actually, let's handle all blockquotes uniformly
-
-    // Horizontal rule
     if (/^---+$/.test(trimmed) || /^\*\*\*+$/.test(trimmed)) {
       closeList();
       closeBlockquote();
@@ -228,7 +188,6 @@ export function markdownToWechatHtml(md: string): string {
       continue;
     }
 
-    // Heading 2
     if (trimmed.startsWith('## ')) {
       closeList();
       closeBlockquote();
@@ -237,7 +196,6 @@ export function markdownToWechatHtml(md: string): string {
       continue;
     }
 
-    // Heading 3
     if (trimmed.startsWith('### ')) {
       closeList();
       closeBlockquote();
@@ -246,7 +204,6 @@ export function markdownToWechatHtml(md: string): string {
       continue;
     }
 
-    // Blockquote
     if (trimmed.startsWith('> ')) {
       closeList();
       if (!inBlockquote) {
@@ -257,7 +214,6 @@ export function markdownToWechatHtml(md: string): string {
       continue;
     }
 
-    // Unordered list
     if (/^[-*]\s+/.test(trimmed)) {
       closeBlockquote();
       closeFooter();
@@ -271,7 +227,6 @@ export function markdownToWechatHtml(md: string): string {
       continue;
     }
 
-    // Ordered list
     if (/^\d+\.\s+/.test(trimmed)) {
       closeBlockquote();
       closeFooter();
@@ -285,7 +240,6 @@ export function markdownToWechatHtml(md: string): string {
       continue;
     }
 
-    // Empty line
     if (trimmed === '') {
       closeList();
       closeBlockquote();
@@ -306,7 +260,6 @@ export function markdownToWechatHtml(md: string): string {
       continue;
     }
 
-    // Regular paragraph
     closeList();
     closeBlockquote();
     closeFooter();
@@ -320,21 +273,16 @@ export function markdownToWechatHtml(md: string): string {
   return htmlParts.join('\n');
 }
 
-// ---------------------------------------------------------------------------
-// Parse article markdown file
-// ---------------------------------------------------------------------------
-
 export interface ParsedArticle {
   title: string;
   digest: string;
   contentMd: string; // markdown body (without title and metadata)
-  html: string; // converted HTML
+  html: string;
 }
 
 export function parseArticleMarkdown(md: string): ParsedArticle {
   const lines = md.split('\n');
 
-  // Extract title from first # heading
   let title = '';
   let startIdx = 0;
   for (let i = 0; i < lines.length; i++) {
@@ -352,7 +300,6 @@ export function parseArticleMarkdown(md: string): ParsedArticle {
     const trimmed = lines[i].trim();
     if (trimmed.startsWith('> ')) {
       const meta = trimmed.slice(2);
-      // Try to extract a useful digest from the metadata
       const parts = meta.split('|').map(p => p.trim());
       for (const part of parts) {
         if (part.startsWith('字数')) continue;
@@ -372,7 +319,6 @@ export function parseArticleMarkdown(md: string): ParsedArticle {
     }
   }
 
-  // Reconstruct body markdown (from after metadata to end)
   const bodyMd = lines.slice(startIdx).join('\n').trim();
   const html = markdownToWechatHtml(lines.slice(startIdx).join('\n'));
 

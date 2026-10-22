@@ -5,7 +5,7 @@ export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
     const type = searchParams.get('type'); // 'buffer' | 'protocol' | null
-    const id = searchParams.get('id'); // single recipe detail
+    const id = searchParams.get('id');
 
     if (id) {
       const recipe = await prisma.userCreatedRecipe.findFirst({

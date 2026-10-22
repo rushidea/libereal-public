@@ -10,7 +10,6 @@
 export type WechatArticleMeta = {
   /** 站内地址 slug，等于去掉扩展名的文件名，例如 001-freezer-archaeology。 */
   slug: string;
-  /** 文章标题。 */
   title: string;
   /** 发布日期，ISO 日期字符串（YYYY-MM-DD），用于排序与结构化数据。 */
   date: string;

@@ -43,7 +43,7 @@ export async function POST(req: NextRequest) {
   }
 
   const outTradeNo = `PT${Date.now()}${Math.random().toString(36).slice(2, 8)}`.slice(0, 64);
-  const amount = points; // 1:1
+  const amount = points;
 
   const topup = await prisma.pointsTopup.create({
     data: {

@@ -234,7 +234,6 @@ function AdminDashboardContent() {
         )}
       </div>
 
-      {/* 今日待处理 */}
       <section>
         <h2 className="text-lg font-semibold text-gray-800 mb-3">今日待处理</h2>
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3 sm:gap-4">
@@ -254,7 +253,6 @@ function AdminDashboardContent() {
         </div>
       </section>
 
-      {/* 经营概览 */}
       <section>
         <h2 className="text-lg font-semibold text-gray-800 mb-3">经营概览</h2>
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
@@ -271,7 +269,6 @@ function AdminDashboardContent() {
         </div>
       </section>
 
-      {/* 数据洞察 */}
       {analytics?.insights && can('orders.read') && (
         <section>
           <h2 className="text-lg font-semibold text-gray-800 mb-3">数据洞察</h2>
@@ -295,7 +292,6 @@ function AdminDashboardContent() {
         </section>
       )}
 
-      {/* 最近动态 */}
       {analytics?.activity && analytics.activity.length > 0 && can('audit.read') && (
         <section>
           <h2 className="text-lg font-semibold text-gray-800 mb-3">最近动态</h2>

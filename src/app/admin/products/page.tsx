@@ -33,7 +33,6 @@ interface AdminProduct {
   target?: string;
   subBrand?: string;
 
-  // === P2-1: 生物医药专业字段 ===
   leadTime?: string;
   storageTemp?: string;
   storageBuffer?: string;
@@ -130,7 +129,6 @@ function ProductsPanel() {
   const categories = productCategories.map((category) => category.name);
   const brands = ['贤至生物', 'Fisher BioReagents', 'Thermo Fisher', 'Abcam', 'Sigma-Aldrich', 'Fisher', 'CST'];
 
-  // Fetch products from API
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -599,7 +597,6 @@ function ProductsPanel() {
                   )}
                 </div>
 
-                {/* === P2-1: 生物医药专业字段 === */}
                 <div className="col-span-2 mt-2 mb-1">
                   <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider">生物医药专业字段</div>
                 </div>
