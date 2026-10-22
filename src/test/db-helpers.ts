@@ -362,8 +362,10 @@ export function getTestDb(): Database.Database {
       pointsRefundedPersonal INTEGER NOT NULL DEFAULT 0,
       pointsRefundedGroup INTEGER NOT NULL DEFAULT 0,
       pointsRefundedCash REAL NOT NULL DEFAULT 0,
-      auto_close_at DATETIME
+      auto_close_at DATETIME,
+      inquiry_order_seq INTEGER
     );
+    CREATE UNIQUE INDEX IF NOT EXISTS Order_inquiryId_inquiryOrderSeq_key ON "Order"(inquiryId, inquiry_order_seq);
     CREATE INDEX IF NOT EXISTS Order_archivedAt_createdAt_idx ON "Order"(archivedAt, createdAt);
     CREATE INDEX IF NOT EXISTS Order_archivedAt_status_createdAt_idx ON "Order"(archivedAt, status, createdAt);
     CREATE TABLE IF NOT EXISTS user_devices (
@@ -838,6 +840,8 @@ export function getTestDb(): Database.Database {
   ensureColumn(_db, 'Coupon', 'scopeType', `scopeType TEXT NOT NULL DEFAULT 'all'`);
   ensureColumn(_db, 'Coupon', 'scopeTargets', `scopeTargets TEXT NOT NULL DEFAULT '[]'`);
   ensureColumn(_db, 'Order', 'pointsRefundedCash', 'pointsRefundedCash REAL NOT NULL DEFAULT 0');
+  ensureColumn(_db, 'Order', 'inquiry_order_seq', 'inquiry_order_seq INTEGER');
+  _db.exec('CREATE UNIQUE INDEX IF NOT EXISTS Order_inquiryId_inquiryOrderSeq_key ON "Order"(inquiryId, inquiry_order_seq)');
   ensureColumn(_db, 'PointsRedemption', 'pointsReturned', 'pointsReturned INTEGER NOT NULL DEFAULT 0');
   return _db;
 }

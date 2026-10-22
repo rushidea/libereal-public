@@ -3,6 +3,7 @@ import {
   INQUIRY_STATUS_LABELS,
   INQUIRY_STATUSES,
   PENDING_INQUIRY_STATUSES,
+  inquiryQuoteAcceptBlock,
   inquiryStatusTransitionError,
 } from '@/lib/inquiry-status';
 import { QUOTE_EXPIRED_INQUIRY_STATUS } from '@/lib/quote-expiry';
@@ -67,5 +68,19 @@ describe('inquiryStatusTransitionError', () => {
     expect(inquiryStatusTransitionError('pending_quote', { status: 'closed' }, null)).toMatch(/询价状态无效/);
     expect(inquiryStatusTransitionError('已确认', 'pending_quote', null)).toMatch(/不在可流转范围内/);
     expect(INQUIRY_STATUSES).not.toContain('expired');
+  });
+});
+
+describe('inquiryQuoteAcceptBlock', () => {
+  it('allows another confirmation only while the inquiry is quote_sent and not archived', () => {
+    expect(inquiryQuoteAcceptBlock({ status: 'quote_sent', archivedAt: null })).toBeNull();
+  });
+
+  it('blocks declined, closed, archived, and any other status', () => {
+    expect(inquiryQuoteAcceptBlock({ status: 'declined', archivedAt: null })).toMatchObject({ code: 'INQUIRY_DECLINED' });
+    expect(inquiryQuoteAcceptBlock({ status: 'closed', archivedAt: null })).toMatchObject({ code: 'INQUIRY_CLOSED' });
+    expect(inquiryQuoteAcceptBlock({ status: 'quote_sent', archivedAt: '2026-10-22T00:00:00.000Z' })).toMatchObject({ code: 'INQUIRY_ARCHIVED' });
+    expect(inquiryQuoteAcceptBlock({ status: 'quote_expired', archivedAt: null })).toMatchObject({ code: 'INQUIRY_NOT_ACCEPTABLE' });
+    expect(inquiryQuoteAcceptBlock({ status: 'pending_quote', archivedAt: null })).toMatchObject({ code: 'INQUIRY_NOT_ACCEPTABLE' });
   });
 });

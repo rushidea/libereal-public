@@ -155,6 +155,35 @@ export function inquiryQuotePublishBlock(facts: InquiryQuotePublishFacts): Inqui
   return null;
 }
 
+export type InquiryQuoteAcceptBlock = {
+  code: 'INQUIRY_DECLINED' | 'INQUIRY_CLOSED' | 'INQUIRY_ARCHIVED' | 'INQUIRY_NOT_ACCEPTABLE';
+  error: string;
+};
+
+/**
+ * 报价仍是已发送时，询价本身是否还能继续分批确认。
+ * 返回 null 表示询价处于 quote_sent 且未归档，可以再生成一张订单。
+ * 过期由报价的 status / validUntil 另行拒绝，不在这里改写。
+ */
+export function inquiryQuoteAcceptBlock(facts: {
+  status: string;
+  archivedAt?: Date | string | null;
+}): InquiryQuoteAcceptBlock | null {
+  if (facts.archivedAt != null) {
+    return { code: 'INQUIRY_ARCHIVED', error: '询价已归档，不能继续确认' };
+  }
+  if (facts.status === 'declined') {
+    return { code: 'INQUIRY_DECLINED', error: '询价已放弃，不能继续确认' };
+  }
+  if (facts.status === 'closed') {
+    return { code: 'INQUIRY_CLOSED', error: '询价已关闭，不能继续确认' };
+  }
+  if (facts.status !== 'quote_sent') {
+    return { code: 'INQUIRY_NOT_ACCEPTABLE', error: '当前询价不能确认报价' };
+  }
+  return null;
+}
+
 export function pendingInquiryWhere(): Prisma.InquiryWhereInput {
   return { status: { in: [...PENDING_INQUIRY_STATUSES] }, archivedAt: null };
 }

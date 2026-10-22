@@ -61,9 +61,14 @@ describe('order number', () => {
     await expect(allocateOrderNumber(db, beijingEarlyMorning)).resolves.toBe('ORD-20261021-008');
     await expect(allocateOrderNumber(memoryOrders([]), shanghaiMidnight)).resolves.toBe('ORD-20261021-001');
     await expect(allocateOrderNumber(memoryOrders(['ORD-20261021-999', 'ORD-20261021-1000']), beijingEarlyMorning)).resolves.toBe('ORD-20261021-1001');
+    await expect(allocateOrderNumber(memoryOrders([
+      'INQ-7K3M9Q2P-K7MP',
+      'id_68011acc-6134-4f0a-9c2b-111111111111-K7MP',
+    ]), shanghaiMidnight)).resolves.toBe('ORD-20261021-001');
   });
 
-  it('keeps cart, quote acceptance, and admin creates on the same sequence', async () => {
+  it('keeps every caller of the shared allocator on one Shanghai-day sequence', async () => {
+    // 购物车和后台代客下单仍走这个分配器。接受报价改用询价号加短后缀，不再占用当日序号。
     const ids = ['ORD-20261020-009'];
     const db = memoryOrders(ids);
     const cart = await allocateOrderNumber(db, beijingEarlyMorning);

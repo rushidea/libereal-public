@@ -532,6 +532,8 @@ model Order {
   id              String   @id @default(cuid())
   inquiryId       String?  // 外键 → Inquiry.id (可选，用于直接购买)
   inquiry         Inquiry? @relation(fields: [inquiryId], references: [id])
+  // 同一询价内第几次确认。只做映射，不写进公开订单号。购物车订单和本字段加入前的订单为空。
+  inquiryOrderSeq Int?     @map("inquiry_order_seq")
   organizationId   String?  @map("organization_id")
   ownerScope       String   @default("personal") @map("owner_scope") // personal | organization
   email           String
@@ -580,6 +582,7 @@ model Order {
   pointsRefundedCash   Float    @default(0) // 已计入积分退款比例的现金（元）
   researchGroup       ResearchGroup? @relation(fields: [pointsGroupId], references: [id], onDelete: SetNull)
 
+  @@unique([inquiryId, inquiryOrderSeq])
   @@index([email])
   @@index([inquiryId])
   @@index([createdAt])

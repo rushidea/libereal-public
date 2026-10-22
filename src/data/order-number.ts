@@ -55,7 +55,8 @@ type OrderNumberClient = Pick<Prisma.TransactionClient, 'order'> | Pick<PrismaCl
 
 /**
  * 在调用方事务内查询当日最高序号并生成下一个订单号。
- * 购物车下单、接受报价、后台/代客下单都调用这一函数。
+ * 购物车下单和后台代客下单共用这一上海日序号。
+ * 接受报价生成的订单不走这里：订单号用询价号加随机短后缀，既看得到关联，又不是连续整数，也不占用当日序号。
  */
 export async function allocateOrderNumber(db: OrderNumberClient, now: Date = new Date()): Promise<string> {
   const prefix = orderNumberPrefix(now);

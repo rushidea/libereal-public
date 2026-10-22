@@ -4,8 +4,15 @@ import { useEffect, useState, type MouseEvent } from 'react';
 import { Check, ChevronDown, ChevronUp, Copy } from 'lucide-react';
 import { uiSurfaces } from '@/lib/ui-surfaces';
 
-/** Inquiry ids are `id_` plus a UUID. Other prefixes (orders, quotes, users) are left as plain text. */
-const INQUIRY_ID_SOURCE = 'id_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}';
+/**
+ * Legacy inquiry ids are `id_` plus a UUID. New inquiry ids are `INQ-` plus 8 public characters.
+ * An order number is that inquiry id plus a 4-character suffix, so the suffix is excluded here.
+ * The alphabet matches `PUBLIC_NUMBER_ALPHABET` in src/data/inquiry-order-number.ts.
+ */
+const PUBLIC_NUMBER_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+const LEGACY_INQUIRY_ID = 'id_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}';
+const LINKED_INQUIRY_ID = `INQ-[${PUBLIC_NUMBER_ALPHABET}]{8}`;
+const INQUIRY_ID_SOURCE = `(?<![A-Za-z0-9])(?:${LEGACY_INQUIRY_ID}|${LINKED_INQUIRY_ID})(?!-[${PUBLIC_NUMBER_ALPHABET}]{4})`;
 
 export type InquiryIdTextPart = { type: 'text' | 'id'; value: string };
 

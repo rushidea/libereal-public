@@ -7,7 +7,9 @@ import { requireOrganizationPermission } from '@/lib/organization-service';
 import { orderAutoCloseAt } from '@/lib/order-auto-close';
 import { initialOrderStatus } from '@/lib/order-domain';
 import { buildCheckoutRequestFingerprint, isUniqueConstraintError, validCheckoutAttemptId } from '@/lib/checkout-idempotency';
-import { isOrderIdUniqueConflict, ORDER_NUMBER_BUSY_ERROR, withAllocatedOrderNumber } from '@/data/order-number';
+import { isInquiryLinkedOrderConflict, withAllocatedInquiryOrderNumber } from '@/data/inquiry-order-number';
+import { ORDER_NUMBER_BUSY_ERROR } from '@/data/order-number';
+import { inquiryQuoteAcceptBlock } from '@/lib/inquiry-status';
 import { verifiedEmailMatches } from '@/lib/verified-email-access';
 import { normalizeOrderPaymentMethod } from '@/data/payment-methods';
 import { adminActingPointsError } from '@/lib/admin-acting-points';
@@ -24,6 +26,16 @@ import {
 import { acceptanceQuantityError, lineTotalForAcceptedQuantity, quoteLineFulfillment, requestedQuantityFromBody, validateAcceptedQuantity } from '@/lib/quote-acceptance';
 import { quoteIsExpired, quoteValidUntilPassed } from '@/lib/quote-expiry';
 import { settleExpiredQuotes } from '@/lib/quote-expiry-settle';
+
+class InquiryAcceptRejected extends Error {
+  code: 'INQUIRY_DECLINED' | 'INQUIRY_CLOSED' | 'INQUIRY_ARCHIVED' | 'INQUIRY_NOT_ACCEPTABLE';
+
+  constructor(code: InquiryAcceptRejected['code'], message: string) {
+    super(message);
+    this.name = 'InquiryAcceptRejected';
+    this.code = code;
+  }
+}
 
 interface OrderItem {
   productId?: string | null;
@@ -88,6 +100,9 @@ export async function POST(
     // 管理员代客接受报价不能代扣客户积分。未传或 0 仍可接受。不新增权限。
     // 代接受生成且尚未支付的订单，由客户本人在付款前调用 POST /api/orders/:orderId/prepay-settlement 选择积分和优惠券。管理员不能代选。
     // 已过期报价（status 为 expired，或 sent 且 validUntil 已到）不能接受，返回 QUOTE_EXPIRED，并把询价标为 quote_expired。不新增权限。
+    // 报价有效期内可以分批确认：每次确认新建一张订单，询价保持 quote_sent，直到可下单的报价行全部完成才把报价标为 accepted、询价标为 closed。
+    // 询价已放弃、已关闭、已归档，或不是 quote_sent 时不能继续确认。不新增权限。
+    // 由此生成的订单号是「询价号-随机短后缀」，并在同一事务内写入 inquiryOrderSeq。购物车和后台代客下单仍用上海日序号。不新增权限。
     if (isAdmin) {
       const pointsError = adminActingPointsError({ personalPoints, groupPoints, groupId });
       if (pointsError) return NextResponse.json({ error: pointsError }, { status: 400 });
@@ -142,6 +157,8 @@ export async function POST(
       }
       return NextResponse.json({ error: '报价版本已变化，请刷新后重新确认。', code: 'QUOTE_VERSION_CONFLICT' }, { status: 409 });
     }
+    const acceptBlock = inquiryQuoteAcceptBlock(inquiry);
+    if (acceptBlock) return NextResponse.json({ error: acceptBlock.error, code: acceptBlock.code }, { status: 409 });
 
     try {
       const orderItems: OrderItem[] = [];
@@ -221,7 +238,7 @@ export async function POST(
         ...quoteAcceptancePointsAudit(orderTotal),
         pointsRedeemed: (settled?.pointsBreakdown?.personalPoints ?? 0) + (settled?.pointsBreakdown?.groupPoints ?? 0),
       };
-      const { orderId, allOrdered } = await withAllocatedOrderNumber(prisma, async (tx, orderId) => {
+      const { orderId, allOrdered } = await withAllocatedInquiryOrderNumber(prisma, id, async (tx, orderId, inquiryOrderSeq) => {
         let allOrdered = false;
         const current = await tx.quote.findFirst({ where: { inquiryId: id }, orderBy: { version: 'desc' }, include: { items: true } });
         if (current && (current.status === 'expired' || quoteValidUntilPassed(current.validUntil))) {
@@ -230,6 +247,14 @@ export async function POST(
         if (!current || current.id !== quote.id || current.version !== quote.version || current.status !== 'sent') {
           throw new Error('QUOTE_CONFLICT');
         }
+        const currentInquiry = await tx.inquiry.findUnique({
+          where: { id },
+          select: { status: true, archivedAt: true },
+        });
+        const blocked = currentInquiry
+          ? inquiryQuoteAcceptBlock(currentInquiry)
+          : { code: 'INQUIRY_NOT_ACCEPTABLE' as const, error: '当前询价不能确认报价' };
+        if (blocked) throw new InquiryAcceptRejected(blocked.code, blocked.error);
         if (settled?.pointsBreakdown && pointsUserId) {
           await assertCheckoutPointsAvailable(tx, pointsUserId, settled.amountsBeforePoints.total, settled.intent);
         }
@@ -256,6 +281,7 @@ export async function POST(
         const created = await tx.order.create({ data: {
           id: orderId,
           inquiryId: id,
+          inquiryOrderSeq,
           email: inquiry.email,
           customerId: inquiry.userId,
           organizationId: inquiry.organizationId,
@@ -362,6 +388,9 @@ export async function POST(
       if (e instanceof Error && (e.message === 'CREDIT_LIMIT_EXCEEDED' || e.message === 'CREDIT_ACCOUNT_SUSPENDED')) {
         return NextResponse.json({ error: '授信额度不足或账户不可用', code: e.message }, { status: 403 });
       }
+      if (e instanceof InquiryAcceptRejected) {
+        return NextResponse.json({ error: e.message, code: e.code }, { status: 409 });
+      }
       if (e instanceof Error && e.message === 'QUOTE_EXPIRED') {
         await settleExpiredQuotes(prisma, [id]);
         return NextResponse.json({ error: '报价已过期，请刷新后重新确认。', code: 'QUOTE_EXPIRED' }, { status: 400 });
@@ -375,7 +404,7 @@ export async function POST(
         }
         return NextResponse.json({ error: '报价或剩余数量已变化，请刷新后重新确认', code: 'QUOTE_VERSION_CONFLICT' }, { status: 409 });
       }
-      if (isOrderIdUniqueConflict(e)) {
+      if (isInquiryLinkedOrderConflict(e)) {
         console.error('[confirm-items POST] order number conflict', e);
         return NextResponse.json({ error: ORDER_NUMBER_BUSY_ERROR }, { status: 503 });
       }
