@@ -64,7 +64,11 @@ describe('POST /api/orders/[id]/quote', () => {
     const db = getTestDb();
     clearAllTables(db);
     seedAdmin(db);
-    seedUser(db, { id: 'buyer_1', email: 'buyer@test.com', tier: '璞玉' });
+    seedUser(db, { id: 'buyer_1', email: 'buyer@test.com', tier: 'standard' });
+    db.prepare(`
+      INSERT INTO CreditAccount (id, userId, baseLimit, usedAmount, status, updatedAt)
+      VALUES ('credit-buyer', 'buyer_1', 100000, 0, 'active', datetime('now'))
+    `).run();
     seedCatalog(10);
   });
 
@@ -181,7 +185,7 @@ describe('POST /api/orders/[id]/quote', () => {
     expect(orderRow()).toEqual({ status: 'pending', quoteSent: 0 });
     expect(await prisma.inventoryReservation.count()).toBe(0);
     expect(await prisma.accountReceivable.count()).toBe(0);
-    expect(await prisma.creditAccount.findUnique({ where: { userId: 'buyer_1' } })).toBeNull();
+    expect(await prisma.creditAccount.findUnique({ where: { userId: 'buyer_1' } })).toMatchObject({ usedAmount: 0 });
   });
 
   it('returns 404 when the order does not exist', async () => {

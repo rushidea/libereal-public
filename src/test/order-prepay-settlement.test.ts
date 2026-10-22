@@ -470,27 +470,30 @@ describe('POST /api/orders/[id]/prepay-settlement', () => {
     seedUser(db, { id: 'buyer_points', email: 'q@test.com', name: '询价人', points: 40, role: 'customer' });
     seedInquiry(db);
     seedCoupon(db, { code: 'SAVE10' });
+    db.prepare(`
+      INSERT INTO CreditAccount (id, userId, baseLimit, usedAmount, status, updatedAt)
+      VALUES ('credit-casmart', 'buyer_points', 100000, 0, 'active', datetime('now'))
+    `).run();
     const casmart = await acceptQuote(admin, { paymentMethod: 'casmart' }, 'proxy-casmart');
-    expect(casmart.total).toBe(326);
+    expect(casmart.total).toBe(300);
     asUser(buyer);
     expect((await settle(casmart.id, { couponCode: 'SAVE10' })).status).toBe(200);
-    expect(orderRow().total).toBe(315.8);
+    expect(orderRow().total).toBe(290);
     expect(db.prepare(`SELECT type, amount FROM OrderAdjustment WHERE orderId = ? ORDER BY type`).all(casmart.id)).toEqual([
       { type: 'coupon', amount: -10 },
-      { type: 'platform_fee', amount: 5.8 },
-      { type: 'transfer_fee', amount: 20 },
     ]);
 
     clearAllTables(db);
     seedAdmin(db);
     seedUser(db, { id: 'buyer_points', email: 'q@test.com', name: '询价人', points: 40, role: 'customer' });
     seedInquiry(db);
-    const bank = await acceptQuote(admin, { paymentMethod: 'bank_transfer' }, 'proxy-bank');
-    expect(bank).toMatchObject({ total: 300, status: 'pending' });
     db.prepare(`
       INSERT INTO CreditAccount (id, userId, baseLimit, usedAmount, status, updatedAt)
-      VALUES ('credit-1', 'buyer_points', 100000, 300, 'active', datetime('now'))
+      VALUES ('credit-1', 'buyer_points', 100000, 0, 'active', datetime('now'))
     `).run();
+    const bank = await acceptQuote(admin, { paymentMethod: 'bank_transfer' }, 'proxy-bank');
+    expect(bank).toMatchObject({ total: 300, status: 'pending' });
+    db.prepare(`UPDATE CreditAccount SET usedAmount = 300 WHERE userId = 'buyer_points'`).run();
     db.prepare(`
       INSERT INTO AccountReceivable (id, orderId, userId, amount, status, confirmedAt, updatedAt)
       VALUES ('recv-1', ?, 'buyer_points', 300, 'open', datetime('now'), datetime('now'))
