@@ -22,6 +22,7 @@ export interface SessionUser {
 }
 
 export async function requireUser(): Promise<SessionUser | NextResponse> {
+  // auth() 的 session 回调会先丢掉已撤销、过期或没有服务端记录的 JWT。
   const session: Session | null = await auth();
   if (!session?.user) {
     return NextResponse.json({ error: '未登录' }, { status: 401 });

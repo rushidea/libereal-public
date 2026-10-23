@@ -7,12 +7,26 @@ import { normalizeChinaMobilePhone, verifySmsCode } from '@/lib/sms-verification
 
 const PHONE_CHANGE_INTERVAL_MS = 365 * 24 * 60 * 60 * 1000;
 
-export async function GET() {
+function presentedSessionCookie(req: NextRequest): boolean {
+  return req.cookies.getAll().some((cookie) =>
+    cookie.name === 'authjs.session-token'
+    || cookie.name === '__Secure-authjs.session-token'
+    || cookie.name.startsWith('authjs.session-token.')
+    || cookie.name.startsWith('__Secure-authjs.session-token.')
+  );
+}
+
+export async function GET(req: NextRequest) {
   const session = await auth();
   const userId = session?.user?.id;
   const email = session?.user?.email;
 
   if (!userId || !email) {
+    // Anonymous reads stay empty. A presented session cookie that auth()
+    // rejected (revoked, expired, or unknown) must not look like a soft miss.
+    if (presentedSessionCookie(req)) {
+      return NextResponse.json({ error: '未登录' }, { status: 401 });
+    }
     return NextResponse.json({ profile: null });
   }
 
