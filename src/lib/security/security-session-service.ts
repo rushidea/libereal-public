@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { headers } from 'next/headers';
+import type { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { getRequestIp } from './mfa-rate-limit';
 import { MFA_RECENT_WINDOW_MS } from './mfa-config';
@@ -343,8 +344,14 @@ export async function revokeOtherSecuritySessions(userId: string, currentSession
   return result.count;
 }
 
-export async function revokeAllSecuritySessions(userId: string): Promise<number> {
-  const result = await prisma.userSession.updateMany({
+type SessionRevokeClient = {
+  userSession: {
+    updateMany: (args: Prisma.UserSessionUpdateManyArgs) => Promise<{ count: number }>;
+  };
+};
+
+export async function revokeAllSecuritySessions(userId: string, db: SessionRevokeClient = prisma): Promise<number> {
+  const result = await db.userSession.updateMany({
     where: { userId, revokedAt: null },
     data: { revokedAt: new Date() },
   });

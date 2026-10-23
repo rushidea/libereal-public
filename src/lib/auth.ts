@@ -34,7 +34,7 @@ import { createMfaLoginChallenge, isUserMfaEnabled, verifyMfaLoginChallenge } fr
 import { getRequestIp } from './security/mfa-rate-limit';
 import { consumePasskeyVerifiedToken } from './security/passkey-session';
 import { recordSecurityEvent } from './security/security-events';
-import { registerSecuritySession } from './security/security-session-service';
+import { isSecuritySessionActive, registerSecuritySession } from './security/security-session-service';
 import { createGoogleOAuthFetch } from './google-oauth-fetch';
 
 const googleOAuthFetch = createGoogleOAuthFetch(process.env.GOOGLE_OAUTH_PROXY_URL?.trim());
@@ -113,6 +113,27 @@ function recordLoginFailure(input: { userId?: string | null; reason: string }): 
   }
 }
 
+/**
+ * Fail closed. A JWT is a login only while its server session row is active.
+ * Unknown, revoked, and expired rows are rejected so auth()-only routes cannot
+ * keep using a cookie after revoke or password reset.
+ */
+async function sessionHasActiveServerRecord(userId: string, sessionId: string): Promise<boolean> {
+  try {
+    return await isSecuritySessionActive(userId, sessionId);
+  } catch (error) {
+    console.error('[auth.session] active session check failed:', error instanceof Error ? error.message : 'unknown');
+    return false;
+  }
+}
+
+function unauthenticatedSession(expires: Date | string) {
+  return {
+    expires: expires instanceof Date ? expires.toISOString() : expires,
+    user: undefined,
+  };
+}
+
 async function getCurrentAuthToken(): Promise<{ id?: string; email?: string; sessionId?: string } | null> {
   if (!AUTH_SECRET) return null;
   try {
@@ -163,7 +184,10 @@ async function resolveLinkingUserId(
   provider: 'google' | 'wechat',
 ): Promise<{ userId: string; callbackUrl?: string } | undefined> {
   const currentToken = await getCurrentAuthToken();
-  const session = currentToken?.id && currentToken.sessionId
+  const sessionActive = currentToken?.id && currentToken.sessionId
+    ? await sessionHasActiveServerRecord(currentToken.id, currentToken.sessionId)
+    : false;
+  const session = sessionActive && currentToken?.id && currentToken.sessionId
     ? { userId: currentToken.id, sessionId: currentToken.sessionId }
     : null;
   // Logged-out or forged cookies never select a user. The intent must match this session.
@@ -829,6 +853,13 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
         session.user.mfaVerifiedAt = typeof token.mfaVerifiedAt === 'number' ? token.mfaVerifiedAt : null;
         session.user.mfaMethod = token.mfaMethod === 'totp' || token.mfaMethod === 'recovery' || token.mfaMethod === 'passkey' ? token.mfaMethod : null;
         session.user.sessionId = typeof token.sessionId === 'string' ? token.sessionId : null;
+        // 直接调用 auth() 的接口不会走 requireActiveSession。在回调里拒绝
+        // 缺失、已撤销或已过期的服务端会话，避免撤销后的 JWT 继续使用。
+        const userId = typeof session.user.id === 'string' ? session.user.id : '';
+        const sessionId = session.user.sessionId ?? '';
+        if (!userId || !sessionId || !(await sessionHasActiveServerRecord(userId, sessionId))) {
+          return unauthenticatedSession(session.expires);
+        }
         // Fetch real role and avatar from DB, fallback to email lookup
         try {
           const db = new Database(DB_PATH, { readonly: true });
