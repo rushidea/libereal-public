@@ -227,6 +227,15 @@ export async function PATCH(
 
     if (Object.keys(updateData).length > 0) {
       await prisma.$transaction(async (tx) => {
+        if (body.status === 'cancelled') {
+          // Claim cancellation before any history or resource releases. The payment
+          // callback competes on the same row, so a stale unpaid snapshot cannot win.
+          const cancelled = await tx.order.updateMany({
+            where: { id, status: order.status, paidAt: null },
+            data: { status: 'cancelled', autoCloseAt: null },
+          });
+          if (cancelled.count !== 1) throw new Error('ORDER_CANCELLATION_CONFLICT');
+        }
         const eventCreates = [
           ...(body.status && body.status !== order.status ? [{
             type: 'status_changed', actorId: user.id, actorEmail: user.email,
@@ -333,7 +342,7 @@ export async function PATCH(
     if (message === POINTS_REFUND_FAILED) {
       return NextResponse.json({ error: POINTS_REFUND_FAILED }, { status: 409 });
     }
-    if (['CREDIT_LIMIT_EXCEEDED', 'CREDIT_ACCOUNT_SUSPENDED', 'RECEIVABLE_NOT_FOUND', 'INVALID_ORDER_TRANSITION', 'INSUFFICIENT_AVAILABLE_INVENTORY', 'ALIPAY_PAYMENT_REQUIRED', 'PAID_ORDER_REFUND_REQUIRED'].includes(message)) {
+    if (['CREDIT_LIMIT_EXCEEDED', 'CREDIT_ACCOUNT_SUSPENDED', 'RECEIVABLE_NOT_FOUND', 'INVALID_ORDER_TRANSITION', 'INSUFFICIENT_AVAILABLE_INVENTORY', 'ALIPAY_PAYMENT_REQUIRED', 'PAID_ORDER_REFUND_REQUIRED', 'ORDER_CANCELLATION_CONFLICT'].includes(message)) {
       return NextResponse.json({ error: message }, { status: 409 });
     }
     if (['INVALID_ORDER_STATUS', 'INVALID_ORDER_AMOUNT'].includes(message)) return NextResponse.json({ error: message }, { status: 400 });

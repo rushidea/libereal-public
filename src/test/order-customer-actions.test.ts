@@ -5,6 +5,7 @@ const mocks = vi.hoisted(() => ({
   requireActiveSession: vi.fn(),
   requireAdmin: vi.fn(),
   orderFindUnique: vi.fn(),
+  transactionOrderUpdateMany: vi.fn(),
   transactionOrderUpdate: vi.fn(),
   notificationCreate: vi.fn(),
   releaseOrderInventory: vi.fn(),
@@ -32,7 +33,7 @@ vi.mock('@/lib/prisma', () => ({
     user: { findUnique: mocks.userFindUnique },
     cart: { findUnique: mocks.cartFindUnique, upsert: mocks.cartUpsert },
     $transaction: async (callback: (tx: unknown) => Promise<unknown>) => callback({
-      order: { update: mocks.transactionOrderUpdate },
+      order: { update: mocks.transactionOrderUpdate, updateMany: mocks.transactionOrderUpdateMany },
     }),
   },
 }));
@@ -97,6 +98,7 @@ describe('customer order actions', () => {
     mocks.requireAdmin.mockResolvedValue({ id: 'user-1', email: 'buyer@example.com', role: 'customer' });
     mocks.orderFindUnique.mockResolvedValue(customerOrder());
     mocks.transactionOrderUpdate.mockResolvedValue({});
+    mocks.transactionOrderUpdateMany.mockResolvedValue({ count: 1 });
     mocks.notificationCreate.mockResolvedValue({});
     mocks.releaseOrderInventory.mockResolvedValue(undefined);
     mocks.restoreRedeemedOrderCoupons.mockResolvedValue(1);
@@ -123,6 +125,10 @@ describe('customer order actions', () => {
 
     expect(response.status).toBe(200);
     expect(mocks.transactionOrderUpdate).toHaveBeenCalled();
+    expect(mocks.transactionOrderUpdateMany).toHaveBeenCalledWith({
+      where: { id: 'order-1', status: 'unpaid', paidAt: null },
+      data: { status: 'cancelled', autoCloseAt: null },
+    });
     expect(mocks.releaseOrderInventory).toHaveBeenCalled();
     expect(mocks.restoreRedeemedOrderCoupons).toHaveBeenCalledWith(expect.anything(), 'order-1');
     expect(mocks.notificationCreate).toHaveBeenCalledWith(expect.objectContaining({
