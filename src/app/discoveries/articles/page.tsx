@@ -6,6 +6,7 @@ import MobileBottomNav from '@/components/mobile/MobileBottomNav';
 import SiteFooter from '@/components/SiteFooter';
 import WechatArticleList from '@/components/discoveries/WechatArticleList';
 import { getAllWechatArticleMetas } from '@/lib/wechat-articles';
+import { mergeDiscoveryArticleMetas } from '@/data/discovery-seo-articles';
 import { canonicalSiteUrl } from '@/lib/site-url';
 import { uiSurfaces } from '@/lib/ui-surfaces';
 
@@ -18,7 +19,7 @@ export const metadata: Metadata = {
 };
 
 export default function WechatArticlesArchivePage() {
-  const articles = getAllWechatArticleMetas();
+  const articles = mergeDiscoveryArticleMetas(getAllWechatArticleMetas());
 
   return (
     <div className={`min-h-screen pb-16 lg:pb-0 ${uiSurfaces.servicePage}`}>

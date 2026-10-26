@@ -7,6 +7,7 @@ import WechatArticleList from '@/components/discoveries/WechatArticleList';
 import MobileBottomNav from '@/components/mobile/MobileBottomNav';
 import SiteFooter from '@/components/SiteFooter';
 import { getAllWechatArticleMetas } from '@/lib/wechat-articles';
+import { mergeDiscoveryArticleMetas } from '@/data/discovery-seo-articles';
 import { WECHAT_ARTICLE_PREVIEW_COUNT } from '@/data/wechat-articles';
 import { DISCOVERY_JOURNALS, type DiscoveryJournalId } from '@/data/discoveries';
 import { canonicalSiteUrl } from '@/lib/site-url';
@@ -32,7 +33,7 @@ export default async function DiscoveriesPage({
   const { tab, journal } = await searchParams;
   const activeTab: DiscoveriesTab = tab === 'journals' ? 'journals' : 'articles';
   const initialJournal = isDiscoveryJournalId(journal) ? journal : undefined;
-  const articles = activeTab === 'articles' ? getAllWechatArticleMetas() : [];
+  const articles = activeTab === 'articles' ? mergeDiscoveryArticleMetas(getAllWechatArticleMetas()) : [];
 
   return (
     <div className={`min-h-screen pb-16 lg:pb-0 ${uiSurfaces.servicePage}`}>
