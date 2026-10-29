@@ -203,6 +203,25 @@ describe('coupon scope eligibility', () => {
     expect(result.triggered).toBe(true);
     expect(result.details?.subtotal).toBe(600);
     expect(result.adjustments[0]?.amount).toBe(0.55);
+    expect(result.summary).toContain('已立减 ¥0.55');
+  });
+
+  it('applies a 100 discount to the 600 eligible subtotal while excluding the 400 promotion line', () => {
+    const result = evaluate(coupon({
+      threshold: 500,
+      discount: 100,
+      promotionPolicy: { state: 'restricted', promotionIds: ['configured-promo'] },
+    }), [
+      line({ id: 'eligible', price: 600, promotionIdentity: { state: 'knownnone' } }),
+      line({ id: 'configured-promotion', price: 400, promotionIdentity: { state: 'restricted', promotionId: 'configured-promo' } }),
+    ]);
+
+    expect(result.triggered).toBe(true);
+    expect(result.details?.subtotal).toBe(600);
+    expect(result.adjustments[0]?.amount).toBe(100);
+    expect(Math.round((Number(result.details?.subtotal ?? 0) - Number(result.adjustments[0]?.amount ?? 0)) * 100) / 100).toBe(500);
+    const wholeCartTotal = Math.round((400 + 600 - Number(result.adjustments[0]?.amount ?? 0)) * 100) / 100;
+    expect(wholeCartTotal).toBe(900);
   });
 
   it('checks the configured threshold against eligible subtotal at the exact boundary', () => {
