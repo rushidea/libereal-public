@@ -282,7 +282,7 @@ export async function verifyAndPriceItems(
           .filter((link) => (!link.variantId || link.variantId === variant?.id)
             && link.promotion.status === 'active'
             && link.promotion.startsAt <= now
-            && link.promotion.endsAt >= now)
+            && link.promotion.endsAt > now)
           .map((link) => ({
             id: link.promotion.id,
             name: link.promotion.name,

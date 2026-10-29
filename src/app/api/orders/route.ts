@@ -23,7 +23,7 @@ import { computePromoAdjustments, hasExceededSelectionAddonQuota, hasMisbrandedE
 import type { CartLine } from '@/lib/cart-promotions/types';
 import { buildCheckoutRevision } from '@/lib/checkout-revision';
 import { normalizedEmailEquals, verifiedStoredEmail } from '@/lib/verified-email-access';
-import { redeemCoupon } from '@/lib/coupon-service';
+import { redeemCoupon, type CouponRedeemSnapshot } from '@/lib/coupon-service';
 import { formatCouponScopeLabel } from '@/lib/coupon-scope';
 import { getReadableOrganizationIds, resolveRecordOwnership } from '@/lib/organization-record-access';
 import { listOrganizationIdsForPermission } from '@/lib/organization-service';
@@ -333,6 +333,7 @@ export async function POST(req: NextRequest) {
     const couponCodeNorm = typeof couponCode === 'string' && couponCode.trim() ? couponCode.trim() : '';
     let couponAdjustment: { type: string; label: string; amount: number; reason: string | null } | null = null;
     let couponScopedSubtotal = verifiedSubtotal;
+    let couponSnapshot: CouponRedeemSnapshot | undefined;
     if (couponCodeNorm) {
       const { buildCouponRule } = await import('@/lib/coupon-service');
       const rule = await buildCouponRule(couponCodeNorm);
@@ -349,6 +350,11 @@ export async function POST(req: NextRequest) {
       }
       const scopedSubtotal = (couponEval.details as { subtotal?: number } | undefined)?.subtotal;
       if (typeof scopedSubtotal === 'number') couponScopedSubtotal = scopedSubtotal;
+      couponSnapshot = {
+        ...rule.snapshot,
+        scopedSubtotal: couponScopedSubtotal,
+        previewedDiscount: couponEval.adjustments[0].amount,
+      };
       const scopeLabel = formatCouponScopeLabel(rule.config.scope ?? { type: 'all' });
       couponAdjustment = {
         type: 'coupon',
@@ -519,7 +525,7 @@ export async function POST(req: NextRequest) {
           // 优惠券原子核销（事务内，防并发重复使用；失败则整单回滚）。
           // 绑定订单 id（redeemedOrderId），退款与审计可追溯。
           if (couponCodeNorm) {
-            const redeemed = await redeemCoupon(tx, couponCodeNorm, session.user!.id as string, couponScopedSubtotal, created.id);
+            const redeemed = await redeemCoupon(tx, couponCodeNorm, session.user!.id as string, couponScopedSubtotal, created.id, couponSnapshot);
             if (!redeemed.ok) {
               throw new Error(`COUPON_APPLY:${redeemed.error}`);
             }
