@@ -10,6 +10,7 @@ import { normalizePointsIntent } from '@/lib/points-checkout';
 import { computePromoAdjustments, hasExceededSelectionAddonQuota, hasMisbrandedEligibleAddonMain, validateAddonPromotionLines, validateGiftPromotionLines } from '@/lib/cart-promotions/service';
 import type { CartLine } from '@/lib/cart-promotions/types';
 import { buildCheckoutRevision } from '@/lib/checkout-revision';
+import { customerVisiblePricingSnapshot } from '@/lib/commerce-records';
 import { buildCouponRule } from '@/lib/coupon-service';
 import { formatCouponScopeLabel } from '@/lib/coupon-scope';
 import { requireOrganizationPermission } from '@/lib/organization-service';
@@ -66,6 +67,8 @@ export async function POST(req: NextRequest) {
           id: vi.productId ?? '',
           variantId: vi.variantId || undefined,
           selectedPromotionId: vi.selectedPromotionId ?? null,
+          promotionIdentity: vi.promotionIdentity ?? { state: 'unknown' },
+          promotionPricingEvidence: vi.promotionPricingEvidence,
           brand: vi.brand ?? raw?.brand ?? '',
           catalogNumber: vi.catalogNumber ?? '',
           name: vi.name ?? '',
@@ -200,7 +203,7 @@ export async function POST(req: NextRequest) {
         available: item.available,
         leadTime: item.leadTime,
         stockQuantity: item.stockQuantity,
-        pricingSnapshot: item.pricingSnapshot,
+        pricingSnapshot: customerVisiblePricingSnapshot(item.pricingSnapshot),
       })),
     });
   } catch (error) {

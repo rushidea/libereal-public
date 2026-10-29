@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { toOrderItemCreates } from '@/lib/commerce-records';
+import { customerVisiblePricingSnapshot, orderItemView, toOrderItemCreates } from '@/lib/commerce-records';
 
 describe('toOrderItemCreates variant metadata', () => {
   it('preserves variant identity in order item metadata', () => {
@@ -21,5 +21,29 @@ describe('toOrderItemCreates variant metadata', () => {
   it('leaves metadata empty when the line has no variant', () => {
     const [row] = toOrderItemCreates([{ name: '试剂', price: 10, quantity: 1 }]);
     expect(row.metadata).toBeNull();
+  });
+});
+
+describe('customer-visible pricing snapshots', () => {
+  it('preserves ordinary and legacy fields while removing only private coupon evidence', () => {
+    expect(customerVisiblePricingSnapshot('{"finalPrice":10,"source":"catalog"}'))
+      .toBe('{"finalPrice":10,"source":"catalog"}');
+    expect(JSON.parse(customerVisiblePricingSnapshot(JSON.stringify({
+      finalPrice: 10,
+      legacy: { keep: true },
+      couponPromotionPricingEvidence: { candidates: [{ status: 'draft', ruleDefinition: 'synthetic-private' }] },
+      couponPromotionIdentity: { state: 'restricted', promotionId: 'synthetic-private' },
+      couponPolicyAudits: [{ policyFingerprint: 'private' }],
+    }))!)).toEqual({ finalPrice: 10, legacy: { keep: true } });
+  });
+
+  it('fails closed on malformed snapshots in the order item view', () => {
+    expect(customerVisiblePricingSnapshot('{malformed synthetic-private')).toBeNull();
+    const view = orderItemView({
+      id: 'item-1', productId: 'p1', catalogNumber: null, name: 'Synthetic item', brand: null,
+      unitPrice: 10, clientPrice: null, quantity: 1, quotedQuantity: null, shippedQty: 0,
+      leadTime: null, status: 'pending', metadata: null, pricingSnapshot: '{malformed synthetic-private',
+    });
+    expect(view.pricingSnapshot).toBeNull();
   });
 });

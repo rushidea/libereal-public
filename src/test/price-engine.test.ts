@@ -14,6 +14,15 @@ describe('price engine', () => {
     expect(result.steps.find((step) => step.stage === 'brand_discount')?.reason).toContain('互斥');
   });
 
+  it('rounds a 0.55 price multiplier to the nearest cent', () => {
+    const result = calculatePrice({
+      basePrice: 1.01,
+      promotions: [{ id: 'synthetic-promotion', name: 'Synthetic rate promotion', type: 'discount_rate', value: 0.55, priority: 1, exclusive: true }],
+    });
+    expect(result.finalPrice).toBe(0.56);
+    expect(result.appliedSource).toBe('promotion:synthetic-promotion');
+  });
+
   it('selects the lowest valid promotion or user price', () => {
     const result = calculatePrice({
       basePrice: 1000,

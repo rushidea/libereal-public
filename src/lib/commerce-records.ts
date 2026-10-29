@@ -25,6 +25,24 @@ function positiveIntegerOrNull(value: unknown): number | null {
   return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
 }
 
+/** Removes server-only coupon eligibility evidence before exposing persisted pricing to a caller. */
+export function customerVisiblePricingSnapshot(value: string | null | undefined): string | null {
+  if (value == null) return null;
+  try {
+    const parsed: unknown = JSON.parse(value);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+    const snapshot = { ...(parsed as Record<string, unknown>) };
+    delete snapshot.couponPromotionPricingEvidence;
+    delete snapshot.couponPromotionIdentity;
+    delete snapshot.couponPolicyAudit;
+    delete snapshot.couponPolicyAudits;
+    return JSON.stringify(snapshot);
+  } catch {
+    // A malformed snapshot cannot be proven free of private server-side pricing evidence.
+    return null;
+  }
+}
+
 export function inquiryItemStoredBrand(metadata: string | null | undefined): string | null {
   if (!metadata) return null;
   try {
@@ -209,7 +227,7 @@ export function orderItemView(item: OrderItemView) {
     shippedQty: item.shippedQty,
     leadTime: item.leadTime,
     status: item.status,
-    pricingSnapshot: item.pricingSnapshot,
+    pricingSnapshot: customerVisiblePricingSnapshot(item.pricingSnapshot),
     metadata: item.metadata ?? null,
     variantId,
     spec,

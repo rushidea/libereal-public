@@ -8,8 +8,10 @@ import {
   pointsRedeemAdjustment,
   type CheckoutAdjustment,
 } from '@/lib/checkout-payment';
-import { formatCouponScopeLabel, parseCouponScope } from '@/lib/coupon-scope';
-import { redeemCoupon, restoreRedeemedOrderCoupons } from '@/lib/coupon-service';
+import { couponLineIsInScope, couponPromotionEvidenceForScope, formatCouponScopeLabel, parseCouponScope } from '@/lib/coupon-scope';
+import type { CouponPromotionIdentity } from '@/lib/coupon-scope';
+import type { CouponPromotionPricingEvidence } from '@/lib/pricing';
+import { configuredCouponPromotionPolicy, redeemCoupon, restoreRedeemedOrderCoupons, type CouponPromotionValidationContext } from '@/lib/coupon-service';
 import { syncUnsettledReceivableAmount } from '@/lib/customer-credit';
 import { assertQuoteAcceptanceCredit } from '@/lib/quote-acceptance-guards';
 import { calculateOrderAmounts } from '@/lib/order-domain';
@@ -344,16 +346,51 @@ async function couponLines(db: Db, order: SettlementOrder): Promise<CartLine[]> 
         category: product?.category ?? undefined,
         subcategory: product?.subcategory ?? undefined,
         delisted: Boolean(product?.deletedAt),
+        promotionIdentity: promotionIdentityFromSnapshot(item.pricingSnapshot),
+        promotionPricingEvidence: promotionEvidenceFromSnapshot(item.pricingSnapshot),
       },
     };
   });
+}
+
+function promotionIdentityFromSnapshot(value: string | null): CouponPromotionIdentity {
+  if (!value) return { state: 'unknown' };
+  try {
+    const parsed = JSON.parse(value) as { couponPromotionIdentity?: unknown };
+    const identity = parsed.couponPromotionIdentity;
+    if (!identity || typeof identity !== 'object') return { state: 'unknown' };
+    const record = identity as { state?: unknown; promotionId?: unknown };
+    if (record.state === 'knownnone') return { state: 'knownnone' };
+    if (record.state === 'restricted' && typeof record.promotionId === 'string' && record.promotionId.length > 0) {
+      return { state: 'restricted', promotionId: record.promotionId };
+    }
+  } catch {
+    // Legacy or malformed pricing evidence cannot establish coupon eligibility.
+  }
+  return { state: 'unknown' };
+}
+
+function promotionEvidenceFromSnapshot(value: string | null): CouponPromotionPricingEvidence | undefined {
+  if (!value) return undefined;
+  try {
+    const parsed = JSON.parse(value) as { couponPromotionPricingEvidence?: unknown };
+    const evidence = parsed.couponPromotionPricingEvidence;
+    if (!evidence || typeof evidence !== 'object' || Array.isArray(evidence)) return undefined;
+    const candidate = evidence as Partial<CouponPromotionPricingEvidence>;
+    if (typeof candidate.productId !== 'string' || typeof candidate.pricedAt !== 'string'
+      || !Array.isArray(candidate.candidates) || !candidate.product || typeof candidate.product !== 'object'
+      || !candidate.identity || typeof candidate.identity !== 'object') return undefined;
+    return candidate as CouponPromotionPricingEvidence;
+  } catch {
+    return undefined;
+  }
 }
 
 async function resolveCoupon(
   db: Db,
   args: { code: string; userId: string; orderId: string; lines: CartLine[]; heldHere: boolean },
 ) {
-  if (!args.code) return { adjustment: null as CheckoutAdjustment | null, scopedSubtotal: 0 };
+  if (!args.code) return { adjustment: null as CheckoutAdjustment | null, scopedSubtotal: 0, promotionValidation: undefined as CouponPromotionValidationContext | undefined };
   const instance = await db.couponInstance.findUnique({ where: { code: args.code }, include: { coupon: true } });
   if (!instance) throw new PrepaySettlementError('优惠券不存在', 400, 'COUPON_INVALID');
   if (instance.userId && instance.userId !== args.userId) {
@@ -382,10 +419,12 @@ async function resolveCoupon(
   }
 
   const scope = parseCouponScope(instance.coupon.scopeType, instance.coupon.scopeTargets);
+  const promotionPolicy = configuredCouponPromotionPolicy();
   const config: CouponRuleConfig = {
     id: `coupon:${instance.code}`,
     type: 'coupon',
     couponId: instance.coupon.id,
+    couponType: instance.coupon.type as CouponRuleConfig['couponType'],
     code: instance.code,
     name: instance.coupon.name,
     enabled: true,
@@ -396,6 +435,7 @@ async function resolveCoupon(
     issueApprovalStatus: instance.issueApprovalStatus as CouponRuleConfig['issueApprovalStatus'],
     description: instance.coupon.description ?? instance.coupon.name,
     scope,
+    promotionPolicy,
   };
   const evaluation = promotionEngine.evaluateAll(args.lines, [config], now)[0];
   if (!evaluation?.triggered || !evaluation.adjustments[0]) {
@@ -411,7 +451,35 @@ async function resolveCoupon(
       reason: `券码 ${instance.code}${instance.coupon.stackable ? '（可叠加）' : ''} · ${formatCouponScopeLabel(scope)}`,
     } satisfies CheckoutAdjustment,
     scopedSubtotal: typeof details?.subtotal === 'number' ? details.subtotal : 0,
+    promotionValidation: promotionPolicy ? {
+      promotionPolicyFingerprint: JSON.stringify(promotionPolicy),
+      policy: promotionPolicy,
+      scope,
+      couponId: instance.coupon.id,
+      code: instance.code,
+      promotionPricingEvidence: couponPromotionEvidenceForScope(args.lines, scope) as Array<CouponPromotionPricingEvidence | undefined>,
+      scopedSubtotal: typeof details?.subtotal === 'number' ? details.subtotal : 0,
+      previewedDiscount: evaluation.adjustments[0].amount,
+      lineAudit: args.lines.map((line) => {
+        const identity = line.product.promotionIdentity ?? { state: 'unknown' as const };
+        const inScope = !line.isQuickOrder && !line.promoMark && couponLineIsInScope(line, scope);
+        return {
+          inScope,
+          excludedByPolicy: Boolean(inScope && instance.coupon.type === 'threshold'
+            && promotionPolicy.state === 'restricted'
+            && identity.state === 'restricted'
+            && promotionPolicy.promotionIds.includes(identity.promotionId)),
+          identity,
+        };
+      }),
+    } : undefined,
   };
+}
+
+function bookedCouponAdjustment(order: { adjustments: Array<{ type: string; label: string; amount: number; reason: string | null }> }): CheckoutAdjustment {
+  const booked = order.adjustments.find((adjustment) => adjustment.type === 'coupon');
+  if (!booked) throw new PrepaySettlementError('订单优惠券记录不完整，请联系管理员处理', 409, 'COUPON_SNAPSHOT_MISSING');
+  return { type: 'coupon', label: booked.label, amount: booked.amount, reason: booked.reason };
 }
 
 async function quotePrepayAmounts(
@@ -561,14 +629,16 @@ async function prepare(db: Db, actor: PrepaySettlementActor, orderId: string, in
 
 export async function previewOrderPrepaySettlement(actor: PrepaySettlementActor, orderId: string, input: PrepaySettlementInput) {
   const { order, selection, currentCouponCode } = await prepare(prisma, actor, orderId, input);
-  const lines = await couponLines(prisma, order);
-  const coupon = await resolveCoupon(prisma, {
-    code: selection.couponCode,
-    userId: order.customerId as string,
-    orderId: order.id,
-    lines,
-    heldHere: selection.couponCode !== '' && selection.couponCode === currentCouponCode,
-  });
+  const keepingCoupon = selection.couponCode !== '' && selection.couponCode === currentCouponCode;
+  const coupon = keepingCoupon
+    ? { adjustment: bookedCouponAdjustment(order), scopedSubtotal: 0 }
+    : await resolveCoupon(prisma, {
+      code: selection.couponCode,
+      userId: order.customerId as string,
+      orderId: order.id,
+      lines: await couponLines(prisma, order),
+      heldHere: false,
+    });
   const quoted = await quotePrepayAmounts(prisma, order, selection, coupon.adjustment, order.pointsApplied);
   return {
     subtotal: quoted.amounts.subtotal,
@@ -649,14 +719,22 @@ export async function applyOrderPrepaySettlement(actor: PrepaySettlementActor, o
     const keepingCoupon = selection.couponCode !== '' && heldCouponCode === selection.couponCode;
     if (!keepingCoupon) await restoreRedeemedOrderCoupons(tx, releasedOrder.id);
 
-    const lines = await couponLines(tx, releasedOrder);
-    const coupon = await resolveCoupon(tx, {
-      code: selection.couponCode,
-      userId: releasedOrder.customerId as string,
-      orderId: releasedOrder.id,
-      lines,
-      heldHere: keepingCoupon,
-    });
+    let coupon: { adjustment: CheckoutAdjustment | null; scopedSubtotal: number; promotionValidation?: CouponPromotionValidationContext };
+    if (keepingCoupon) {
+      coupon = {
+        adjustment: bookedCouponAdjustment(releasedOrder),
+        scopedSubtotal: 0,
+      };
+    } else {
+      const lines = await couponLines(tx, releasedOrder);
+      coupon = await resolveCoupon(tx, {
+        code: selection.couponCode,
+        userId: releasedOrder.customerId as string,
+        orderId: releasedOrder.id,
+        lines,
+        heldHere: false,
+      });
+    }
     const quoted = await quotePrepayAmounts(tx, releasedOrder, selection, coupon.adjustment, false);
     const nextSelection = quoted.scopedSelection;
 
@@ -723,8 +801,35 @@ export async function applyOrderPrepaySettlement(actor: PrepaySettlementActor, o
         releasedOrder.customerId as string,
         coupon.scopedSubtotal,
         releasedOrder.id,
+        undefined,
+        coupon.promotionValidation,
       );
       if (!redeemed.ok) throw new PrepaySettlementError(redeemed.error, 400, 'COUPON_INVALID');
+      const validation = coupon.promotionValidation;
+      if (validation) {
+        for (const [index, item] of releasedOrder.orderItems.entries()) {
+          let pricing: Record<string, unknown> = {};
+          try { pricing = JSON.parse(item.pricingSnapshot || '{}') as Record<string, unknown>; } catch { /* Keep the policy audit even if legacy pricing JSON is malformed. */ }
+          const priorAudits = Array.isArray(pricing.couponPolicyAudits) ? pricing.couponPolicyAudits : [];
+          const lineAudit = validation.lineAudit?.[index] ?? { inScope: false, excludedByPolicy: false, identity: { state: 'unknown' } };
+          await tx.orderItem.update({
+            where: { id: item.id },
+            data: { pricingSnapshot: JSON.stringify({
+              ...pricing,
+              couponPolicyAudits: [...priorAudits, {
+                policyFingerprint: validation.promotionPolicyFingerprint,
+                policy: validation.policy,
+                scope: validation.scope,
+                couponId: validation.couponId,
+                code: validation.code,
+                eligibleSubtotal: validation.scopedSubtotal,
+                discount: validation.previewedDiscount,
+                ...lineAudit,
+              }],
+            }) },
+          });
+        }
+      }
     }
     const applied = await applyOrderPointsDeduction(tx, releasedOrder.id);
     if (!applied.ok) {

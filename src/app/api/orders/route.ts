@@ -24,7 +24,7 @@ import type { CartLine } from '@/lib/cart-promotions/types';
 import { buildCheckoutRevision } from '@/lib/checkout-revision';
 import { normalizedEmailEquals, verifiedStoredEmail } from '@/lib/verified-email-access';
 import { redeemCoupon, type CouponRedeemSnapshot } from '@/lib/coupon-service';
-import { formatCouponScopeLabel } from '@/lib/coupon-scope';
+import { couponLineIsInScope, couponPromotionEvidenceForScope, formatCouponScopeLabel } from '@/lib/coupon-scope';
 import { getReadableOrganizationIds, resolveRecordOwnership } from '@/lib/organization-record-access';
 import { listOrganizationIdsForPermission } from '@/lib/organization-service';
 import { organizationRbacErrorStatus, OrganizationRbacError, requireOrganizationPermission } from '@/lib/organization-service';
@@ -277,6 +277,8 @@ export async function POST(req: NextRequest) {
           id: vi.productId ?? '',
           variantId: vi.variantId || undefined,
           selectedPromotionId: vi.selectedPromotionId ?? null,
+          promotionIdentity: vi.promotionIdentity ?? { state: 'unknown' },
+          promotionPricingEvidence: vi.promotionPricingEvidence,
           brand: vi.brand ?? raw?.brand ?? '',
           catalogNumber: vi.catalogNumber ?? '',
           name: vi.name ?? '',
@@ -355,7 +357,36 @@ export async function POST(req: NextRequest) {
         ...rule.snapshot,
         scopedSubtotal: couponScopedSubtotal,
         previewedDiscount: couponEval.adjustments[0].amount,
+        promotionPricingEvidence: couponPromotionEvidenceForScope(
+          promoLines,
+          rule.config.scope ?? { type: 'all' },
+        ) as CouponRedeemSnapshot['promotionPricingEvidence'],
       };
+      if (rule.config.promotionPolicy) {
+        const couponPolicyAudit = {
+          policyFingerprint: rule.snapshot.promotionPolicyFingerprint,
+          policy: rule.config.promotionPolicy,
+          scope: rule.config.scope ?? { type: 'all' as const },
+          eligibleSubtotal: couponScopedSubtotal,
+          discount: couponEval.adjustments[0].amount,
+        };
+        orderItems.forEach((orderItem, index) => {
+          const line = promoLines[index];
+          const identity = line?.product.promotionIdentity;
+          const inScope = Boolean(line && !line.isQuickOrder && !line.promoMark
+            && couponLineIsInScope(line, rule.config.scope ?? { type: 'all' }));
+          const excludedByPolicy = Boolean(inScope && rule.config.couponType === 'threshold'
+            && rule.config.promotionPolicy?.state === 'restricted'
+            && identity?.state === 'restricted'
+            && rule.config.promotionPolicy.promotionIds.includes(identity.promotionId));
+          let pricing: Record<string, unknown> = {};
+          try { pricing = JSON.parse(orderItem.pricingSnapshot) as Record<string, unknown>; } catch { /* Keep the new audit record even if legacy pricing JSON is malformed. */ }
+          orderItem.pricingSnapshot = JSON.stringify({
+            ...pricing,
+            couponPolicyAudits: [{ ...couponPolicyAudit, inScope, excludedByPolicy, identity: identity ?? { state: 'unknown' } }],
+          });
+        });
+      }
       const scopeLabel = formatCouponScopeLabel(rule.config.scope ?? { type: 'all' });
       couponAdjustment = {
         type: 'coupon',

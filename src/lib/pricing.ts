@@ -57,12 +57,69 @@ export interface VerifiedItem {
   subcategory?: string | null;
   /** Trusted Promotion table identity if established; null does not imply no active restriction. */
   selectedPromotionId?: string | null;
+  promotionIdentity?: import('@/lib/coupon-scope').CouponPromotionIdentity;
+  promotionPricingEvidence?: CouponPromotionPricingEvidence;
+  pricingAt?: string;
   /** Product.deletedAt 非空。优惠券不算入范围，计价本身不因下架改价。 */
   delisted?: boolean;
   available?: boolean | null;
   leadTime?: string | null;
   stockQuantity?: number | null;
   pricingSnapshot: string;
+}
+
+export type CouponPromotionPricingEvidence = {
+  productId: string;
+  variantId: string | null;
+  pricedAt: string;
+  identity: import('@/lib/coupon-scope').CouponPromotionIdentity;
+  product: { price: number; promotionalPrice: number | null; minimumSalePrice: number | null };
+  variant: { price: number | null; promotionalPrice: number | null; minimumSalePrice: number | null } | null;
+  candidates: Array<{
+    bindingId: string;
+    productId: string;
+    variantId: string | null;
+    groupKey: string;
+    promotion: { id: string; type: string; value: number; ruleDefinition: string | null; ruleVersion: number;
+      status: string; startsAt: string; endsAt: string; priority: number; exclusive: boolean };
+  }>;
+};
+
+function promotionPricingEvidence(
+  product: PricingProduct,
+  variant: { id: string; productId: string; price: number; promotionalPrice: number | null; minimumSalePrice: number | null } | null,
+  now: Date,
+): CouponPromotionPricingEvidence {
+  const variantId = variant?.id ?? null;
+  return {
+    productId: product.id,
+    variantId,
+    pricedAt: now.toISOString(),
+    identity: { state: 'unknown' },
+    product: { price: product.price, promotionalPrice: product.promotionalPrice, minimumSalePrice: product.minimumSalePrice },
+    variant: variant ? { price: variant.price, promotionalPrice: variant.promotionalPrice, minimumSalePrice: variant.minimumSalePrice } : null,
+    candidates: product.promotionLinks
+      .filter((link) => !link.variantId || link.variantId === variantId)
+      .map((link) => ({
+        bindingId: link.id,
+        productId: link.productId,
+        variantId: link.variantId,
+        groupKey: link.groupKey,
+        promotion: {
+          id: link.promotion.id,
+          type: link.promotion.type,
+          value: link.promotion.value,
+          ruleDefinition: link.promotion.ruleDefinition,
+          ruleVersion: link.promotion.ruleVersion,
+          status: link.promotion.status,
+          startsAt: link.promotion.startsAt.toISOString(),
+          endsAt: link.promotion.endsAt.toISOString(),
+          priority: link.promotion.priority,
+          exclusive: link.promotion.exclusive,
+        },
+      }))
+      .sort((a, b) => a.bindingId.localeCompare(b.bindingId)),
+  };
 }
 
 export type InventoryValidationError = 'PRODUCT_OUT_OF_STOCK' | 'INSUFFICIENT_STOCK';
@@ -102,6 +159,85 @@ export class CustomerUnavailableProductError extends Error {
     this.catalogNumber = catalogNumber;
     this.productName = productName;
   }
+}
+
+/** Compare every pricing-relevant Promotion binding and value inside the checkout transaction. */
+export async function revalidateCouponPromotionEvidence(
+  tx: Prisma.TransactionClient,
+  evidence: CouponPromotionPricingEvidence[],
+  transactionNow: Date,
+): Promise<boolean> {
+  for (const expected of evidence) {
+    const pricedAt = new Date(expected.pricedAt);
+    if (!Number.isFinite(pricedAt.getTime())) return false;
+    const product = await tx.product.findUnique({
+      where: { id: expected.productId },
+      select: { id: true, price: true, promotionalPrice: true, minimumSalePrice: true },
+    });
+    if (!product) return false;
+    const variant = expected.variantId
+      ? await tx.productVariant.findUnique({
+        where: { id: expected.variantId },
+        select: { id: true, productId: true, price: true, promotionalPrice: true, minimumSalePrice: true },
+      })
+      : null;
+    if (expected.variantId && (!variant || variant.productId !== expected.productId)) return false;
+    const where = expected.variantId
+      ? { productId: expected.productId, OR: [{ variantId: null }, { variantId: expected.variantId }] }
+      : { productId: expected.productId, variantId: null };
+    const bindings = await tx.promotionProduct.findMany({
+      where,
+      select: {
+        id: true, productId: true, variantId: true, groupKey: true,
+        promotion: { select: {
+          id: true, type: true, value: true, ruleDefinition: true, ruleVersion: true,
+          status: true, startsAt: true, endsAt: true, priority: true, exclusive: true,
+        } },
+      },
+    });
+    const actual: CouponPromotionPricingEvidence = {
+      productId: product.id,
+      variantId: variant?.id ?? null,
+      pricedAt: expected.pricedAt,
+      identity: expected.identity,
+      product: { price: product.price, promotionalPrice: product.promotionalPrice, minimumSalePrice: product.minimumSalePrice },
+      variant: variant ? { price: variant.price, promotionalPrice: variant.promotionalPrice, minimumSalePrice: variant.minimumSalePrice } : null,
+      candidates: bindings.map((link) => ({
+        bindingId: link.id,
+        productId: link.productId,
+        variantId: link.variantId,
+        groupKey: link.groupKey,
+        promotion: {
+          id: link.promotion.id,
+          type: link.promotion.type,
+          value: link.promotion.value,
+          ruleDefinition: link.promotion.ruleDefinition,
+          ruleVersion: link.promotion.ruleVersion,
+          status: link.promotion.status,
+          startsAt: link.promotion.startsAt.toISOString(),
+          endsAt: link.promotion.endsAt.toISOString(),
+          priority: link.promotion.priority,
+          exclusive: link.promotion.exclusive,
+        },
+      })).sort((a, b) => a.bindingId.localeCompare(b.bindingId)),
+    };
+    if (JSON.stringify(actual) !== JSON.stringify(expected)) return false;
+    const candidatesAt = (at: Date) => actual.candidates
+      .filter((candidate) => candidate.promotion.status === 'active'
+        && new Date(candidate.promotion.startsAt) <= at
+        && new Date(candidate.promotion.endsAt) > at);
+    const activeAtPricing = candidatesAt(pricedAt);
+    const activeAtTransaction = candidatesAt(transactionNow);
+    if (JSON.stringify(activeAtPricing.map((candidate) => candidate.bindingId))
+      !== JSON.stringify(activeAtTransaction.map((candidate) => candidate.bindingId))) return false;
+    if (expected.identity.state === 'unknown') return false;
+    if (expected.identity.state === 'knownnone' && activeAtPricing.length > 0) return false;
+    if (expected.identity.state === 'restricted') {
+      const winnerId = expected.identity.promotionId;
+      if (!activeAtPricing.some((candidate) => candidate.promotion.id === winnerId)) return false;
+    }
+  }
+  return true;
 }
 
 const pricingProductSelect = {
@@ -225,6 +361,8 @@ export async function verifyAndPriceItems(
     let matchedSubcategory: string | null = null;
     let matchedDelisted = false;
     let selectedPromotionId: string | null = null;
+    let promotionIdentity: import('@/lib/coupon-scope').CouponPromotionIdentity = { state: 'unknown' };
+    let promotionEvidence: CouponPromotionPricingEvidence | undefined;
     let manualAdjustment: PriceAdjustment | undefined;
     let pricingSnapshot = '';
 
@@ -261,6 +399,7 @@ export async function verifyAndPriceItems(
         matchedCategory = product.category;
         matchedSubcategory = product.subcategory;
         matchedDelisted = product.deletedAt != null;
+        promotionEvidence = promotionPricingEvidence(product, variant, now);
       }
       const adjustmentKey = variant?.id || variant?.catalogNumber || product?.catalogNumber || item.catalogNumber || item.productId || undefined;
       manualAdjustment = adjustmentKey
@@ -345,13 +484,21 @@ export async function verifyAndPriceItems(
           && !syntheticPromotionIds.has(appliedPromotionId)) {
           selectedPromotionId = appliedPromotionId;
         }
+        promotionIdentity = selectedPromotionId
+          ? { state: 'restricted', promotionId: selectedPromotionId }
+          : activePromotionLinks.length === 0 && syntheticPromotionIds.size === 0
+            && !manualAdjustment && !result.minimumPriceApplied
+            ? { state: 'knownnone' }
+            : { state: 'unknown' };
+        if (promotionEvidence) promotionEvidence = { ...promotionEvidence, identity: promotionIdentity };
         unitPrice = result.finalPrice;
         matchedCatalog = variant?.catalogNumber || product.catalogNumber;
         matchedProductId = product.id;
         matchedBrand = product.brand;
         pricingSnapshot = JSON.stringify({
           calculatedAt: now.toISOString(), productId: product.id, variantId: variant?.id || null,
-          catalogNumber: matchedCatalog, ...result,
+          catalogNumber: matchedCatalog, ...result, couponPromotionIdentity: promotionIdentity,
+          couponPromotionPricingEvidence: promotionEvidence,
         });
         source = 'db';
       }
@@ -405,6 +552,9 @@ export async function verifyAndPriceItems(
       subcategory: matchedSubcategory,
       delisted: matchedDelisted,
       selectedPromotionId,
+      promotionIdentity,
+      promotionPricingEvidence: promotionEvidence,
+      pricingAt: now.toISOString(),
       available,
       leadTime,
       stockQuantity,

@@ -19,6 +19,7 @@ export type CouponScopeLine = {
     category?: string | null;
     subcategory?: string | null;
     delisted?: boolean;
+    promotionIdentity?: CouponPromotionIdentity;
   };
 };
 
@@ -37,6 +38,18 @@ export type CouponScope =
   | { type: 'brand'; brands: string[] }
   | { type: 'category'; categories: string[] }
   | { type: 'product'; products: CouponProductTarget[] };
+
+/** Server-owned promotion policy for coupon eligibility. Omitted means legacy behavior. */
+export type CouponPromotionPolicy =
+  | { state: 'knownnone' }
+  | { state: 'restricted'; promotionIds: string[] }
+  | { state: 'unknown' };
+
+/** Trusted result of resolving a line's winning promotion identity. */
+export type CouponPromotionIdentity =
+  | { state: 'knownnone' }
+  | { state: 'restricted'; promotionId: string }
+  | { state: 'unknown' };
 
 export const COUPON_SCOPE_EMPTY_MESSAGE = '订单中没有符合该优惠券适用范围的商品';
 
@@ -250,4 +263,47 @@ export function couponScopedLines(items: CouponScopeLine[], scope: CouponScope):
   const inScope = base.filter((item) => lineMatchesCouponScope(item, scope));
   const subtotal = inScope.reduce((sum, item) => sum + (item.product.price ?? 0) * item.quantity, 0);
   return { subtotal, inScopeCount: inScope.length, baseCount: base.length };
+}
+
+export function couponLineIsInScope(item: CouponScopeLine, scope: CouponScope): boolean {
+  return !item.product.delisted && lineMatchesCouponScope(item, scope);
+}
+
+/** Trusted line evidence for the exact items that can change this coupon's subtotal. */
+export function couponPromotionEvidenceForScope<T extends CouponScopeLine & {
+  product: CouponScopeLine['product'] & { promotionPricingEvidence?: unknown };
+}>(items: T[], scope: CouponScope): unknown[] {
+  return items
+    .filter((item) => !item.isQuickOrder && !item.promoMark && couponLineIsInScope(item, scope))
+    .map((item) => item.product.promotionPricingEvidence);
+}
+
+/** Evaluate the configured promotion policy before applying this coupon's own scope. */
+export function couponPolicyScopedLines(
+  items: CouponScopeLine[],
+  scope: CouponScope,
+  policy?: CouponPromotionPolicy,
+): { subtotal: number; inScopeCount: number; baseCount: number; error?: 'unknown_promotion_identity' } {
+  if (!policy) return couponScopedLines(items, scope);
+  if (policy.state === 'knownnone') return couponScopedLines(items, scope);
+
+  const base = items.filter((item) => !item.isQuickOrder && !item.promoMark);
+  const inScope = base.filter((item) => couponLineIsInScope(item, scope));
+  if (policy.state === 'unknown') {
+    return inScope.length === 0
+      ? { subtotal: 0, inScopeCount: 0, baseCount: base.length }
+      : { subtotal: 0, inScopeCount: 0, baseCount: base.length, error: 'unknown_promotion_identity' };
+  }
+  const permitted: CouponScopeLine[] = [];
+  for (const item of inScope) {
+    const identity = item.product.promotionIdentity;
+    if (!identity || identity.state === 'unknown') {
+      return { subtotal: 0, inScopeCount: 0, baseCount: base.length, error: 'unknown_promotion_identity' };
+    }
+    if (policy.state === 'restricted' && identity.state === 'restricted'
+      && policy.promotionIds.includes(identity.promotionId)) continue;
+    permitted.push(item);
+  }
+  const subtotal = permitted.reduce((sum, item) => sum + (item.product.price ?? 0) * item.quantity, 0);
+  return { subtotal, inScopeCount: permitted.length, baseCount: base.length };
 }

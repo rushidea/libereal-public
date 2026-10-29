@@ -21,7 +21,9 @@ import {
   parseCouponScope,
   serializeCouponScope,
   type CouponScope,
+  type CouponPromotionPolicy,
 } from '@/lib/coupon-scope';
+import { revalidateCouponPromotionEvidence, type CouponPromotionPricingEvidence } from '@/lib/pricing';
 
 export type CouponView = {
   id: string;
@@ -153,7 +155,45 @@ export type CouponRedeemSnapshot = {
   /** 预评估的范围小计和折扣，核销时必须逐项一致。 */
   scopedSubtotal?: number;
   previewedDiscount?: number;
+  promotionPolicyFingerprint?: string;
+  promotionPricingEvidence?: Array<CouponPromotionPricingEvidence | undefined>;
 };
+
+export type CouponPromotionValidationContext = {
+  promotionPolicyFingerprint: string;
+  policy: CouponPromotionPolicy;
+  scope: CouponScope;
+  couponId: string;
+  code: string;
+  promotionPricingEvidence?: Array<CouponPromotionPricingEvidence | undefined>;
+  scopedSubtotal?: number;
+  previewedDiscount?: number;
+  lineAudit?: Array<{ inScope: boolean; excludedByPolicy: boolean; identity: import('@/lib/coupon-scope').CouponPromotionIdentity }>;
+};
+
+/** Optional generic server configuration. No setting means the legacy policy is disabled. */
+export function configuredCouponPromotionPolicy(): CouponPromotionPolicy | undefined {
+  const raw = process.env.COUPON_PROMOTION_POLICY;
+  if (!raw) return undefined;
+  try {
+    const value: unknown = JSON.parse(raw);
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return { state: 'unknown' };
+    const record = value as { state?: unknown; promotionIds?: unknown };
+    if (record.state === 'knownnone') return { state: 'knownnone' };
+    if (record.state === 'restricted' && Array.isArray(record.promotionIds)
+      && record.promotionIds.length > 0 && record.promotionIds.length <= 100
+      && record.promotionIds.every((id) => typeof id === 'string' && id.trim().length > 0)) {
+      return { state: 'restricted', promotionIds: [...new Set(record.promotionIds.map((id) => (id as string).trim()))].sort() };
+    }
+  } catch {
+    // A configured but malformed policy must fail closed.
+  }
+  return { state: 'unknown' };
+}
+
+function couponPromotionPolicyFingerprint(): string {
+  return JSON.stringify(configuredCouponPromotionPolicy() ?? null);
+}
 
 function sameCouponNumber(left: number, right: number): boolean {
   return Math.round(left * 100) === Math.round(right * 100);
@@ -237,12 +277,36 @@ export async function redeemCoupon(
   subtotal: number,
   orderId?: string,
   snapshot?: CouponRedeemSnapshot,
+  promotionValidation?: CouponPromotionValidationContext,
 ): Promise<CouponRedeemResult> {
   const instance = await tx.couponInstance.findUnique({
     where: { code },
     include: { coupon: true },
   });
   if (!instance) return { ok: false, error: '优惠券不存在' };
+  const policyFingerprint = snapshot?.promotionPolicyFingerprint ?? promotionValidation?.promotionPolicyFingerprint;
+  if (policyFingerprint !== undefined && policyFingerprint !== couponPromotionPolicyFingerprint()) {
+    return { ok: false, error: '商品促销规则在结算期间发生变化，请重新确认' };
+  }
+  const promotionPolicy = configuredCouponPromotionPolicy();
+  if (promotionPolicy && !(['threshold', 'unrestricted'].includes(instance.coupon.type)
+    && (instance.coupon.type !== 'threshold' || instance.coupon.threshold > 0)
+    && (instance.coupon.type !== 'unrestricted' || instance.coupon.threshold === 0))) {
+    return { ok: false, error: '优惠券规则无效，请重新确认' };
+  }
+  if (promotionPolicy?.state === 'restricted' && instance.coupon.type === 'threshold') {
+    const evidence = snapshot?.promotionPricingEvidence ?? promotionValidation?.promotionPricingEvidence;
+    if (!evidence || evidence.length === 0 || evidence.some((entry) => !entry)) {
+      return { ok: false, error: '商品促销信息无法确认，请重新确认订单' };
+    }
+    let stable = false;
+    try {
+      stable = await revalidateCouponPromotionEvidence(tx, evidence as CouponPromotionPricingEvidence[], new Date());
+    } catch {
+      return { ok: false, error: '商品促销信息无法确认，请重新确认订单' };
+    }
+    if (!stable) return { ok: false, error: '商品促销规则在结算期间发生变化，请重新确认' };
+  }
   if (snapshot && !sameCouponSnapshot(instance, snapshot)) {
     return { ok: false, error: '优惠券规则在结算期间发生变化，请重新确认' };
   }
@@ -280,11 +344,13 @@ export async function redeemCoupon(
 
   const discount = Math.min(instance.coupon.discount, Math.round(subtotal * 100) / 100);
   if (discount <= 0) return { ok: false, error: '优惠券金额无效' };
-  if (snapshot) {
-    if (snapshot.scopedSubtotal !== undefined && !sameCouponNumber(snapshot.scopedSubtotal, subtotal)) {
+  if (snapshot || promotionValidation) {
+    const scopedSubtotal = snapshot?.scopedSubtotal ?? promotionValidation?.scopedSubtotal;
+    const previewedDiscount = snapshot?.previewedDiscount ?? promotionValidation?.previewedDiscount;
+    if (scopedSubtotal !== undefined && !sameCouponNumber(scopedSubtotal, subtotal)) {
       return { ok: false, error: '优惠券适用范围在结算期间发生变化，请重新确认' };
     }
-    if (snapshot.previewedDiscount !== undefined && !sameCouponNumber(snapshot.previewedDiscount, discount)) {
+    if (previewedDiscount !== undefined && !sameCouponNumber(previewedDiscount, discount)) {
       return { ok: false, error: '优惠券金额在结算期间发生变化，请重新确认' };
     }
   }
@@ -394,6 +460,7 @@ export async function buildCouponRule(code: string): Promise<{
       id: `coupon:${code}`,
       type: 'coupon',
       couponId: instance.coupon.id,
+      couponType: instance.coupon.type as 'threshold' | 'unrestricted',
       code: instance.code,
       name: instance.coupon.name,
       enabled: true,
@@ -404,6 +471,7 @@ export async function buildCouponRule(code: string): Promise<{
       issueApprovalStatus: instance.issueApprovalStatus as 'auto' | 'pending' | 'approved' | 'rejected',
       description: instance.coupon.description ?? instance.coupon.name,
       scope: parseCouponScope(instance.coupon.scopeType, instance.coupon.scopeTargets),
+      promotionPolicy: configuredCouponPromotionPolicy(),
     },
     snapshot: {
       instanceId: instance.id,
@@ -422,6 +490,7 @@ export async function buildCouponRule(code: string): Promise<{
       maxUses: instance.coupon.maxUses,
       scopeType: instance.coupon.scopeType,
       scopeTargets: instance.coupon.scopeTargets,
+      promotionPolicyFingerprint: couponPromotionPolicyFingerprint(),
     },
   };
 }
