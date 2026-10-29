@@ -132,6 +132,58 @@ export type CouponRedeemResult =
 
 const COUPON_CLAIM_CONFLICT = '优惠券正在被其他订单使用，请重试';
 
+/** 预评估时捕获的规则快照。只在服务端订单调用链内部传递。 */
+export type CouponRedeemSnapshot = {
+  instanceId: string;
+  couponId: string;
+  userId: string | null;
+  instanceStatus: string;
+  issueApprovalStatus: string;
+  instanceExpiresAt: Date | null;
+  type: string;
+  threshold: number;
+  discount: number;
+  stackable: boolean;
+  approvalStatus: string;
+  validFrom: Date;
+  validUntil: Date | null;
+  maxUses: number;
+  scopeType: string;
+  scopeTargets: string;
+  /** 预评估的范围小计和折扣，核销时必须逐项一致。 */
+  scopedSubtotal?: number;
+  previewedDiscount?: number;
+};
+
+function sameCouponNumber(left: number, right: number): boolean {
+  return Math.round(left * 100) === Math.round(right * 100);
+}
+
+function sameCouponSnapshot(instance: {
+  id: string; couponId: string; userId: string | null; status: string;
+  issueApprovalStatus: string; expiresAt: Date | null;
+  coupon: { type: string; threshold: number; discount: number; stackable: boolean; approvalStatus: string;
+    validFrom: Date | null; validUntil: Date | null; maxUses: number;
+    scopeType: string; scopeTargets: string };
+}, snapshot: CouponRedeemSnapshot): boolean {
+  return instance.id === snapshot.instanceId
+    && instance.couponId === snapshot.couponId
+    && instance.userId === snapshot.userId
+    && instance.status === snapshot.instanceStatus
+    && instance.issueApprovalStatus === snapshot.issueApprovalStatus
+    && sameCouponInstant(instance.expiresAt, snapshot.instanceExpiresAt)
+    && instance.coupon.type === snapshot.type
+    && sameCouponNumber(instance.coupon.threshold, snapshot.threshold)
+    && sameCouponNumber(instance.coupon.discount, snapshot.discount)
+    && instance.coupon.stackable === snapshot.stackable
+    && instance.coupon.approvalStatus === snapshot.approvalStatus
+    && sameCouponInstant(instance.coupon.validFrom, snapshot.validFrom)
+    && sameCouponInstant(instance.coupon.validUntil, snapshot.validUntil)
+    && Math.floor(instance.coupon.maxUses) === Math.floor(snapshot.maxUses)
+    && instance.coupon.scopeType === snapshot.scopeType
+    && instance.coupon.scopeTargets === snapshot.scopeTargets;
+}
+
 function errorText(error: unknown): string {
   const parts: string[] = [];
   const seen = new Set<unknown>();
@@ -184,12 +236,16 @@ export async function redeemCoupon(
   userId: string,
   subtotal: number,
   orderId?: string,
+  snapshot?: CouponRedeemSnapshot,
 ): Promise<CouponRedeemResult> {
   const instance = await tx.couponInstance.findUnique({
     where: { code },
     include: { coupon: true },
   });
   if (!instance) return { ok: false, error: '优惠券不存在' };
+  if (snapshot && !sameCouponSnapshot(instance, snapshot)) {
+    return { ok: false, error: '优惠券规则在结算期间发生变化，请重新确认' };
+  }
   if (instance.userId && instance.userId !== userId) {
     return { ok: false, error: '该优惠券不属于当前账户' };
   }
@@ -224,10 +280,21 @@ export async function redeemCoupon(
 
   const discount = Math.min(instance.coupon.discount, Math.round(subtotal * 100) / 100);
   if (discount <= 0) return { ok: false, error: '优惠券金额无效' };
+  if (snapshot) {
+    if (snapshot.scopedSubtotal !== undefined && !sameCouponNumber(snapshot.scopedSubtotal, subtotal)) {
+      return { ok: false, error: '优惠券适用范围在结算期间发生变化，请重新确认' };
+    }
+    if (snapshot.previewedDiscount !== undefined && !sameCouponNumber(snapshot.previewedDiscount, discount)) {
+      return { ok: false, error: '优惠券金额在结算期间发生变化，请重新确认' };
+    }
+  }
 
   // 只有仍未使用的实例能被这次更新认领。另一笔并发事务已核销时 count=0。
   const claimed = await claimCouponWrite(() => tx.couponInstance.updateMany({
-    where: { id: instance.id, status: 'active' },
+    where: { id: instance.id, status: 'active', ...(snapshot ? {
+      couponId: snapshot.couponId, userId: snapshot.userId,
+      issueApprovalStatus: snapshot.issueApprovalStatus, expiresAt: snapshot.instanceExpiresAt,
+    } : {}) },
     data: { status: 'used', redeemedAt: now, redeemedOrderId: orderId ?? null },
   }));
   if (!claimed.ok) return claimed;
@@ -239,6 +306,18 @@ export async function redeemCoupon(
   const counted = await claimCouponWrite(() => tx.coupon.updateMany({
     where: {
       id: instance.coupon.id,
+      ...(snapshot ? {
+        type: snapshot.type,
+        threshold: snapshot.threshold,
+        discount: snapshot.discount,
+        stackable: snapshot.stackable,
+        approvalStatus: snapshot.approvalStatus,
+        validFrom: snapshot.validFrom,
+        validUntil: snapshot.validUntil,
+        maxUses: snapshot.maxUses,
+        scopeType: snapshot.scopeType,
+        scopeTargets: snapshot.scopeTargets,
+      } : {}),
       OR: [
         { maxUses: 0 },
         { usedCount: { lt: instance.coupon.maxUses } },
@@ -295,6 +374,7 @@ export async function restoreRedeemedOrderCoupons(tx: Tx, orderId: string): Prom
  * 已使用/已作废/已过期/未生效的券返回 null，价格预览与下单预评估均不会展示其优惠。 */
 export async function buildCouponRule(code: string): Promise<{
   config: import('@/lib/cart-promotions/types').CouponRuleConfig;
+  snapshot: CouponRedeemSnapshot;
 } | null> {
   const instance = await prisma.couponInstance.findUnique({
     where: { code },
@@ -324,6 +404,24 @@ export async function buildCouponRule(code: string): Promise<{
       issueApprovalStatus: instance.issueApprovalStatus as 'auto' | 'pending' | 'approved' | 'rejected',
       description: instance.coupon.description ?? instance.coupon.name,
       scope: parseCouponScope(instance.coupon.scopeType, instance.coupon.scopeTargets),
+    },
+    snapshot: {
+      instanceId: instance.id,
+      couponId: instance.coupon.id,
+      userId: instance.userId,
+      instanceStatus: instance.status,
+      issueApprovalStatus: instance.issueApprovalStatus,
+      instanceExpiresAt: instance.expiresAt,
+      type: instance.coupon.type,
+      threshold: instance.coupon.threshold,
+      discount: instance.coupon.discount,
+      stackable: instance.coupon.stackable,
+      approvalStatus: instance.coupon.approvalStatus,
+      validFrom: instance.coupon.validFrom,
+      validUntil: instance.coupon.validUntil,
+      maxUses: instance.coupon.maxUses,
+      scopeType: instance.coupon.scopeType,
+      scopeTargets: instance.coupon.scopeTargets,
     },
   };
 }

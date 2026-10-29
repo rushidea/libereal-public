@@ -3,7 +3,7 @@ import path from 'node:path';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
-import { redeemCoupon, restoreRedeemedOrderCoupons } from '@/lib/coupon-service';
+import { buildCouponRule, redeemCoupon, restoreRedeemedOrderCoupons } from '@/lib/coupon-service';
 import { clearAllTables, closeTestDb, getTestDb } from './db-helpers';
 
 describe('redeemCoupon conditional claim', () => {
@@ -212,6 +212,41 @@ describe('concurrent coupon redemption', () => {
     const db = getTestDb();
     db.pragma('busy_timeout = 5000');
     clearAllTables(db);
+  });
+
+  it.each(['discount', 'scope'])('rejects a changed %s after pre-evaluation without consuming the coupon', async (field) => {
+    const id = await seedCoupon({ code: 'SYNTHETIC-CHANGED', maxUses: 0 });
+    const rule = await buildCouponRule('SYNTHETIC-CHANGED');
+    expect(rule).not.toBeNull();
+    await prisma.coupon.update({ where: { id }, data: field === 'discount'
+      ? { discount: 20 }
+      : { scopeType: 'product', scopeTargets: '[{"productId":"other"}]' } });
+    await expect(prisma.$transaction(async (tx) => {
+      const result = await redeemCoupon(tx, 'SYNTHETIC-CHANGED', 'buyer-1', 200, 'synthetic-order', {
+        ...rule!.snapshot, scopedSubtotal: 200, previewedDiscount: 10,
+      });
+      if (!result.ok) throw new Error(result.error);
+    })).rejects.toThrow('优惠券规则在结算期间发生变化');
+    expect(await prisma.couponInstance.findUnique({ where: { code: 'SYNTHETIC-CHANGED' }, include: { coupon: true } }))
+      .toMatchObject({ status: 'active', redeemedOrderId: null, coupon: { usedCount: 0 } });
+  });
+
+  it('rolls back a claimed instance when the template conditional update fails', async () => {
+    await seedCoupon({ code: 'SYNTHETIC-CAS-FAIL', maxUses: 0 });
+    const rule = await buildCouponRule('SYNTHETIC-CAS-FAIL');
+    expect(rule).not.toBeNull();
+    await expect(prisma.$transaction(async (tx) => {
+      const simulateChangedTemplate = {
+        couponInstance: tx.couponInstance,
+        coupon: { updateMany: async () => ({ count: 0 }) },
+      } as unknown as Prisma.TransactionClient;
+      const result = await redeemCoupon(simulateChangedTemplate, 'SYNTHETIC-CAS-FAIL', 'buyer-1', 200, 'synthetic-order', {
+        ...rule!.snapshot, scopedSubtotal: 200, previewedDiscount: 10,
+      });
+      if (!result.ok) throw new Error(result.error);
+    })).rejects.toThrow();
+    expect(await prisma.couponInstance.findUnique({ where: { code: 'SYNTHETIC-CAS-FAIL' }, include: { coupon: true } }))
+      .toMatchObject({ status: 'active', redeemedOrderId: null, coupon: { usedCount: 0 } });
   });
 
   it('lets only one of two overlapping orders redeem the same coupon and rolls the other back', async () => {

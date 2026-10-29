@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { AMBIGUOUS_PRODUCT_CATALOG_NUMBER, getVerifiedInventoryError, verifyAndPriceItems } from '@/lib/pricing';
+import { withPromotionRepository } from '@/lib/promotion-repository';
 import { clearAllTables, closeTestDb, getTestDb, seedUser } from './db-helpers';
 
 function seedProduct() {
@@ -43,6 +44,38 @@ describe('pricing service', () => {
     const snapshot = JSON.parse(result.verifiedItems[0].pricingSnapshot);
     expect(snapshot.appliedSource).toBe('promotion:promo_1');
     expect(snapshot.steps.some((step: { stage: string; applied: boolean }) => step.stage === 'promotion' && step.applied)).toBe(true);
+  });
+
+  it('uses the same left-closed right-open promotion boundary as foundation pricing', async () => {
+    const db = getTestDb();
+    db.prepare("UPDATE Product SET minimumSalePrice = NULL WHERE id = 'product_1'").run();
+    const startsAt = new Date('2030-01-01T00:00:00.000Z');
+    const endsAt = new Date('2030-01-02T00:00:00.000Z');
+    db.prepare(`INSERT INTO Promotion
+      (id, name, type, value, ruleDefinition, ruleVersion, status, startsAt, endsAt, priority, exclusive, updatedAt)
+      VALUES ('promo_boundary', '边界活动', 'fixed_price', 500, ?, 1, 'active', ?, ?, 1, 1, ?)`
+    ).run(JSON.stringify({
+      schemaVersion: 1,
+      template: 'direct-price',
+      groups: [{ key: 'main', role: 'benefit', unit: '件', quantity: 1 }],
+      benefit: { kind: 'fixed-price', unitPriceCents: 500 },
+      repeat: false,
+      maxApplications: null,
+      partialBenefit: false,
+    }), startsAt.getTime(), endsAt.getTime(), endsAt.getTime());
+    db.prepare(`INSERT INTO PromotionProduct (id, promotionId, productId, groupKey)
+      VALUES ('link_boundary', 'promo_boundary', 'product_1', 'main')`).run();
+
+    const atStart = await verifyAndPriceItems([{ catalogNumber: 'CAT-1', name: '测试产品', price: 999 }], {
+      userId: 'user_1', now: startsAt,
+    });
+    const atEnd = await verifyAndPriceItems([{ catalogNumber: 'CAT-1', name: '测试产品', price: 999 }], {
+      userId: 'user_1', now: endsAt,
+    });
+
+    expect(atStart.verifiedItems[0].unitPrice).toBe(500);
+    expect(atEnd.verifiedItems[0].unitPrice).toBe(1000);
+    expect(withPromotionRepository((repository) => repository.activeForProducts(['product_1'], endsAt))).toEqual([]);
   });
 
   it('ignores an expired promotion', async () => {
