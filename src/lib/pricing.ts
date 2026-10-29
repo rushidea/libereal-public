@@ -55,6 +55,8 @@ export interface VerifiedItem {
   category?: string | null;
   /** Product.subcategory，优惠券品类范围用。 */
   subcategory?: string | null;
+  /** Trusted Promotion table identity if established; null does not imply no active restriction. */
+  selectedPromotionId?: string | null;
   /** Product.deletedAt 非空。优惠券不算入范围，计价本身不因下架改价。 */
   delisted?: boolean;
   available?: boolean | null;
@@ -222,6 +224,7 @@ export async function verifyAndPriceItems(
     let matchedCategory: string | null = null;
     let matchedSubcategory: string | null = null;
     let matchedDelisted = false;
+    let selectedPromotionId: string | null = null;
     let manualAdjustment: PriceAdjustment | undefined;
     let pricingSnapshot = '';
 
@@ -278,12 +281,13 @@ export async function verifyAndPriceItems(
         throw new CustomerUnavailableProductError(product.catalogNumber, product.name);
       }
       if (!quoteRequired && product && (product.price > 0 || (variant?.price || 0) > 0)) {
-        const promotions: PromotionCandidate[] = product.promotionLinks
+        const activePromotionLinks = product.promotionLinks
           .filter((link) => (!link.variantId || link.variantId === variant?.id)
             && link.promotion.status === 'active'
             && link.promotion.startsAt <= now
-            && link.promotion.endsAt > now)
-          .map((link) => ({
+            && link.promotion.endsAt > now);
+        const activeDatabasePromotionIds = new Set(activePromotionLinks.map((link) => link.promotion.id));
+        const promotions: PromotionCandidate[] = activePromotionLinks.map((link) => ({
             id: link.promotion.id,
             name: link.promotion.name,
             type: link.promotion.type as PromotionCandidate['type'],
@@ -291,9 +295,11 @@ export async function verifyAndPriceItems(
             priority: link.promotion.priority,
             exclusive: link.promotion.exclusive,
           }));
+        const syntheticPromotionIds = new Set<string>();
         // P0-1 统一前后台价格源：前台 getEffectiveProductPrice 用 promotionalPrice（>0 即生效），
         // 服务端同样将其纳入促销候选（fixed_price），与会员/品牌折扣、Promotion 表促销统一「取最低成交价」。
         if (product.promotionalPrice != null && product.promotionalPrice > 0) {
+          syntheticPromotionIds.add('product-promotional-price');
           promotions.push({
             id: 'product-promotional-price',
             name: '商品促销价',
@@ -304,6 +310,7 @@ export async function verifyAndPriceItems(
           });
         }
         if (variant?.promotionalPrice != null && variant.promotionalPrice > 0) {
+          syntheticPromotionIds.add(`variant-promotional-price:${variant.id}`);
           promotions.push({
             id: `variant-promotional-price:${variant.id}`,
             name: '规格促销价',
@@ -328,6 +335,16 @@ export async function verifyAndPriceItems(
           manualAdjustment: isPromoLine ? null : manualAdjustment,
           minimumSalePrice: isPromoLine ? undefined : (variant?.minimumSalePrice ?? product.minimumSalePrice),
         });
+        // Promotion identity is trusted only when the exact server-loaded Promotion
+        // candidate won pricing and no later override changed its effective price.
+        const appliedPromotionId = result.appliedSource.startsWith('promotion:')
+          ? result.appliedSource.slice('promotion:'.length)
+          : '';
+        if (appliedPromotionId && !result.minimumPriceApplied && !manualAdjustment
+          && activeDatabasePromotionIds.has(appliedPromotionId)
+          && !syntheticPromotionIds.has(appliedPromotionId)) {
+          selectedPromotionId = appliedPromotionId;
+        }
         unitPrice = result.finalPrice;
         matchedCatalog = variant?.catalogNumber || product.catalogNumber;
         matchedProductId = product.id;
@@ -387,6 +404,7 @@ export async function verifyAndPriceItems(
       category: matchedCategory,
       subcategory: matchedSubcategory,
       delisted: matchedDelisted,
+      selectedPromotionId,
       available,
       leadTime,
       stockQuantity,

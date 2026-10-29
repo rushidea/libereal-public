@@ -276,6 +276,7 @@ export async function POST(req: NextRequest) {
         product: {
           id: vi.productId ?? '',
           variantId: vi.variantId || undefined,
+          selectedPromotionId: vi.selectedPromotionId ?? null,
           brand: vi.brand ?? raw?.brand ?? '',
           catalogNumber: vi.catalogNumber ?? '',
           name: vi.name ?? '',

@@ -41,6 +41,7 @@ describe('pricing service', () => {
 
     const result = await verifyAndPriceItems([{ catalogNumber: 'CAT-1', name: '测试产品', price: 999 }], { userId: 'user_1' });
     expect(result.verifiedItems[0].unitPrice).toBe(800);
+    expect(result.verifiedItems[0].selectedPromotionId).toBe('promo_1');
     const snapshot = JSON.parse(result.verifiedItems[0].pricingSnapshot);
     expect(snapshot.appliedSource).toBe('promotion:promo_1');
     expect(snapshot.steps.some((step: { stage: string; applied: boolean }) => step.stage === 'promotion' && step.applied)).toBe(true);
@@ -85,6 +86,28 @@ describe('pricing service', () => {
     db.prepare(`INSERT INTO PromotionProduct (id, promotionId, productId) VALUES ('link_1', 'promo_1', 'product_1')`).run();
     const result = await verifyAndPriceItems([{ catalogNumber: 'CAT-1', name: '测试产品', price: 999 }], { userId: 'user_1' });
     expect(result.verifiedItems[0].unitPrice).toBe(995);
+    expect(result.verifiedItems[0].selectedPromotionId).toBeNull();
+  });
+
+  it('does not expose a promotion identity when another price source wins or changes it', async () => {
+    const db = getTestDb();
+    db.prepare(`INSERT INTO Promotion (id, name, type, value, status, startsAt, endsAt, updatedAt)
+      VALUES ('promo_floor', '低价活动', 'fixed_price', 600, 'active', datetime('now', '-1 day'), datetime('now', '+1 day'), datetime('now'))`).run();
+    db.prepare(`INSERT INTO PromotionProduct (id, promotionId, productId) VALUES ('link_floor', 'promo_floor', 'product_1')`).run();
+    const floored = await verifyAndPriceItems([{ catalogNumber: 'CAT-1', name: '测试产品', price: 999 }]);
+    expect(floored.verifiedItems[0]).toMatchObject({ unitPrice: 700, selectedPromotionId: null });
+
+    db.prepare("DELETE FROM PromotionProduct WHERE promotionId = 'promo_floor'").run();
+    db.prepare("UPDATE Product SET promotionalPrice = 800 WHERE id = 'product_1'").run();
+    const pseudoCandidate = await verifyAndPriceItems([{ catalogNumber: 'CAT-1', name: '测试产品', price: 999 }]);
+    expect(pseudoCandidate.verifiedItems[0]).toMatchObject({ unitPrice: 800, selectedPromotionId: null });
+
+    db.prepare("UPDATE Product SET minimumSalePrice = NULL WHERE id = 'product_1'").run();
+    db.prepare(`INSERT INTO Promotion (id, name, type, value, status, startsAt, endsAt, updatedAt)
+      VALUES ('product-promotional-price', '标识冲突活动', 'fixed_price', 600, 'active', datetime('now', '-1 day'), datetime('now', '+1 day'), datetime('now'))`).run();
+    db.prepare(`INSERT INTO PromotionProduct (id, promotionId, productId) VALUES ('link_collision', 'product-promotional-price', 'product_1')`).run();
+    const collision = await verifyAndPriceItems([{ catalogNumber: 'CAT-1', name: '测试产品', price: 999 }]);
+    expect(collision.verifiedItems[0]).toMatchObject({ unitPrice: 600, selectedPromotionId: null });
   });
 
   it('enforces minimum sale price after an authorized manual adjustment', async () => {
@@ -93,6 +116,7 @@ describe('pricing service', () => {
       manualAdjustments: { 'CAT-1': { type: 'fixed_price', value: 600, reason: '人工报价' } },
     });
     expect(result.verifiedItems[0].unitPrice).toBe(700);
+    expect(result.verifiedItems[0].selectedPromotionId).toBeNull();
     expect(JSON.parse(result.verifiedItems[0].pricingSnapshot).minimumPriceApplied).toBe(true);
   });
 

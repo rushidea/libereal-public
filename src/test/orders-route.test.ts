@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({
   auth: vi.fn(),
   verifyAndPriceItems: vi.fn(),
+  capturePromoLines: vi.fn(),
   userFindUnique: vi.fn(),
   orderFindFirst: vi.fn(),
   orderFindUnique: vi.fn(),
@@ -21,6 +22,16 @@ vi.mock('@/lib/cart-promotions/rules', () => ({ PROMOTION_RULES: [sampleRules.sa
 
 
 vi.mock('@/lib/auth', () => ({ auth: mocks.auth }));
+vi.mock('@/lib/cart-promotions/service', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/cart-promotions/service')>();
+  return {
+    ...actual,
+    computePromoAdjustments: (lines: Parameters<typeof actual.computePromoAdjustments>[0], now?: Date) => {
+      mocks.capturePromoLines(lines);
+      return actual.computePromoAdjustments(lines, now);
+    },
+  };
+});
 vi.mock('@/lib/pricing', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/pricing')>();
   return {
@@ -99,6 +110,21 @@ describe('POST /api/orders', () => {
   function replayRecord(body = keyedRequest()) {
     return { id: 'synthetic-existing', customerId: 'user-1', organizationId: null, ownerScope: 'personal', checkoutRequestFingerprint: buildCheckoutRequestFingerprint({ operation: 'order', actorId: 'user-1', organizationId: null, ownerScope: 'personal', request: body }) };
   }
+  it('uses only verified promotion identity for order cart lines', async () => {
+    const verified = verifiedPromotion();
+    verified.verifiedItems[0].selectedPromotionId = 'trusted-promotion';
+    const submitted = submittedPromotion().map((item) => ({ ...item, selectedPromotionId: 'forged-promotion' }));
+    mocks.verifyAndPriceItems.mockResolvedValue(verified);
+    const response = await POST(request({
+      items: submitted,
+      paymentMethod: 'bank_transfer',
+      acceptedLegalIds: ['checkout-terms'],
+    }) as never);
+
+    expect(response.status).toBe(200);
+    const [lines] = mocks.capturePromoLines.mock.calls.at(-1) as [Array<{ product: { selectedPromotionId?: string | null } }>];
+    expect(lines.map((line) => line.product.selectedPromotionId)).toEqual(['trusted-promotion', null]);
+  });
   it('replays before price verification without duplicate order or notifications', async () => {
     mocks.orderFindUnique.mockResolvedValue(replayRecord());
     const response = await POST(request(keyedRequest()) as never);
