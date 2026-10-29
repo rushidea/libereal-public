@@ -161,6 +161,8 @@ export interface CouponRuleConfig extends BaseRuleConfig {
   type: 'coupon';
   /** 券模板 id（Coupon.id） */
   couponId: string;
+  /** Trusted coupon type loaded from the template. */
+  couponType: 'threshold' | 'unrestricted';
   /** 券码（CouponInstance.code，下单时提交） */
   code: string;
   /** 满减门槛金额（满 X 减 Y；无门槛券为 0） */
@@ -178,6 +180,8 @@ export interface CouponRuleConfig extends BaseRuleConfig {
    * 门槛与抵扣只看范围内且未下架的商品小计。
    */
   scope?: import('@/lib/coupon-scope').CouponScope;
+  /** Server-owned policy; omitted preserves the historical coupon behavior. */
+  promotionPolicy?: import('@/lib/coupon-scope').CouponPromotionPolicy;
 }
 
 export type RuleConfig =
@@ -201,6 +205,9 @@ export interface CartLine {
     variantId?: string;
     /** Trusted DB Promotion identity when established; null does not imply no active restriction. */
     selectedPromotionId?: string | null;
+    /** Trusted certainty for promotion identity; null selectedPromotionId is not proof of none. */
+    promotionIdentity?: import('@/lib/coupon-scope').CouponPromotionIdentity;
+    promotionPricingEvidence?: import('@/lib/pricing').CouponPromotionPricingEvidence;
     brand: string;
     catalogNumber: string;
     price: number | null;

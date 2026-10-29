@@ -14,7 +14,7 @@
  */
 import {
   COUPON_SCOPE_EMPTY_MESSAGE,
-  couponScopedLines,
+  couponPolicyScopedLines,
   formatCouponScopeLabel,
   type CouponScope,
 } from '@/lib/coupon-scope';
@@ -45,9 +45,30 @@ export const couponStrategy: RuleStrategy<CouponRuleConfig> = {
       };
     }
 
-    // 范围内商品小计（排除促销标记行、快速下单行和已下架商品）
+    // Unrestricted zero-threshold coupons explicitly remain eligible for promotional lines.
+    // Threshold coupons apply the configured trusted promotion-line policy before their own scope.
     const scope = couponScope(config);
-    const scoped = couponScopedLines(ctx.items, scope);
+    if (config.promotionPolicy && !['threshold', 'unrestricted'].includes(config.couponType)) {
+      return { active: true, triggered: false, summary: `${config.name}：优惠券规则无效`, details: { reason: 'invalid_coupon_type', couponAmount: 0 }, adjustments: [] };
+    }
+    if (config.promotionPolicy && config.couponType === 'threshold'
+      && (!Number.isFinite(config.threshold) || config.threshold <= 0)) {
+      return { active: true, triggered: false, summary: `${config.name}：优惠券规则无效`, details: { reason: 'invalid_coupon_type', couponAmount: 0 }, adjustments: [] };
+    }
+    if (config.promotionPolicy && config.couponType === 'unrestricted' && config.threshold !== 0) {
+      return { active: true, triggered: false, summary: `${config.name}：优惠券规则无效`, details: { reason: 'invalid_coupon_type', couponAmount: 0 }, adjustments: [] };
+    }
+    const usePromotionPolicy = config.couponType === 'threshold' ? config.promotionPolicy : undefined;
+    const scoped = couponPolicyScopedLines(ctx.items, scope, usePromotionPolicy);
+    if (scoped.error) {
+      return {
+        active: true,
+        triggered: false,
+        summary: `${config.name}：商品促销身份无法确认，请重新确认订单`,
+        details: { reason: 'unknown_promotion_identity', subtotal: 0, couponAmount: 0 },
+        adjustments: [],
+      };
+    }
     const subtotal = scoped.subtotal;
     const scopeLabel = formatCouponScopeLabel(scope);
     // 全站券且没有任何可计行（只剩赠品/换购）时，沿用原来的门槛/金额无效提示。

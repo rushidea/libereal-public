@@ -40,6 +40,7 @@ describe('POST /api/orders/pricing-preview', () => {
   it('uses only verified promotion identity for cart lines', async () => {
     const verified = verifiedPromotion();
     verified.verifiedItems[0].selectedPromotionId = 'trusted-promotion';
+    verified.verifiedItems[0].promotionIdentity = { state: 'restricted', promotionId: 'trusted-promotion' };
     const submitted = submittedPromotion().map((item) => ({ ...item, selectedPromotionId: 'forged-promotion' }));
     mocks.verifyAndPriceItems.mockResolvedValue(verified);
     const response = await POST(new Request('https://libereal.cn/api/orders/pricing-preview', {
@@ -47,8 +48,11 @@ describe('POST /api/orders/pricing-preview', () => {
     }) as never);
 
     expect(response.status).toBe(200);
-    const [lines] = mocks.capturePromoLines.mock.calls.at(-1) as [Array<{ product: { selectedPromotionId?: string | null } }>];
+    const [lines] = mocks.capturePromoLines.mock.calls.at(-1) as [Array<{ product: { selectedPromotionId?: string | null; promotionIdentity?: unknown } }>];
     expect(lines.map((line) => line.product.selectedPromotionId)).toEqual(['trusted-promotion', null]);
+    expect(lines.map((line) => line.product.promotionIdentity)).toEqual([
+      { state: 'restricted', promotionId: 'trusted-promotion' }, { state: 'unknown' },
+    ]);
   });
 
   it('普通合成商品根据服务端确认身份自动计算加购价', async () => {

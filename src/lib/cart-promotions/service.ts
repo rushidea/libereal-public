@@ -24,6 +24,8 @@ export function toVerifiedCartLines(items: VerifiedItem[], submitted: PriceLooku
       catalogNumber: item.catalogNumber ?? '', spec: item.spec,
       name: item.name, price: item.unitPrice,
       selectedPromotionId: item.selectedPromotionId ?? null,
+      promotionIdentity: item.promotionIdentity ?? { state: 'unknown' },
+      promotionPricingEvidence: item.promotionPricingEvidence,
     },
     quantity: item.quantity,
     isQuickOrder: item.source !== 'db',

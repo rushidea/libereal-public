@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { NextRequest } from 'next/server';
 import { clearAllTables, closeTestDb, getTestDb, seedAdmin, seedUser } from './db-helpers';
 import { PREPAY_POINTS_RELEASE_REASON } from '@/lib/points-checkout-service';
@@ -17,6 +17,7 @@ import { POST as previewPOST } from '@/app/api/orders/[id]/prepay-settlement/pre
 
 const admin = { id: 'admin_test_id', email: 'admin@test.com', role: 'admin' as const };
 const buyer = { id: 'buyer_points', email: 'q@test.com', role: 'customer' as const };
+const initialCouponPromotionPolicy = process.env.COUPON_PROMOTION_POLICY;
 
 function asUser(user: { id: string; email: string; role: 'admin' | 'customer' }) {
   authMock.mockResolvedValue({
@@ -155,6 +156,10 @@ function preview(orderId: string, body: Record<string, unknown>) {
 describe('POST /api/orders/[id]/prepay-settlement', () => {
   beforeAll(() => { getTestDb(); });
   afterAll(() => { closeTestDb(); });
+  afterEach(() => {
+    if (initialCouponPromotionPolicy === undefined) delete process.env.COUPON_PROMOTION_POLICY;
+    else process.env.COUPON_PROMOTION_POLICY = initialCouponPromotionPolicy;
+  });
   beforeEach(() => {
     const db = getTestDb();
     clearAllTables(db);
@@ -231,6 +236,47 @@ describe('POST /api/orders/[id]/prepay-settlement', () => {
       redeemedOrderId: null,
     });
     expect(db.prepare('SELECT usedCount FROM Coupon WHERE id = ?').get('coupon_SAVE10')).toEqual({ usedCount: 0 });
+  });
+
+  it('preserves the booked coupon when only points change after policy or template drift', async () => {
+    const db = getTestDb();
+    db.prepare("UPDATE User SET points = 100 WHERE id = 'buyer_points'").run();
+    seedCoupon(db, { code: 'SAVE10', threshold: 100, discount: 10 });
+    const created = await acceptQuote(admin, { paymentMethod: 'alipay' }, 'proxy-coupon-policy-held');
+    asUser(buyer);
+    expect((await settle(created.id, { personalPoints: 40, couponCode: 'SAVE10' })).status).toBe(200);
+
+    process.env.COUPON_PROMOTION_POLICY = JSON.stringify({ state: 'restricted', promotionIds: ['changed-policy'] });
+    db.prepare("UPDATE Coupon SET discount = 50 WHERE id = 'coupon_SAVE10'").run();
+    const previewed = await preview(created.id, { personalPoints: 60, couponCode: 'SAVE10' });
+    expect(previewed.status).toBe(200);
+    await expect(previewed.json()).resolves.toMatchObject({ total: 230, coupon: { amount: -10 } });
+    const updated = await settle(created.id, { personalPoints: 60, couponCode: 'SAVE10' });
+    expect(updated.status).toBe(200);
+    expect(orderRow().total).toBe(230);
+    expect(db.prepare('SELECT amount FROM OrderAdjustment WHERE orderId = ? AND type = ?').get(created.id, 'coupon')).toEqual({ amount: -10 });
+    expect(db.prepare('SELECT usedCount FROM Coupon WHERE id = ?').get('coupon_SAVE10')).toEqual({ usedCount: 1 });
+  });
+
+  it('records the active policy audit when a replacement coupon is redeemed during prepay', async () => {
+    const db = getTestDb();
+    seedCoupon(db, { code: 'SAVE10' });
+    const created = await acceptQuote(admin, { paymentMethod: 'alipay' }, 'proxy-coupon-policy-audit');
+    asUser(buyer);
+    process.env.COUPON_PROMOTION_POLICY = JSON.stringify({ state: 'knownnone' });
+    const response = await settle(created.id, { couponCode: 'SAVE10' });
+    expect(response.status).toBe(200);
+    const item = db.prepare('SELECT pricingSnapshot FROM OrderItem WHERE orderId = ?').get(created.id) as { pricingSnapshot: string };
+    const pricing = JSON.parse(item.pricingSnapshot) as { couponPolicyAudits?: Array<Record<string, unknown>> };
+    expect(pricing.couponPolicyAudits).toHaveLength(1);
+    expect(pricing.couponPolicyAudits?.[0]).toMatchObject({
+      policy: { state: 'knownnone' },
+      code: 'SAVE10',
+      eligibleSubtotal: 300,
+      discount: 10,
+      inScope: true,
+      excludedByPolicy: false,
+    });
   });
 
   it('keeps existing points when the request only changes the coupon', async () => {

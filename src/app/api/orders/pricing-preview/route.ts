@@ -66,6 +66,8 @@ export async function POST(req: NextRequest) {
           id: vi.productId ?? '',
           variantId: vi.variantId || undefined,
           selectedPromotionId: vi.selectedPromotionId ?? null,
+          promotionIdentity: vi.promotionIdentity ?? { state: 'unknown' },
+          promotionPricingEvidence: vi.promotionPricingEvidence,
           brand: vi.brand ?? raw?.brand ?? '',
           catalogNumber: vi.catalogNumber ?? '',
           name: vi.name ?? '',

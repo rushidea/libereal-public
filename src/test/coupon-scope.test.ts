@@ -20,6 +20,7 @@ function line(over: Partial<CartLine['product']> & { price: number }, quantity =
       variantId: over.variantId,
       delisted: over.delisted,
       name: over.name,
+      promotionIdentity: over.promotionIdentity,
     },
     quantity,
     ...extra,
@@ -31,6 +32,7 @@ function coupon(over: Partial<CouponRuleConfig> = {}): CouponRuleConfig {
     id: 'coupon:TEST',
     type: 'coupon',
     couponId: 'c1',
+    couponType: 'threshold',
     code: 'TESTCODE',
     name: '测试券',
     enabled: true,
@@ -183,6 +185,57 @@ describe('coupon scope eligibility', () => {
       scope: { type: 'product', products: [{ productId: 'gone', variantId: null }] },
     }), [delisted]);
     expect(product.summary).toContain(COUPON_SCOPE_EMPTY_MESSAGE);
+  });
+
+  it('excludes configured promotion lines before threshold and discount, then applies coupon scope', () => {
+    const config = coupon({
+      threshold: 500,
+      discount: 0.55,
+      promotionPolicy: { state: 'restricted', promotionIds: ['configured-promo'] },
+      scope: { type: 'brand', brands: ['Eligible'] },
+    });
+    const result = evaluate(config, [
+      line({ id: 'eligible', brand: 'Eligible', price: 600, promotionIdentity: { state: 'knownnone' } }),
+      line({ id: 'promo', brand: 'Eligible', price: 400, promotionIdentity: { state: 'restricted', promotionId: 'configured-promo' } }),
+      line({ id: 'other-scope', brand: 'Other', price: 900, promotionIdentity: { state: 'unknown' } }),
+      line({ id: 'promo-marked', brand: 'Eligible', price: 1000, promotionIdentity: { state: 'unknown' } }, 1, { promoMark: { ruleId: 'gift' } }),
+    ]);
+    expect(result.triggered).toBe(true);
+    expect(result.details?.subtotal).toBe(600);
+    expect(result.adjustments[0]?.amount).toBe(0.55);
+  });
+
+  it('checks the configured threshold against eligible subtotal at the exact boundary', () => {
+    const config = coupon({ threshold: 500, promotionPolicy: { state: 'restricted', promotionIds: ['configured-promo'] } });
+    const promotional = line({ price: 400, promotionIdentity: { state: 'restricted', promotionId: 'configured-promo' } });
+    const boundary = evaluate(config, [
+      line({ price: 500, promotionIdentity: { state: 'knownnone' } }), promotional,
+    ]);
+    const below = evaluate(config, [
+      line({ price: 499.99, promotionIdentity: { state: 'knownnone' } }), promotional,
+    ]);
+    expect(boundary.triggered).toBe(true);
+    expect(boundary.details?.subtotal).toBe(500);
+    expect(below.triggered).toBe(false);
+    expect(below.details?.subtotal).toBe(499.99);
+  });
+
+  it('fails closed on unknown or missing promotion identity when policy is configured', () => {
+    const config = coupon({ promotionPolicy: { state: 'restricted', promotionIds: ['configured-promo'] } });
+    for (const identity of [undefined, { state: 'unknown' as const }]) {
+      const result = evaluate(config, [line({ price: 600, promotionIdentity: identity })]);
+      expect(result.triggered).toBe(false);
+      expect(result.details?.reason).toBe('unknown_promotion_identity');
+      expect(result.adjustments).toEqual([]);
+    }
+  });
+
+  it('permits an unrestricted zero-threshold coupon even when promotion identity is unknown', () => {
+    const result = evaluate(coupon({
+      couponType: 'unrestricted', threshold: 0, promotionPolicy: { state: 'unknown' },
+    }), [line({ price: 40, promotionIdentity: { state: 'unknown' } })]);
+    expect(result.triggered).toBe(true);
+    expect(result.details?.subtotal).toBe(40);
   });
 
   it('keeps promo and quick-order lines out of the threshold', () => {

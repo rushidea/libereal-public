@@ -113,6 +113,7 @@ describe('POST /api/orders', () => {
   it('uses only verified promotion identity for order cart lines', async () => {
     const verified = verifiedPromotion();
     verified.verifiedItems[0].selectedPromotionId = 'trusted-promotion';
+    verified.verifiedItems[0].promotionIdentity = { state: 'restricted', promotionId: 'trusted-promotion' };
     const submitted = submittedPromotion().map((item) => ({ ...item, selectedPromotionId: 'forged-promotion' }));
     mocks.verifyAndPriceItems.mockResolvedValue(verified);
     const response = await POST(request({
@@ -122,8 +123,11 @@ describe('POST /api/orders', () => {
     }) as never);
 
     expect(response.status).toBe(200);
-    const [lines] = mocks.capturePromoLines.mock.calls.at(-1) as [Array<{ product: { selectedPromotionId?: string | null } }>];
+    const [lines] = mocks.capturePromoLines.mock.calls.at(-1) as [Array<{ product: { selectedPromotionId?: string | null; promotionIdentity?: unknown } }>];
     expect(lines.map((line) => line.product.selectedPromotionId)).toEqual(['trusted-promotion', null]);
+    expect(lines.map((line) => line.product.promotionIdentity)).toEqual([
+      { state: 'restricted', promotionId: 'trusted-promotion' }, { state: 'unknown' },
+    ]);
   });
   it('replays before price verification without duplicate order or notifications', async () => {
     mocks.orderFindUnique.mockResolvedValue(replayRecord());
