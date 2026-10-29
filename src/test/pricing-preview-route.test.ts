@@ -4,12 +4,23 @@ import { NextResponse } from 'next/server';
 const mocks = vi.hoisted(() => ({
   requireActiveSession: vi.fn(),
   verifyAndPriceItems: vi.fn(),
+  capturePromoLines: vi.fn(),
 }));
 const sampleRules = vi.hoisted(() => ({ sample: { id: 'sample-addon-rule', type: 'addon' as const, name: 'Synthetic add-on offer', enabled: true, description: 'Synthetic fixture only.', eligibleBrand: 'Sample', eligibleTerms: ['SAMPLE-MAIN'], minQuantity: 6, addonPrice: 50, addonBrand: 'Sample', addonTerms: ['SAMPLE-ADDON'] } }));
 vi.mock('@/lib/cart-promotions/rules', () => ({ PROMOTION_RULES: [sampleRules.sample], CART_ADDON_RULES: [sampleRules.sample], CART_GIFT_RULES: [], CART_BUNDLE_RULES: [] }));
 
 
 vi.mock('@/lib/session', () => ({ requireActiveSession: mocks.requireActiveSession }));
+vi.mock('@/lib/cart-promotions/service', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/cart-promotions/service')>();
+  return {
+    ...actual,
+    computePromoAdjustments: (lines: Parameters<typeof actual.computePromoAdjustments>[0], now?: Date) => {
+      mocks.capturePromoLines(lines);
+      return actual.computePromoAdjustments(lines, now);
+    },
+  };
+});
 vi.mock('@/lib/pricing', () => ({
   AMBIGUOUS_PRODUCT_CATALOG_NUMBER: 'AMBIGUOUS_PRODUCT_CATALOG_NUMBER',
   verifyAndPriceItems: mocks.verifyAndPriceItems,
@@ -25,6 +36,20 @@ import { POST } from '@/app/api/orders/pricing-preview/route';
 import { promotionLines, submittedPromotion, verifiedPromotion } from './cart-promotion-fixtures';
 
 describe('POST /api/orders/pricing-preview', () => {
+
+  it('uses only verified promotion identity for cart lines', async () => {
+    const verified = verifiedPromotion();
+    verified.verifiedItems[0].selectedPromotionId = 'trusted-promotion';
+    const submitted = submittedPromotion().map((item) => ({ ...item, selectedPromotionId: 'forged-promotion' }));
+    mocks.verifyAndPriceItems.mockResolvedValue(verified);
+    const response = await POST(new Request('https://libereal.cn/api/orders/pricing-preview', {
+      method: 'POST', body: JSON.stringify({ items: submitted, paymentMethod: 'bank_transfer' }),
+    }) as never);
+
+    expect(response.status).toBe(200);
+    const [lines] = mocks.capturePromoLines.mock.calls.at(-1) as [Array<{ product: { selectedPromotionId?: string | null } }>];
+    expect(lines.map((line) => line.product.selectedPromotionId)).toEqual(['trusted-promotion', null]);
+  });
 
   it('普通合成商品根据服务端确认身份自动计算加购价', async () => {
     const submitted = submittedPromotion().map((item) => ({ ...item, promoMark: undefined, price: 0 }));

@@ -23,6 +23,7 @@ export function toVerifiedCartLines(items: VerifiedItem[], submitted: PriceLooku
       id: item.productId ?? '', brand: item.brand ?? '',
       catalogNumber: item.catalogNumber ?? '', spec: item.spec,
       name: item.name, price: item.unitPrice,
+      selectedPromotionId: item.selectedPromotionId ?? null,
     },
     quantity: item.quantity,
     isQuickOrder: item.source !== 'db',

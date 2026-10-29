@@ -199,6 +199,8 @@ export interface CartLine {
     id: string;
     /** 实际选中的规格主键，用于展示状态中的 SKU 身份；不参与规则前缀匹配。 */
     variantId?: string;
+    /** Trusted DB Promotion identity when established; null does not imply no active restriction. */
+    selectedPromotionId?: string | null;
     brand: string;
     catalogNumber: string;
     price: number | null;
