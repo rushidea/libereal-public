@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { requireActiveSession, requireAdmin } from '@/lib/session';
-import { AMBIGUOUS_PRODUCT_CATALOG_NUMBER, CustomerUnavailableProductError, getVerifiedInventoryError, verifyAndPriceItems, type PriceLookupItem } from '@/lib/pricing';
+import { AMBIGUOUS_PRODUCT_CATALOG_NUMBER, CustomerUnavailableProductError, getVerifiedInventoryError, revalidateReferencePriceEvidence, verifyAndPriceItems, type PriceLookupItem } from '@/lib/pricing';
 import { reportError } from '@/lib/errorReporting';
 import type { Prisma } from '@prisma/client';
 import { sendAdminOperationalEmail } from '@/lib/mail';
@@ -481,6 +481,15 @@ export async function POST(req: NextRequest) {
             metadata: item.metadata,
           })));
 
+          // Recheck activity-bound prices in this transaction regardless of whether the order has a coupon.
+          // Coupon identity uncertainty is handled by coupon scope checks and must not masquerade as price drift.
+          const referencePriceEvidence = verifiedItems
+            .filter((item) => item.referencePriceApplied && item.promotionPricingEvidence)
+            .map((item) => item.promotionPricingEvidence!);
+          if (!await revalidateReferencePriceEvidence(tx, referencePriceEvidence, new Date())) {
+            throw new Error('REFERENCE_PRICE_DRIFT');
+          }
+
           const created = await tx.order.create({
             data: {
               id: orderId,
@@ -572,6 +581,9 @@ export async function POST(req: NextRequest) {
       if (error instanceof Error && error.message.startsWith('COUPON_')) {
         const msg = error.message.replace(/^COUPON_APPLY:/, '');
         return NextResponse.json({ error: msg }, { status: 400 });
+      }
+      if (error instanceof Error && error.message === 'REFERENCE_PRICE_DRIFT') {
+        return NextResponse.json({ error: '活动参考价已变化，请刷新后重新确认', code: 'REFERENCE_PRICE_DRIFT' }, { status: 409 });
       }
       if (error instanceof Error && error.message.startsWith('POINTS_')) {
         const msg = error.message.replace(/^POINTS_(PRECHECK|APPLY):/, '');

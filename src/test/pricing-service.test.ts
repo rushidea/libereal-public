@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { AMBIGUOUS_PRODUCT_CATALOG_NUMBER, getVerifiedInventoryError, verifyAndPriceItems } from '@/lib/pricing';
+import { AMBIGUOUS_PRODUCT_CATALOG_NUMBER, getVerifiedInventoryError, revalidateCouponPromotionEvidence, revalidateReferencePriceEvidence, verifyAndPriceItems } from '@/lib/pricing';
 import { withPromotionRepository } from '@/lib/promotion-repository';
+import { prisma } from '@/lib/prisma';
 import { clearAllTables, closeTestDb, getTestDb, seedUser } from './db-helpers';
 
 function seedProduct() {
@@ -9,6 +10,8 @@ function seedProduct() {
     VALUES ('product_1', 'CAT-1', '测试产品', 'CST', 1000, 700, '[]', '[]', datetime('now'), datetime('now'))
   `).run();
 }
+
+const originalReferencePriceConfig = process.env.REFERENCE_PRICE_PROMOTION_CONFIG;
 
 describe('pricing service', () => {
   it.each([0, -1, 1.5, NaN, Infinity])('rejects invalid quantity %s', async (quantity) => {
@@ -26,12 +29,136 @@ describe('pricing service', () => {
     });
   });
   beforeAll(() => getTestDb());
-  afterAll(() => closeTestDb());
+  afterAll(() => {
+    if (originalReferencePriceConfig === undefined) delete process.env.REFERENCE_PRICE_PROMOTION_CONFIG;
+    else process.env.REFERENCE_PRICE_PROMOTION_CONFIG = originalReferencePriceConfig;
+    closeTestDb();
+  });
   beforeEach(() => {
+    delete process.env.REFERENCE_PRICE_PROMOTION_CONFIG;
     const db = getTestDb();
     clearAllTables(db);
     seedUser(db, { id: 'user_1', email: 'buyer@test.com', tier: 'standard' });
     seedProduct();
+  });
+
+  it('uses the configured promotion once as a reference-price discount and ignores legacy promotional price', async () => {
+    const db = getTestDb();
+    db.prepare("UPDATE Product SET price = 0, originalPrice = 1000, promotionalPrice = 100, minimumSalePrice = NULL WHERE id = 'product_1'").run();
+    db.prepare(`INSERT INTO Promotion (id, name, type, value, status, startsAt, endsAt, priority, exclusive, updatedAt)
+      VALUES ('reference_campaign', 'Synthetic campaign', 'discount_rate', 0.55, 'active', datetime('now', '-1 day'), datetime('now', '+1 day'), 1, 1, datetime('now'))`).run();
+    db.prepare(`INSERT INTO PromotionProduct (id, promotionId, productId) VALUES ('reference_link', 'reference_campaign', 'product_1')`).run();
+    process.env.REFERENCE_PRICE_PROMOTION_CONFIG = JSON.stringify({ promotionId: 'reference_campaign' });
+
+    const result = await verifyAndPriceItems([{ catalogNumber: 'CAT-1', name: 'Synthetic product', price: 999 }]);
+    const item = result.verifiedItems[0];
+    const snapshot = JSON.parse(item.pricingSnapshot);
+    expect(item).toMatchObject({ unitPrice: 550, selectedPromotionId: 'reference_campaign' });
+    expect(snapshot.appliedSource).toBe('promotion:reference_campaign');
+    expect(snapshot.steps.filter((step: { stage: string; applied: boolean }) => step.stage === 'promotion' && step.applied)).toHaveLength(1);
+    expect(item.promotionPricingEvidence?.referencePricePromotionId).toBe('reference_campaign');
+    expect(item.promotionPricingEvidence?.identity).toEqual({ state: 'restricted', promotionId: 'reference_campaign' });
+  });
+
+  it('fails closed when reference-promotion configuration or catalog price changes after pricing', async () => {
+    const db = getTestDb();
+    db.prepare("UPDATE Product SET price = 0, originalPrice = 1000, minimumSalePrice = NULL WHERE id = 'product_1'").run();
+    db.prepare(`INSERT INTO Promotion (id, name, type, value, status, startsAt, endsAt, updatedAt)
+      VALUES ('reference_campaign', 'Synthetic campaign', 'discount_rate', 0.55, 'active', datetime('now', '-1 day'), datetime('now', '+1 day'), datetime('now'))`).run();
+    db.prepare(`INSERT INTO PromotionProduct (id, promotionId, productId) VALUES ('reference_link', 'reference_campaign', 'product_1')`).run();
+    process.env.REFERENCE_PRICE_PROMOTION_CONFIG = JSON.stringify({ promotionId: 'reference_campaign' });
+    const priced = await verifyAndPriceItems([{ catalogNumber: 'CAT-1', name: 'Synthetic product', price: 999 }]);
+    const evidence = priced.verifiedItems[0].promotionPricingEvidence!;
+
+    process.env.REFERENCE_PRICE_PROMOTION_CONFIG = JSON.stringify({ promotionId: 'different_campaign' });
+    await expect(prisma.$transaction((tx) => revalidateCouponPromotionEvidence(tx, [evidence], new Date())))
+      .resolves.toBe(false);
+
+    process.env.REFERENCE_PRICE_PROMOTION_CONFIG = JSON.stringify({ promotionId: 'reference_campaign' });
+    db.prepare("UPDATE Product SET originalPrice = 1200 WHERE id = 'product_1'").run();
+    await expect(prisma.$transaction((tx) => revalidateCouponPromotionEvidence(tx, [evidence], new Date())))
+      .resolves.toBe(false);
+  });
+
+  it('rejects reference-price evidence when another applicable campaign starts before transaction revalidation', async () => {
+    const db = getTestDb();
+    const pricedAt = new Date('2030-01-01T12:00:00.000Z');
+    const otherStartsAt = new Date('2030-01-02T00:00:00.000Z');
+    const transactionNow = new Date('2030-01-02T12:00:00.000Z');
+    db.prepare("UPDATE Product SET price = 0, originalPrice = 1000, minimumSalePrice = NULL WHERE id = 'product_1'").run();
+    db.prepare(`INSERT INTO Promotion (id, name, type, value, status, startsAt, endsAt, priority, exclusive, updatedAt)
+      VALUES ('reference_campaign', 'Synthetic reference campaign', 'discount_rate', 0.55, 'active', ?, ?, 1, 1, ?),
+             ('future_campaign', 'Synthetic future campaign', 'fixed_price', 900, 'active', ?, ?, 2, 0, ?)`)
+      .run(new Date('2030-01-01T00:00:00.000Z').getTime(), new Date('2030-01-04T00:00:00.000Z').getTime(),
+        pricedAt.getTime(), otherStartsAt.getTime(), new Date('2030-01-04T00:00:00.000Z').getTime(), pricedAt.getTime());
+    db.prepare(`INSERT INTO PromotionProduct (id, promotionId, productId) VALUES
+      ('reference_link', 'reference_campaign', 'product_1'),
+      ('future_link', 'future_campaign', 'product_1')`).run();
+    process.env.REFERENCE_PRICE_PROMOTION_CONFIG = JSON.stringify({ promotionId: 'reference_campaign' });
+
+    const priced = await verifyAndPriceItems([{ catalogNumber: 'CAT-1', name: 'Synthetic product', price: 999 }], { now: pricedAt });
+    expect(priced.verifiedItems[0].referencePriceApplied).toBe(true);
+    await expect(prisma.$transaction((tx) => revalidateReferencePriceEvidence(
+      tx, [priced.verifiedItems[0].promotionPricingEvidence!], transactionNow,
+    ))).resolves.toBe(false);
+  });
+
+  it('fails closed for malformed reference configuration and an invalid configured campaign', async () => {
+    const db = getTestDb();
+    db.prepare("UPDATE Product SET price = 1000, originalPrice = 1200, minimumSalePrice = NULL WHERE id = 'product_1'").run();
+    process.env.REFERENCE_PRICE_PROMOTION_CONFIG = '{broken-json';
+    const malformedConfig = await verifyAndPriceItems([{ catalogNumber: 'CAT-1', name: 'Synthetic product', price: 999 }]);
+    expect(malformedConfig.verifiedItems[0]).toMatchObject({ unitPrice: 1000, source: 'db' });
+    expect(malformedConfig.verifiedItems[0].promotionIdentity).toEqual({ state: 'unknown' });
+
+    db.prepare("UPDATE Product SET price = 0, originalPrice = 1200 WHERE id = 'product_1'").run();
+    db.prepare(`INSERT INTO Promotion (id, name, type, value, status, startsAt, endsAt, updatedAt)
+      VALUES ('invalid_reference_campaign', 'Synthetic invalid campaign', 'fixed_price', 500, 'active', datetime('now', '-1 day'), datetime('now', '+1 day'), datetime('now'))`).run();
+    db.prepare(`INSERT INTO PromotionProduct (id, promotionId, productId) VALUES ('invalid_reference_link', 'invalid_reference_campaign', 'product_1')`).run();
+    process.env.REFERENCE_PRICE_PROMOTION_CONFIG = JSON.stringify({ promotionId: 'invalid_reference_campaign' });
+    await expect(verifyAndPriceItems([{ catalogNumber: 'CAT-1', name: 'Synthetic product', price: 999 }]))
+      .rejects.toThrow('REFERENCE_PRICE_PROMOTION_INVALID');
+  });
+
+  it('revalidates legacy pricing evidence without newly added reference-price fields', async () => {
+    const result = await verifyAndPriceItems([{ catalogNumber: 'CAT-1', name: 'Synthetic product', price: 999 }]);
+    const current = result.verifiedItems[0].promotionPricingEvidence!;
+    const { originalPrice: _originalPrice, ...legacyProduct } = current.product;
+    const { referencePricePromotionId: _referencePricePromotionId, referencePriceApplied: _referencePriceApplied, ...legacyEvidence } = current;
+    const legacy = { ...legacyEvidence, product: legacyProduct } as unknown as typeof current;
+
+    await expect(prisma.$transaction((tx) => revalidateCouponPromotionEvidence(tx, [legacy], new Date())))
+      .resolves.toBe(true);
+  });
+
+  it('keeps ordinary pricing behavior without a valid configured active campaign and on unrelated products', async () => {
+    const db = getTestDb();
+    db.prepare("UPDATE Product SET price = 0, originalPrice = 1000, promotionalPrice = 100 WHERE id = 'product_1'").run();
+    delete process.env.REFERENCE_PRICE_PROMOTION_CONFIG;
+    const noCampaign = await verifyAndPriceItems([{ catalogNumber: 'CAT-1', name: 'Synthetic product', price: 999 }]);
+    expect(noCampaign.verifiedItems[0]).toMatchObject({ unitPrice: 999, source: 'fallback', selectedPromotionId: null });
+
+    db.prepare("INSERT INTO Promotion (id, name, type, value, status, startsAt, endsAt, updatedAt) VALUES ('inactive_campaign', 'Inactive synthetic campaign', 'discount_rate', 0.55, 'draft', datetime('now', '-1 day'), datetime('now', '+1 day'), datetime('now'))").run();
+    db.prepare("INSERT INTO PromotionProduct (id, promotionId, productId) VALUES ('inactive_link', 'inactive_campaign', 'product_1')").run();
+    process.env.REFERENCE_PRICE_PROMOTION_CONFIG = JSON.stringify({ promotionId: 'inactive_campaign' });
+    const inactive = await verifyAndPriceItems([{ catalogNumber: 'CAT-1', name: 'Synthetic product', price: 999 }]);
+    expect(inactive.verifiedItems[0]).toMatchObject({ unitPrice: 999, source: 'fallback', selectedPromotionId: null });
+
+    db.prepare("DELETE FROM PromotionProduct WHERE promotionId = 'inactive_campaign'").run();
+    db.prepare("UPDATE Product SET promotionalPrice = NULL WHERE id = 'product_1'").run();
+    delete process.env.REFERENCE_PRICE_PROMOTION_CONFIG;
+    const noCatalogPrice = await verifyAndPriceItems([{ catalogNumber: 'CAT-1', name: 'Synthetic product', price: 999 }]);
+    expect(noCatalogPrice.verifiedItems[0]).toMatchObject({ unitPrice: 999, source: 'fallback' });
+
+    db.prepare("UPDATE Product SET price = 1000, promotionalPrice = NULL WHERE id = 'product_1'").run();
+    db.prepare(`INSERT INTO Product (id, catalogNumber, name, brand, price, minimumSalePrice, applications, reactivity, createdAt, updatedAt)
+      VALUES ('product_2', 'CAT-2', 'Other synthetic product', 'CST', 2000, NULL, '[]', '[]', datetime('now'), datetime('now'))`).run();
+    db.prepare(`INSERT INTO Promotion (id, name, type, value, status, startsAt, endsAt, updatedAt)
+      VALUES ('reference_campaign', 'Synthetic campaign', 'discount_rate', 0.55, 'active', datetime('now', '-1 day'), datetime('now', '+1 day'), datetime('now'))`).run();
+    db.prepare(`INSERT INTO PromotionProduct (id, promotionId, productId) VALUES ('other_link', 'reference_campaign', 'product_2')`).run();
+    process.env.REFERENCE_PRICE_PROMOTION_CONFIG = JSON.stringify({ promotionId: 'reference_campaign' });
+    const unrelated = await verifyAndPriceItems([{ catalogNumber: 'CAT-2', name: 'Other synthetic product', price: 999 }]);
+    expect(unrelated.verifiedItems[0]).toMatchObject({ unitPrice: 1100, selectedPromotionId: 'reference_campaign' });
   });
 
   it('uses an active promotion and stores calculation evidence', async () => {
