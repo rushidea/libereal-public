@@ -43,10 +43,40 @@ describe('结算页服务端合成活动金额', () => {
   it('结算页提供促销收费方式与库存交期复核', async () => {
     render(<OrderPage />);
     const review = await screen.findByRole('region', { name: '活动与履约复核' });
-
-    expect(review).toHaveTextContent('付费加购');
-    expect(review).toHaveTextContent('加购价 ¥50.00 / 件');
+    await waitFor(() => expect(review).toHaveTextContent('付费加购'));
+    await waitFor(() => expect(review).toHaveTextContent('计入订单 ¥50.00'));
     expect(review).toHaveTextContent('货期 1-2 周');
+  });
+
+  it('多价档按实际单价和数量展示，不显示虚构的平均单价', async () => {
+    const first = cart.items[0] as { product: unknown };
+    cart.items = [{ product: first.product, quantity: 2 }];
+    vi.mocked(fetch).mockImplementation(async (url) => new Response(JSON.stringify(
+      String(url).includes('pricing-preview') ? {
+        subtotal: 150, totalBeforePoints: 150, total: 150, promotionDiscount: 0, promotionAdjustments: [], adjustments: [],
+        items: [{ unitPrice: null, originalUnitPrice: 100, includedPromotionDiscount: 50, quantity: 2,
+          lineTotal: 150, finalLineTotal: 150, finalUnitPrice: null, priceTiers: [{ unitPrice: 100, quantity: 1 }, { unitPrice: 50, quantity: 1 }] }],
+      } : String(url).includes('addresses') ? { addresses: [] } : { personalPoints: 0, group: null },
+    ), { status: 200 }));
+    render(<OrderPage />);
+    expect(await screen.findByText('¥100.00 × 1')).toBeInTheDocument();
+    expect(screen.getByText('¥50.00 × 1')).toBeInTheDocument();
+    expect(screen.queryByText('¥75.00 × 2')).not.toBeInTheDocument();
+  });
+
+  it('only treats an unpriced product as orderable after server coverage', async () => {
+    const first = cart.items[0] as { product: Record<string, unknown> };
+    cart.items = [{ product: { ...first.product, price: 0, promotionalPrice: null }, quantity: 1 }];
+    vi.mocked(fetch).mockImplementation(async (url) => new Response(JSON.stringify(
+      String(url).includes('/promotions/cart') ? { enabled: true, unified: true, lineTotals: [5000],
+        lineBands: [[{ quantity: 1, unitPriceCents: 5000 }]], ordinaryLineTotals: [null], total: 5000, statuses: [] }
+        : String(url).includes('pricing-preview') ? { subtotal: 50, totalBeforePoints: 50, total: 50,
+          promotionDiscount: 0, promotionAdjustments: [], adjustments: [], items: [{ unitPrice: 50, quantity: 1, lineTotal: 50, finalLineTotal: 50 }] }
+          : String(url).includes('addresses') ? { addresses: [] } : { personalPoints: 0, group: null },
+    ), { status: 200 }));
+    render(<OrderPage />);
+    await waitFor(() => expect(screen.getByText('应付总额').parentElement).toHaveTextContent('¥50.00'));
+    expect(screen.queryByText('待报价')).not.toBeInTheDocument();
   });
 
   it('预览拒绝活动条件时展示提示并禁用下单', async () => {
@@ -55,6 +85,8 @@ describe('结算页服务端合成活动金额', () => {
     ), { status: String(url).includes('pricing-preview') ? 400 : 200 }));
     render(<OrderPage />);
     expect(await screen.findByText('活动条件不满足，请补足主品或移除加购商品')).toBeInTheDocument();
+    expect(screen.getByText('应付总额').parentElement).toHaveTextContent('待确认');
+    expect(screen.queryByText('¥600.00')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: /确认下单/ })).toBeDisabled();
   });
 });

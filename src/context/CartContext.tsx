@@ -6,7 +6,7 @@ import { useToast } from './ToastContext';
 import { detectAddonEligibility, isAddonProduct } from '@/lib/cart-promotions/detect';
 import { getRuleLifecycle } from '@/lib/cart-promotions/lifecycle';
 import { isGiftProduct } from '@/lib/cart-promotions/matching';
-import { PROMOTION_RULES } from '@/lib/cart-promotions/rules';
+import { CART_ADDON_RULES, PROMOTION_RULES } from '@/lib/cart-promotions/rules';
 import { isPricedProduct } from '@/lib/product-pricing';
 
 export interface QuickOrderItem {
@@ -100,12 +100,12 @@ interface CartContextType {
   items: CartItem[];
   addItem: (product: Product) => void;
   /** 以换购价加入购物车（product 原价结算，结算页按 addon 优惠扣除差额） */
-  addAddonItem: (product: Product, ruleId: string, addonPrice: number) => void;
+  addAddonItem: (product: Product, ruleId: string, addonPrice: number, serverQualified?: boolean) => void;
   /** 活动页选中的换购品或赠品带活动标记入车，价格由购物车和服务端重新计算。 */
   addPromotionItem: (product: Product, ruleId: string) => void;
   addQuickOrderItem: (item: Omit<QuickOrderItem, 'isQuickOrder' | 'quickId'>) => void;
   removeItem: (itemId: string) => void;
-  updateQuantity: (itemId: string, quantity: number) => void;
+  updateQuantity: (itemId: string, quantity: number, serverQualified?: boolean) => void;
   clearCart: () => void;
   clearQuickOrderItems: () => void;
   isInCart: (productId: string) => boolean;
@@ -252,22 +252,32 @@ export function CartProvider({ children }: { children: ReactNode }) {
     });
   };
 
-  const addAddonItem = (product: Product, ruleId: string, addonPrice: number) => {
+  const addAddonItem = (product: Product, ruleId: string, addonPrice: number, serverQualified = false) => {
     const key = getProductCartKey(product);
     setItemsAndSync((prev) => {
-      const eligibility = detectAddonEligibility(prev.filter((item) => !item.isQuickOrder && isPricedProduct(item.product)))
-        .find((entry) => entry.rule.id === ruleId);
-      if (!eligibility?.active || !eligibility.triggered || eligibility.remainingQuota <= 0
-        || eligibility.rule.addonPrice !== addonPrice || !isAddonProduct(eligibility.rule, product)) return prev;
+      // The server-qualified branch records cart intent only. Pricing, stock and
+      // eligibility are always re-read by the server before preview and order.
+      const rule = CART_ADDON_RULES.find((entry) => entry.id === ruleId);
+      if (!rule || getRuleLifecycle(rule) !== 'active' || !isAddonProduct(rule, product)) return prev;
+      const option = rule.addonOptions?.find((entry) => entry.catalogNumber === product.catalogNumber);
+      if (rule.addonOptions?.length && !option) return prev;
+      const expected = option?.price ?? rule.addonPrice;
+      const quantity = option?.quantity ?? 1;
+      if (!Number.isFinite(addonPrice) || addonPrice !== expected || !Number.isSafeInteger(quantity) || quantity <= 0 || !product.inStock) return prev;
+      if (!serverQualified) {
+        const eligibility = detectAddonEligibility(prev.filter((item) => !item.isQuickOrder && isPricedProduct(item.product)))
+          .find((entry) => entry.rule.id === ruleId);
+        if (!eligibility?.active || !eligibility.triggered || eligibility.remainingQuota <= 0) return prev;
+      }
       const existing = prev.find(
         (item) => !item.isQuickOrder && item.addon?.ruleId === ruleId && getProductCartKey(item.product) === key,
       );
       if (existing) {
         return prev.map((item) =>
-          item === existing ? { ...item, quantity: item.quantity + 1 } : item,
+          item === existing ? { ...item, quantity: item.quantity + quantity } : item,
         );
       }
-      return [...prev, { product, quantity: 1, addon: { ruleId, addonPrice } }];
+      return [...prev, { product, quantity, addon: { ruleId, addonPrice } }];
     });
   };
 
@@ -307,7 +317,7 @@ export function CartProvider({ children }: { children: ReactNode }) {
     );
   };
 
-  const updateQuantity = (itemId: string, quantity: number) => {
+  const updateQuantity = (itemId: string, quantity: number, serverQualified = false) => {
     if (!Number.isSafeInteger(quantity)) return;
     if (quantity <= 0) {
       removeItem(itemId);
@@ -315,10 +325,16 @@ export function CartProvider({ children }: { children: ReactNode }) {
     }
     setItemsAndSync((prev) => {
       const target = prev.find((item) => cartItemMatchesIdentifier(item, itemId));
-      if (target && !target.isQuickOrder && target.addon && quantity > target.quantity) {
-        const eligibility = detectAddonEligibility(prev.filter((item) => !item.isQuickOrder && isPricedProduct(item.product)))
-          .find((entry) => entry.rule.id === target.addon!.ruleId);
-        if (!eligibility?.active || quantity - target.quantity > eligibility.remainingQuota) return prev;
+      if (target && !target.isQuickOrder && target.addon) {
+        const rule = CART_ADDON_RULES.find((entry) => entry.id === target.addon!.ruleId);
+        const option = rule?.addonOptions?.find((entry) => entry.catalogNumber === target.product.catalogNumber);
+        if (option && (quantity % option.quantity !== 0 || target.addon.addonPrice !== option.price)) return prev;
+        if (quantity > target.quantity && !serverQualified) {
+          const eligibility = detectAddonEligibility(prev.filter((item) => !item.isQuickOrder && isPricedProduct(item.product)))
+            .find((entry) => entry.rule.id === target.addon!.ruleId);
+          const selectionCount = option ? (quantity - target.quantity) / option.quantity : quantity - target.quantity;
+          if (!eligibility?.active || selectionCount > eligibility.remainingQuota) return prev;
+        }
       }
       return prev.map((item) =>
         cartItemMatchesIdentifier(item, itemId)

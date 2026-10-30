@@ -37,6 +37,9 @@ export function customerVisiblePricingSnapshot(value: string | null | undefined)
     delete snapshot.couponPolicyAudit;
     delete snapshot.couponPolicyAudits;
     delete snapshot.referencePriceApplied;
+    delete snapshot.referencePricePromotionId;
+    delete snapshot.referencePriceEligible;
+    delete snapshot.unifiedPricingEvidenceHash;
     delete snapshot.appliedSource;
     const safeStepLabels: Record<string, { source: string; reason: string }> = {
       base: { source: 'base_price', reason: '商品基础价格' },

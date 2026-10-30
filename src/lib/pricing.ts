@@ -1,4 +1,7 @@
 import { prisma } from '@/lib/prisma';
+import { PROMOTION_RULES } from '@/lib/cart-promotions/rules';
+import { promotionEngine } from '@/lib/cart-promotions/engine';
+import { legacyRuleVersionHash } from '@/lib/legacy-rule-version';
 import { calculatePrice, type PriceAdjustment, type PromotionCandidate } from '@/lib/price-engine';
 import { lookupBrandDiscountRate } from '@/lib/discount-brand-catalog';
 import type { Prisma } from '@prisma/client';
@@ -57,6 +60,8 @@ export interface VerifiedItem {
   subcategory?: string | null;
   /** Trusted Promotion table identity if established; null does not imply no active restriction. */
   selectedPromotionId?: string | null;
+  /** Internal occupancy for a complete unified allocation, including ordinary-priced qualifier units. */
+  unifiedOccupiedPromotionId?: string | null;
   /** True only when this line's unit price came from the configured reference price activity. */
   referencePriceApplied?: boolean;
   /** Eligible product-level checkout line; used to detect newly effective target activity. */
@@ -160,6 +165,8 @@ export function getVerifiedInventoryError(item: VerifiedItem): InventoryValidati
 }
 
 export interface PricingContext {
+  /** Optional caller-owned transaction for a consistent checkout price snapshot. */
+  db?: Prisma.TransactionClient;
   userId?: string | null;
   customerEmail?: string | null;
   now?: Date;
@@ -264,6 +271,13 @@ export async function revalidateCouponPromotionEvidence(
     if (JSON.stringify(activeAtPricing.map((candidate) => candidate.bindingId))
       !== JSON.stringify(activeAtTransaction.map((candidate) => candidate.bindingId))) return false;
     if (expected.identity.state === 'unknown') return false;
+    if (expected.identity.state === 'static') {
+      const identity = expected.identity;
+      const matching = PROMOTION_RULES.filter((rule) => `legacy-cart:${rule.id}` === identity.ruleId);
+      if (matching.length !== 1 || legacyRuleVersionHash(matching[0]) !== identity.versionHash
+        || !promotionEngine.activeRules(matching, pricedAt).length
+        || !promotionEngine.activeRules(matching, transactionNow).length) return false;
+    }
     if (expected.referencePricePromotionId !== actual.referencePricePromotionId) return false;
     if (expected.referencePriceApplied && (currentReferenceConfig === null || currentReferenceConfig === 'unknown'
       || expected.referencePricePromotionId !== currentReferenceConfig.promotionId
@@ -371,13 +385,13 @@ const pricingProductSelect = {
 
 type PricingProduct = Prisma.ProductGetPayload<{ select: typeof pricingProductSelect }>;
 
-async function findProductByCatalogNumber(catalogNumber: string, brand?: string | null): Promise<PricingProduct | null> {
+async function findProductByCatalogNumber(db: Prisma.TransactionClient, catalogNumber: string, brand?: string | null): Promise<PricingProduct | null> {
   const where = {
     catalogNumber,
     ...(brand ? { brand } : {}),
   };
 
-  const products = await prisma.product.findMany({
+  const products = await db.product.findMany({
     where,
     orderBy: { createdAt: 'asc' },
     take: brand ? 1 : 2,
@@ -391,9 +405,9 @@ async function findProductByCatalogNumber(catalogNumber: string, brand?: string 
   return products[0] ?? null;
 }
 
-async function findPricingProduct(item: PriceLookupItem): Promise<PricingProduct | null> {
+async function findPricingProduct(db: Prisma.TransactionClient, item: PriceLookupItem): Promise<PricingProduct | null> {
   if (item.productId) {
-    const productById = await prisma.product.findUnique({
+    const productById = await db.product.findUnique({
       where: { id: item.productId },
       select: pricingProductSelect,
     }).catch(() => null);
@@ -404,7 +418,7 @@ async function findPricingProduct(item: PriceLookupItem): Promise<PricingProduct
   const catalogNumber = item.catalogNumber || item.productId;
   if (!catalogNumber) return null;
 
-  return findProductByCatalogNumber(catalogNumber, item.brand);
+  return findProductByCatalogNumber(db, catalogNumber, item.brand);
 }
 
 function explicitBrandDiscount(value: string | null | undefined, brand: string, subBrand?: string | null): number | null {
@@ -438,9 +452,10 @@ export async function verifyAndPriceItems(
   const verifiedItems: VerifiedItem[] = [];
   let verifiedSubtotal = 0;
   let mismatchedCount = 0;
+  const db = context.db ?? prisma;
   const now = context.now || new Date();
   const user = context.userId || context.customerEmail
-    ? await prisma.user.findFirst({
+    ? await db.user.findFirst({
       where: context.userId ? { id: context.userId } : { email: context.customerEmail! },
       select: { tier: true, discountRate: true, brandDiscounts: true, isFrozen: true },
     })
@@ -477,12 +492,12 @@ export async function verifyAndPriceItems(
     let pricingSnapshot = '';
 
     if (lookupKey) {
-      const directProduct = item.variantId ? null : await findPricingProduct(item);
+      const directProduct = item.variantId ? null : await findPricingProduct(db, item);
       const variant = item.variantId
-        ? await prisma.productVariant.findUnique({ where: { id: item.variantId }, select: pricingVariantSelect }).catch(() => null)
-        : directProduct ? null : await prisma.productVariant.findFirst({ where: { catalogNumber: lookupKey }, select: pricingVariantSelect }).catch(() => null);
+        ? await db.productVariant.findUnique({ where: { id: item.variantId }, select: pricingVariantSelect }).catch(() => null)
+        : directProduct ? null : await db.productVariant.findFirst({ where: { catalogNumber: lookupKey }, select: pricingVariantSelect }).catch(() => null);
       if (item.variantId && !variant) throw new Error('PRODUCT_VARIANT_NOT_FOUND');
-      const product = directProduct || await prisma.product.findFirst({
+      const product = directProduct || await db.product.findFirst({
         where: variant
           ? { id: variant.productId }
           : { id: lookupKey },
@@ -533,6 +548,11 @@ export async function verifyAndPriceItems(
           .filter((link) => (!link.variantId || link.variantId === variant?.id)
             && link.promotion.status === 'active'
             && link.promotion.startsAt <= now && link.promotion.endsAt > now) ?? [];
+      if (context.strictQuantity && !item.promoMark && activePromotionLinks.some((link) => {
+        if (!link.promotion.ruleDefinition || (link.variantId ?? null) !== (variant?.id ?? null)) return false;
+        try { return (JSON.parse(link.promotion.ruleDefinition) as { priceBasis?: unknown }).priceBasis === 'catalog'; }
+        catch { return true; }
+      })) throw new Error('PROMOTION_UNIFIED_RUNTIME_REQUIRED');
       const referenceConfig = referencePricePromotionConfig();
       const configuredReferenceLinks = referenceConfig && referenceConfig !== 'unknown'
         ? activePromotionLinks.filter((link) => link.promotion.id === referenceConfig.promotionId)

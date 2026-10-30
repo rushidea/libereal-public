@@ -1271,6 +1271,24 @@ model Promotion {
   @@index([priority])
 }
 
+// Durable operation receipts for explicitly idempotent promotion creation.
+model PromotionCreateReceipt {
+  actorId     String
+  requestKey  String
+  requestHash String
+  resultJson  String
+  createdAt   DateTime @default(now())
+
+  @@id([actorId, requestKey])
+}
+
+// Selection intent for catalog drafts and its publication-time price evidence.
+model PromotionCatalogSelection {
+  promotionId       String @id
+  selectorsJson     String
+  frozenJson        String?
+}
+
 model PromotionProduct {
   id          String   @id @default(cuid())
   promotionId String
