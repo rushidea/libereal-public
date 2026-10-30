@@ -85,7 +85,7 @@ export default function PromotionsPage() {
     let parsed: PromotionDefinition | null = null;
     const rate = Number(ratePercent);
     if (legacyRate) {
-      if (!ratePercent.trim() || !Number.isFinite(rate) || rate <= 0 || rate > 100 || bindings.length !== 1 || bindings[0].variantId) {
+      if (!ratePercent.trim() || !Number.isFinite(rate) || rate <= 0 || rate > 100 || (!editing && (bindings.length !== 1 || bindings[0].variantId))) {
         setError('请选择一个商品默认规格并填写大于 0、最多 100 的成交比例'); return;
       }
     } else {

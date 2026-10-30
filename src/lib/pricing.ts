@@ -307,7 +307,8 @@ export async function revalidateReferencePriceEvidence(
   if (!config || config === 'unknown') return false;
   for (const expected of applicable) {
     if ((expected.referencePriceScope ?? null) !== (config.scope ? JSON.stringify(config.scope) : null)) return false;
-    if (expected.variantId !== null || expected.referencePricePromotionId !== config.promotionId) return false;
+    if (expected.referencePricePromotionId !== config.promotionId) return false;
+    if (expected.variantId !== null && (!config.scope || expected.productId !== config.scope.productId)) return false;
     const pricedAt = new Date(expected.pricedAt);
     if (!Number.isFinite(pricedAt.getTime())) return false;
     const product = await tx.product.findUnique({
@@ -318,8 +319,15 @@ export async function revalidateReferencePriceEvidence(
       price: product.price, originalPrice: product.originalPrice,
       promotionalPrice: product.promotionalPrice, minimumSalePrice: product.minimumSalePrice,
     }) !== JSON.stringify(expected.product)) return false;
+    const variant = expected.variantId ? await tx.productVariant.findUnique({
+      where: { id: expected.variantId },
+      select: { productId: true, price: true, promotionalPrice: true, minimumSalePrice: true },
+    }) : null;
+    if (expected.variantId && (!variant || variant.productId !== expected.productId
+      || JSON.stringify({ price: variant.price, promotionalPrice: variant.promotionalPrice, minimumSalePrice: variant.minimumSalePrice }) !== JSON.stringify(expected.variant))) return false;
     const bindings = await tx.promotionProduct.findMany({
-      where: { productId: expected.productId, variantId: null },
+      where: expected.variantId ? { productId: expected.productId, OR: [{ variantId: null }, { variantId: expected.variantId }] }
+        : { productId: expected.productId, variantId: null },
       select: {
         id: true, productId: true, variantId: true, groupKey: true,
         promotion: { select: {
@@ -344,7 +352,7 @@ export async function revalidateReferencePriceEvidence(
       && new Date(candidate.promotion.startsAt) <= at && new Date(candidate.promotion.endsAt) > at);
     const appliesAt = (at: Date) => {
       const activeTargets = activeTargetsAt(at);
-      return activeTargets.length === 1
+      return expected.variantId === null && activeTargets.length === 1
         && activeTargets[0].variantId === null
         && activeTargets[0].promotion.type === 'discount_rate'
         && activeTargets[0].promotion.ruleDefinition === null
@@ -569,7 +577,7 @@ export async function verifyAndPriceItems(
         throw new Error('REFERENCE_PRICE_PROMOTION_INVALID');
       }
       const inReferenceScope = Boolean(product && !variant && !item.promoMark && !quoteRequired);
-      referencePriceEligible = inReferenceScope;
+      referencePriceEligible = inReferenceScope || Boolean(scope && product?.id === scope.productId && variant && !item.promoMark && !quoteRequired);
       const referenceReady = Boolean(product && variant == null && configuredReferenceLinks.length === 1
           && configuredReferenceLink !== undefined && configuredReferenceLink.variantId == null && configuredReferenceLink.promotion.ruleDefinition == null
           && configuredReferenceLink.promotion.type === 'discount_rate'
@@ -581,7 +589,7 @@ export async function verifyAndPriceItems(
       }
       const referenceApplies = inReferenceScope && referenceReady;
       if (promotionEvidence) {
-        promotionEvidence = { ...promotionEvidence, referencePriceApplied: referenceApplies, referencePriceEligible: inReferenceScope };
+        promotionEvidence = { ...promotionEvidence, referencePriceApplied: referenceApplies, referencePriceEligible };
       }
       if (!quoteRequired && product && (referenceApplies || product.price > 0 || (variant?.price || 0) > 0)) {
         const activeDatabasePromotionIds = new Set(activePromotionLinks.map((link) => link.promotion.id));

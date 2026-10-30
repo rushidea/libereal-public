@@ -101,6 +101,25 @@ describe('pricing service', () => {
     }])).rejects.toThrow('REFERENCE_PRICE_PROMOTION_INVALID');
   });
 
+  it('rechecks a target variant when the scoped activity starts after pricing', async () => {
+    const db = getTestDb();
+    const startsAt = '2032-01-02T00:00:00.000Z';
+    const endsAt = '2032-01-04T00:00:00.000Z';
+    const pricedAt = new Date('2032-01-01T12:00:00.000Z');
+    db.prepare("UPDATE Product SET originalPrice = 1000, minimumSalePrice = NULL WHERE id = 'product_1'").run();
+    db.prepare("INSERT INTO ProductVariant (id, productId, catalogNumber, spec, price, originalPrice) VALUES ('variant_scope', 'product_1', 'CAT-1-V', 'Synthetic', 900, 1000)").run();
+    db.prepare(`INSERT INTO Promotion (id, name, type, value, status, startsAt, endsAt, updatedAt)
+      VALUES ('scope_campaign', 'Synthetic', 'discount_rate', 0.6, 'active', ?, ?, ?)`)
+      .run(new Date(startsAt).getTime(), new Date(endsAt).getTime(), pricedAt.getTime());
+    db.prepare("INSERT INTO PromotionProduct (id, promotionId, productId) VALUES ('scope_link', 'scope_campaign', 'product_1')").run();
+    process.env.REFERENCE_PRICE_PROMOTION_CONFIG = JSON.stringify({ promotionId: 'scope_campaign', productId: 'product_1', rate: 0.6, startsAt, endsAt });
+    const priced = await verifyAndPriceItems([{ productId: 'product_1', variantId: 'variant_scope', name: 'Synthetic', price: 1 }], { now: pricedAt });
+    expect(priced.verifiedItems[0].referencePriceEligible).toBe(true);
+    const evidence = priced.verifiedItems[0].promotionPricingEvidence!;
+    await expect(prisma.$transaction((tx) => revalidateReferencePriceEvidence(tx, [evidence], pricedAt))).resolves.toBe(true);
+    await expect(prisma.$transaction((tx) => revalidateReferencePriceEvidence(tx, [evidence], new Date(startsAt)))).resolves.toBe(false);
+  });
+
   it('fails closed when reference-promotion configuration or catalog price changes after pricing', async () => {
     const db = getTestDb();
     db.prepare("UPDATE Product SET price = 0, originalPrice = 1000, minimumSalePrice = NULL WHERE id = 'product_1'").run();
