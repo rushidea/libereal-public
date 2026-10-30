@@ -59,6 +59,8 @@ export interface VerifiedItem {
   selectedPromotionId?: string | null;
   /** True only when this line's unit price came from the configured reference price activity. */
   referencePriceApplied?: boolean;
+  /** Eligible product-level checkout line; used to detect newly effective target activity. */
+  referencePriceEligible?: boolean;
   promotionIdentity?: import('@/lib/coupon-scope').CouponPromotionIdentity;
   promotionPricingEvidence?: CouponPromotionPricingEvidence;
   pricingAt?: string;
@@ -87,6 +89,7 @@ export type CouponPromotionPricingEvidence = {
   }>;
   referencePricePromotionId?: string | null;
   referencePriceApplied?: boolean;
+  referencePriceEligible?: boolean;
 };
 
 /** Optional, server-only opt-in. A malformed configured value disables application and makes identity unknown. */
@@ -249,6 +252,7 @@ export async function revalidateCouponPromotionEvidence(
         ? { referencePricePromotionId: currentReferenceConfig === 'unknown' ? 'unknown' : currentReferenceConfig?.promotionId ?? null }
         : {}),
       ...(Object.hasOwn(expected, 'referencePriceApplied') ? { referencePriceApplied: expected.referencePriceApplied } : {}),
+      ...(Object.hasOwn(expected, 'referencePriceEligible') ? { referencePriceEligible: expected.referencePriceEligible } : {}),
     };
     if (JSON.stringify(actual) !== JSON.stringify(expected)) return false;
     const candidatesAt = (at: Date) => actual.candidates
@@ -280,13 +284,16 @@ export async function revalidateReferencePriceEvidence(
   evidence: CouponPromotionPricingEvidence[],
   transactionNow: Date,
 ): Promise<boolean> {
-  const applicable = evidence.filter((entry) => entry.referencePriceApplied === true);
-  if (applicable.length === 0) return true;
   const config = referencePricePromotionConfig();
+  // With the opt-in disabled, retain the prior behavior: only rows already priced
+  // from the target activity need revalidation (and will fail closed if config vanished).
+  const applicable = config === null
+    ? evidence.filter((entry) => entry.referencePriceApplied === true)
+    : evidence.filter((entry) => entry.referencePriceEligible === true || entry.referencePriceApplied === true);
+  if (applicable.length === 0) return true;
   if (!config || config === 'unknown') return false;
   for (const expected of applicable) {
-    if (expected.variantId !== null || expected.referencePricePromotionId !== config.promotionId
-      || typeof expected.product.originalPrice !== 'number' || expected.product.originalPrice <= 0) return false;
+    if (expected.variantId !== null || expected.referencePricePromotionId !== config.promotionId) return false;
     const pricedAt = new Date(expected.pricedAt);
     if (!Number.isFinite(pricedAt.getTime())) return false;
     const product = await tx.product.findUnique({
@@ -319,15 +326,24 @@ export async function revalidateReferencePriceEvidence(
       .map((candidate) => candidate.bindingId);
     if (JSON.stringify(activeBindingIdsAt(pricedAt)) !== JSON.stringify(activeBindingIdsAt(transactionNow))) return false;
     const target = candidates.filter((candidate) => candidate.promotion.id === config.promotionId);
-    if (target.length !== 1) return false;
-    const campaign = target[0].promotion;
-    const activeAt = (at: Date) => campaign.status === 'active'
-      && new Date(campaign.startsAt) <= at && new Date(campaign.endsAt) > at;
-    if (!activeAt(pricedAt) || !activeAt(transactionNow)
-      || target[0].variantId !== null || campaign.type !== 'discount_rate'
-      || campaign.ruleDefinition !== null || !Number.isFinite(campaign.value)
-      || campaign.value <= 0 || campaign.value > 1
-      || typeof product.originalPrice !== 'number' || product.originalPrice <= 0) return false;
+    const activeTargetsAt = (at: Date) => target.filter((candidate) => candidate.promotion.status === 'active'
+      && new Date(candidate.promotion.startsAt) <= at && new Date(candidate.promotion.endsAt) > at);
+    const appliesAt = (at: Date) => {
+      const activeTargets = activeTargetsAt(at);
+      return activeTargets.length === 1
+        && activeTargets[0].variantId === null
+        && activeTargets[0].promotion.type === 'discount_rate'
+        && activeTargets[0].promotion.ruleDefinition === null
+        && Number.isFinite(activeTargets[0].promotion.value)
+        && activeTargets[0].promotion.value > 0 && activeTargets[0].promotion.value <= 1
+        && typeof product.originalPrice === 'number' && product.originalPrice > 0;
+    };
+    // A target activity that is active but invalid would make checkout reject during
+    // pricing; reject the transaction if it became invalid after the pricing snapshot.
+    if ((activeTargetsAt(pricedAt).length > 0 && !appliesAt(pricedAt))
+      || (activeTargetsAt(transactionNow).length > 0 && !appliesAt(transactionNow))) return false;
+    const expectedApplied = expected.referencePriceApplied === true;
+    if (appliesAt(pricedAt) !== expectedApplied || appliesAt(transactionNow) !== expectedApplied) return false;
   }
   return true;
 }
@@ -444,6 +460,7 @@ export async function verifyAndPriceItems(
     let matchedBrand: string | null = null;
     let source: 'db' | 'fallback' = 'fallback';
     let quoteRequired = false;
+    let referencePriceEligible = false;
     let available: boolean | null = null;
     let leadTime: string | null = null;
     let stockQuantity: number | null = null;
@@ -522,6 +539,7 @@ export async function verifyAndPriceItems(
         : [];
       const configuredReferenceLink = configuredReferenceLinks.length === 1 ? configuredReferenceLinks[0] : undefined;
       const inReferenceScope = Boolean(product && !variant && !item.promoMark && !quoteRequired);
+      referencePriceEligible = inReferenceScope;
       const referenceReady = Boolean(product && variant == null && configuredReferenceLinks.length === 1
           && configuredReferenceLink?.variantId == null && configuredReferenceLink.promotion.ruleDefinition == null
           && configuredReferenceLink.promotion.type === 'discount_rate'
@@ -533,7 +551,7 @@ export async function verifyAndPriceItems(
       }
       const referenceApplies = inReferenceScope && referenceReady;
       if (promotionEvidence) {
-        promotionEvidence = { ...promotionEvidence, referencePriceApplied: referenceApplies };
+        promotionEvidence = { ...promotionEvidence, referencePriceApplied: referenceApplies, referencePriceEligible: inReferenceScope };
       }
       if (!quoteRequired && product && (referenceApplies || product.price > 0 || (variant?.price || 0) > 0)) {
         const activeDatabasePromotionIds = new Set(activePromotionLinks.map((link) => link.promotion.id));
@@ -669,6 +687,7 @@ export async function verifyAndPriceItems(
       promotionIdentity,
       promotionPricingEvidence: promotionEvidence,
       referencePriceApplied: promotionEvidence?.referencePriceApplied ?? false,
+      referencePriceEligible,
       pricingAt: now.toISOString(),
       available,
       leadTime,

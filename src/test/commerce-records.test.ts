@@ -25,16 +25,23 @@ describe('toOrderItemCreates variant metadata', () => {
 });
 
 describe('customer-visible pricing snapshots', () => {
-  it('preserves ordinary and legacy fields while removing only private coupon evidence', () => {
+  it('preserves customer amounts and stages while removing private pricing provenance', () => {
     expect(customerVisiblePricingSnapshot('{"finalPrice":10,"source":"catalog"}'))
       .toBe('{"finalPrice":10,"source":"catalog"}');
     expect(JSON.parse(customerVisiblePricingSnapshot(JSON.stringify({
       finalPrice: 10,
+      referencePriceApplied: true,
+      appliedSource: 'promotion:synthetic-private',
+      steps: [{ stage: 'promotion', applied: true, before: 20, after: 10, source: 'promotion', reason: 'Synthetic private rule' }],
       legacy: { keep: true },
       couponPromotionPricingEvidence: { candidates: [{ status: 'draft', ruleDefinition: 'synthetic-private' }] },
       couponPromotionIdentity: { state: 'restricted', promotionId: 'synthetic-private' },
       couponPolicyAudits: [{ policyFingerprint: 'private' }],
-    }))!)).toEqual({ finalPrice: 10, legacy: { keep: true } });
+    }))!)).toEqual({
+      finalPrice: 10,
+      steps: [{ stage: 'promotion', applied: true, before: 20, after: 10, source: 'promotion', reason: '活动优惠' }],
+      legacy: { keep: true },
+    });
   });
 
   it('fails closed on malformed snapshots in the order item view', () => {

@@ -25,7 +25,7 @@ function positiveIntegerOrNull(value: unknown): number | null {
   return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
 }
 
-/** Removes server-only coupon eligibility evidence before exposing persisted pricing to a caller. */
+/** Removes server-only pricing provenance before exposing persisted pricing to a caller. */
 export function customerVisiblePricingSnapshot(value: string | null | undefined): string | null {
   if (value == null) return null;
   try {
@@ -36,6 +36,32 @@ export function customerVisiblePricingSnapshot(value: string | null | undefined)
     delete snapshot.couponPromotionIdentity;
     delete snapshot.couponPolicyAudit;
     delete snapshot.couponPolicyAudits;
+    delete snapshot.referencePriceApplied;
+    delete snapshot.appliedSource;
+    const safeStepLabels: Record<string, { source: string; reason: string }> = {
+      base: { source: 'base_price', reason: '商品基础价格' },
+      variant: { source: 'variant_price', reason: '规格价格' },
+      tier_discount: { source: 'tier_discount', reason: '等级优惠' },
+      brand_discount: { source: 'brand_discount', reason: '品牌优惠' },
+      promotion: { source: 'promotion', reason: '活动优惠' },
+      manual_adjustment: { source: 'manual_adjustment', reason: '价格调整' },
+      minimum_price: { source: 'minimum_price', reason: '最低价保护' },
+    };
+    if (Array.isArray(snapshot.steps)) {
+      snapshot.steps = snapshot.steps.map((step) => {
+        if (!step || typeof step !== 'object' || Array.isArray(step)) return step;
+        const customerStep = { ...(step as Record<string, unknown>) };
+        const safe = typeof customerStep.stage === 'string' ? safeStepLabels[customerStep.stage] : undefined;
+        if (safe) {
+          customerStep.source = safe.source;
+          customerStep.reason = safe.reason;
+        } else {
+          delete customerStep.source;
+          delete customerStep.reason;
+        }
+        return customerStep;
+      });
+    }
     return JSON.stringify(snapshot);
   } catch {
     // A malformed snapshot cannot be proven free of private server-side pricing evidence.

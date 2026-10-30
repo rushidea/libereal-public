@@ -483,10 +483,12 @@ export async function POST(req: NextRequest) {
 
           // Recheck activity-bound prices in this transaction regardless of whether the order has a coupon.
           // Coupon identity uncertainty is handled by coupon scope checks and must not masquerade as price drift.
-          const referencePriceEvidence = verifiedItems
-            .filter((item) => item.referencePriceApplied && item.promotionPricingEvidence)
-            .map((item) => item.promotionPricingEvidence!);
-          if (!await revalidateReferencePriceEvidence(tx, referencePriceEvidence, new Date())) {
+          const eligibleReferenceRows = verifiedItems.filter((item) => item.referencePriceEligible);
+          const referencePriceEvidence = eligibleReferenceRows
+            .map((item) => item.promotionPricingEvidence)
+            .filter((entry): entry is NonNullable<typeof entry> => Boolean(entry));
+          if (referencePriceEvidence.length !== eligibleReferenceRows.length
+            || !await revalidateReferencePriceEvidence(tx, referencePriceEvidence, new Date())) {
             throw new Error('REFERENCE_PRICE_DRIFT');
           }
 

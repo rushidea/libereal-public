@@ -103,6 +103,41 @@ describe('pricing service', () => {
     ))).resolves.toBe(false);
   });
 
+  it('revalidates a not-yet-applied eligible product row when the configured activity becomes effective', async () => {
+    const db = getTestDb();
+    const pricedAt = new Date('2030-01-01T12:00:00.000Z');
+    const transactionNow = new Date('2030-01-03T12:00:00.000Z');
+    db.prepare("UPDATE Product SET price = 1000, originalPrice = 1200, minimumSalePrice = NULL WHERE id = 'product_1'").run();
+    db.prepare(`INSERT INTO Promotion (id, name, type, value, status, startsAt, endsAt, updatedAt)
+      VALUES ('reference_campaign', 'Synthetic scheduled campaign', 'discount_rate', 0.55, 'active', ?, ?, ?)`)
+      .run(new Date('2030-01-02T00:00:00.000Z').getTime(), new Date('2030-01-04T00:00:00.000Z').getTime(), pricedAt.getTime());
+    db.prepare("INSERT INTO PromotionProduct (id, promotionId, productId) VALUES ('reference_link', 'reference_campaign', 'product_1')").run();
+    process.env.REFERENCE_PRICE_PROMOTION_CONFIG = JSON.stringify({ promotionId: 'reference_campaign' });
+
+    const priced = await verifyAndPriceItems([{ catalogNumber: 'CAT-1', name: 'Synthetic product', price: 999 }], { now: pricedAt });
+    expect(priced.verifiedItems[0]).toMatchObject({ referencePriceApplied: false, referencePriceEligible: true });
+    await expect(prisma.$transaction((tx) => revalidateReferencePriceEvidence(
+      tx, [priced.verifiedItems[0].promotionPricingEvidence!], transactionNow,
+    ))).resolves.toBe(false);
+  });
+
+  it('allows an eligible non-target product without original price when the configured activity is unrelated', async () => {
+    const db = getTestDb();
+    db.prepare("UPDATE Product SET price = 1000, originalPrice = NULL, minimumSalePrice = NULL WHERE id = 'product_1'").run();
+    db.prepare(`INSERT INTO Product (id, catalogNumber, name, brand, price, minimumSalePrice, applications, reactivity, createdAt, updatedAt)
+      VALUES ('product_2', 'CAT-2', 'Unrelated product', 'CST', 2000, NULL, '[]', '[]', datetime('now'), datetime('now'))`).run();
+    db.prepare(`INSERT INTO Promotion (id, name, type, value, status, startsAt, endsAt, updatedAt)
+      VALUES ('reference_campaign', 'Synthetic unrelated campaign', 'discount_rate', 0.55, 'active', datetime('now', '-1 day'), datetime('now', '+1 day'), datetime('now'))`).run();
+    db.prepare("INSERT INTO PromotionProduct (id, promotionId, productId) VALUES ('unrelated_link', 'reference_campaign', 'product_2')").run();
+    process.env.REFERENCE_PRICE_PROMOTION_CONFIG = JSON.stringify({ promotionId: 'reference_campaign' });
+
+    const priced = await verifyAndPriceItems([{ catalogNumber: 'CAT-1', name: 'Synthetic product', price: 999 }]);
+    expect(priced.verifiedItems[0]).toMatchObject({ referencePriceApplied: false, referencePriceEligible: true });
+    await expect(prisma.$transaction((tx) => revalidateReferencePriceEvidence(
+      tx, [priced.verifiedItems[0].promotionPricingEvidence!], new Date(),
+    ))).resolves.toBe(true);
+  });
+
   it('fails closed for malformed reference configuration and an invalid configured campaign', async () => {
     const db = getTestDb();
     db.prepare("UPDATE Product SET price = 1000, originalPrice = 1200, minimumSalePrice = NULL WHERE id = 'product_1'").run();
@@ -124,10 +159,23 @@ describe('pricing service', () => {
     const result = await verifyAndPriceItems([{ catalogNumber: 'CAT-1', name: 'Synthetic product', price: 999 }]);
     const current = result.verifiedItems[0].promotionPricingEvidence!;
     const { originalPrice: _originalPrice, ...legacyProduct } = current.product;
-    const { referencePricePromotionId: _referencePricePromotionId, referencePriceApplied: _referencePriceApplied, ...legacyEvidence } = current;
+    const {
+      referencePricePromotionId: _referencePricePromotionId,
+      referencePriceApplied: _referencePriceApplied,
+      referencePriceEligible: _referencePriceEligible,
+      ...legacyEvidence
+    } = current;
     const legacy = { ...legacyEvidence, product: legacyProduct } as unknown as typeof current;
 
     await expect(prisma.$transaction((tx) => revalidateCouponPromotionEvidence(tx, [legacy], new Date())))
+      .resolves.toBe(true);
+  });
+
+  it('accepts unchanged current coupon pricing evidence', async () => {
+    const priced = await verifyAndPriceItems([{ catalogNumber: 'CAT-1', name: 'Synthetic product', price: 999 }]);
+    const evidence = priced.verifiedItems[0].promotionPricingEvidence!;
+
+    await expect(prisma.$transaction((tx) => revalidateCouponPromotionEvidence(tx, [evidence], new Date())))
       .resolves.toBe(true);
   });
 
