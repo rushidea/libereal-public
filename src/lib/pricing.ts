@@ -538,10 +538,13 @@ export async function verifyAndPriceItems(
         ? activePromotionLinks.filter((link) => link.promotion.id === referenceConfig.promotionId)
         : [];
       const configuredReferenceLink = configuredReferenceLinks.length === 1 ? configuredReferenceLinks[0] : undefined;
+      if (product && variant && !item.promoMark && configuredReferenceLinks.length > 0) {
+        throw new Error('REFERENCE_PRICE_PROMOTION_INVALID');
+      }
       const inReferenceScope = Boolean(product && !variant && !item.promoMark && !quoteRequired);
       referencePriceEligible = inReferenceScope;
       const referenceReady = Boolean(product && variant == null && configuredReferenceLinks.length === 1
-          && configuredReferenceLink?.variantId == null && configuredReferenceLink.promotion.ruleDefinition == null
+          && configuredReferenceLink !== undefined && configuredReferenceLink.variantId == null && configuredReferenceLink.promotion.ruleDefinition == null
           && configuredReferenceLink.promotion.type === 'discount_rate'
           && Number.isFinite(configuredReferenceLink.promotion.value)
           && configuredReferenceLink.promotion.value > 0 && configuredReferenceLink.promotion.value <= 1

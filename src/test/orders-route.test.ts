@@ -136,12 +136,12 @@ describe('POST /api/orders', () => {
       verifiedSubtotal: 100, mismatchedCount: 0,
       verifiedItems: [{
         productId: 'product-1', catalogNumber: 'CAT-1', name: '测试产品', unitPrice: 100,
-        quantity: 1, lineTotal: 100, pricingSnapshot: '{"finalPrice":100}', referencePriceApplied: true,
+        quantity: 1, lineTotal: 100, pricingSnapshot: '{"finalPrice":100}', referencePriceApplied: true, referencePriceEligible: true,
         promotionPricingEvidence: {
           productId: 'product-1', variantId: null, pricedAt: '2026-10-30T12:00:00.000Z',
           identity: { state: 'restricted' as const, promotionId: 'reference-campaign' },
           product: { price: 0, originalPrice: 1000, promotionalPrice: null, minimumSalePrice: null },
-          variant: null, candidates: [], referencePricePromotionId: 'reference-campaign', referencePriceApplied: true,
+          variant: null, candidates: [], referencePricePromotionId: 'reference-campaign', referencePriceApplied: true, referencePriceEligible: true,
         },
       }],
     };
@@ -163,7 +163,8 @@ describe('POST /api/orders', () => {
       verifiedItems: [{
         productId: 'product-1', catalogNumber: 'CAT-1', name: '测试产品', unitPrice: 100,
         quantity: 1, lineTotal: 100, pricingSnapshot: '{"finalPrice":100}',
-        referencePriceApplied: true, promotionPricingEvidence: { productId: 'product-1' } as never,
+        referencePriceApplied: true, referencePriceEligible: true,
+        promotionPricingEvidence: { productId: 'product-1', referencePriceEligible: true } as never,
       }],
     };
     mocks.verifyAndPriceItems.mockResolvedValue(priced);
@@ -175,6 +176,9 @@ describe('POST /api/orders', () => {
 
     expect(response.status).toBe(409);
     expect(await response.json()).toMatchObject({ code: 'REFERENCE_PRICE_DRIFT' });
+    expect(mocks.revalidateReferencePriceEvidence).toHaveBeenCalledWith(
+      expect.anything(), [priced.verifiedItems[0].promotionPricingEvidence], expect.any(Date),
+    );
     expect(mocks.orderCreate).not.toHaveBeenCalled();
   });
   it('replays before price verification without duplicate order or notifications', async () => {
