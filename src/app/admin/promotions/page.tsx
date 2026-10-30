@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Plus, X } from 'lucide-react';
 import { uiSurfaces } from '@/lib/ui-surfaces';
 import { parsePromotionDefinition, promotionSkuKey, type PromotionDefinition, type PromotionGroup, type PromotionSkuBinding } from '@/data/promotion-foundation';
@@ -27,11 +27,14 @@ export default function PromotionsPage() {
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
   const [saving, setSaving] = useState(false);
+  const savingRef = useRef(false);
   const [editing, setEditing] = useState<string | null>(null);
   const [name, setName] = useState('');
   const [startsAt, setStartsAt] = useState('');
   const [endsAt, setEndsAt] = useState('');
   const [priority, setPriority] = useState(0);
+  const [legacyRate, setLegacyRate] = useState(false);
+  const [ratePercent, setRatePercent] = useState('');
   const [definition, setDefinition] = useState<PromotionDefinition>(initial);
   const [bindings, setBindings] = useState<Choice[]>([]);
   const [groupKey, setGroupKey] = useState('main');
@@ -64,7 +67,7 @@ export default function PromotionsPage() {
     }, 250);
     return () => { clearTimeout(timer); controller.abort(); };
   }, [search]);
-  const reset = () => { setEditing(null); setName(''); setStartsAt(''); setEndsAt(''); setPriority(0); setBindings([]); setDefinition(initial); setGroupKey('main'); setSearch(''); setProducts([]); };
+  const reset = () => { setEditing(null); setName(''); setStartsAt(''); setEndsAt(''); setPriority(0); setLegacyRate(false); setRatePercent(''); setBindings([]); setDefinition(initial); setGroupKey('main'); setSearch(''); setProducts([]); };
   const selectTemplate = (template: PromotionDefinition['template']) => {
     const shared = template === 'same-sku-gift' || template === 'buy-n-get-m';
     const direct = template === 'direct-price';
@@ -76,22 +79,32 @@ export default function PromotionsPage() {
     setBindings([]); setGroupKey('main');
   };
   const save = async () => {
+    if (savingRef.current) return;
     setError(''); setMessage('');
     if (!name.trim() || !startsAt || !endsAt) { setError('请填写活动名称和有效期'); return; }
-    let parsed: PromotionDefinition;
-    try { parsed = parsePromotionDefinition(definition); } catch { setError('请检查数量、金额和规则配置'); return; }
+    let parsed: PromotionDefinition | null = null;
+    const rate = Number(ratePercent);
+    if (legacyRate) {
+      if (!ratePercent.trim() || !Number.isFinite(rate) || rate <= 0 || rate > 100 || bindings.length !== 1 || bindings[0].variantId) {
+        setError('请选择一个商品默认规格并填写大于 0、最多 100 的成交比例'); return;
+      }
+    } else {
+      try { parsed = parsePromotionDefinition(definition); } catch { setError('请检查数量、金额和规则配置'); return; }
+    }
+    savingRef.current = true;
     setSaving(true);
     try {
       const response = await fetch(editing ? `/api/admin/promotions/${editing}` : '/api/admin/promotions', {
         method: editing ? 'PATCH' : 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name, startsAt: new Date(startsAt).toISOString(), endsAt: new Date(endsAt).toISOString(),
-          status: 'draft', priority, ruleDefinition: parsed, products: bindings.map(({ productId, variantId, groupKey: key }) => ({ productId, variantId, groupKey: key })) }),
+          status: 'draft', priority, ...(legacyRate ? { type: 'discount_rate', value: rate / 100, ruleDefinition: null } : { ruleDefinition: parsed }),
+          products: bindings.map(({ productId, variantId, groupKey: key }) => ({ productId, variantId, groupKey: key })) }),
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || '保存失败');
       reset(); setMessage('草稿保存成功'); await load();
     } catch (failure) { setError(failure instanceof Error ? failure.message : '保存失败'); }
-    finally { setSaving(false); }
+    finally { savingRef.current = false; setSaving(false); }
   };
   const setStatus = async (id: string, status: string) => {
     setSaving(true); setError(''); setMessage('');
@@ -106,6 +119,8 @@ export default function PromotionsPage() {
   const edit = (promotion: ManagedPromotion) => {
     setEditing(promotion.id); setName(promotion.name); setStartsAt(localDate(promotion.startsAt)); setEndsAt(localDate(promotion.endsAt));
     setPriority(promotion.priority);
+    setLegacyRate(!promotion.ruleDefinition && promotion.type === 'discount_rate');
+    setRatePercent(!promotion.ruleDefinition && promotion.type === 'discount_rate' ? String(promotion.value * 100) : '');
     const config = promotion.ruleDefinition ?? { ...initial, template: 'direct-price' as const,
       groups: [{ key: 'main', role: 'benefit' as const, quantity: 1, unit: '件' }],
       benefit: promotion.type === 'discount_rate' ? { kind: 'percentage' as const, basisPoints: Math.round(promotion.value * 10000) }
@@ -146,16 +161,19 @@ export default function PromotionsPage() {
     {message && <p role="status" className="text-sm">{message}</p>}
     <section className={`space-y-4 border-y py-5 ${uiSurfaces.border}`}>
       <h2 className="text-xl font-semibold">{editing ? '编辑活动' : '新建活动'}</h2>
+      <p className="text-sm">时间使用当前浏览器时区；结束时刻不包含在活动内。请核对系统时区后保存。</p>
+      <label className="flex min-h-11 items-center gap-2 text-sm"><input type="checkbox" checked={legacyRate} disabled={Boolean(editing)} onChange={(event) => { setLegacyRate(event.target.checked); setBindings([]); setGroupKey('main'); }} />单商品折扣比例</label>
+      {legacyRate && <label className="space-y-1 text-sm">成交比例 %<input className={inputClass} type="number" min="0.01" max="100" step="0.01" value={ratePercent} onChange={(event) => setRatePercent(event.target.value)} /></label>}
       <div className="grid gap-3 md:grid-cols-3">
         <label className="space-y-1 text-sm">活动名称<input className={inputClass} value={name} onChange={(event) => setName(event.target.value)} /></label>
-        <label className="space-y-1 text-sm">规则模板<select className={inputClass} value={definition.template} onChange={(event) => selectTemplate(event.target.value as PromotionDefinition['template'])}>{Object.entries(templates).map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select></label>
-        <label className="space-y-1 text-sm">最多参与次数<input className={inputClass} type="number" min="1" placeholder="不限" value={definition.maxApplications ?? ''} onChange={(event) => setDefinition({ ...definition, maxApplications: event.target.value ? Number(event.target.value) : null })} /></label>
+        {!legacyRate && <label className="space-y-1 text-sm">规则模板<select className={inputClass} value={definition.template} onChange={(event) => selectTemplate(event.target.value as PromotionDefinition['template'])}>{Object.entries(templates).map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select></label>}
+        {!legacyRate && <label className="space-y-1 text-sm">最多参与次数<input className={inputClass} type="number" min="1" placeholder="不限" value={definition.maxApplications ?? ''} onChange={(event) => setDefinition({ ...definition, maxApplications: event.target.value ? Number(event.target.value) : null })} /></label>}
         <label className="space-y-1 text-sm">开始时间<input className={inputClass} type="datetime-local" value={startsAt} onChange={(event) => setStartsAt(event.target.value)} /></label>
         <label className="space-y-1 text-sm">结束时间<input className={inputClass} type="datetime-local" value={endsAt} onChange={(event) => setEndsAt(event.target.value)} /></label>
         <label className="space-y-1 text-sm">规则优先级<input className={inputClass} type="number" min="-1000" max="1000" value={priority} onChange={(event) => setPriority(Number(event.target.value))} /></label>
-        <label className="flex min-h-11 items-center gap-2 text-sm"><input type="checkbox" checked={definition.repeat} onChange={(event) => setDefinition({ ...definition, repeat: event.target.checked })} />每达到一次条件重复享受</label>
+        {!legacyRate && <label className="flex min-h-11 items-center gap-2 text-sm"><input type="checkbox" checked={definition.repeat} onChange={(event) => setDefinition({ ...definition, repeat: event.target.checked })} />每达到一次条件重复享受</label>}
       </div>
-      <div className="space-y-3">
+      {!legacyRate && <div className="space-y-3">
         {definition.groups.map((group, index) => <div key={group.key} className="grid gap-2 sm:grid-cols-3">
           <label className="space-y-1 text-sm">商品组 {index + 1}<select className={inputClass} value={group.role} disabled={definition.template !== 'bundle'} onChange={(event) => updateGroup(index, { role: event.target.value as PromotionGroup['role'] })}>
             <option value="qualifier">主品</option><option value="benefit">附属品或活动商品</option><option value="qualifier-and-benefit">同组购买与优惠商品</option>
@@ -164,8 +182,8 @@ export default function PromotionsPage() {
           <label className="space-y-1 text-sm">计量单位<input className={inputClass} value={group.unit} onChange={(event) => updateGroup(index, { unit: event.target.value })} /></label>
         </div>)}
         {definition.template === 'bundle' && <button className={uiSurfaces.buttonSecondary} onClick={() => setDefinition({ ...definition, groups: [...definition.groups, { key: `group-${definition.groups.length + 1}`, role: 'qualifier', quantity: 1, unit: '件' }] })}><Plus className="h-4 w-4" />添加商品组</button>}
-      </div>
-      <div className="grid gap-3 sm:grid-cols-3">
+      </div>}
+      {!legacyRate && <div className="grid gap-3 sm:grid-cols-3">
         <label className="space-y-1 text-sm">优惠方式<select className={inputClass} value={benefit.kind} disabled={['gift', 'same-sku-gift', 'buy-n-get-m'].includes(definition.template)} onChange={(event) => {
           const kind = event.target.value;
           setDefinition({ ...definition, partialBenefit: kind !== 'group-price', benefit: kind === 'gift' ? { kind }
@@ -180,9 +198,9 @@ export default function PromotionsPage() {
         }} /></label>}
         {definition.freeQuantity !== undefined && <label className="space-y-1 text-sm">每组免费件数<input className={inputClass} type="number" min="1" value={definition.freeQuantity} onChange={(event) => setDefinition({ ...definition, freeQuantity: Number(event.target.value) })} /></label>}
         {benefit.kind !== 'group-price' && <label className="flex min-h-11 items-center gap-2 text-sm"><input type="checkbox" checked={definition.partialBenefit} onChange={(event) => setDefinition({ ...definition, partialBenefit: event.target.checked })} />允许购买部分附属品</label>}
-      </div>
+      </div>}
       <div className="grid gap-3 sm:grid-cols-[14rem_1fr]">
-        <label className="space-y-1 text-sm">绑定到商品组<select className={inputClass} value={groupKey} onChange={(event) => setGroupKey(event.target.value)}>{definition.groups.map((group, index) => <option key={group.key} value={group.key}>商品组 {index + 1} · {group.role === 'qualifier' ? '主品' : '优惠商品'}</option>)}</select></label>
+        {!legacyRate && <label className="space-y-1 text-sm">绑定到商品组<select className={inputClass} value={groupKey} onChange={(event) => setGroupKey(event.target.value)}>{definition.groups.map((group, index) => <option key={group.key} value={group.key}>商品组 {index + 1} · {group.role === 'qualifier' ? '主品' : '优惠商品'}</option>)}</select></label>}
         <label className="space-y-1 text-sm">搜索货号或商品名称<input className={inputClass} value={search} onChange={(event) => { setSearch(event.target.value); setProducts([]); }} /></label>
       </div>
       {search.trim().length >= 2 && <div className="max-h-60 space-y-1 overflow-y-auto">{products.map((product) => <div key={product.id} className={`border-b py-2 text-sm ${uiSurfaces.border}`}>
@@ -190,7 +208,7 @@ export default function PromotionsPage() {
         {product.variants.map((variant) => <button key={variant.id} className="block min-h-11 pl-4 text-left" onClick={() => add(product, variant)}>{variant.catalogNumber} · {variant.spec}</button>)}
       </div>)}</div>}
       <div className="space-y-2">{bindings.map((binding) => <div key={promotionSkuKey(binding)} className={`flex items-center justify-between gap-3 border-b py-2 text-sm ${uiSurfaces.border}`}>
-        <span className="min-w-0 break-words">商品组 {definition.groups.findIndex((group) => group.key === binding.groupKey) + 1} · {binding.label}</span>
+        <span className="min-w-0 break-words">{!legacyRate && `商品组 ${definition.groups.findIndex((group) => group.key === binding.groupKey) + 1} · `}{binding.label}</span>
         <button aria-label={`移除 ${binding.label}`} className="min-h-11 min-w-11" onClick={() => setBindings(bindings.filter((entry) => promotionSkuKey(entry) !== promotionSkuKey(binding)))}><X className="mx-auto h-4 w-4" /></button>
       </div>)}</div>
       <div className="flex gap-3"><button className={uiSurfaces.primaryButton} disabled={saving || !bindings.length} onClick={() => { void save(); }}>{saving ? '保存中' : '保存草稿'}</button>{editing && <button className={uiSurfaces.buttonSecondary} onClick={reset}>取消编辑</button>}</div>
