@@ -60,6 +60,32 @@ describe('pricing service', () => {
     expect(item.promotionPricingEvidence?.identity).toEqual({ state: 'restricted', promotionId: 'reference_campaign' });
   });
 
+  it('binds a scoped reference activity to its product, rate and exact time window', async () => {
+    const db = getTestDb();
+    const startsAt = '2031-02-01T00:00:00.000Z';
+    const endsAt = '2031-02-03T00:00:00.000Z';
+    const now = new Date('2031-02-02T00:00:00.000Z');
+    db.prepare("UPDATE Product SET price = 1000, originalPrice = 1000, minimumSalePrice = NULL WHERE id = 'product_1'").run();
+    db.prepare(`INSERT INTO Promotion (id, name, type, value, status, startsAt, endsAt, updatedAt)
+      VALUES ('scope_campaign', 'Synthetic', 'discount_rate', 0.6, 'active', ?, ?, ?)`)
+      .run(new Date(startsAt).getTime(), new Date(endsAt).getTime(), now.getTime());
+    db.prepare("INSERT INTO PromotionProduct (id, promotionId, productId) VALUES ('scope_link', 'scope_campaign', 'product_1')").run();
+    const scope = { promotionId: 'scope_campaign', productId: 'product_1', rate: 0.6, startsAt, endsAt };
+    process.env.REFERENCE_PRICE_PROMOTION_CONFIG = JSON.stringify(scope);
+    const items = [{ productId: 'product_1', name: 'Synthetic', price: 1 }];
+    const priced = await verifyAndPriceItems(items, { now });
+    expect(priced.verifiedItems[0].unitPrice).toBe(600);
+    const evidence = priced.verifiedItems[0].promotionPricingEvidence!;
+    await expect(prisma.$transaction((tx) => revalidateReferencePriceEvidence(tx, [evidence], now))).resolves.toBe(true);
+    await expect(prisma.$transaction((tx) => revalidateReferencePriceEvidence(tx, [evidence], new Date(endsAt)))).resolves.toBe(false);
+    process.env.REFERENCE_PRICE_PROMOTION_CONFIG = JSON.stringify({ ...scope, rate: 0.7 });
+    await expect(prisma.$transaction((tx) => revalidateReferencePriceEvidence(tx, [evidence], now))).resolves.toBe(false);
+    await expect(verifyAndPriceItems(items, { now })).rejects.toThrow('REFERENCE_PRICE_PROMOTION_INVALID');
+    process.env.REFERENCE_PRICE_PROMOTION_CONFIG = JSON.stringify(scope);
+    db.prepare("DELETE FROM PromotionProduct WHERE id = 'scope_link'").run();
+    await expect(verifyAndPriceItems(items, { now })).rejects.toThrow('REFERENCE_PRICE_PROMOTION_INVALID');
+  });
+
   it('rejects a variant line when the configured reference-price activity targets its product', async () => {
     const db = getTestDb();
     db.prepare("UPDATE Product SET price = 1000, originalPrice = 1200, minimumSalePrice = NULL WHERE id = 'product_1'").run();

@@ -88,20 +88,31 @@ export type CouponPromotionPricingEvidence = {
       status: string; startsAt: string; endsAt: string; priority: number; exclusive: boolean };
   }>;
   referencePricePromotionId?: string | null;
+  referencePriceScope?: string | null;
   referencePriceApplied?: boolean;
   referencePriceEligible?: boolean;
 };
 
 /** Optional, server-only opt-in. A malformed configured value disables application and makes identity unknown. */
-function referencePricePromotionConfig(): { promotionId: string } | null | 'unknown' {
+type ReferenceConfig = { promotionId: string; scope?: { productId: string; rate: number; startsAt: string; endsAt: string } };
+function referencePricePromotionConfig(): ReferenceConfig | null | 'unknown' {
   const raw = process.env.REFERENCE_PRICE_PROMOTION_CONFIG;
   if (!raw) return null;
   try {
     const value: unknown = JSON.parse(raw);
     if (!value || typeof value !== 'object' || Array.isArray(value)) return 'unknown';
     const record = value as Record<string, unknown>;
-    if (Object.keys(record).length !== 1 || typeof record.promotionId !== 'string' || !record.promotionId.trim()) return 'unknown';
-    return { promotionId: record.promotionId.trim() };
+    if (typeof record.promotionId !== 'string' || !record.promotionId.trim()) return 'unknown';
+    if (Object.keys(record).length === 1) return { promotionId: record.promotionId.trim() };
+    if (Object.keys(record).sort().join(',') !== 'endsAt,productId,promotionId,rate,startsAt'
+      || typeof record.productId !== 'string' || !record.productId.trim()
+      || typeof record.rate !== 'number' || !Number.isFinite(record.rate) || record.rate <= 0 || record.rate > 1
+      || typeof record.startsAt !== 'string' || typeof record.endsAt !== 'string') return 'unknown';
+    const start = new Date(record.startsAt); const end = new Date(record.endsAt);
+    if (!Number.isFinite(start.getTime()) || !Number.isFinite(end.getTime())
+      || start.toISOString() !== record.startsAt || end.toISOString() !== record.endsAt || start >= end) return 'unknown';
+    return { promotionId: record.promotionId.trim(), scope: { productId: record.productId.trim(), rate: record.rate,
+      startsAt: record.startsAt, endsAt: record.endsAt } };
   } catch {
     return 'unknown';
   }
@@ -113,6 +124,7 @@ function promotionPricingEvidence(
   now: Date,
 ): CouponPromotionPricingEvidence {
   const variantId = variant?.id ?? null;
+  const referenceConfig = referencePricePromotionConfig();
   return {
     productId: product.id,
     variantId,
@@ -141,10 +153,9 @@ function promotionPricingEvidence(
         },
       }))
       .sort((a, b) => a.bindingId.localeCompare(b.bindingId)),
-    referencePricePromotionId: (() => {
-      const config = referencePricePromotionConfig();
-      return config === 'unknown' ? 'unknown' : config?.promotionId ?? null;
-    })(),
+    ...(referenceConfig && referenceConfig !== 'unknown' && referenceConfig.scope
+      ? { referencePriceScope: JSON.stringify(referenceConfig.scope) } : {}),
+    referencePricePromotionId: referenceConfig === 'unknown' ? 'unknown' : referenceConfig?.promotionId ?? null,
   };
 }
 
@@ -248,6 +259,8 @@ export async function revalidateCouponPromotionEvidence(
           exclusive: link.promotion.exclusive,
         },
       })).sort((a, b) => a.bindingId.localeCompare(b.bindingId)),
+      ...(Object.hasOwn(expected, 'referencePriceScope') || (currentReferenceConfig && currentReferenceConfig !== 'unknown' && currentReferenceConfig.scope)
+        ? { referencePriceScope: currentReferenceConfig && currentReferenceConfig !== 'unknown' && currentReferenceConfig.scope ? JSON.stringify(currentReferenceConfig.scope) : null } : {}),
       ...(Object.hasOwn(expected, 'referencePricePromotionId') || currentReferenceConfig !== null
         ? { referencePricePromotionId: currentReferenceConfig === 'unknown' ? 'unknown' : currentReferenceConfig?.promotionId ?? null }
         : {}),
@@ -293,6 +306,7 @@ export async function revalidateReferencePriceEvidence(
   if (applicable.length === 0) return true;
   if (!config || config === 'unknown') return false;
   for (const expected of applicable) {
+    if ((expected.referencePriceScope ?? null) !== (config.scope ? JSON.stringify(config.scope) : null)) return false;
     if (expected.variantId !== null || expected.referencePricePromotionId !== config.promotionId) return false;
     const pricedAt = new Date(expected.pricedAt);
     if (!Number.isFinite(pricedAt.getTime())) return false;
@@ -342,6 +356,12 @@ export async function revalidateReferencePriceEvidence(
     // pricing; reject the transaction if it became invalid after the pricing snapshot.
     if ((activeTargetsAt(pricedAt).length > 0 && !appliesAt(pricedAt))
       || (activeTargetsAt(transactionNow).length > 0 && !appliesAt(transactionNow))) return false;
+    const scope = config.scope;
+    if (scope && target.some((candidate) => expected.productId !== scope.productId || candidate.variantId !== null
+      || candidate.promotion.value !== scope.rate
+      || candidate.promotion.startsAt !== scope.startsAt || candidate.promotion.endsAt !== scope.endsAt)) return false;
+    if (scope && expected.productId === scope.productId && ((pricedAt >= new Date(scope.startsAt) && pricedAt < new Date(scope.endsAt))
+      || (transactionNow >= new Date(scope.startsAt) && transactionNow < new Date(scope.endsAt))) && target.length !== 1) return false;
     const expectedApplied = expected.referencePriceApplied === true;
     if (appliesAt(pricedAt) !== expectedApplied || appliesAt(transactionNow) !== expectedApplied) return false;
   }
@@ -538,6 +558,13 @@ export async function verifyAndPriceItems(
         ? activePromotionLinks.filter((link) => link.promotion.id === referenceConfig.promotionId)
         : [];
       const configuredReferenceLink = configuredReferenceLinks.length === 1 ? configuredReferenceLinks[0] : undefined;
+      const scope = referenceConfig && referenceConfig !== 'unknown' ? referenceConfig.scope : undefined;
+      if (scope && configuredReferenceLinks.some((link) => product?.id !== scope.productId || link.variantId !== null
+        || link.promotion.value !== scope.rate || link.promotion.startsAt.toISOString() !== scope.startsAt
+        || link.promotion.endsAt.toISOString() !== scope.endsAt)) throw new Error('REFERENCE_PRICE_PROMOTION_INVALID');
+      if (scope && product?.id === scope.productId && !item.promoMark && !quoteRequired
+        && now >= new Date(scope.startsAt) && now < new Date(scope.endsAt)
+        && (variant || configuredReferenceLinks.length !== 1)) throw new Error('REFERENCE_PRICE_PROMOTION_INVALID');
       if (product && variant && !item.promoMark && configuredReferenceLinks.length > 0) {
         throw new Error('REFERENCE_PRICE_PROMOTION_INVALID');
       }
