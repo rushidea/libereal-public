@@ -57,6 +57,10 @@ export interface VerifiedItem {
   subcategory?: string | null;
   /** Trusted Promotion table identity if established; null does not imply no active restriction. */
   selectedPromotionId?: string | null;
+  /** True only when this line's unit price came from the configured reference price activity. */
+  referencePriceApplied?: boolean;
+  /** Eligible product-level checkout line; used to detect newly effective target activity. */
+  referencePriceEligible?: boolean;
   promotionIdentity?: import('@/lib/coupon-scope').CouponPromotionIdentity;
   promotionPricingEvidence?: CouponPromotionPricingEvidence;
   pricingAt?: string;
@@ -73,7 +77,7 @@ export type CouponPromotionPricingEvidence = {
   variantId: string | null;
   pricedAt: string;
   identity: import('@/lib/coupon-scope').CouponPromotionIdentity;
-  product: { price: number; promotionalPrice: number | null; minimumSalePrice: number | null };
+  product: { price: number; originalPrice?: number | null; promotionalPrice: number | null; minimumSalePrice: number | null };
   variant: { price: number | null; promotionalPrice: number | null; minimumSalePrice: number | null } | null;
   candidates: Array<{
     bindingId: string;
@@ -83,7 +87,25 @@ export type CouponPromotionPricingEvidence = {
     promotion: { id: string; type: string; value: number; ruleDefinition: string | null; ruleVersion: number;
       status: string; startsAt: string; endsAt: string; priority: number; exclusive: boolean };
   }>;
+  referencePricePromotionId?: string | null;
+  referencePriceApplied?: boolean;
+  referencePriceEligible?: boolean;
 };
+
+/** Optional, server-only opt-in. A malformed configured value disables application and makes identity unknown. */
+function referencePricePromotionConfig(): { promotionId: string } | null | 'unknown' {
+  const raw = process.env.REFERENCE_PRICE_PROMOTION_CONFIG;
+  if (!raw) return null;
+  try {
+    const value: unknown = JSON.parse(raw);
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return 'unknown';
+    const record = value as Record<string, unknown>;
+    if (Object.keys(record).length !== 1 || typeof record.promotionId !== 'string' || !record.promotionId.trim()) return 'unknown';
+    return { promotionId: record.promotionId.trim() };
+  } catch {
+    return 'unknown';
+  }
+}
 
 function promotionPricingEvidence(
   product: PricingProduct,
@@ -96,7 +118,7 @@ function promotionPricingEvidence(
     variantId,
     pricedAt: now.toISOString(),
     identity: { state: 'unknown' },
-    product: { price: product.price, promotionalPrice: product.promotionalPrice, minimumSalePrice: product.minimumSalePrice },
+    product: { price: product.price, originalPrice: product.originalPrice, promotionalPrice: product.promotionalPrice, minimumSalePrice: product.minimumSalePrice },
     variant: variant ? { price: variant.price, promotionalPrice: variant.promotionalPrice, minimumSalePrice: variant.minimumSalePrice } : null,
     candidates: product.promotionLinks
       .filter((link) => !link.variantId || link.variantId === variantId)
@@ -119,6 +141,10 @@ function promotionPricingEvidence(
         },
       }))
       .sort((a, b) => a.bindingId.localeCompare(b.bindingId)),
+    referencePricePromotionId: (() => {
+      const config = referencePricePromotionConfig();
+      return config === 'unknown' ? 'unknown' : config?.promotionId ?? null;
+    })(),
   };
 }
 
@@ -172,7 +198,7 @@ export async function revalidateCouponPromotionEvidence(
     if (!Number.isFinite(pricedAt.getTime())) return false;
     const product = await tx.product.findUnique({
       where: { id: expected.productId },
-      select: { id: true, price: true, promotionalPrice: true, minimumSalePrice: true },
+      select: { id: true, price: true, originalPrice: true, promotionalPrice: true, minimumSalePrice: true },
     });
     if (!product) return false;
     const variant = expected.variantId
@@ -195,12 +221,14 @@ export async function revalidateCouponPromotionEvidence(
         } },
       },
     });
+    const currentReferenceConfig = referencePricePromotionConfig();
     const actual: CouponPromotionPricingEvidence = {
       productId: product.id,
       variantId: variant?.id ?? null,
       pricedAt: expected.pricedAt,
       identity: expected.identity,
-      product: { price: product.price, promotionalPrice: product.promotionalPrice, minimumSalePrice: product.minimumSalePrice },
+      product: { price: product.price, ...(Object.hasOwn(expected.product, 'originalPrice') || currentReferenceConfig !== null
+        ? { originalPrice: product.originalPrice } : {}), promotionalPrice: product.promotionalPrice, minimumSalePrice: product.minimumSalePrice },
       variant: variant ? { price: variant.price, promotionalPrice: variant.promotionalPrice, minimumSalePrice: variant.minimumSalePrice } : null,
       candidates: bindings.map((link) => ({
         bindingId: link.id,
@@ -220,6 +248,11 @@ export async function revalidateCouponPromotionEvidence(
           exclusive: link.promotion.exclusive,
         },
       })).sort((a, b) => a.bindingId.localeCompare(b.bindingId)),
+      ...(Object.hasOwn(expected, 'referencePricePromotionId') || currentReferenceConfig !== null
+        ? { referencePricePromotionId: currentReferenceConfig === 'unknown' ? 'unknown' : currentReferenceConfig?.promotionId ?? null }
+        : {}),
+      ...(Object.hasOwn(expected, 'referencePriceApplied') ? { referencePriceApplied: expected.referencePriceApplied } : {}),
+      ...(Object.hasOwn(expected, 'referencePriceEligible') ? { referencePriceEligible: expected.referencePriceEligible } : {}),
     };
     if (JSON.stringify(actual) !== JSON.stringify(expected)) return false;
     const candidatesAt = (at: Date) => actual.candidates
@@ -231,6 +264,11 @@ export async function revalidateCouponPromotionEvidence(
     if (JSON.stringify(activeAtPricing.map((candidate) => candidate.bindingId))
       !== JSON.stringify(activeAtTransaction.map((candidate) => candidate.bindingId))) return false;
     if (expected.identity.state === 'unknown') return false;
+    if (expected.referencePricePromotionId !== actual.referencePricePromotionId) return false;
+    if (expected.referencePriceApplied && (currentReferenceConfig === null || currentReferenceConfig === 'unknown'
+      || expected.referencePricePromotionId !== currentReferenceConfig.promotionId
+      || !activeAtPricing.some((candidate) => candidate.promotion.id === currentReferenceConfig.promotionId)
+      || !activeAtTransaction.some((candidate) => candidate.promotion.id === currentReferenceConfig.promotionId))) return false;
     if (expected.identity.state === 'knownnone' && activeAtPricing.length > 0) return false;
     if (expected.identity.state === 'restricted') {
       const winnerId = expected.identity.promotionId;
@@ -240,10 +278,81 @@ export async function revalidateCouponPromotionEvidence(
   return true;
 }
 
+/** Revalidate reference-price rows independently of coupon identity, including unknown coupon scopes. */
+export async function revalidateReferencePriceEvidence(
+  tx: Prisma.TransactionClient,
+  evidence: CouponPromotionPricingEvidence[],
+  transactionNow: Date,
+): Promise<boolean> {
+  const config = referencePricePromotionConfig();
+  // With the opt-in disabled, retain the prior behavior: only rows already priced
+  // from the target activity need revalidation (and will fail closed if config vanished).
+  const applicable = config === null
+    ? evidence.filter((entry) => entry.referencePriceApplied === true)
+    : evidence.filter((entry) => entry.referencePriceEligible === true || entry.referencePriceApplied === true);
+  if (applicable.length === 0) return true;
+  if (!config || config === 'unknown') return false;
+  for (const expected of applicable) {
+    if (expected.variantId !== null || expected.referencePricePromotionId !== config.promotionId) return false;
+    const pricedAt = new Date(expected.pricedAt);
+    if (!Number.isFinite(pricedAt.getTime())) return false;
+    const product = await tx.product.findUnique({
+      where: { id: expected.productId },
+      select: { price: true, originalPrice: true, promotionalPrice: true, minimumSalePrice: true },
+    });
+    if (!product || JSON.stringify({
+      price: product.price, originalPrice: product.originalPrice,
+      promotionalPrice: product.promotionalPrice, minimumSalePrice: product.minimumSalePrice,
+    }) !== JSON.stringify(expected.product)) return false;
+    const bindings = await tx.promotionProduct.findMany({
+      where: { productId: expected.productId, variantId: null },
+      select: {
+        id: true, productId: true, variantId: true, groupKey: true,
+        promotion: { select: {
+          id: true, type: true, value: true, ruleDefinition: true, ruleVersion: true,
+          status: true, startsAt: true, endsAt: true, priority: true, exclusive: true,
+        } },
+      },
+    });
+    const candidates = bindings.map((link) => ({
+      bindingId: link.id, productId: link.productId, variantId: link.variantId, groupKey: link.groupKey,
+      promotion: { ...link.promotion, startsAt: link.promotion.startsAt.toISOString(), endsAt: link.promotion.endsAt.toISOString() },
+    })).sort((a, b) => a.bindingId.localeCompare(b.bindingId));
+    if (JSON.stringify(candidates) !== JSON.stringify(expected.candidates)) return false;
+    const activeBindingIdsAt = (at: Date) => candidates
+      .filter((candidate) => candidate.promotion.status === 'active'
+        && new Date(candidate.promotion.startsAt) <= at
+        && new Date(candidate.promotion.endsAt) > at)
+      .map((candidate) => candidate.bindingId);
+    if (JSON.stringify(activeBindingIdsAt(pricedAt)) !== JSON.stringify(activeBindingIdsAt(transactionNow))) return false;
+    const target = candidates.filter((candidate) => candidate.promotion.id === config.promotionId);
+    const activeTargetsAt = (at: Date) => target.filter((candidate) => candidate.promotion.status === 'active'
+      && new Date(candidate.promotion.startsAt) <= at && new Date(candidate.promotion.endsAt) > at);
+    const appliesAt = (at: Date) => {
+      const activeTargets = activeTargetsAt(at);
+      return activeTargets.length === 1
+        && activeTargets[0].variantId === null
+        && activeTargets[0].promotion.type === 'discount_rate'
+        && activeTargets[0].promotion.ruleDefinition === null
+        && Number.isFinite(activeTargets[0].promotion.value)
+        && activeTargets[0].promotion.value > 0 && activeTargets[0].promotion.value <= 1
+        && typeof product.originalPrice === 'number' && product.originalPrice > 0;
+    };
+    // A target activity that is active but invalid would make checkout reject during
+    // pricing; reject the transaction if it became invalid after the pricing snapshot.
+    if ((activeTargetsAt(pricedAt).length > 0 && !appliesAt(pricedAt))
+      || (activeTargetsAt(transactionNow).length > 0 && !appliesAt(transactionNow))) return false;
+    const expectedApplied = expected.referencePriceApplied === true;
+    if (appliesAt(pricedAt) !== expectedApplied || appliesAt(transactionNow) !== expectedApplied) return false;
+  }
+  return true;
+}
+
 const pricingProductSelect = {
   id: true,
   catalogNumber: true,
   price: true,
+  originalPrice: true,
   promotionalPrice: true,
   pricingMode: true,
   name: true,
@@ -351,6 +460,7 @@ export async function verifyAndPriceItems(
     let matchedBrand: string | null = null;
     let source: 'db' | 'fallback' = 'fallback';
     let quoteRequired = false;
+    let referencePriceEligible = false;
     let available: boolean | null = null;
     let leadTime: string | null = null;
     let stockQuantity: number | null = null;
@@ -419,25 +529,49 @@ export async function verifyAndPriceItems(
       if (product?.hazardous && !context.allowHazardousProducts) {
         throw new CustomerUnavailableProductError(product.catalogNumber, product.name);
       }
-      if (!quoteRequired && product && (product.price > 0 || (variant?.price || 0) > 0)) {
-        const activePromotionLinks = product.promotionLinks
+      const activePromotionLinks = product?.promotionLinks
           .filter((link) => (!link.variantId || link.variantId === variant?.id)
             && link.promotion.status === 'active'
-            && link.promotion.startsAt <= now
-            && link.promotion.endsAt > now);
+            && link.promotion.startsAt <= now && link.promotion.endsAt > now) ?? [];
+      const referenceConfig = referencePricePromotionConfig();
+      const configuredReferenceLinks = referenceConfig && referenceConfig !== 'unknown'
+        ? activePromotionLinks.filter((link) => link.promotion.id === referenceConfig.promotionId)
+        : [];
+      const configuredReferenceLink = configuredReferenceLinks.length === 1 ? configuredReferenceLinks[0] : undefined;
+      if (product && variant && !item.promoMark && configuredReferenceLinks.length > 0) {
+        throw new Error('REFERENCE_PRICE_PROMOTION_INVALID');
+      }
+      const inReferenceScope = Boolean(product && !variant && !item.promoMark && !quoteRequired);
+      referencePriceEligible = inReferenceScope;
+      const referenceReady = Boolean(product && variant == null && configuredReferenceLinks.length === 1
+          && configuredReferenceLink !== undefined && configuredReferenceLink.variantId == null && configuredReferenceLink.promotion.ruleDefinition == null
+          && configuredReferenceLink.promotion.type === 'discount_rate'
+          && Number.isFinite(configuredReferenceLink.promotion.value)
+          && configuredReferenceLink.promotion.value > 0 && configuredReferenceLink.promotion.value <= 1
+          && typeof product.originalPrice === 'number' && Number.isFinite(product.originalPrice) && product.originalPrice > 0);
+      if (inReferenceScope && configuredReferenceLinks.length > 0 && !referenceReady) {
+        throw new Error('REFERENCE_PRICE_PROMOTION_INVALID');
+      }
+      const referenceApplies = inReferenceScope && referenceReady;
+      if (promotionEvidence) {
+        promotionEvidence = { ...promotionEvidence, referencePriceApplied: referenceApplies, referencePriceEligible: inReferenceScope };
+      }
+      if (!quoteRequired && product && (referenceApplies || product.price > 0 || (variant?.price || 0) > 0)) {
         const activeDatabasePromotionIds = new Set(activePromotionLinks.map((link) => link.promotion.id));
         const promotions: PromotionCandidate[] = activePromotionLinks.map((link) => ({
             id: link.promotion.id,
             name: link.promotion.name,
-            type: link.promotion.type as PromotionCandidate['type'],
-            value: link.promotion.value,
+            type: referenceApplies && link === configuredReferenceLink ? 'fixed_price' : link.promotion.type as PromotionCandidate['type'],
+            value: referenceApplies && link === configuredReferenceLink
+              ? Math.round((product.originalPrice! * link.promotion.value + Number.EPSILON) * 100) / 100
+              : link.promotion.value,
             priority: link.promotion.priority,
             exclusive: link.promotion.exclusive,
           }));
         const syntheticPromotionIds = new Set<string>();
         // P0-1 统一前后台价格源：前台 getEffectiveProductPrice 用 promotionalPrice（>0 即生效），
         // 服务端同样将其纳入促销候选（fixed_price），与会员/品牌折扣、Promotion 表促销统一「取最低成交价」。
-        if (product.promotionalPrice != null && product.promotionalPrice > 0) {
+        if (!referenceApplies && product.promotionalPrice != null && product.promotionalPrice > 0) {
           syntheticPromotionIds.add('product-promotional-price');
           promotions.push({
             id: 'product-promotional-price',
@@ -463,8 +597,8 @@ export async function verifyAndPriceItems(
         // 促销标记行（换购/赠品）：按原价计价，不叠加会员/品牌折扣与促销价（优惠由下单 API 统一扣减）
         const isPromoLine = Boolean(item.promoMark);
         const result = calculatePrice({
-          basePrice: product.price,
-          variantPrice: variant?.price,
+          basePrice: referenceApplies ? product.originalPrice! : product.price,
+          variantPrice: referenceApplies ? null : variant?.price,
           tier: !isPromoLine && allowMemberDiscount ? user?.tier : undefined,
           personalDiscountRate: !isPromoLine && allowMemberDiscount ? user?.discountRate : null,
           brandDiscountRate: !isPromoLine && allowMemberDiscount
@@ -484,7 +618,7 @@ export async function verifyAndPriceItems(
           && !syntheticPromotionIds.has(appliedPromotionId)) {
           selectedPromotionId = appliedPromotionId;
         }
-        promotionIdentity = selectedPromotionId
+        promotionIdentity = referenceConfig === 'unknown' ? { state: 'unknown' } : selectedPromotionId
           ? { state: 'restricted', promotionId: selectedPromotionId }
           : activePromotionLinks.length === 0 && syntheticPromotionIds.size === 0
             && !manualAdjustment && !result.minimumPriceApplied
@@ -497,7 +631,8 @@ export async function verifyAndPriceItems(
         matchedBrand = product.brand;
         pricingSnapshot = JSON.stringify({
           calculatedAt: now.toISOString(), productId: product.id, variantId: variant?.id || null,
-          catalogNumber: matchedCatalog, ...result, couponPromotionIdentity: promotionIdentity,
+          catalogNumber: matchedCatalog, ...result, referencePriceApplied: referenceApplies,
+          couponPromotionIdentity: promotionIdentity,
           couponPromotionPricingEvidence: promotionEvidence,
         });
         source = 'db';
@@ -554,6 +689,8 @@ export async function verifyAndPriceItems(
       selectedPromotionId,
       promotionIdentity,
       promotionPricingEvidence: promotionEvidence,
+      referencePriceApplied: promotionEvidence?.referencePriceApplied ?? false,
+      referencePriceEligible,
       pricingAt: now.toISOString(),
       available,
       leadTime,

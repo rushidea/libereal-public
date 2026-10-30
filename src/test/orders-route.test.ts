@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({
   auth: vi.fn(),
   verifyAndPriceItems: vi.fn(),
+  revalidateReferencePriceEvidence: vi.fn(),
   capturePromoLines: vi.fn(),
   userFindUnique: vi.fn(),
   orderFindFirst: vi.fn(),
@@ -37,6 +38,7 @@ vi.mock('@/lib/pricing', async (importOriginal) => {
   return {
     ...actual,
     verifyAndPriceItems: mocks.verifyAndPriceItems,
+    revalidateReferencePriceEvidence: mocks.revalidateReferencePriceEvidence,
   };
 });
 vi.mock('@/lib/prisma', () => ({
@@ -128,6 +130,56 @@ describe('POST /api/orders', () => {
     expect(lines.map((line) => line.product.promotionIdentity)).toEqual([
       { state: 'restricted', promotionId: 'trusted-promotion' }, { state: 'unknown' },
     ]);
+  });
+  it('revalidates reference-price activity inside a no-coupon order transaction', async () => {
+    const priced = {
+      verifiedSubtotal: 100, mismatchedCount: 0,
+      verifiedItems: [{
+        productId: 'product-1', catalogNumber: 'CAT-1', name: '测试产品', unitPrice: 100,
+        quantity: 1, lineTotal: 100, pricingSnapshot: '{"finalPrice":100}', referencePriceApplied: true, referencePriceEligible: true,
+        promotionPricingEvidence: {
+          productId: 'product-1', variantId: null, pricedAt: '2026-10-30T12:00:00.000Z',
+          identity: { state: 'restricted' as const, promotionId: 'reference-campaign' },
+          product: { price: 0, originalPrice: 1000, promotionalPrice: null, minimumSalePrice: null },
+          variant: null, candidates: [], referencePricePromotionId: 'reference-campaign', referencePriceApplied: true, referencePriceEligible: true,
+        },
+      }],
+    };
+    mocks.verifyAndPriceItems.mockResolvedValue(priced);
+    const response = await POST(request({
+      items: [{ productId: 'product-1', catalogNumber: 'CAT-1', name: '测试产品', price: 100, quantity: 1 }],
+      paymentMethod: 'bank_transfer', acceptedLegalIds: ['checkout-terms'],
+    }) as never);
+
+    expect(response.status).toBe(200);
+    expect(mocks.revalidateReferencePriceEvidence).toHaveBeenCalledTimes(1);
+    expect(mocks.revalidateReferencePriceEvidence).toHaveBeenCalledWith(
+      expect.anything(), [priced.verifiedItems[0].promotionPricingEvidence], expect.any(Date),
+    );
+  });
+  it('rejects a no-coupon order when reference-price evidence drifts in the transaction', async () => {
+    const priced = {
+      verifiedSubtotal: 100, mismatchedCount: 0,
+      verifiedItems: [{
+        productId: 'product-1', catalogNumber: 'CAT-1', name: '测试产品', unitPrice: 100,
+        quantity: 1, lineTotal: 100, pricingSnapshot: '{"finalPrice":100}',
+        referencePriceApplied: true, referencePriceEligible: true,
+        promotionPricingEvidence: { productId: 'product-1', referencePriceEligible: true } as never,
+      }],
+    };
+    mocks.verifyAndPriceItems.mockResolvedValue(priced);
+    mocks.revalidateReferencePriceEvidence.mockResolvedValue(false);
+    const response = await POST(request({
+      items: [{ productId: 'product-1', catalogNumber: 'CAT-1', name: '测试产品', price: 100, quantity: 1 }],
+      paymentMethod: 'bank_transfer', acceptedLegalIds: ['checkout-terms'],
+    }) as never);
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({ code: 'REFERENCE_PRICE_DRIFT' });
+    expect(mocks.revalidateReferencePriceEvidence).toHaveBeenCalledWith(
+      expect.anything(), [priced.verifiedItems[0].promotionPricingEvidence], expect.any(Date),
+    );
+    expect(mocks.orderCreate).not.toHaveBeenCalled();
   });
   it('replays before price verification without duplicate order or notifications', async () => {
     mocks.orderFindUnique.mockResolvedValue(replayRecord());
@@ -232,6 +284,7 @@ describe('POST /api/orders', () => {
   });
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.revalidateReferencePriceEvidence.mockResolvedValue(true);
     mocks.auth.mockResolvedValue({ user: { id: 'user-1', email: 'buyer@example.com', role: 'customer', sessionId: 'session-1' } });
     mocks.requireActiveSession.mockResolvedValue({ id: 'user-1', email: 'buyer@example.com', role: 'customer', sessionId: 'session-1' });
     mocks.userFindUnique.mockResolvedValue({
