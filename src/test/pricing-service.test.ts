@@ -28,6 +28,29 @@ describe('pricing service', () => {
       brand: 'CST', catalogNumber: 'CAT-1', unitPrice: 1000, source: 'db',
     });
   });
+  it('uses the caller transaction for product price reads', async () => {
+    await prisma.$transaction(async (tx) => {
+      await tx.product.update({ where: { id: 'product_1' }, data: { price: 1234, minimumSalePrice: null } });
+      const result = await verifyAndPriceItems([{ productId: 'product_1', name: '测试', price: 1, quantity: 1 }],
+        { db: tx, allowClientFallback: false, strictQuantity: true });
+      expect(result.verifiedItems[0].unitPrice).toBe(1234);
+    });
+  });
+  it('refuses a silent old-path quote for an active catalog activity while allowing marked lines', async () => {
+    const db = getTestDb();
+    db.prepare(`INSERT INTO Promotion (id, name, type, value, status, startsAt, endsAt, ruleDefinition, updatedAt)
+      VALUES ('catalog_campaign', 'Synthetic', 'rule', 0, 'active', datetime('now', '-1 day'), datetime('now', '+1 day'), ?, datetime('now'))`)
+      .run(JSON.stringify({ priceBasis: 'catalog' }));
+    db.prepare("INSERT INTO PromotionProduct (id, promotionId, productId) VALUES ('catalog_link', 'catalog_campaign', 'product_1')").run();
+    await expect(verifyAndPriceItems([{ productId: 'product_1', name: 'Synthetic', price: 1, quantity: 1 }], { strictQuantity: true, allowClientFallback: false }))
+      .rejects.toThrow('PROMOTION_UNIFIED_RUNTIME_REQUIRED');
+    const marked = await verifyAndPriceItems([{ productId: 'product_1', name: 'Synthetic', price: 1, quantity: 1, promoMark: { ruleId: 'synthetic', price: 50 } }],
+      { strictQuantity: true, allowClientFallback: false });
+    expect(marked.verifiedItems[0].unitPrice).toBe(1000);
+    db.prepare("UPDATE Promotion SET ruleDefinition = '{invalid' WHERE id = 'catalog_campaign'").run();
+    await expect(verifyAndPriceItems([{ productId: 'product_1', name: 'Synthetic', price: 1, quantity: 1 }],
+      { strictQuantity: true, allowClientFallback: false })).rejects.toThrow('PROMOTION_UNIFIED_RUNTIME_REQUIRED');
+  });
   beforeAll(() => getTestDb());
   afterAll(() => {
     if (originalReferencePriceConfig === undefined) delete process.env.REFERENCE_PRICE_PROMOTION_CONFIG;

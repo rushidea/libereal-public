@@ -17,6 +17,7 @@ const mocks = vi.hoisted(() => ({
   previewPointsRedeem: vi.fn(),
   applyOrderPointsDeduction: vi.fn(),
   requireActiveSession: vi.fn(),
+  transactionRunner: null as null | ((fn: (tx: unknown) => Promise<unknown>) => Promise<unknown>),
 }));
 const sampleRules = vi.hoisted(() => ({ sample: { id: 'sample-addon-rule', type: 'addon' as const, name: 'Synthetic add-on offer', enabled: true, description: 'Synthetic fixture only.', eligibleBrand: 'Sample', eligibleTerms: ['SAMPLE-MAIN'], minQuantity: 6, addonPrice: 50, addonBrand: 'Sample', addonTerms: ['SAMPLE-ADDON'] } }));
 vi.mock('@/lib/cart-promotions/rules', () => ({ PROMOTION_RULES: [sampleRules.sample], CART_ADDON_RULES: [sampleRules.sample], CART_GIFT_RULES: [], CART_BUNDLE_RULES: [] }));
@@ -50,7 +51,7 @@ vi.mock('@/lib/prisma', () => ({
       create: mocks.orderCreate,
     },
     notification: { create: mocks.notificationCreate, findMany: mocks.notificationFindMany },
-    $transaction: async (fn: (tx: unknown) => Promise<unknown>) => fn({
+    $transaction: async (fn: (tx: unknown) => Promise<unknown>) => mocks.transactionRunner ? mocks.transactionRunner(fn) : fn({
       order: { create: mocks.orderCreate },
       notification: { create: mocks.notificationCreate },
     }),
@@ -92,9 +93,16 @@ vi.mock('@/lib/inventory', () => ({
 }));
 
 import { POST } from '@/app/api/orders/route';
+import { POST as pricingPreviewPOST } from '@/app/api/orders/pricing-preview/route';
 import { promotionLines, submittedPromotion, verifiedPromotion } from './cart-promotion-fixtures';
 import { buildCheckoutRevision } from '@/lib/checkout-revision';
 import { buildCheckoutRequestFingerprint } from '@/lib/checkout-idempotency';
+import Database from 'better-sqlite3';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { PrismaClient } from '@prisma/client';
+import { PrismaBetterSqlite3 } from '@prisma/adapter-better-sqlite3';
 
 function request(body: object) {
   return new Request('https://libereal.cn/api/orders', {
@@ -104,7 +112,184 @@ function request(body: object) {
   });
 }
 
+function unifiedCheckoutDependencies(stockQuantity = 10, noOrdinaryPrice = false) {
+  const identity = { id: JSON.stringify(['product-1', null]), productId: 'product-1', variantId: null, quantity: 2,
+    catalogNumber: 'CAT-1', name: '数据库商品', brand: 'BrandX', category: 'Lab', subcategory: null, deletedAt: null,
+    pricingMode: 'standard', available: true, stockQuantity, leadTime: null, spec: null };
+  const promotion = { id: 'campaign-1', name: '合成活动', type: noOrdinaryPrice ? 'catalog_discount' : 'fixed_price', value: 50, status: 'active',
+    startsAt: '2026-01-01T00:00:00.000Z', endsAt: '2027-01-01T00:00:00.000Z', priority: 1, exclusive: true,
+    ruleDefinition: null, ruleVersion: 1, bindings: [{ bindingId: 'binding-1', productId: 'product-1', variantId: null, groupKey: 'benefit' }] };
+  const snapshot = {
+    items: [identity], evidenceHash: 'a'.repeat(64),
+    evidence: { at: '2026-10-30T12:00:00.000Z', userId: 'user-1', referencePricePromotionId: null,
+      products: [{ id: 'product-1', pricingMode: 'standard', price: noOrdinaryPrice ? 0 : 1, promotionalPrice: null, minimumSalePrice: null,
+        originalPrice: 100, brand: 'BrandX', subBrand: null, variants: [],
+        promotionLinks: [{ id: 'binding-1', promotionId: 'campaign-1', productId: 'product-1', variantId: null, groupKey: 'benefit' }] }],
+      user: { tier: 'none', discountRate: null, brandDiscounts: null, isFrozen: false }, promotions: [promotion], campaigns: [],
+      legacyPromotions: [], lines: [{ id: identity.id, productId: 'product-1', variantId: null, quantity: 2,
+        unitPriceCents: noOrdinaryPrice ? 0 : 100, basePriceCents: noOrdinaryPrice ? 0 : 100, catalogReferenceCents: 10000 }], ordinaryUnitPricesCents: [noOrdinaryPrice ? null : 100] },
+    pricing: { totalCents: 150, promotionIds: ['campaign-1'], allocationIds: ['campaign-1'],
+      lines: [{ productId: 'product-1', variantId: null, quantity: 2, totalAfterCents: 150, promotionId: 'campaign-1',
+        priceBands: noOrdinaryPrice ? [{ quantity: 2, unitCents: 75, source: 'promotion' }] : [{ quantity: 1, unitCents: 100, source: 'ordinary' }, { quantity: 1, unitCents: 50, source: 'promotion' }] }] },
+    unitPriceAllocations: [{ productId: 'product-1', variantId: null, quantity: 2, ordinaryUnitPriceCents: 100, reconstructable: true,
+      priceBands: [{ quantity: 1, unitPriceCents: 100, promotionId: null }, { quantity: 1, unitPriceCents: 50, promotionId: 'campaign-1' }] }],
+  };
+  return {
+    client: { $transaction: async (run: (tx: unknown) => Promise<unknown>) => run({}) },
+    resolveIdentities: async (_tx: unknown, input: { lines: Array<{ quantity: number }> }) => ({ items: input.lines.map((line) => ({ ...identity, quantity: line.quantity })) }),
+    createSnapshot: vi.fn(async (_tx: unknown, input: { now?: Date }) => ({ ...snapshot,
+      evidence: { ...snapshot.evidence, at: input.now?.toISOString() ?? snapshot.evidence.at } }),
+    ),
+  };
+}
+
 describe('POST /api/orders', () => {
+
+  it('uses production POST with all gates and retains legacy paths when any gate is missing', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'unified-order-'));
+    const path = join(dir, 'fixture.sqlite');
+    const sqlite = new Database(path);
+    sqlite.exec(`
+      CREATE TABLE Product (id TEXT PRIMARY KEY, catalogNumber TEXT NOT NULL, name TEXT NOT NULL, brand TEXT NOT NULL, price REAL NOT NULL,
+        pricingMode TEXT NOT NULL DEFAULT 'fixed', originalPrice REAL, category TEXT, subcategory TEXT, inStock BOOLEAN NOT NULL DEFAULT 1,
+        promotionalPrice REAL, promotion BOOLEAN NOT NULL DEFAULT 0, costPrice REAL, minimumSalePrice REAL, subBrand TEXT, leadTime TEXT,
+        hazardous BOOLEAN NOT NULL DEFAULT 0, stockQuantity INTEGER NOT NULL DEFAULT -1, deletedAt DATETIME);
+      CREATE TABLE ProductVariant (id TEXT PRIMARY KEY, productId TEXT NOT NULL, catalogNumber TEXT NOT NULL, spec TEXT NOT NULL,
+        price REAL NOT NULL, originalPrice REAL, promotionalPrice REAL, costPrice REAL, minimumSalePrice REAL);
+      CREATE TABLE Promotion (id TEXT PRIMARY KEY, name TEXT NOT NULL, type TEXT NOT NULL, value REAL NOT NULL, ruleDefinition TEXT,
+        ruleVersion INTEGER NOT NULL DEFAULT 1, status TEXT NOT NULL, startsAt DATETIME NOT NULL, endsAt DATETIME NOT NULL,
+        priority INTEGER NOT NULL DEFAULT 0, exclusive BOOLEAN NOT NULL DEFAULT 1, createdBy TEXT,
+        createdAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, updatedAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP);
+      CREATE TABLE PromotionProduct (id TEXT PRIMARY KEY, promotionId TEXT NOT NULL, productId TEXT NOT NULL, variantId TEXT, groupKey TEXT NOT NULL);
+      CREATE TABLE InventoryAccount (id TEXT PRIMARY KEY, productId TEXT NOT NULL, variantId TEXT, availableQuantity INTEGER NOT NULL DEFAULT -1);
+      CREATE TABLE User (id TEXT PRIMARY KEY, tier TEXT NOT NULL DEFAULT 'standard', discountRate REAL, brandDiscounts TEXT, isFrozen BOOLEAN NOT NULL DEFAULT 0);
+      INSERT INTO User(id) VALUES ('user-1');
+      INSERT INTO Product(id,catalogNumber,name,brand,price,originalPrice,stockQuantity) VALUES
+        ('main','SAMPLE-MAIN-1','Synthetic main','Sample',100,100,100),
+        ('addon','SAMPLE-ADDON-1','Synthetic add-on','Sample',100,100,100);
+    `);
+    sqlite.close();
+    const db = new PrismaClient({ adapter: new PrismaBetterSqlite3({ url: `file:${path}` }) });
+    mocks.transactionRunner = (fn) => db.$transaction(async (tx) => fn(new Proxy(tx, {
+      get(target, property, receiver) { return property === 'order' ? { create: mocks.orderCreate } : Reflect.get(target, property, receiver); },
+    })));
+    const flagNames = ['PROMOTION_UNIFIED_ENABLED', 'PROMOTION_FOUNDATION_ENABLED', 'PROMOTION_CREATE_IDEMPOTENCY_ENABLED', 'PROMOTION_VERSION_CHECK_ENABLED'] as const;
+    const originalFlags = flagNames.map((name) => process.env[name]);
+    for (const name of flagNames) process.env[name] = 'true';
+    const input = { items: [
+      { productId: 'main', quantity: 6 },
+      { productId: 'addon', quantity: 1 },
+      { productId: 'addon', quantity: 1, promoMark: { ruleId: 'sample-addon-rule', price: 50 } },
+    ], paymentMethod: 'bank_transfer' };
+    try {
+      const preview = await pricingPreviewPOST(request(input) as never);
+      const previewData = await preview.json();
+      expect(preview.status, JSON.stringify(previewData)).toBe(200);
+      expect(previewData.subtotal).toBe(750);
+      expect(previewData.items[2]).toMatchObject({ originalUnitPrice: 100, includedPromotionDiscount: 50, finalLineTotal: 50 });
+      expect(previewData.total).toBe(750);
+      const result = await POST(request({ ...input, acceptedLegalIds: ['checkout-terms'], checkoutRevision: previewData.checkoutRevision }) as never);
+      const body = await result.json();
+      expect(result.status, JSON.stringify(body)).toBe(200);
+      expect(mocks.orderCreate.mock.calls[0]?.[0].data).toMatchObject({ subtotal: 750, total: 750 });
+      expect(mocks.capturePromoLines).not.toHaveBeenCalled();
+      mocks.orderCreate.mockClear();
+      mocks.transactionRunner = async (fn) => {
+        await db.$executeRaw`UPDATE Product SET price = 110 WHERE id = 'addon'`;
+        return db.$transaction(async (tx) => fn(new Proxy(tx, {
+          get(target, property, receiver) { return property === 'order' ? { create: mocks.orderCreate } : Reflect.get(target, property, receiver); },
+        })));
+      };
+      const changed = await POST(request({ ...input, acceptedLegalIds: ['checkout-terms'], checkoutRevision: previewData.checkoutRevision }) as never);
+      expect(changed.status).toBe(409);
+      expect(mocks.orderCreate).not.toHaveBeenCalled();
+      for (const disabled of flagNames) {
+        for (const name of flagNames) { if (name === disabled) delete process.env[name]; else process.env[name] = 'true'; }
+        mocks.verifyAndPriceItems.mockClear();
+        mocks.verifyAndPriceItems.mockResolvedValue(verifiedPromotion());
+        const oldInput = { items: submittedPromotion(), paymentMethod: 'bank_transfer', acceptedLegalIds: ['checkout-terms'] };
+        expect((await pricingPreviewPOST(request(oldInput) as never)).status).toBe(200);
+        expect(mocks.verifyAndPriceItems).toHaveBeenCalled();
+        mocks.verifyAndPriceItems.mockClear();
+        expect((await POST(request(oldInput) as never)).status).toBe(200);
+        expect(mocks.verifyAndPriceItems).toHaveBeenCalled();
+      }
+    } finally {
+      flagNames.forEach((name, index) => { const value = originalFlags[index]; if (value === undefined) delete process.env[name]; else process.env[name] = value; });
+      mocks.transactionRunner = null;
+      await db.$disconnect();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('uses one server snapshot for preview and order, preserving native integer-cent price bands', async () => {
+    const dependencies = unifiedCheckoutDependencies();
+    const input = { items: [{ productId: 'product-1', catalogNumber: 'CAT-1', name: '伪造名称', price: 999, quantity: 2 }], paymentMethod: 'bank_transfer' };
+    const preview = await pricingPreviewPOST.forTest(request(input) as never, dependencies as never);
+    expect(preview.status).toBe(200);
+    const previewData = await preview.json();
+    expect(previewData.subtotal).toBe(1.5);
+    expect(previewData.items[0]).toMatchObject({ unitPrice: null, lineTotal: 1.5, finalLineTotal: 1.5,
+      priceTiers: [{ unitPrice: 1, quantity: 1 }, { unitPrice: 0.5, quantity: 1 }] });
+    expect(JSON.stringify(previewData)).not.toContain('campaign-1');
+    const response = await POST.forTest(request({ ...input, acceptedLegalIds: ['checkout-terms'], checkoutRevision: previewData.checkoutRevision }) as never, dependencies as never);
+    expect(response.status).toBe(200);
+    const created = mocks.orderCreate.mock.calls[0]?.[0] as { data: { subtotal: number; total: number; orderItems: { create: Array<{ unitPrice: number; quantity: number; catalogNumber: string }> } } };
+    expect(created.data).toMatchObject({ subtotal: 1.5, total: 1.5 });
+    expect(created.data.orderItems.create).toEqual(expect.arrayContaining([
+      expect.objectContaining({ unitPrice: 1, quantity: 1, catalogNumber: 'CAT-1' }),
+      expect.objectContaining({ unitPrice: 0.5, quantity: 1, catalogNumber: 'CAT-1' }),
+    ]));
+    expect(mocks.orderCreate).toHaveBeenCalledTimes(1);
+    expect(dependencies.createSnapshot).toHaveBeenCalledTimes(3); // preview, initial order quote, and transaction rebuild
+  });
+
+  it('checks aggregate stock across duplicate source rows before price-band splitting', async () => {
+    const dependencies = unifiedCheckoutDependencies(3);
+    const response = await pricingPreviewPOST.forTest(request({ items: [
+      { productId: 'product-1', quantity: 2 }, { productId: 'product-1', quantity: 2 },
+    ] }) as never, dependencies as never);
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({ code: 'INSUFFICIENT_STOCK' });
+    expect(dependencies.createSnapshot).not.toHaveBeenCalled();
+  });
+
+  it('accepts a fully covered catalog tier when the ordinary product price is zero', async () => {
+    const dependencies = unifiedCheckoutDependencies(10, true);
+    const input = { items: [{ productId: 'product-1', catalogNumber: 'CAT-1', price: 999, quantity: 2 }], paymentMethod: 'bank_transfer' };
+    const preview = await pricingPreviewPOST.forTest(request(input) as never, dependencies as never);
+    expect(preview.status).toBe(200);
+    const previewData = await preview.json();
+    expect(previewData.subtotal).toBe(1.5);
+    expect(previewData.items[0]).toMatchObject({ unitPrice: 0.75, lineTotal: 1.5 });
+    const order = await POST.forTest(request({ ...input, acceptedLegalIds: ['checkout-terms'], checkoutRevision: previewData.checkoutRevision }) as never, dependencies as never);
+    expect(order.status).toBe(200);
+    expect(mocks.orderCreate.mock.calls[0]?.[0].data.orderItems.create).toEqual(expect.arrayContaining([
+      expect.objectContaining({ unitPrice: 0.75, quantity: 2 }),
+    ]));
+  });
+
+  it('blocks a legacy discount on an ordinary tier occupied by a unified campaign', () => {
+    const overlaps = POST.campaignOverlapsLegacyDiscountsForTest as (items: unknown[], discounts: Record<string, number>) => boolean;
+    expect(overlaps([{ productId: 'product-1', selectedPromotionId: null, unifiedOccupiedPromotionId: 'campaign-1' }], { '0': 1 })).toBe(true);
+    expect(overlaps([{ productId: 'product-1', selectedPromotionId: null }], { '0': 1 })).toBe(false);
+  });
+
+  it('rejects a price-evidence change between the initial quote and transaction rebuild', async () => {
+    const dependencies = unifiedCheckoutDependencies();
+    let snapshotCall = 0;
+    dependencies.createSnapshot.mockImplementation(async (_tx: unknown, input: { now?: Date }) => {
+      snapshotCall += 1;
+      const result = await unifiedCheckoutDependencies().createSnapshot({}, input);
+      return { ...result, evidenceHash: snapshotCall === 3 ? 'b'.repeat(64) : 'a'.repeat(64) };
+    });
+    const input = { items: [{ productId: 'product-1', catalogNumber: 'CAT-1', quantity: 2 }], paymentMethod: 'bank_transfer' };
+    const preview = await pricingPreviewPOST.forTest(request(input) as never, dependencies as never);
+    const previewData = await preview.json();
+    const order = await POST.forTest(request({ ...input, acceptedLegalIds: ['checkout-terms'], checkoutRevision: previewData.checkoutRevision }) as never, dependencies as never);
+    expect(order.status).toBe(409);
+    expect(mocks.orderCreate).not.toHaveBeenCalled();
+  });
 
   function keyedRequest() {
     return { items: [{ productId: 'product-1', quantity: 1 }], paymentMethod: 'bank_transfer', acceptedLegalIds: ['checkout-terms'], checkoutAttemptId: 'synthetic-order-attempt' };
@@ -156,6 +341,31 @@ describe('POST /api/orders', () => {
     expect(mocks.revalidateReferencePriceEvidence).toHaveBeenCalledWith(
       expect.anything(), [priced.verifiedItems[0].promotionPricingEvidence], expect.any(Date),
     );
+  });
+  it('rejects changed pricing evidence inside the order transaction even when the price is unchanged', async () => {
+    const first = { verifiedSubtotal: 100, mismatchedCount: 0, verifiedItems: [{
+      productId: 'product-1', catalogNumber: 'CAT-1', name: '测试产品', unitPrice: 100, quantity: 1, lineTotal: 100,
+      pricingSnapshot: JSON.stringify({ calculatedAt: '2030-01-01T00:00:00Z', appliedSource: 'promotion:a' }),
+    }] };
+    const changed = { ...first, verifiedItems: [{ ...first.verifiedItems[0],
+      pricingSnapshot: JSON.stringify({ calculatedAt: '2030-01-01T00:00:01Z', appliedSource: 'promotion:b' }) }] };
+    mocks.verifyAndPriceItems.mockResolvedValueOnce(first).mockResolvedValueOnce(changed);
+    const response = await POST(request({ items: [{ productId: 'product-1', name: '测试产品', price: 100, quantity: 1 }],
+      paymentMethod: 'bank_transfer', acceptedLegalIds: ['checkout-terms'] }) as never);
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({ code: 'CHECKOUT_PRICE_DRIFT' });
+    expect(mocks.orderCreate).not.toHaveBeenCalled();
+    expect(mocks.verifyAndPriceItems.mock.calls[1][1]).toMatchObject({ db: expect.anything(), allowClientFallback: false });
+  });
+  it('returns a conflict when a reference-price rule becomes invalid in the transaction', async () => {
+    const first = { verifiedSubtotal: 100, mismatchedCount: 0, verifiedItems: [{ productId: 'product-1',
+      catalogNumber: 'CAT-1', name: '测试产品', unitPrice: 100, quantity: 1, lineTotal: 100, pricingSnapshot: '{}' }] };
+    mocks.verifyAndPriceItems.mockResolvedValueOnce(first).mockRejectedValueOnce(new Error('REFERENCE_PRICE_PROMOTION_INVALID'));
+    const response = await POST(request({ items: [{ productId: 'product-1', name: '测试产品', price: 100, quantity: 1 }],
+      paymentMethod: 'bank_transfer', acceptedLegalIds: ['checkout-terms'] }) as never);
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({ code: 'CHECKOUT_PRICE_DRIFT' });
+    expect(mocks.orderCreate).not.toHaveBeenCalled();
   });
   it('rejects a no-coupon order when reference-price evidence drifts in the transaction', async () => {
     const priced = {

@@ -4,6 +4,8 @@ import { buildCouponRule, redeemCoupon, type CouponRedeemSnapshot } from '@/lib/
 import { revalidateCouponPromotionEvidence, verifyAndPriceItems, type CouponPromotionPricingEvidence } from '@/lib/pricing';
 import { prisma } from '@/lib/prisma';
 import { clearAllTables, closeTestDb, getTestDb, seedUser } from './db-helpers';
+import { PROMOTION_RULES } from '@/lib/cart-promotions/rules';
+import { legacyRuleVersionHash } from '@/lib/legacy-rule-version';
 
 const now = new Date('2026-10-29T12:00:00.000Z');
 const previousPolicy = process.env.COUPON_PROMOTION_POLICY;
@@ -74,6 +76,21 @@ describe('transactional coupon promotion evidence', () => {
   afterEach(() => {
     if (previousPolicy === undefined) delete process.env.COUPON_PROMOTION_POLICY;
     else process.env.COUPON_PROMOTION_POLICY = previousPolicy;
+  });
+
+  it('revalidates a static rule in its own namespace and detects its change or expiry', async () => {
+    const rule = { id: 'test-static', type: 'fixed-price' as const, name: 'Synthetic', description: '', enabled: true,
+      terms: ['SYNTH'], fixedPrice: 5, validUntil: '2026-11-01T00:00:00.000Z' };
+    PROMOTION_RULES.push(rule);
+    try {
+      const staticEvidence: CouponPromotionPricingEvidence = { ...evidence, candidates: [],
+        identity: { state: 'static', ruleId: 'legacy-cart:test-static', versionHash: legacyRuleVersionHash(rule) } };
+      const tx = txWithCandidates([]) as unknown as Prisma.TransactionClient;
+      expect(await revalidateCouponPromotionEvidence(tx, [staticEvidence], now)).toBe(true);
+      expect(await revalidateCouponPromotionEvidence(tx, [staticEvidence], new Date('2026-11-02T00:00:00Z'))).toBe(false);
+      rule.fixedPrice = 4;
+      expect(await revalidateCouponPromotionEvidence(tx, [staticEvidence], now)).toBe(false);
+    } finally { PROMOTION_RULES.pop(); }
   });
 
   it.each([
