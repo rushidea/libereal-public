@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { requireAdmin } from '@/lib/session';
 import { retryBackgroundTask } from '@/lib/background-tasks';
+import { projectAiOpsTask } from '@/lib/ai-ops/tasks';
 import { writeAuditLog } from '@/lib/audit';
 
 const STATUSES = new Set(['pending', 'running', 'succeeded', 'failed']);
@@ -17,7 +18,7 @@ export async function GET(req: NextRequest) {
   const limit = Math.min(100, Math.max(10, Number(searchParams.get('limit')) || 30));
   if (status && !STATUSES.has(status)) return NextResponse.json({ error: 'Invalid status' }, { status: 400 });
 
-  const where = { ...(status ? { status } : {}), ...(type ? { type } : {}) };
+  const where = { AND: [{ type: { not: { startsWith: 'aiops.control.' } } }, ...(status ? [{ status }] : []), ...(type ? [{ type }] : [])] };
   const [tasks, total, statusCounts, types] = await Promise.all([
     prisma.backgroundTask.findMany({
       where,
@@ -26,11 +27,11 @@ export async function GET(req: NextRequest) {
       take: limit,
     }),
     prisma.backgroundTask.count({ where }),
-    prisma.backgroundTask.groupBy({ by: ['status'], _count: { _all: true } }),
-    prisma.backgroundTask.findMany({ select: { type: true }, distinct: ['type'], orderBy: { type: 'asc' } }),
+    prisma.backgroundTask.groupBy({ by: ['status'], where: { type: { not: { startsWith: 'aiops.control.' } } }, _count: { _all: true } }),
+    prisma.backgroundTask.findMany({ where: { type: { not: { startsWith: 'aiops.control.' } } }, select: { type: true }, distinct: ['type'], orderBy: { type: 'asc' } }),
   ]);
   return NextResponse.json({
-    tasks,
+    tasks: tasks.map((task) => task.type.startsWith('aiops.') ? projectAiOpsTask(task) : task),
     total,
     page,
     pageCount: Math.max(1, Math.ceil(total / limit)),
@@ -49,6 +50,7 @@ export async function PATCH(req: NextRequest) {
 
   const previous = await prisma.backgroundTask.findUnique({ where: { id: body.id } });
   if (!previous) return NextResponse.json({ error: 'Task not found' }, { status: 404 });
+  if (previous.type.startsWith('aiops.')) return NextResponse.json({ error: 'AI tasks cannot be retried automatically' }, { status: 409 });
   const task = await retryBackgroundTask(body.id);
   if (!task) return NextResponse.json({ error: 'Only failed tasks can be retried' }, { status: 409 });
   await writeAuditLog({

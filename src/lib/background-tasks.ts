@@ -8,6 +8,8 @@ export const BACKGROUND_TASK_TYPES = [
   'quote.expire',
   'search.index_update',
   'news.update',
+  'security.mfa_cleanup',
+  'aiops.run',
 ] as const;
 
 export type BackgroundTaskType = typeof BACKGROUND_TASK_TYPES[number];
@@ -51,7 +53,7 @@ export async function enqueueBackgroundTask(
 export async function recoverStaleBackgroundTasks(now = new Date(), leaseMs = 15 * 60 * 1000): Promise<number> {
   const staleBefore = new Date(now.getTime() - leaseMs);
   const stale = await prisma.backgroundTask.findMany({
-    where: { status: 'running', lockedAt: { lt: staleBefore } },
+    where: { type: { not: { startsWith: 'aiops.' } }, status: 'running', lockedAt: { lt: staleBefore } },
     select: { id: true, attempts: true, maxAttempts: true },
   });
   if (stale.length === 0) return 0;
@@ -80,7 +82,7 @@ export async function recoverStaleBackgroundTasks(now = new Date(), leaseMs = 15
 export async function claimNextBackgroundTask(workerId: string, now = new Date()): Promise<BackgroundTask | null> {
   return prisma.$transaction(async (tx) => {
     const candidate = await tx.backgroundTask.findFirst({
-      where: { status: 'pending', runAt: { lte: now } },
+      where: { type: { not: { startsWith: 'aiops.' } }, status: 'pending', runAt: { lte: now } },
       orderBy: [{ priority: 'desc' }, { runAt: 'asc' }, { createdAt: 'asc' }],
     });
     if (!candidate) return null;
@@ -147,7 +149,7 @@ export async function failBackgroundTask(id: string, workerId: string, error: un
 
 export async function retryBackgroundTask(id: string): Promise<BackgroundTask | null> {
   const task = await prisma.backgroundTask.findUnique({ where: { id } });
-  if (!task || task.status !== 'failed') return null;
+  if (!task || task.type.startsWith('aiops.') || task.status !== 'failed') return null;
   return prisma.backgroundTask.update({
     where: { id },
     data: {
