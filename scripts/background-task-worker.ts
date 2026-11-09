@@ -14,6 +14,12 @@ import { prisma } from '@/lib/prisma';
 import { runMfaChallengeCleanupOnce } from '@/lib/security/mfa-cleanup';
 
 const once = process.argv.includes('--once');
+const typeArgs = process.argv.filter((arg) => arg.startsWith('--type='));
+if (typeArgs.length > 1 || (typeArgs.length === 1 && typeArgs[0] !== '--type=aiops.run') || process.argv.includes('--type')) {
+  throw new Error('Only --type=aiops.run is supported');
+}
+const aiOpsOnly = typeArgs.length === 1;
+const stopController = new AbortController();
 const pollMs = Math.max(250, Number(process.env.TASK_WORKER_POLL_MS) || 2000);
 const workerId = `${os.hostname()}:${process.pid}:${randomUUID().slice(0, 8)}`;
 let stopping = false;
@@ -42,6 +48,20 @@ async function scheduleRecurringTasks(now: Date): Promise<void> {
 
 async function run(): Promise<void> {
   console.info(`[task-worker] started ${workerId}`);
+  if (aiOpsOnly) {
+    const { claimAiOpsTask, recoverStaleAiOpsTasks } = await import('@/lib/ai-ops/tasks');
+    const { runAiOpsTask } = await import('@/lib/ai-ops/runtime-composition');
+    await recoverStaleAiOpsTasks();
+    let lastRecoveryAt = Date.now();
+    while (!stopping) {
+      if (Date.now() - lastRecoveryAt >= 60_000) { await recoverStaleAiOpsTasks(); lastRecoveryAt = Date.now(); }
+      const task = await claimAiOpsTask(workerId);
+      if (task) await runAiOpsTask(task, { workerId, signal: stopController.signal });
+      if (once) break;
+      if (!task) await sleep(pollMs);
+    }
+    return;
+  }
   await recoverStaleBackgroundTasks();
   let lastScheduleAt = 0;
 
@@ -71,8 +91,8 @@ async function run(): Promise<void> {
   }
 }
 
-process.on('SIGINT', () => { stopping = true; });
-process.on('SIGTERM', () => { stopping = true; });
+process.on('SIGINT', () => { stopping = true; stopController.abort(); });
+process.on('SIGTERM', () => { stopping = true; stopController.abort(); });
 
 run()
   .catch((error) => {

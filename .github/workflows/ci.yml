@@ -4,7 +4,7 @@ on:
   push:
     branches: [main, staging-main]
   pull_request:
-    branches: [main, staging-main]
+    branches: [main, staging-main, codex/aiops-mvp-v1]
 
 env:
   AUTH_SECRET: ci-dummy-auth-secret-for-github-actions
@@ -107,7 +107,7 @@ jobs:
           src/test/automatic-promotions.test.ts
 
   e2e-tests:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: [catalog-search-promotion-validation]
     steps:
       - name: Checkout
