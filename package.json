@@ -43,15 +43,15 @@
     "exceljs": "4.4.0",
     "html2canvas": "^1.4.1",
     "lucide-react": "^1.8.0",
-    "markdown-it": "^14.3.0",
-    "next": "16.3.8",
+    "markdown-it": "14.3.3",
+    "next": "16.4.5",
     "next-auth": "5.0.0-beta.32",
     "qrcode": "^1.5.4",
     "react": "19.2.4",
     "react-dom": "19.2.4",
     "recharts": "^3.8.1",
-    "sharp": "0.35.4",
-    "undici": "^7.25.0"
+    "sharp": "0.35.5",
+    "undici": "7.30.2"
   },
   "devDependencies": {
     "@playwright/test": "^1.59.1",

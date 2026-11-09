@@ -12,7 +12,7 @@ const exec = promisify(execFile);
 const SHA = /^[a-f0-9]{40}$/;
 const GIT = '/usr/bin/git';
 const GH_CANDIDATES = ['/usr/bin/gh', '/usr/local/bin/gh', '/opt/homebrew/bin/gh'];
-const CI_WORKFLOW_SHA256 = '0a1b93e7af550858728594fc5645c5dd5728647ac62744d04826f7e2fa78bb30';
+const CI_WORKFLOW_SHA256 = ['0a1b93e7af550858728594fc5645c5dd5728647ac62744d04826f7e2fa78bb30', '233e88f4b2fc77295d390f68e73a67ec7dafcd1193400a1dc9e319a9f4d597da'];
 const REQUIRED_CI_JOBS = ['security-audit', 'lint-and-type', 'unit-tests', 'catalog-search-promotion-validation', 'e2e-tests', 'build'];
 export function assessRequiredCiJobs(jobs: Array<{ name?: string; status?: string; conclusion?: string | null }>): 'passed' | 'failed' | 'pending' {
   const required = REQUIRED_CI_JOBS.map((name) => jobs.filter((job) => job.name === name));
@@ -189,7 +189,7 @@ export async function runEngineeringTask(input: Input) {
   await input.onProgress({ stage: 'ci', links: { pr: pr.url } });
   await check();
   const workflow = await exec(GIT, [...gitArgs, '-C', h.repo, 'show', `${h.base}:.github/workflows/ci.yml`], { cwd: h.repo, signal: input.signal, timeout: 120_000, maxBuffer: MAX_BUFFER, encoding: 'buffer', env: commandEnvironment() });
-  if (digest(workflow.stdout) !== CI_WORKFLOW_SHA256) throw new Error('engineering_ci_workflow_changed');
+  if (!CI_WORKFLOW_SHA256.includes(digest(workflow.stdout))) throw new Error('engineering_ci_workflow_changed');
   let ci: 'passed' | 'failed' | 'pending' = 'pending';
   const deadline = Date.now() + 15 * 60_000;
   let recordedRun = '';

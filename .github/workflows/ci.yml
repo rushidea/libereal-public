@@ -107,7 +107,7 @@ jobs:
           src/test/automatic-promotions.test.ts
 
   e2e-tests:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: [catalog-search-promotion-validation]
     steps:
       - name: Checkout
