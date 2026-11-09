@@ -13,7 +13,7 @@ export type EngineeringPolicy = {
   allowedPaths: string[];
   privateToolsRoot: string;
   privateToolsCommit: string;
-  staging?: { command: string; commandSha256: string; url: string; privateCommit: string };
+  staging?: { command: string; commandSha256: string; configPath: string; url: string; privateCommit: string };
 };
 export type AiOpsPolicy = {
   version: 1;
@@ -50,7 +50,7 @@ function validateEngineeringPolicy(value: unknown): asserts value is Engineering
   if (!Array.isArray(p.allowedPaths) || p.allowedPaths.length < 1 || p.allowedPaths.length > 16 || new Set(p.allowedPaths).size !== p.allowedPaths.length || p.allowedPaths.some((path) => typeof path !== 'string' || path.length > 240 || !/^[A-Za-z0-9_@()[\]./-]+$/.test(path) || path.startsWith('/') || path.endsWith('/') || path.split('/').some((part) => !part || part === '.' || part === '..' || part.startsWith('.')) || /(?:auth|session|permission|security|secret|credential|mfa|oauth|\.env|\.git)/i.test(path))) return fail();
   if (p.staging !== undefined) {
     const stage = p.staging as Record<string, unknown>;
-    if (!stage || typeof stage !== 'object' || Array.isArray(stage) || Object.keys(stage).length !== 4 || !['command', 'commandSha256', 'url', 'privateCommit'].every((key) => Object.hasOwn(stage, key)) || !absolutePath(stage.command) || typeof stage.commandSha256 !== 'string' || !/^[a-f0-9]{64}$/.test(stage.commandSha256) || typeof stage.privateCommit !== 'string' || !/^[a-f0-9]{40}$/.test(stage.privateCommit) || typeof stage.url !== 'string') return fail();
+    if (!stage || typeof stage !== 'object' || Array.isArray(stage) || Object.keys(stage).length !== 5 || !['command', 'commandSha256', 'configPath', 'url', 'privateCommit'].every((key) => Object.hasOwn(stage, key)) || !absolutePath(stage.command) || !absolutePath(stage.configPath) || typeof stage.commandSha256 !== 'string' || !/^[a-f0-9]{64}$/.test(stage.commandSha256) || typeof stage.privateCommit !== 'string' || !/^[a-f0-9]{40}$/.test(stage.privateCommit) || typeof stage.url !== 'string') return fail();
     try { const url = new URL(stage.url); if (url.protocol !== 'https:' || url.username || url.password || url.search || url.hash) return fail(); } catch { return fail(); }
   }
 }

@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { access, lstat, mkdir, readFile, realpath, writeFile } from 'node:fs/promises';
+import { access, lstat, mkdir, readFile, readdir, realpath, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import type { AiOpsActor, AiOpsStage } from './contracts';
@@ -12,7 +12,8 @@ const exec = promisify(execFile);
 const SHA = /^[a-f0-9]{40}$/;
 const GIT = '/usr/bin/git';
 const GH_CANDIDATES = ['/usr/bin/gh', '/usr/local/bin/gh', '/opt/homebrew/bin/gh'];
-const CI_WORKFLOW_SHA256 = ['0a1b93e7af550858728594fc5645c5dd5728647ac62744d04826f7e2fa78bb30', '233e88f4b2fc77295d390f68e73a67ec7dafcd1193400a1dc9e319a9f4d597da'];
+const MVP_CI_WORKFLOW_SHA256 = 'fe8b7585964ca301515d195cf1b4a06cd5a3cfc71b4bd7376831142d77fcd1e7';
+const CI_WORKFLOW_SHA256 = ['0a1b93e7af550858728594fc5645c5dd5728647ac62744d04826f7e2fa78bb30', '233e88f4b2fc77295d390f68e73a67ec7dafcd1193400a1dc9e319a9f4d597da', MVP_CI_WORKFLOW_SHA256];
 const REQUIRED_CI_JOBS = ['security-audit', 'lint-and-type', 'unit-tests', 'catalog-search-promotion-validation', 'e2e-tests', 'build'];
 export function assessRequiredCiJobs(jobs: Array<{ name?: string; status?: string; conclusion?: string | null }>): 'passed' | 'failed' | 'pending' {
   const required = REQUIRED_CI_JOBS.map((name) => jobs.filter((job) => job.name === name));
@@ -43,6 +44,9 @@ async function executable(paths: string[]) { for (const p of paths) { try { awai
 function exactObject(value: unknown, keys: string[]): value is Record<string, unknown> {
   return !!value && typeof value === 'object' && !Array.isArray(value) && Object.keys(value).length === keys.length && keys.every((k) => Object.hasOwn(value, k));
 }
+export function isValidStagingResult(result: unknown, expected: { publicCommit: string; privateCommit: string; url: string }): boolean {
+  return exactObject(result, ['status', 'publicCommit', 'privateCommit', 'treeSha256', 'url']) && result.status === 'deployed' && result.publicCommit === expected.publicCommit && result.privateCommit === expected.privateCommit && typeof result.treeSha256 === 'string' && /^[a-f0-9]{64}$/.test(result.treeSha256) && result.url === expected.url;
+}
 function validateRemote(value: string) {
   return /^(?:https:\/\/github\.com\/rushidea\/libereal-public(?:\.git)?|git@github\.com:rushidea\/libereal-public(?:\.git)?)$/.test(value);
 }
@@ -71,6 +75,7 @@ async function pinnedTools(policy: EngineeringPolicy) {
   return path.join(root, CLI);
 }
 async function host(policy: EngineeringPolicy) {
+  if (!['main', 'staging-main', 'codex/aiops-mvp-v1'].includes(policy.baseBranch)) throw new Error('engineering_ci_base_unsupported');
   await executable([GIT]);
   await executable([process.execPath]);
   const gh = await executable(GH_CANDIDATES);
@@ -81,17 +86,68 @@ async function host(policy: EngineeringPolicy) {
   if (!validateRemote(await git(repo, ['remote', 'get-url', 'origin'])) || !validateRemote(await git(repo, ['remote', 'get-url', '--push', '--all', 'origin']))) throw new Error('engineering_remote_invalid');
   const base = await git(repo, ['rev-parse', '--verify', `${policy.baseRef}^{commit}`]);
   if (!SHA.test(base)) throw new Error('engineering_base_invalid');
+  const workflow = await exec(GIT, [...gitArgs, '-C', repo, 'show', `${base}:.github/workflows/ci.yml`], { cwd: repo, timeout: 120_000, maxBuffer: MAX_BUFFER, encoding: 'buffer', env: commandEnvironment() });
+  const workflowHash = digest(workflow.stdout);
+  if (!CI_WORKFLOW_SHA256.includes(workflowHash)) throw new Error('engineering_ci_workflow_changed');
+  if (policy.baseBranch === 'codex/aiops-mvp-v1' && workflowHash !== MVP_CI_WORKFLOW_SHA256) throw new Error('engineering_ci_trigger_missing');
   const cli = await pinnedTools(policy);
   return { repo, worktreesRoot, base, cli, gh };
 }
-export async function engineeringAvailability(): Promise<{ available: boolean; reason: string | null; stagingAvailable: boolean }> {
+
+async function pinnedStaging(stage: NonNullable<EngineeringPolicy['staging']>) {
+  if (process.platform !== 'linux') throw new Error('staging_platform_unsupported');
+  const root = path.dirname(path.dirname(path.dirname(stage.configPath)));
+  if (stage.configPath !== path.join(root, 'operations/staging/aiops-host.json') || stage.command !== path.join(root, 'operations/staging/aiops-run-release.py') || await realpath(root) !== root || await git(root, ['rev-parse', '--show-toplevel']) !== root) throw new Error('staging_host_invalid');
+  await executable(['/usr/bin/python3']);
+  const listing = await exec(GIT, [...gitArgs, '-C', root, 'ls-tree', '-r', '-z', '--full-tree', stage.privateCommit, '--', 'operations/production', 'operations/staging'], { cwd: root, encoding: 'buffer', maxBuffer: MAX_BUFFER, env: commandEnvironment() });
+  const tracked = new Set<string>();
+  for (const item of listing.stdout.toString('utf8').split('\0').filter(Boolean)) {
+    const match = /^(100644|100755) blob [a-f0-9]{40}\t(.+)$/.exec(item);
+    if (!match) throw new Error('staging_pin_invalid');
+    const relative = match[2];
+    if (relative.includes('/tests/') || relative.endsWith('.md')) continue;
+    if (!relative.startsWith('operations/production/') && !relative.startsWith('operations/staging/')) throw new Error('staging_pin_invalid');
+    tracked.add(relative);
+    const filename = path.join(root, relative);
+    if ((await lstat(filename)).isSymbolicLink() || await realpath(filename) !== filename) throw new Error('staging_pin_invalid');
+    const [actual, expected] = await Promise.all([readFile(filename), exec(GIT, [...gitArgs, '-C', root, 'show', `${stage.privateCommit}:${relative}`], { cwd: root, encoding: 'buffer', maxBuffer: MAX_BUFFER, env: commandEnvironment() })]);
+    if (!actual.equals(expected.stdout)) throw new Error('staging_pin_invalid');
+  }
+  if (!tracked.has('operations/staging/aiops-run-release.py') || !tracked.has('operations/staging/aiops-host.json')) throw new Error('staging_pin_invalid');
+  async function verifyPythonFiles(folder: string): Promise<void> {
+    for (const entry of await readdir(path.join(root, folder), { withFileTypes: true })) {
+      const relative = `${folder}/${entry.name}`;
+      if (entry.name === 'tests') continue;
+      if (entry.isDirectory()) await verifyPythonFiles(relative);
+      else if (entry.name.endsWith('.py') && (!entry.isFile() || !tracked.has(relative))) throw new Error('staging_pin_invalid');
+    }
+  }
+  for (const folder of ['operations/production', 'operations/staging']) await verifyPythonFiles(folder);
+  const config: unknown = JSON.parse(await readFile(stage.configPath, 'utf8'));
+  if (!exactObject(config, ['schemaVersion', 'privateRepo', 'publicRepo', 'node', 'taskRoot', 'url']) || config.schemaVersion !== 1 || config.privateRepo !== root || config.url !== stage.url || typeof config.publicRepo !== 'string' || typeof config.node !== 'string' || typeof config.taskRoot !== 'string' || !path.isAbsolute(config.publicRepo) || !path.isAbsolute(config.node) || !path.isAbsolute(config.taskRoot) || await realpath(config.publicRepo) !== config.publicRepo || await realpath(config.node) !== config.node) throw new Error('staging_host_invalid');
+  await executable([config.node]);
+  if (!/^v20\./.test(await command(config.node, ['--version'], root)) || !/^Python 3\.(?:1[0-9]|[2-9][0-9])\./.test(await command('/usr/bin/python3', ['--version'], root))) throw new Error('staging_runtime_invalid');
+  const profile: unknown = JSON.parse(await readFile(path.join(root, 'operations/staging/host-profile.json'), 'utf8'));
+  if (!profile || typeof profile !== 'object' || Array.isArray(profile)) throw new Error('staging_host_invalid');
+  const profileData = profile as Record<string, unknown>;
+  if (typeof profileData.root !== 'string' || config.taskRoot !== path.join(profileData.root, 'releases') || profileData.defaultHealthUrl !== 'http://127.0.0.1:3001/') throw new Error('staging_host_invalid');
+  if (digest(await readFile(stage.command)) !== stage.commandSha256) throw new Error('staging_pin_invalid');
+  return { root };
+}
+export async function engineeringAvailability(): Promise<{ available: boolean; reason: string | null; stagingAvailable: boolean; stagingReason?: string | null }> {
   try {
     const policy = await loadAiOpsPolicy();
     if (!policy?.engineering) return { available: false, reason: 'engineering_not_configured', stagingAvailable: false };
     await host(policy.engineering);
-    // Staging requires a separately integrated and reviewed execution boundary.
-    return { available: true, reason: null, stagingAvailable: false };
-  } catch { return { available: false, reason: 'engineering_host_unavailable', stagingAvailable: false }; }
+    let stagingAvailable = false;
+    let stagingReason: string | null = policy.engineering.staging ? 'staging_host_unavailable' : 'staging_not_configured';
+    if (policy.engineering.staging && process.platform !== 'linux') stagingReason = 'staging_platform_unsupported';
+    else if (policy.engineering.staging) { try { await pinnedStaging(policy.engineering.staging); stagingAvailable = true; stagingReason = null; } catch { /* unavailable until the host pin is valid */ } }
+    return { available: true, reason: null, stagingAvailable, stagingReason };
+  } catch (error) {
+    const reason = error instanceof Error && ['engineering_ci_base_unsupported', 'engineering_ci_workflow_changed', 'engineering_ci_trigger_missing'].includes(error.message) ? error.message : 'engineering_host_unavailable';
+    return { available: false, reason, stagingAvailable: false };
+  }
 }
 const proposalSchema = { type: 'object', additionalProperties: false, required: ['summary', 'architecture', 'files'], properties: {
   summary: { type: 'string' }, architecture: { type: 'string' }, files: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['path', 'change'], properties: { path: { type: 'string' }, change: { type: 'string', enum: ['ADD', 'MODIFY', 'DELETE'] } } } },
@@ -99,7 +155,7 @@ const proposalSchema = { type: 'object', additionalProperties: false, required: 
 const patchSchema = { type: 'object', additionalProperties: false, required: ['patch'], properties: { patch: { type: 'string' } } };
 const reviewSchema = { type: 'object', additionalProperties: false, required: ['decision', 'report'], properties: { decision: { type: 'string', enum: ['CONFIRM', 'FINDINGS'] }, report: { type: 'string' } } };
 
-type Input = { taskId: string; request: string; actor: AiOpsActor; signal: AbortSignal; assertActive: () => Promise<void>; onProgress: (p: { stage: AiOpsStage; links?: { pr?: string; ci?: string } }) => Promise<void> };
+type Input = { taskId: string; request: string; actor: AiOpsActor; signal: AbortSignal; assertActive: () => Promise<void>; onProgress: (p: { stage: AiOpsStage; links?: { pr?: string; ci?: string; staging?: string } }) => Promise<void> };
 export async function runEngineeringTask(input: Input) {
   const policy = await loadAiOpsPolicy();
   if (!policy?.engineering) return { terminalStage: 'needs_connection' as const };
@@ -220,5 +276,27 @@ export async function runEngineeringTask(input: Input) {
     });
   }
   const usage = { inputTokens: planResult.usage.inputTokens + coded.usage.inputTokens + reviewed.usage.inputTokens, outputTokens: planResult.usage.outputTokens + coded.usage.outputTokens + reviewed.usage.outputTokens, totalTokens: planResult.usage.totalTokens + coded.usage.totalTokens + reviewed.usage.totalTokens };
-  return { terminalStage: ci === 'passed' ? 'needs_connection' as const : 'needs_reconciliation' as const, links: { pr: pr.url, ...(recordedRun ? { ci: recordedRun } : {}) }, usage, output: JSON.stringify({ commit, ci, review: 'declared_not_authenticated', staging: 'not_connected' }) };
+  const links = { pr: pr.url, ...(recordedRun ? { ci: recordedRun } : {}) };
+  if (ci !== 'passed') return { terminalStage: 'needs_reconciliation' as const, links, usage };
+  if (!cfg.staging || !recordedRun) return { terminalStage: 'needs_connection' as const, links, usage };
+  await check();
+  let stageRoot: string;
+  try { stageRoot = (await pinnedStaging(cfg.staging)).root; }
+  catch { return { terminalStage: 'needs_connection' as const, links, usage }; }
+  const stageRequest = path.join(dir, 'staging-request.json');
+  await writeFile(stageRequest, JSON.stringify({ taskId: input.taskId, repository: cfg.repository, publicCommit: commit, privateCommit: cfg.staging.privateCommit, prUrl: pr.url, ciUrl: recordedRun }), { flag: 'wx', mode: 0o600 });
+  await input.onProgress({ stage: 'staging', links });
+  await check();
+  try { await pinnedStaging(cfg.staging); } catch { return { terminalStage: 'needs_connection' as const, links, usage }; }
+  await check();
+  // Once started, any timeout, cancellation, invalid result or nonzero exit has an unknown outcome.
+  const stageEnv = commandEnvironment();
+  delete stageEnv.OPENAI_API_KEY;
+  const staged = await exec('/usr/bin/python3', ['-I', '-B', '-X', `pycache_prefix=${path.join(dir, 'python-cache')}`, cfg.staging.command, '--host-config', cfg.staging.configPath, '--request', stageRequest], { cwd: stageRoot, signal: input.signal, timeout: 30 * 60_000, maxBuffer: MAX_BUFFER, env: stageEnv });
+  const stageResult: unknown = JSON.parse(staged.stdout);
+  if (!isValidStagingResult(stageResult, { publicCommit: commit, privateCommit: cfg.staging.privateCommit, url: cfg.staging.url })) throw new Error('staging_result_unverified');
+  await writeFile(path.join(dir, 'staging-result.json'), JSON.stringify(stageResult), { flag: 'wx', mode: 0o600 });
+  await input.onProgress({ stage: 'staging', links: { ...links, staging: cfg.staging.url } });
+  return { terminalStage: 'awaiting_production_approval' as const, links, usage };
+
 }

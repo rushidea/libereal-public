@@ -1,3 +1,4 @@
+import { isValidStagingResult } from '@/lib/ai-ops/engineering';
 // @vitest-environment node
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({
@@ -142,6 +143,17 @@ describe('persistent AI budget control row', () => {
   it('accepts only pinned host engineering configuration and exact safe file paths', () => {
     const engineering = { repository: 'rushidea/libereal-public', repositoryRoot: '/synthetic/repo', worktreesRoot: '/synthetic/worktrees', baseRef: 'a'.repeat(40), baseBranch: 'main', allowedPaths: ['src/app/page.tsx'], privateToolsRoot: '/synthetic/private-tools', privateToolsCommit: 'b'.repeat(40) };
     expect(parseAiOpsPolicy({ ...policy, engineering }).engineering).toEqual(engineering);
+    const staging = { command: '/synthetic/private/operations/staging/aiops-entry.py', commandSha256: 'c'.repeat(64), configPath: '/synthetic/private/operations/staging/aiops-host.json', url: 'https://staging.example.test/', privateCommit: 'd'.repeat(40) };
+    expect(parseAiOpsPolicy({ ...policy, engineering: { ...engineering, staging } }).engineering?.staging).toEqual(staging);
+    const deployed = { status: 'deployed', publicCommit: 'e'.repeat(40), privateCommit: staging.privateCommit, treeSha256: 'f'.repeat(64), url: staging.url };
+    const expected = { publicCommit: deployed.publicCommit, privateCommit: staging.privateCommit, url: staging.url };
+    expect(isValidStagingResult(deployed, expected)).toBe(true);
+    expect(isValidStagingResult({ ...deployed, privateCommit: '0'.repeat(40) }, expected)).toBe(false);
+    expect(isValidStagingResult({ ...deployed, treeSha256: 'bad' }, expected)).toBe(false);
+    expect(isValidStagingResult({ ...deployed, url: 'https://other.example/' }, expected)).toBe(false);
+    expect(isValidStagingResult({ ...deployed, extra: true }, expected)).toBe(false);
+    expect(() => parseAiOpsPolicy({ ...policy, engineering: { ...engineering, staging: { ...staging, configPath: 'relative' } } })).toThrow('aiops_engineering_policy_invalid');
+    expect(() => parseAiOpsPolicy({ ...policy, engineering: { ...engineering, staging: { ...staging, extra: true } } })).toThrow('aiops_engineering_policy_invalid');
     for (const path of ['../escape.ts', 'src/lib/security/x.ts', '.env', 'src/app/*']) expect(() => parseAiOpsPolicy({ ...policy, engineering: { ...engineering, allowedPaths: [path] } })).toThrow('aiops_engineering_policy_invalid');
     expect(() => parseAiOpsPolicy({ ...policy, engineering: { ...engineering, command: 'arbitrary' } })).toThrow('aiops_engineering_policy_invalid');
   });

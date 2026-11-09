@@ -2,8 +2,9 @@ import type { BackgroundTask } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { AI_OPS_TYPE, type AiOpsActor, type AiOpsKind, type AiOpsStage, type AiOpsSummary } from './contracts';
 import { parseAiOpsPayload, updateAiOpsProgress } from './tasks';
+import { loadAiOpsPolicy } from './policy';
 
-type Progress = { stage: AiOpsStage; message?: string; links?: { pr?: string; ci?: string } };
+type Progress = { stage: AiOpsStage; message?: string; links?: { pr?: string; ci?: string; staging?: string } };
 function verifiedLinks(links: Progress['links']) {
   if (!links) return {};
   const valid = (link: unknown, pattern: RegExp) => typeof link === 'string' && pattern.test(link) ? link : undefined;
@@ -67,7 +68,9 @@ export function createAiOpsRuntime(adapters: AiOpsRuntimeAdapters) {
         // Only the host engineering adapter may publish verified GitHub links.
         if (decision.kind === 'engineering' && progress.links) {
           const links = verifiedLinks(progress.links);
-          summary.links = { ...summary.links, ...(links.pr ? { pr: links.pr } : {}), ...(links.ci ? { ci: links.ci } : {}) };
+          const configuredUrl = progress.stage === 'staging' ? (await loadAiOpsPolicy())?.engineering?.staging?.url : undefined;
+          const staging = configuredUrl && progress.links.staging === configuredUrl ? configuredUrl : undefined;
+          summary.links = { ...summary.links, ...(links.pr ? { pr: links.pr } : {}), ...(links.ci ? { ci: links.ci } : {}), ...(staging ? { staging } : {}) };
         }
         await save(progress.stage);
       };

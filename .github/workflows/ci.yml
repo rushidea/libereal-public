@@ -4,7 +4,7 @@ on:
   push:
     branches: [main, staging-main]
   pull_request:
-    branches: [main, staging-main]
+    branches: [main, staging-main, codex/aiops-mvp-v1]
 
 env:
   AUTH_SECRET: ci-dummy-auth-secret-for-github-actions
