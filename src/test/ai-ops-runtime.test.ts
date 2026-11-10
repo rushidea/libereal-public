@@ -8,7 +8,8 @@ const mocks = vi.hoisted(() => ({
   transaction: vi.fn(), permissions: vi.fn(), session: vi.fn(), requireAdmin: vi.fn(),
 }));
 vi.mock('@/lib/prisma', () => ({ prisma: { ...mocks, $transaction: mocks.transaction } }));
-vi.mock('@/lib/session', () => ({ getAdminPermissions: mocks.permissions, requireAdmin: mocks.requireAdmin }));
+vi.mock('@/lib/session', () => ({ requireAdmin: mocks.requireAdmin }));
+vi.mock('@/lib/admin-user-permissions', () => ({ getAdminPermissions: mocks.permissions }));
 vi.mock('@/lib/security/security-session-service', () => ({ getSecuritySessionState: mocks.session }));
 import { readBusinessSnapshot, BUSINESS_WORKERS } from '@/lib/ai-ops/business-tools';
 import { routeAiOpsRequest } from '@/lib/ai-ops/business';
