@@ -1,9 +1,9 @@
 import { NextResponse } from 'next/server';
 import type { Session } from 'next-auth';
 import { auth } from './auth';
-import { prisma } from './prisma';
-import { isAdminEmail } from './auth-helpers';
-import { ADMIN_PERMISSION_KEYS, type AdminPermissionKey } from './admin-permissions';
+import type { AdminPermissionKey } from './admin-permissions';
+import { getAdminPermissions } from './admin-user-permissions';
+export { getAdminPermissions } from './admin-user-permissions';
 import { requiresAdminMfaForPermission } from './admin-mfa-settings';
 import { isMfaAdminRequired, MFA_RECENT_WINDOW_MS } from './security/mfa-config';
 import { getAdminMfaPolicy } from './security/admin-mfa-policy';
@@ -84,20 +84,6 @@ export async function requireRecentActiveMfaUser(): Promise<SessionUser | NextRe
     return NextResponse.json({ error: 'Recent MFA verification required' }, { status: 403 });
   }
   return user;
-}
-
-export async function getAdminPermissions(user: SessionUser): Promise<AdminPermissionKey[]> {
-  if (user.role !== 'admin') return [];
-  if (isAdminEmail(user.email)) return [...ADMIN_PERMISSION_KEYS];
-
-  const assignments = await prisma.adminUserRole.findMany({
-    where: { userId: user.id },
-    select: { role: { select: { key: true, permissions: { select: { permission: { select: { key: true } } } } } } },
-  });
-  if (assignments.some((assignment) => assignment.role.key === 'super_admin')) return [...ADMIN_PERMISSION_KEYS];
-
-  const keys = new Set(assignments.flatMap((assignment) => assignment.role.permissions.map((item) => item.permission.key)));
-  return ADMIN_PERMISSION_KEYS.filter((key) => keys.has(key));
 }
 
 export async function requireAdminStepUp(user: SessionUser): Promise<SessionUser | NextResponse> {

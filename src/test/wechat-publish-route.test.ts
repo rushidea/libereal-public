@@ -1,11 +1,10 @@
-import { File } from 'node:buffer';
+// @vitest-environment node
 import { mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { MockInstance } from 'vitest';
 import { NextRequest, NextResponse } from 'next/server';
-import { FormData } from 'undici';
 
 const mocks = vi.hoisted(() => ({
   requireAdmin: vi.fn(),
@@ -40,7 +39,7 @@ function publishRequest(input: {
   if (input.saveCopy) form.set('saveCopy', input.saveCopy);
   return new NextRequest('http://localhost/api/admin/wechat-publish', {
     method: 'POST',
-    body: form as unknown as BodyInit,
+    body: form,
   });
 }
 

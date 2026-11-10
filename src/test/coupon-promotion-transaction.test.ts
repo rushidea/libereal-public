@@ -73,7 +73,13 @@ function txWithCandidates(candidates: typeof evidence.candidates) {
 }
 
 describe('transactional coupon promotion evidence', () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(now);
+  });
+
   afterEach(() => {
+    vi.useRealTimers();
     if (previousPolicy === undefined) delete process.env.COUPON_PROMOTION_POLICY;
     else process.env.COUPON_PROMOTION_POLICY = previousPolicy;
   });

@@ -4,7 +4,7 @@ on:
   push:
     branches: [main, staging-main]
   pull_request:
-    branches: [main, staging-main]
+    branches: [main, staging-main, codex/aiops-v1-current-staging]
 
 env:
   AUTH_SECRET: ci-dummy-auth-secret-for-github-actions
@@ -20,7 +20,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '26.13.0'
           cache: 'npm'
 
       - name: Install dependencies
@@ -38,7 +38,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '26.13.0'
           cache: 'npm'
 
       - name: Install dependencies
@@ -59,7 +59,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '26.13.0'
           cache: 'npm'
 
       - name: Install dependencies
@@ -84,7 +84,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '26.13.0'
           cache: 'npm'
 
       - name: Install dependencies
@@ -107,7 +107,7 @@ jobs:
           src/test/automatic-promotions.test.ts
 
   e2e-tests:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: [catalog-search-promotion-validation]
     steps:
       - name: Checkout
@@ -116,7 +116,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '26.13.0'
           cache: 'npm'
 
       - name: Install dependencies
@@ -136,6 +136,7 @@ jobs:
         run: npm run build
 
       - name: Install Playwright browsers
+        timeout-minutes: 10
         run: npx playwright install chromium --with-deps
 
       - name: Run Playwright tests
@@ -153,7 +154,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '26.13.0'
           cache: 'npm'
 
       - name: Install dependencies
