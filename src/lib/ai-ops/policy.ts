@@ -68,6 +68,6 @@ export async function loadAiOpsPolicy(): Promise<AiOpsPolicy | null> {
 export async function aiOpsAvailability() {
   try {
     const policy = await loadAiOpsPolicy();
-    return { available: Boolean(policy && process.env.OPENAI_API_KEY?.trim()), reason: !policy ? 'policy_not_configured' : !process.env.OPENAI_API_KEY?.trim() ? 'provider_not_configured' : null };
+    return { available: Boolean(policy), reason: !policy ? 'policy_not_configured' : null };
   } catch { return { available: false, reason: 'policy_unavailable' }; }
 }

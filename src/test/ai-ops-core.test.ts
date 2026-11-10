@@ -31,9 +31,10 @@ describe('AI task queue isolation', () => {
   it('allows only one running AI task and fences a cancelled worker', async () => {
     const first = await enqueueAiOpsTask({ request: 'private prompt', kind: 'business', actor });
     await enqueueAiOpsTask({ request: 'another', kind: 'engineering', actor });
-    const claimed = await claimAiOpsTask('worker');
+    expect(await claimAiOpsTask('legacy-website-worker')).toBeNull();
+    const claimed = await claimAiOpsTask('worker', new Date(), true);
     expect(claimed?.id).toBe(first.id);
-    expect(await claimAiOpsTask('other')).toBeNull();
+    expect(await claimAiOpsTask('other', new Date(), true)).toBeNull();
     await updateAiOpsProgress(first.id, 'worker', { version: 1, kind: 'business', workerId: 'catalog', stage: 'business', status: 'running', updatedAt: new Date().toISOString(), links: { pr: 'https://github.com/rushidea/libereal-public/pull/123', ci: 'https://github.com/rushidea/libereal-public/actions/runs/456' }, usage: { totalTokens: 9 } });
     expect(await cancelAiOpsTask(first.id)).toBe(true);
     const row = await prisma.backgroundTask.findUniqueOrThrow({ where: { id: first.id } });
@@ -47,7 +48,7 @@ describe('AI task queue isolation', () => {
   it('does not commit two active claims under concurrent workers', async () => {
     await enqueueAiOpsTask({ request: 'first', kind: 'business', actor });
     await enqueueAiOpsTask({ request: 'second', kind: 'engineering', actor });
-    const outcomes = await Promise.allSettled([claimAiOpsTask('one'), claimAiOpsTask('two')]);
+    const outcomes = await Promise.allSettled([claimAiOpsTask('one', new Date(), true), claimAiOpsTask('two', new Date(), true)]);
     expect(outcomes.some((outcome) => outcome.status === 'fulfilled' && outcome.value)).toBe(true);
     expect(await prisma.backgroundTask.count({ where: { type: 'aiops.run', status: 'running' } })).toBe(1);
   });
@@ -67,7 +68,7 @@ describe('AI task queue isolation', () => {
   });
   it('keeps validated PR and run links if a later CI step fails', async () => {
     const task = await enqueueAiOpsTask({ request: 'change', kind: 'engineering', actor });
-    const claimed = await claimAiOpsTask('worker');
+    const claimed = await claimAiOpsTask('worker', new Date(), true);
     const run = createAiOpsRuntime({
       revalidateActor: async (a) => ({ ...a, permissions: ['tasks.manage'] }),
       route: async () => ({ kind: 'engineering' }),

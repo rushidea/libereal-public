@@ -60,7 +60,8 @@ export async function enqueueAiOpsTask(input: { request: string; kind: AiOpsKind
 
 // SQLite serializes writes. A competing read transaction that loses the write race fails
 // rather than committing a second running task; callers may poll again.
-export async function claimAiOpsTask(workerId: string, now = new Date()): Promise<BackgroundTask | null> {
+export async function claimAiOpsTask(workerId: string, now = new Date(), nativeRunner = false): Promise<BackgroundTask | null> {
+  if (!nativeRunner) return null;
   return prisma.$transaction(async (tx) => {
     if (await tx.backgroundTask.findFirst({ where: { type: AI_OPS_TYPE, status: 'running' }, select: { id: true } })) return null;
     const candidate = await tx.backgroundTask.findFirst({ where: { type: AI_OPS_TYPE, status: 'pending', attempts: 0, runAt: { lte: now } }, orderBy: [{ priority: 'desc' }, { runAt: 'asc' }, { createdAt: 'asc' }] });

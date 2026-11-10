@@ -26,6 +26,7 @@ export type AiOpsSummary = {
   updatedAt: string;
   cancelled?: boolean;
   output?: string;
+  artifacts?: { publicCommit: string; privateCommit?: string; treeSha256?: string };
   links?: { pr?: string; ci?: string; staging?: string };
   usage?: { inputTokens?: number; outputTokens?: number; totalTokens?: number };
 };

@@ -39,6 +39,8 @@ export async function GET() {
     const [availability, engineering, rows] = await Promise.all([
       aiOpsAvailability(), engineeringAvailability(), prisma.backgroundTask.findMany({ where: { type: 'aiops.run', payload: { contains: actorFragment } }, orderBy: { createdAt: 'desc' }, take: 100 }),
     ]);
+    availability.available = availability.available && engineering.businessAvailable;
+    if (!availability.available && !availability.reason) availability.reason = 'runner_offline';
     const tasks = rows.filter((row) => { try { return parseAiOpsPayload(row.payload).actor.id === actor.id; } catch { return false; } }).slice(0, 50).map(projectAiOpsTask);
     return NextResponse.json({ tasks, capabilities: { ...availability, model: AI_OPS_MODEL,
       domains: BUSINESS_WORKERS.map((id) => ({ id, requiredPermissions: WORKER_PERMISSIONS[id], available: availability.available && WORKER_PERMISSIONS[id].every((p) => actor.permissions.includes(p)) })),

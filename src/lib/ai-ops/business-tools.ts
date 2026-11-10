@@ -1,17 +1,17 @@
 import type { AdminPermissionKey } from '@/lib/admin-permissions';
 import { prisma } from '@/lib/prisma';
 
-export const BUSINESS_WORKERS = ['catalog', 'promotion', 'customer_sales', 'order_fulfillment', 'logistics', 'content_search', 'risk_data'] as const;
-export type BusinessWorker = typeof BUSINESS_WORKERS[number];
+import { type BusinessWorker } from './business-core';
+export { BUSINESS_WORKERS, isBusinessWorker } from './business-core';
+export type { BusinessWorker, BusinessSnapshot } from './business-core';
 export const WORKER_PERMISSIONS: Record<BusinessWorker, readonly AdminPermissionKey[]> = {
   catalog: ['products.read'], promotion: ['pricing.read'], customer_sales: ['inquiries.read'],
   order_fulfillment: ['orders.read'], logistics: ['orders.read'], content_search: ['content.read'], risk_data: ['audit.read'],
 };
-export function isBusinessWorker(value: unknown): value is BusinessWorker { return BUSINESS_WORKERS.includes(value as BusinessWorker); }
 export function requireWorkerPermissions(worker: BusinessWorker, permissions: readonly string[]) {
   if (!WORKER_PERMISSIONS[worker].every((p) => permissions.includes(p))) throw new Error('aiops_domain_forbidden');
 }
-export type BusinessSnapshot = { version: 1; workerId: BusinessWorker; asOf: string; source: string; facts: unknown };
+import type { BusinessSnapshot } from './business-core';
 
 // These queries are the complete tool allowlist. User/model text cannot select a table,
 // field, filter, SQL statement, write operation or outbound communication.

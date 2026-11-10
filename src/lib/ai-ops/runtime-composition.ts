@@ -1,10 +1,3 @@
-import { createAiOpsRuntime } from './runtime';
-import { revalidateAiOpsActor, routeAiOpsRequest, runBusinessTask } from './business';
-import { waitForEngineeringTask } from './engineering-bridge';
-
-export const runAiOpsTask = createAiOpsRuntime({
-  revalidateActor: revalidateAiOpsActor,
-  route: routeAiOpsRequest,
-  business: runBusinessTask,
-  engineering: waitForEngineeringTask,
-});
+// AI model execution is owned by the native Mac runner.
+// Legacy website workers cannot claim these tasks.
+export async function runAiOpsTask(..._args: unknown[]): Promise<void> { throw new Error('aiops_native_runner_required'); }
