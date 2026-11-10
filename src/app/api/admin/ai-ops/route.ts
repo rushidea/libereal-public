@@ -35,10 +35,11 @@ export async function GET() {
     if (!admin.sessionId) return NextResponse.json({ error: 'Active session required' }, { status: 401 });
     const actor = await revalidateAiOpsActor({ id: admin.id, sessionId: admin.sessionId });
     if (!actor.permissions.includes('tasks.read')) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    const actorFragment = `"actor":{"id":${JSON.stringify(actor.id)},`;
     const [availability, engineering, rows] = await Promise.all([
-      aiOpsAvailability(), engineeringAvailability(), prisma.backgroundTask.findMany({ where: { type: 'aiops.run' }, orderBy: { createdAt: 'desc' }, take: 100 }),
+      aiOpsAvailability(), engineeringAvailability(), prisma.backgroundTask.findMany({ where: { type: 'aiops.run', payload: { contains: actorFragment } }, orderBy: { createdAt: 'desc' }, take: 100 }),
     ]);
-    const tasks = rows.filter((row) => { try { return parseAiOpsPayload(row.payload).actor.id === admin.id; } catch { return false; } }).slice(0, 50).map(projectAiOpsTask);
+    const tasks = rows.filter((row) => { try { return parseAiOpsPayload(row.payload).actor.id === actor.id; } catch { return false; } }).slice(0, 50).map(projectAiOpsTask);
     return NextResponse.json({ tasks, capabilities: { ...availability, model: AI_OPS_MODEL,
       domains: BUSINESS_WORKERS.map((id) => ({ id, requiredPermissions: WORKER_PERMISSIONS[id], available: availability.available && WORKER_PERMISSIONS[id].every((p) => actor.permissions.includes(p)) })),
       engineering: { ...engineering, available: availability.available && engineering.available && actor.permissions.includes('tasks.manage'), stagingAvailable: availability.available && engineering.stagingAvailable && actor.permissions.includes('tasks.manage') },

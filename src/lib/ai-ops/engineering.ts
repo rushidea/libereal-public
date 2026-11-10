@@ -11,7 +11,7 @@ const exec = promisify(execFile);
 const SHA = /^[a-f0-9]{40}$/;
 const GIT = '/usr/bin/git';
 const GH_CANDIDATES = ['/usr/bin/gh', '/usr/local/bin/gh', '/opt/homebrew/bin/gh'];
-const MVP_CI_WORKFLOW_SHA256 = '63d2ed41cdf4f7ed536517e80e6614a49138563845df54c4dfb9ef2f5a52b2df';
+const MVP_CI_WORKFLOW_SHA256 = 'b0167918a77e84f02d8b8ef444be82be53dafffbca930209d88b92e4fdcf7915';
 const CI_WORKFLOW_SHA256 = ['0a1b93e7af550858728594fc5645c5dd5728647ac62744d04826f7e2fa78bb30', '233e88f4b2fc77295d390f68e73a67ec7dafcd1193400a1dc9e319a9f4d597da', MVP_CI_WORKFLOW_SHA256];
 const REQUIRED_CI_JOBS = ['security-audit', 'lint-and-type', 'unit-tests', 'catalog-search-promotion-validation', 'e2e-tests', 'build'];
 export function assessRequiredCiJobs(jobs: Array<{ name?: string; status?: string; conclusion?: string | null }>): 'passed' | 'failed' | 'pending' {
