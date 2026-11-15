@@ -1,4 +1,3 @@
-import { createHash } from 'crypto';
 import type { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { writeAuditLog } from '@/lib/audit';
@@ -6,6 +5,9 @@ import { enqueueBackgroundTask } from '@/lib/background-tasks';
 import { invalidateProductFilters } from '@/lib/product-filter-cache';
 import { recordProductPriceChanges } from '@/lib/product-catalog-records';
 import { getEphemeralStore } from '@/lib/ephemeral-store';
+import { isPriceAdjustmentApprovalHash, priceAdjustmentApprovalHash } from '@/lib/pricing-adjustment-approval';
+import { findPricingQuoteImpact, type PricingQuoteImpact } from '@/lib/pricing-adjustment-impact';
+import { repriceQuotesAfterCatalogChange } from '@/lib/quote-catalog-repricing';
 import {
   applyPublicPriceFloor,
   computeAdjustedPrice,
@@ -18,7 +20,6 @@ import {
   type CatalogNameReviewItem,
   type CatalogPriceItem,
   type FilePriceField,
-  type PriceAdjustmentField,
   type PriceAdjustmentRequest,
   type PriceAdjustmentSample,
 } from '@/lib/pricing-adjustment-rules';
@@ -26,7 +27,6 @@ import { assessImportedProductName } from '@/lib/pricing-adjustment-import';
 
 const PRODUCT_PAGE = 200;
 const CATALOG_CHUNK = 400;
-const APPLY_CHUNK = 40;
 const REVIEW_ITEM_LIMIT = 200;
 const PLAN_TTL_MS = 60 * 60 * 1000;
 
@@ -34,6 +34,13 @@ export class PriceAdjustmentPlanMissingError extends Error {
   constructor() {
     super('请先生成调价预览，再确认执行');
     this.name = 'PriceAdjustmentPlanMissingError';
+  }
+}
+
+export class PriceAdjustmentApprovalChangedError extends Error {
+  constructor() {
+    super('确认内容与当前预览不一致，请重新查看预览后确认');
+    this.name = 'PriceAdjustmentApprovalChangedError';
   }
 }
 
@@ -85,6 +92,8 @@ export type FilePreviewDraft = {
 };
 
 export type PriceAdjustmentPreview = {
+  approvalHash?: string;
+  quoteImpact?: { quoteCount: number; pendingOrderCount: number };
   matchedCount: number;
   changeCount: number;
   skippedInquiryCount: number;
@@ -719,30 +728,32 @@ function priceKind(field: FilePriceField): string {
   return 'list';
 }
 
-function planCacheKey(request: PriceAdjustmentRequest): string {
-  const payload = JSON.stringify({
-    brand: request.brand,
-    scope: request.scope,
-    category: request.category ?? null,
-    subcategory: request.subcategory ?? null,
-    catalogNumbers: request.catalogNumbers ?? [],
-    catalogItems: request.catalogItems ?? [],
-    priceField: request.priceField,
-    mode: request.mode,
-    direction: request.direction,
-    amount: request.amount,
-    includeVariants: request.includeVariants,
-  });
-  return `price-adjustment-plan:${createHash('sha256').update(payload).digest('hex')}`;
+function planCacheKey(approvalHash: string): string {
+  return `price-adjustment-plan:${approvalHash}`;
 }
 
-async function readFrozenPlan(request: PriceAdjustmentRequest): Promise<{ preview: PriceAdjustmentPreview; changes: PlannedChange[] } | null> {
-  const raw = await getEphemeralStore().get(planCacheKey(request));
+type FrozenPlan = { preview: PriceAdjustmentPreview; changes: PlannedChange[]; impact?: PricingQuoteImpact; source?: unknown };
+
+async function sourceSnapshot(changes: PlannedChange[], db: Prisma.TransactionClient = prisma) {
+  const rows = [];
+  for (const ids of chunk([...new Set(changes.map((change) => change.productId))].sort(), CATALOG_CHUNK)) {
+    rows.push(...await db.product.findMany({
+      where: { id: { in: ids } }, orderBy: { id: 'asc' },
+      select: { ...productSelect, deletedAt: true, updatedAt: true,
+        variants: { ...productSelect.variants, orderBy: { id: 'asc' } } },
+    }));
+  }
+  return rows;
+}
+
+async function readFrozenPlan(approvalHash: string): Promise<FrozenPlan | null> {
+  if (!isPriceAdjustmentApprovalHash(approvalHash)) return null;
+  const raw = await getEphemeralStore().get(planCacheKey(approvalHash));
   if (!raw) return null;
   try {
-    const parsed = JSON.parse(raw) as { preview?: PriceAdjustmentPreview; changes?: PlannedChange[] };
+    const parsed = JSON.parse(raw) as Partial<FrozenPlan>;
     if (!parsed.preview || !Array.isArray(parsed.changes)) return null;
-    return { preview: parsed.preview, changes: parsed.changes };
+    return { preview: parsed.preview, changes: parsed.changes, impact: parsed.impact, source: parsed.source };
   } catch {
     return null;
   }
@@ -750,19 +761,38 @@ async function readFrozenPlan(request: PriceAdjustmentRequest): Promise<{ previe
 
 const PLAN_STORE_LIMIT = 8 * 1024 * 1024;
 
-async function writeFrozenPlan(request: PriceAdjustmentRequest, plan: { preview: PriceAdjustmentPreview; changes: PlannedChange[] }): Promise<void> {
-  const raw = JSON.stringify(plan);
+async function writeFrozenPlan(request: PriceAdjustmentRequest, plan: { preview: PriceAdjustmentPreview; changes: PlannedChange[] }): Promise<PriceAdjustmentPreview> {
+  const impact = await findPricingQuoteImpact(plan.changes);
+  const source = await sourceSnapshot(plan.changes);
+  const unboundPreview = { ...plan.preview };
+  delete unboundPreview.approvalHash;
+  const preview = { ...unboundPreview, quoteImpact: { quoteCount: impact.quoteIds.length, pendingOrderCount: impact.pendingOrderIds.length } };
+  const approvalHash = priceAdjustmentApprovalHash(request, { preview, changes: plan.changes, impact, source });
+  const boundPreview = { ...preview, approvalHash };
+  const raw = JSON.stringify({ preview: boundPreview, changes: plan.changes, impact, source });
   if (raw.length > PLAN_STORE_LIMIT) {
     throw new Error('PREVIEW_PLAN_TOO_LARGE');
   }
-  await getEphemeralStore().set(planCacheKey(request), raw, PLAN_TTL_MS);
+  await getEphemeralStore().set(planCacheKey(approvalHash), raw, PLAN_TTL_MS);
+  return boundPreview;
+}
+
+export async function readPriceAdjustmentDetails(approvalHash: string, offset: number) {
+  const plan = await readFrozenPlan(approvalHash);
+  if (!plan) return null;
+  const rows = plan.changes.flatMap((change) => FILE_PRICE_FIELDS
+    .filter((field) => change.patch[field] != null && !pricesMatch(change.before[field], change.patch[field]))
+    .map((field) => ({ productId: change.productId, variantId: change.variantId, brand: change.brand,
+      catalogNumber: change.catalogNumber, name: change.name, field: FIELD_LABELS[field],
+      before: change.before[field], after: change.patch[field] })));
+  return { approvalHash, offset, total: rows.length, rows: rows.slice(offset, offset + 100) };
 }
 
 export async function commitPriceAdjustmentPlan(
   request: PriceAdjustmentRequest,
   plan: { preview: PriceAdjustmentPreview; changes: PlannedChange[] },
-): Promise<void> {
-  await writeFrozenPlan(request, plan);
+): Promise<PriceAdjustmentPreview> {
+  return writeFrozenPlan(request, plan);
 }
 
 export async function matchCatalogItems(brand: string, items: CatalogPriceItem[]): Promise<CatalogMatchResult[]> {
@@ -830,21 +860,35 @@ export async function matchCatalogItems(brand: string, items: CatalogPriceItem[]
 export async function previewPriceAdjustment(request: PriceAdjustmentRequest): Promise<PriceAdjustmentPreview> {
   const loaded = await loadProducts(request);
   const planned = planChanges(loaded.products, request, loaded.unmatchedCatalogs);
-  await writeFrozenPlan(request, planned);
-  return planned.preview;
+  return writeFrozenPlan(request, planned);
 }
 
 export async function applyPriceAdjustment(
   request: PriceAdjustmentRequest,
   actor: { id: string; email: string },
-): Promise<PriceAdjustmentPreview & { updatedCount: number }> {
-  const planned = await readFrozenPlan(request);
+): Promise<PriceAdjustmentPreview & { updatedCount: number; repricedQuotes: Awaited<ReturnType<typeof repriceQuotesAfterCatalogChange>> }> {
+  const planned = await readFrozenPlan(request.approvalHash ?? '');
   if (!planned) throw new PriceAdjustmentPlanMissingError();
-  let updatedCount = 0;
-
-  for (const group of chunk(planned.changes, APPLY_CHUNK)) {
-    await prisma.$transaction(async (tx) => {
-      for (const change of group) {
+  const { approvalHash, ...preview } = planned.preview;
+  if (!isPriceAdjustmentApprovalHash(request.approvalHash)
+    || request.approvalHash !== approvalHash
+    || approvalHash !== priceAdjustmentApprovalHash(request, { preview, changes: planned.changes, impact: planned.impact, source: planned.source })) {
+    throw new PriceAdjustmentApprovalChangedError();
+  }
+  const result = await prisma.$transaction(async (tx) => {
+      const dedupeKey = `pricing-apply:${approvalHash}`;
+      const prior = await tx.backgroundTask.findUnique({ where: { dedupeKey } });
+      if (prior?.status === 'succeeded' && prior.result) {
+        return { ...JSON.parse(prior.result), updatedCount: 0 };
+      }
+      const currentSource = await sourceSnapshot(planned.changes, tx);
+      const currentImpact = await findPricingQuoteImpact(planned.changes, tx);
+      if (priceAdjustmentApprovalHash(request, planned.source) !== priceAdjustmentApprovalHash(request, currentSource)
+        || priceAdjustmentApprovalHash(request, planned.impact) !== priceAdjustmentApprovalHash(request, currentImpact)) {
+        throw new PriceAdjustmentApprovalChangedError();
+      }
+      let updatedCount = 0;
+      for (const change of planned.changes) {
         const fields = FILE_PRICE_FIELDS.filter((field) => change.patch[field] != null);
         if (fields.length === 0) continue;
 
@@ -853,9 +897,9 @@ export async function applyPriceAdjustment(
             where: { id: change.variantId },
             select: { price: true, originalPrice: true, promotionalPrice: true, costPrice: true, minimumSalePrice: true },
           });
-          if (!previous) continue;
+          if (!previous) throw new PriceAdjustmentApprovalChangedError();
           const drifted = fields.some((field) => !pricesMatch(previous[field], change.before[field]));
-          if (drifted) continue;
+          if (drifted) throw new PriceAdjustmentApprovalChangedError();
           const unchanged = fields.every((field) => pricesMatch(previous[field], change.patch[field]));
           if (unchanged) continue;
           await tx.productVariant.update({
@@ -877,9 +921,9 @@ export async function applyPriceAdjustment(
             where: { id: change.productId },
             select: { price: true, originalPrice: true, promotionalPrice: true, costPrice: true, minimumSalePrice: true, pricingMode: true },
           });
-          if (!previous) continue;
+          if (!previous) throw new PriceAdjustmentApprovalChangedError();
           const drifted = fields.some((field) => !pricesMatch(previous[field], change.before[field]));
-          if (drifted) continue;
+          if (drifted) throw new PriceAdjustmentApprovalChangedError();
           const unchanged = fields.every((field) => pricesMatch(previous[field], change.patch[field]));
           if (unchanged) continue;
           const next = nextSnapshot(previous, change.patch);
@@ -897,10 +941,10 @@ export async function applyPriceAdjustment(
         }
         updatedCount += 1;
       }
-    });
-  }
-
-  await writeAuditLog({
+      const repricedQuotes = await repriceQuotesAfterCatalogChange(tx, {
+        impact: currentImpact, changes: planned.changes, approvalHash, actor,
+      });
+      await writeAuditLog({
     actorId: actor.id,
     actorEmail: actor.email,
     action: 'pricing.bulk_adjusted',
@@ -908,9 +952,16 @@ export async function applyPriceAdjustment(
     targetType: 'Product',
     targetId: request.brand,
     before: { matchedCount: planned.preview.matchedCount },
-    after: { updatedCount, changeCount: planned.preview.changeCount, priceField: request.priceField, mode: request.mode },
+    after: { updatedCount, changeCount: planned.preview.changeCount, priceField: request.priceField, mode: request.mode, approvalHash, repricedQuotes },
     reason: request.reason,
-  });
+      }, tx);
+      const completed = { ...planned.preview, updatedCount, repricedQuotes };
+      await tx.backgroundTask.create({ data: {
+        type: 'pricing.apply', status: 'succeeded', dedupeKey, completedAt: new Date(),
+        payload: JSON.stringify({ approvalHash, actorId: actor.id }), result: JSON.stringify(completed),
+      } });
+      return completed;
+  }, { timeout: 60_000 });
 
   invalidateProductFilters();
   try {
@@ -922,5 +973,5 @@ export async function applyPriceAdjustment(
     console.error('[pricing-adjustment] search index enqueue failed', error);
   }
 
-  return { ...planned.preview, updatedCount };
+  return result;
 }

@@ -22,13 +22,24 @@ vi.mock('@/lib/pricing-adjustment-template', () => ({
   })),
 }));
 
+import { NextRequest } from 'next/server';
+import { PATCH as adminAcceptOrder } from '@/app/api/admin/orders/[id]/route';
+import { PATCH as acceptOrder } from '@/app/api/orders/[id]/route';
+import { POST as orderQuote } from '@/app/api/orders/[id]/quote/route';
+import { GET as previewDetails } from '@/app/api/admin/pricing-adjustments/preview/details/route';
+import { POST as publishQuote } from '@/app/api/inquiries/[id]/quote/route';
+import { quoteContentHash } from '@/lib/quote-records';
 import { auth } from '@/lib/auth';
+import { prisma } from '@/lib/prisma';
+import { POST as recordRepricing } from '@/app/api/inquiries/[id]/quote/repricing/route';
+import { assertOrderPricingResolved } from '@/lib/order-catalog-repricing';
+import { closeStalePendingOrders } from '@/lib/order-auto-close';
 import { requiresAdminMfaForPermission } from '@/lib/admin-mfa-settings';
 import { isMfaAdminRequired, isMfaPhase1Enabled } from '@/lib/security/mfa-config';
 import { readPricingAdjustmentTemplate } from '@/lib/pricing-adjustment-template';
-import { POST as previewPricing } from '@/app/api/admin/pricing-adjustments/preview/route';
-import { POST as previewChunk } from '@/app/api/admin/pricing-adjustments/preview/chunk/route';
-import { POST as applyPricing } from '@/app/api/admin/pricing-adjustments/apply/route';
+import { POST as previewPricingRoute } from '@/app/api/admin/pricing-adjustments/preview/route';
+import { POST as previewChunkRoute } from '@/app/api/admin/pricing-adjustments/preview/chunk/route';
+import { POST as applyPricingRoute } from '@/app/api/admin/pricing-adjustments/apply/route';
 import { POST as matchPricing } from '@/app/api/admin/pricing-adjustments/match/route';
 import { POST as createMissingPricing } from '@/app/api/admin/pricing-adjustments/create-missing/route';
 import { POST as classifyPreviewPricing } from '@/app/api/admin/pricing-adjustments/classify-preview/route';
@@ -41,6 +52,32 @@ const mfaRequiredMock = requiresAdminMfaForPermission as unknown as Mock;
 const adminMfaRequiredMock = isMfaAdminRequired as unknown as Mock;
 const phase1EnabledMock = isMfaPhase1Enabled as unknown as Mock;
 const readTemplateMock = readPricingAdjustmentTemplate as unknown as Mock;
+
+// Model the UI's retained preview: never generate a new preview while applying.
+let displayedApprovalHash: string | undefined;
+async function rememberPreview(response: Response) {
+  const data = await response.clone().json();
+  if (data.preview?.approvalHash) displayedApprovalHash = data.preview.approvalHash;
+  return response;
+}
+async function previewPricing(req: Request) { return rememberPreview(await previewPricingRoute(req)); }
+async function previewChunk(req: Request) { return rememberPreview(await previewChunkRoute(req)); }
+async function applyDisplayedPreview(req: Request) {
+  const body = await req.json();
+  return applyPricingRoute(new Request(req.url, {
+    method: 'POST', headers: req.headers,
+    body: JSON.stringify({ ...body, approvalHash: displayedApprovalHash }),
+  }));
+}
+
+async function seedQuoteCase(id: string, orderStatus?: string, actualQuantity = 2) {
+  const inquiry = await prisma.inquiry.create({ data: { id: `inquiry_${id}`, userId: 'admin_test_id', name: '测试客户', email: 'admin@test.com', phone: 'test', institution: 'test', subtotal: 200, status: orderStatus ? 'closed' : 'quote_sent' } });
+  const inquiryItem = await prisma.inquiryItem.create({ data: { inquiryId: inquiry.id, position: 0, productId: 'product_1', catalogNumber: 'CAT-1', name: '测试抗体', unitPrice: 100, quantity: 2, lineTotal: 200, metadata: JSON.stringify({ brand: 'CST' }) } });
+  const quote = await prisma.quote.create({ data: { id: `quote_${id}`, inquiryId: inquiry.id, version: 1, status: orderStatus ? 'accepted' : 'sent', subtotal: 200, items: { create: [{ inquiryItemId: inquiryItem.id, position: 0, productId: 'product_1', catalogNumber: 'CAT-1', name: '测试抗体', quantity: 2, orderedQty: orderStatus ? actualQuantity : 0, unitPrice: 100, lineTotal: 200, metadata: JSON.stringify({ brand: 'CST' }) }] } }, include: { items: true } });
+  const order = orderStatus ? await prisma.order.create({ data: { id: `order_${id}`, inquiryId: inquiry.id, email: inquiry.email, customerId: inquiry.userId, subtotal: actualQuantity * 100, total: actualQuantity * 100, status: orderStatus, orderItems: { create: [{ position: 0, productId: 'product_1', catalogNumber: 'CAT-1', name: '测试抗体', unitPrice: 100, quantity: actualQuantity, metadata: JSON.stringify({ brand: 'CST' }) }] } }, include: { orderItems: true } }) : null;
+  if (order) await prisma.quoteConfirmation.create({ data: { quoteId: quote.id, email: inquiry.email, userId: inquiry.userId, action: 'accept', details: JSON.stringify({ orderId: order.id, items: [{ quoteItemId: quote.items[0].id, orderedQuantity: actualQuantity }] }) } });
+  return { inquiry, quote, order };
+}
 
 function seedProduct(overrides: {
   id: string;
@@ -97,6 +134,7 @@ describe('admin pricing adjustment routes', () => {
   beforeAll(() => { getTestDb(); });
   afterAll(() => { closeTestDb(); });
   beforeEach(() => {
+    displayedApprovalHash = undefined;
     const db = getTestDb();
     clearAllTables(db);
     seedAdmin(db);
@@ -110,6 +148,210 @@ describe('admin pricing adjustment routes', () => {
       fileName: '商品集中调价导入模板.xlsx',
       buffer: Buffer.from('xlsx-bytes'),
     });
+  });
+
+  it('requires the exact displayed approval and rejects a missing or tampered hash', async () => {
+    await previewPricing(request('/preview', {}));
+    for (const approvalHash of [undefined, '0'.repeat(64)]) {
+      const response = await applyPricingRoute(request('/apply', { approvalHash }));
+      expect(response.status).toBe(409);
+    }
+    expect(getTestDb().prepare('SELECT price FROM Product WHERE id = ?').get('product_1')).toEqual({ price: 100 });
+    expect(getTestDb().prepare('SELECT COUNT(*) AS n FROM ProductPrice').get()).toEqual({ n: 0 });
+  });
+
+  it('does not execute a newer preview with an older approval', async () => {
+    const first = await previewPricing(request('/preview', {}));
+    const oldHash = (await first.json()).preview.approvalHash;
+    getTestDb().prepare('UPDATE Product SET price = 105 WHERE id = ?').run('product_1');
+    await previewPricing(request('/preview', {}));
+    expect(displayedApprovalHash).not.toBe(oldHash);
+    const response = await applyPricingRoute(request('/apply', { approvalHash: oldHash }));
+    expect(response.status).toBe(409);
+    expect(getTestDb().prepare('SELECT price FROM Product WHERE id = ?').get('product_1')).toEqual({ price: 105 });
+  });
+
+  it('rejects drift after preview without partially applying other rows', async () => {
+    getTestDb().prepare("UPDATE Product SET pricingMode = 'fixed' WHERE id = 'product_2'").run();
+    await previewPricing(request('/preview', {}));
+    getTestDb().prepare('UPDATE Product SET price = 55 WHERE id = ?').run('product_2');
+    const response = await applyDisplayedPreview(request('/apply', {}));
+    expect(response.status).toBe(409);
+    expect(getTestDb().prepare('SELECT price FROM Product WHERE id = ?').get('product_1')).toEqual({ price: 100 });
+    expect(getTestDb().prepare('SELECT COUNT(*) AS n FROM ProductPrice').get()).toEqual({ n: 0 });
+  });
+
+  it('cannot change the approval reason while reusing the preview', async () => {
+    await previewPricing(request('/preview', {}));
+    const response = await applyDisplayedPreview(request('/apply', { reason: 'different authorization content' }));
+    expect(response.status).toBe(409);
+    expect(getTestDb().prepare('SELECT price FROM Product WHERE id = ?').get('product_1')).toEqual({ price: 100 });
+  });
+
+  it('recalculates a sent quote into the existing review flow while preserving merchant-accepted prices', async () => {
+    const open = await seedQuoteCase('open');
+    const locked = await seedQuoteCase('locked', 'confirmed');
+    await previewPricing(request('/preview', {}));
+    const response = await applyDisplayedPreview(request('/apply', {}));
+    expect(response.status).toBe(200);
+    const result = (await response.json()).result;
+    expect(result.repricedQuotes).toHaveLength(1);
+    const draft = await prisma.quote.findFirstOrThrow({ where: { inquiryId: open.inquiry.id }, orderBy: { version: 'desc' }, include: { items: true } });
+    expect(draft).toMatchObject({ version: 2, status: 'draft', subtotal: 220 });
+    expect(draft.items[0]).toMatchObject({ unitPrice: 110, quantity: 2 });
+    expect((await prisma.inquiry.findUniqueOrThrow({ where: { id: open.inquiry.id } })).hasUnresolvedPricing).toBe(true);
+    expect((await prisma.order.findUniqueOrThrow({ where: { id: locked.order!.id } })).total).toBe(200);
+    expect((await prisma.quote.findUniqueOrThrow({ where: { id: locked.quote.id } })).status).toBe('accepted');
+  });
+
+  it('uses the actual pending order quantity and resumes the same order after recorded customer confirmation', async () => {
+    const fixture = await seedQuoteCase('pending', 'pending', 3);
+    await previewPricing(request('/preview', {}));
+    expect((await applyDisplayedPreview(request('/apply', {}))).status).toBe(200);
+    const draft = await prisma.quote.findFirstOrThrow({ where: { inquiryId: fixture.inquiry.id }, orderBy: { version: 'desc' }, include: { items: true } });
+    expect(draft).toMatchObject({ status: 'draft', subtotal: 330 });
+    expect(draft.items[0]).toMatchObject({ quantity: 3, unitPrice: 110 });
+    await expect(prisma.$transaction((tx) => assertOrderPricingResolved(tx, fixture.order!.id))).rejects.toThrow('QUOTE_REPRICE_REQUIRED');
+    const proposal = JSON.parse(draft.items[0].metadata!);
+    const payload = { quoteId: draft.id, orderId: fixture.order!.id, proposalHash: proposal.repricingProposalHash, responseChannel: '测试邮件', responseReference: 'fixture-only customer response' };
+    const response = await recordRepricing(request('/repricing', payload), { params: Promise.resolve({ id: fixture.inquiry.id }) });
+    expect(response.status).toBe(200);
+    const updated = await prisma.order.findUniqueOrThrow({ where: { id: fixture.order!.id }, include: { orderItems: true } });
+    expect(updated).toMatchObject({ status: 'pending', total: 330 });
+    expect(updated.orderItems[0].id).toBe(fixture.order!.orderItems[0].id);
+    expect(await prisma.order.count()).toBe(1);
+    expect((await prisma.quote.findUniqueOrThrow({ where: { id: fixture.quote.id } })).status).toBe('accepted');
+    await prisma.$transaction((tx) => assertOrderPricingResolved(tx, fixture.order!.id));
+    const replay = await recordRepricing(request('/repricing', payload), { params: Promise.resolve({ id: fixture.inquiry.id }) });
+    expect(replay.status).toBe(200);
+    expect((await replay.json()).result.replayed).toBe(true);
+    expect(await prisma.orderEvent.count({ where: { type: 'catalog_repricing_resolved' } })).toBe(1);
+  });
+
+  it('creates only one successor on a second catalogue change and rejects the superseded customer confirmation', async () => {
+    const fixture = await seedQuoteCase('twice', 'pending');
+    await previewPricing(request('/preview', {}));
+    await applyDisplayedPreview(request('/apply', {}));
+    const first = await prisma.quote.findFirstOrThrow({ where: { inquiryId: fixture.inquiry.id }, orderBy: { version: 'desc' }, include: { items: true } });
+    await previewPricing(request('/preview', {}));
+    const second = await applyDisplayedPreview(request('/apply', {}));
+    expect(second.status).toBe(200);
+    expect((await second.json()).result.repricedQuotes).toHaveLength(1);
+    expect(await prisma.quote.count({ where: { inquiryId: fixture.inquiry.id } })).toBe(3);
+    const latest = await prisma.quote.findFirstOrThrow({ where: { inquiryId: fixture.inquiry.id }, orderBy: { version: 'desc' } });
+    expect(latest).toMatchObject({ version: 3, subtotal: 242 });
+    const response = await recordRepricing(request('/repricing', { quoteId: first.id, orderId: fixture.order!.id, proposalHash: JSON.parse(first.items[0].metadata!).repricingProposalHash, responseChannel: '测试邮件', responseReference: 'stale fixture response' }), { params: Promise.resolve({ id: fixture.inquiry.id }) });
+    expect(response.status).toBe(409);
+    expect((await prisma.order.findUniqueOrThrow({ where: { id: fixture.order!.id } })).total).toBe(200);
+  });
+
+  it('binds quote contents as well as IDs to the price-change preview', async () => {
+    const fixture = await seedQuoteCase('drift');
+    await previewPricing(request('/preview', {}));
+    await prisma.quoteItem.update({ where: { id: fixture.quote.items[0].id }, data: { quantity: 4 } });
+    expect((await applyDisplayedPreview(request('/apply', {}))).status).toBe(409);
+    expect((await prisma.product.findUniqueOrThrow({ where: { id: 'product_1' } })).price).toBe(100);
+    expect(await prisma.quote.count()).toBe(1);
+  });
+
+  it('keeps paid pending orders and their payment facts unchanged for financial reconciliation', async () => {
+    const fixture = await seedQuoteCase('paid', 'pending');
+    await prisma.order.update({ where: { id: fixture.order!.id }, data: { paidAt: new Date('2026-11-15T00:00:00Z') } });
+    await previewPricing(request('/preview', {}));
+    expect((await applyDisplayedPreview(request('/apply', {}))).status).toBe(200);
+    const draft = await prisma.quote.findFirstOrThrow({ where: { inquiryId: fixture.inquiry.id }, orderBy: { version: 'desc' }, include: { items: true } });
+    const response = await recordRepricing(request('/repricing', { quoteId: draft.id, orderId: fixture.order!.id, proposalHash: JSON.parse(draft.items[0].metadata!).repricingProposalHash, responseChannel: '测试邮件', responseReference: 'fixture response' }), { params: Promise.resolve({ id: fixture.inquiry.id }) });
+    expect(response.status).toBe(409);
+    expect((await response.json()).code).toBe('REPRICING_FINANCE_REVIEW_REQUIRED');
+    expect((await prisma.order.findUniqueOrThrow({ where: { id: fixture.order!.id } })).total).toBe(200);
+    await expect(prisma.$transaction((tx) => assertOrderPricingResolved(tx, fixture.order!.id))).rejects.toThrow('QUOTE_REPRICE_REQUIRED');
+  });
+
+  it('exposes the complete immutable change list beyond the twenty sample rows', async () => {
+    for (let index = 3; index <= 25; index++) seedProduct({ id: `product_${index}`, catalogNumber: `CAT-${index}`, price: 100 });
+    await previewPricing(request('/preview', {}));
+    const hash = displayedApprovalHash;
+    const details = await previewDetails(new Request(`http://localhost/details?approvalHash=${hash}`));
+    expect(details.status).toBe(200);
+    expect((await details.json()).total).toBe(24);
+    getTestDb().prepare('UPDATE Product SET price = 101 WHERE id = ?').run('product_25');
+    const frozen = await previewDetails(new Request(`http://localhost/details?approvalHash=${hash}`));
+    expect((await frozen.json()).rows.find((row: { productId: string }) => row.productId === 'product_25')).toMatchObject({ before: 100, after: 110 });
+    expect((await applyDisplayedPreview(request('/apply', {}))).status).toBe(409);
+    expect((await prisma.product.findUniqueOrThrow({ where: { id: 'product_1' } })).price).toBe(100);
+  });
+
+  it('blocks all three merchant-acceptance entrances until original-order repricing is resolved', async () => {
+    const fixture = await seedQuoteCase('acceptance_guard', 'pending');
+    await previewPricing(request('/preview', {}));
+    expect((await applyDisplayedPreview(request('/apply', {}))).status).toBe(200);
+    for (const handler of [adminAcceptOrder, acceptOrder]) {
+      const response = await handler(new NextRequest(`http://localhost/order/${fixture.order!.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: 'confirmed' }) }), { params: Promise.resolve({ id: fixture.order!.id }) });
+      expect(response.status).toBe(409);
+    }
+    const response = await orderQuote(new NextRequest('http://localhost/order/quote', { method: 'POST' }), { params: Promise.resolve({ id: fixture.order!.id }) });
+    expect(response.status).toBe(409);
+    expect((await prisma.order.findUniqueOrThrow({ where: { id: fixture.order!.id } })).status).toBe('pending');
+  });
+
+  it('publishes exactly the recalculated quote that the administrator reviewed', async () => {
+    const fixture = await seedQuoteCase('publish');
+    await previewPricing(request('/preview', {}));
+    await applyDisplayedPreview(request('/apply', {}));
+    const draft = await prisma.quote.findFirstOrThrow({ where: { inquiryId: fixture.inquiry.id }, orderBy: { version: 'desc' }, include: { items: { orderBy: { position: 'asc' } } } });
+    const response = await publishQuote(new NextRequest('http://localhost/inquiry/quote', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ catalogQuoteId: draft.id, catalogQuoteHash: quoteContentHash(draft) }) }), { params: Promise.resolve({ id: fixture.inquiry.id }) });
+    expect(response.status).toBe(200);
+    const sent = (await response.json()).quote;
+    expect(sent).toMatchObject({ status: 'sent', subtotal: 220 });
+    expect(sent.items[0]).toMatchObject({ price: 110, quantity: 2 });
+    expect((await prisma.inquiry.findUniqueOrThrow({ where: { id: fixture.inquiry.id } })).hasUnresolvedPricing).toBe(false);
+  });
+
+  it('invalidates the old proposal when the catalogue returns to the original order price', async () => {
+    const fixture = await seedQuoteCase('return_price', 'pending');
+    await previewPricing(request('/preview', {})); await applyDisplayedPreview(request('/apply', {}));
+    const first = await prisma.quote.findFirstOrThrow({ where: { inquiryId: fixture.inquiry.id }, orderBy: { version: 'desc' }, include: { items: true } });
+    await previewPricing(request('/preview', { mode: 'set', amount: 100 }));
+    expect((await applyDisplayedPreview(request('/apply', { mode: 'set', amount: 100 }))).status).toBe(200);
+    const latest = await prisma.quote.findFirstOrThrow({ where: { inquiryId: fixture.inquiry.id }, orderBy: { version: 'desc' }, include: { items: true } });
+    expect(latest).toMatchObject({ version: 3, subtotal: 200 });
+    const stale = await recordRepricing(request('/repricing', { quoteId: first.id, orderId: fixture.order!.id, proposalHash: JSON.parse(first.items[0].metadata!).repricingProposalHash, responseChannel: '测试邮件', responseReference: 'outdated response' }), { params: Promise.resolve({ id: fixture.inquiry.id }) });
+    expect(stale.status).toBe(409);
+    expect((await prisma.order.findUniqueOrThrow({ where: { id: fixture.order!.id } })).total).toBe(200);
+  });
+
+  it.each(['manual cancellation', 'automatic closure'])('continues remaining quote lines after %s of a pending order', async (closure) => {
+    const fixture = await seedQuoteCase(`close_${closure}`, 'pending', 1);
+    await prisma.quote.update({ where: { id: fixture.quote.id }, data: { status: 'sent' } });
+    await prisma.inquiry.update({ where: { id: fixture.inquiry.id }, data: { status: 'quote_sent' } });
+    await previewPricing(request('/preview', {})); await applyDisplayedPreview(request('/apply', {}));
+    if (closure === 'manual cancellation') {
+      const response = await adminAcceptOrder(new NextRequest('http://localhost/order', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: 'cancelled' }) }), { params: Promise.resolve({ id: fixture.order!.id }) });
+      expect(response.status).toBe(200);
+    } else {
+      await prisma.order.update({ where: { id: fixture.order!.id }, data: { autoCloseAt: new Date('2026-01-01T00:00:00Z') } });
+      expect((await closeStalePendingOrders(new Date('2026-11-16T00:00:00Z'))).closed).toBe(1);
+    }
+    const draft = await prisma.quote.findFirstOrThrow({ where: { inquiryId: fixture.inquiry.id }, orderBy: { version: 'desc' }, include: { items: { orderBy: { position: 'asc' } } } });
+    expect(draft.items.filter((line) => line.available)).toHaveLength(1);
+    const response = await publishQuote(new NextRequest('http://localhost/inquiry/quote', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ catalogQuoteId: draft.id, catalogQuoteHash: quoteContentHash(draft) }) }), { params: Promise.resolve({ id: fixture.inquiry.id }) });
+    expect(response.status).toBe(200);
+    expect((await response.json()).quote.items[0]).toMatchObject({ quantity: 1, price: 110 });
+    expect(await prisma.order.count()).toBe(1);
+  });
+
+  it('preserves variant identity from the pricing snapshot through recalculation and publication', async () => {
+    const fixture = await seedQuoteCase('snapshot_variant');
+    await prisma.productVariant.create({ data: { id: 'variant_snapshot', productId: 'product_1', catalogNumber: 'CAT-1-10', spec: '10 ml', price: 100 } });
+    await prisma.quoteItem.update({ where: { id: fixture.quote.items[0].id }, data: { catalogNumber: 'CAT-1-10', pricingSnapshot: JSON.stringify({ variantId: 'variant_snapshot' }) } });
+    const rule = { scope: 'catalog', catalogNumbers: ['CAT-1-10'], includeVariants: true };
+    await previewPricing(request('/preview', rule));
+    expect((await applyDisplayedPreview(request('/apply', rule))).status).toBe(200);
+    const draft = await prisma.quote.findFirstOrThrow({ where: { inquiryId: fixture.inquiry.id }, orderBy: { version: 'desc' }, include: { items: { orderBy: { position: 'asc' } } } });
+    expect(JSON.parse(draft.items[0].metadata!).variantId).toBe('variant_snapshot');
+    const response = await publishQuote(new NextRequest('http://localhost/inquiry/quote', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ catalogQuoteId: draft.id, catalogQuoteHash: quoteContentHash(draft) }) }), { params: Promise.resolve({ id: fixture.inquiry.id }) });
+    expect(response.status).toBe(200);
+    expect((await response.json()).quote.items[0]).toMatchObject({ catalogNumber: 'CAT-1-10', price: 110, variantId: 'variant_snapshot' });
   });
 
   it('previews public price changes and skips inquiry items', async () => {
@@ -128,7 +370,7 @@ describe('admin pricing adjustment routes', () => {
       direction: 'decrease',
       amount: 20,
     }));
-    const response = await applyPricing(request('/api/admin/pricing-adjustments/apply', {
+    const response = await applyDisplayedPreview(request('/api/admin/pricing-adjustments/apply', {
       mode: 'percent',
       direction: 'decrease',
       amount: 20,
@@ -155,7 +397,7 @@ describe('admin pricing adjustment routes', () => {
     const preview = await previewPricing(request('/api/admin/pricing-adjustments/preview', {}));
     expect(preview.status).toBe(200);
 
-    const apply = await applyPricing(request('/api/admin/pricing-adjustments/apply', {}));
+    const apply = await applyDisplayedPreview(request('/api/admin/pricing-adjustments/apply', {}));
     expect(apply.status).toBe(403);
     const body = await apply.json();
     expect(body.error).toMatch(/MFA|authenticator|验证/i);
@@ -165,7 +407,7 @@ describe('admin pricing adjustment routes', () => {
     mfaRequiredMock.mockResolvedValue(true);
     adminMfaRequiredMock.mockReturnValue(true);
     await previewPricing(request('/api/admin/pricing-adjustments/preview', {}));
-    const apply = await applyPricing(request('/api/admin/pricing-adjustments/apply', {
+    const apply = await applyDisplayedPreview(request('/api/admin/pricing-adjustments/apply', {
       stepUpToken: 'already-used',
     }));
     expect(apply.status).toBe(403);
@@ -178,7 +420,7 @@ describe('admin pricing adjustment routes', () => {
       direction: 'decrease',
       amount: 10,
     }));
-    const apply = await applyPricing(request('/api/admin/pricing-adjustments/apply', {
+    const apply = await applyDisplayedPreview(request('/api/admin/pricing-adjustments/apply', {
       mode: 'percent',
       direction: 'decrease',
       amount: 10,
@@ -191,7 +433,7 @@ describe('admin pricing adjustment routes', () => {
   it('asks for MFA before apply when step-up is enabled even if admin MFA policy is off', async () => {
     phase1EnabledMock.mockReturnValue(true);
     await previewPricing(request('/api/admin/pricing-adjustments/preview', {}));
-    const apply = await applyPricing(request('/api/admin/pricing-adjustments/apply', {}));
+    const apply = await applyDisplayedPreview(request('/api/admin/pricing-adjustments/apply', {}));
     expect(apply.status).toBe(403);
     expect((await apply.json()).error).toBe('Admin MFA required');
   });
@@ -254,7 +496,7 @@ describe('admin pricing adjustment routes', () => {
     expect(previewBody.preview.changeCount).toBe(2);
     expect(previewBody.preview.skippedInquiryCount).toBe(0);
 
-    const apply = await applyPricing(request('/api/admin/pricing-adjustments/apply', {
+    const apply = await applyDisplayedPreview(request('/api/admin/pricing-adjustments/apply', {
       mode: 'set',
       amount: 88,
     }));
@@ -300,11 +542,11 @@ describe('admin pricing adjustment routes', () => {
       amount: 10,
     };
     await previewPricing(request('/api/admin/pricing-adjustments/preview', previewBody));
-    const first = await applyPricing(request('/api/admin/pricing-adjustments/apply', previewBody));
+    const first = await applyDisplayedPreview(request('/api/admin/pricing-adjustments/apply', previewBody));
     expect(first.status).toBe(200);
     expect((await first.json()).result.updatedCount).toBe(1);
 
-    const second = await applyPricing(request('/api/admin/pricing-adjustments/apply', {
+    const second = await applyDisplayedPreview(request('/api/admin/pricing-adjustments/apply', {
       mode: 'percent',
       direction: 'increase',
       amount: 10,
@@ -359,7 +601,7 @@ describe('admin pricing adjustment routes', () => {
     expect(previewBody.preview.samples.some((sample: { fieldLabel?: string }) => sample.fieldLabel === '进货价')).toBe(true);
     expect(JSON.stringify(previewBody)).not.toContain('costPrice');
 
-    const apply = await applyPricing(new Request('http://localhost/api/admin/pricing-adjustments/apply', {
+    const apply = await applyDisplayedPreview(new Request('http://localhost/api/admin/pricing-adjustments/apply', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
@@ -408,7 +650,7 @@ describe('admin pricing adjustment routes', () => {
   });
 
   it('rejects apply when preview has not been generated', async () => {
-    const response = await applyPricing(request('/api/admin/pricing-adjustments/apply', {}));
+    const response = await applyDisplayedPreview(request('/api/admin/pricing-adjustments/apply', {}));
     expect(response.status).toBe(409);
     const body = await response.json();
     expect(body.error).toContain('预览');
@@ -441,7 +683,7 @@ describe('admin pricing adjustment routes', () => {
     const body = await preview.json();
     expect(body.preview.unmatchedCatalogs).toContain('CAT-1 / 100ul');
 
-    await applyPricing(new Request('http://localhost/api/admin/pricing-adjustments/apply', {
+    await applyDisplayedPreview(new Request('http://localhost/api/admin/pricing-adjustments/apply', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
@@ -482,7 +724,7 @@ describe('admin pricing adjustment routes', () => {
     expect(preview.status).toBe(200);
     expect((await preview.json()).preview.unmatchedCatalogs).toContain('CAT-1 / CAT-3');
 
-    await applyPricing(new Request('http://localhost/api/admin/pricing-adjustments/apply', {
+    await applyDisplayedPreview(new Request('http://localhost/api/admin/pricing-adjustments/apply', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
@@ -505,7 +747,7 @@ describe('admin pricing adjustment routes', () => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     }));
-    const apply = await applyPricing(new Request('http://localhost/api/admin/pricing-adjustments/apply', {
+    const apply = await applyDisplayedPreview(new Request('http://localhost/api/admin/pricing-adjustments/apply', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
@@ -545,7 +787,7 @@ describe('admin pricing adjustment routes', () => {
     const body = await preview.json();
     expect(body.preview.changeCount).toBe(1);
 
-    const apply = await applyPricing(new Request('http://localhost/api/admin/pricing-adjustments/apply', {
+    const apply = await applyDisplayedPreview(new Request('http://localhost/api/admin/pricing-adjustments/apply', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
@@ -583,7 +825,7 @@ describe('admin pricing adjustment routes', () => {
     expect(preview.status).toBe(200);
     expect((await preview.json()).preview.flooredCount).toBe(1);
 
-    const apply = await applyPricing(new Request('http://localhost/api/admin/pricing-adjustments/apply', {
+    const apply = await applyDisplayedPreview(new Request('http://localhost/api/admin/pricing-adjustments/apply', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
@@ -611,7 +853,7 @@ describe('admin pricing adjustment routes', () => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     }));
-    const apply = await applyPricing(new Request('http://localhost/api/admin/pricing-adjustments/apply', {
+    const apply = await applyDisplayedPreview(new Request('http://localhost/api/admin/pricing-adjustments/apply', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
@@ -700,7 +942,7 @@ describe('admin pricing adjustment routes', () => {
     expect(previewBody.preview.unmatchedCatalogs).toEqual([]);
     expect(JSON.stringify(previewBody)).not.toContain('costPrice');
 
-    const apply = await applyPricing(new Request('http://localhost/api/admin/pricing-adjustments/apply', {
+    const apply = await applyDisplayedPreview(new Request('http://localhost/api/admin/pricing-adjustments/apply', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
@@ -736,7 +978,7 @@ describe('admin pricing adjustment routes', () => {
       { catalogNumber: 'CAT-1', spec: '', importedName: '另一商品', productName: '测试抗体' },
     ]);
 
-    const apply = await applyPricing(new Request('http://localhost/api/admin/pricing-adjustments/apply', {
+    const apply = await applyDisplayedPreview(new Request('http://localhost/api/admin/pricing-adjustments/apply', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
@@ -928,7 +1170,7 @@ describe('admin pricing adjustment routes', () => {
     expect(firstBody.chunkPreview.changeCount).toBe(1);
     expect(firstBody.preview).toBeNull();
 
-    const earlyApply = await applyPricing(new Request('http://localhost/api/admin/pricing-adjustments/apply', {
+    const earlyApply = await applyDisplayedPreview(new Request('http://localhost/api/admin/pricing-adjustments/apply', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(full),
@@ -952,7 +1194,7 @@ describe('admin pricing adjustment routes', () => {
     expect(secondBody.receivedCount).toBe(2);
     expect(secondBody.preview).toEqual(singlePreview);
 
-    const apply = await applyPricing(new Request('http://localhost/api/admin/pricing-adjustments/apply', {
+    const apply = await applyDisplayedPreview(new Request('http://localhost/api/admin/pricing-adjustments/apply', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(full),
@@ -1009,7 +1251,7 @@ describe('admin pricing adjustment routes', () => {
     expect(second.status).toBe(200);
     expect((await second.json()).preview).toEqual(singlePreview);
 
-    const apply = await applyPricing(new Request('http://localhost/api/admin/pricing-adjustments/apply', {
+    const apply = await applyDisplayedPreview(new Request('http://localhost/api/admin/pricing-adjustments/apply', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(full),
@@ -1088,7 +1330,7 @@ describe('admin pricing adjustment routes', () => {
       }),
     }));
     expect(response.status).toBe(200);
-    const apply = await applyPricing(new Request('http://localhost/api/admin/pricing-adjustments/apply', {
+    const apply = await applyDisplayedPreview(new Request('http://localhost/api/admin/pricing-adjustments/apply', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({

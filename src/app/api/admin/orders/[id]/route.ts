@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import { assertOrderPricingResolved, closeOrderRepricing } from '@/lib/order-catalog-repricing';
 import type { Prisma } from '@prisma/client';
 import { orderItemView } from '@/lib/commerce-records';
 import { getAlipayPaymentSummary } from '@/data/alipay-payment';
@@ -100,6 +101,9 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     }
 
     const updated = await prisma.$transaction(async (tx) => {
+      if (status === 'confirmed') {
+        await assertOrderPricingResolved(tx, id);
+      }
       if (status === 'cancelled') {
         // Claim cancellation before any history or resource releases. The payment
         // callback competes on the same row, so a stale unpaid snapshot cannot win.
@@ -135,6 +139,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       if (status === 'confirmed' && existing.status !== 'confirmed' && isPostDeliveryPaymentMethod(existing.paymentMethod)) await reserveOrderCredit(tx, id, admin.id);
       if (status === 'confirmed' && existing.status !== 'confirmed') await reserveOrderInventory(tx, id, admin.id);
       if (isInactiveOrderStatus(status) && !isInactiveOrderStatus(existing.status)) {
+        await closeOrderRepricing(tx, id, { id: admin.id, email: admin.email });
         if (isPostDeliveryPaymentMethod(existing.paymentMethod)) await releaseOrderReceivableOnCancellation(tx, id, admin.id);
         await releaseOrderInventory(tx, id, admin.id);
         await restoreRedeemedOrderCoupons(tx, id);
@@ -158,7 +163,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     if (message === POINTS_REFUND_FAILED) {
       return NextResponse.json({ error: POINTS_REFUND_FAILED }, { status: 409 });
     }
-    if (['CREDIT_LIMIT_EXCEEDED', 'CREDIT_ACCOUNT_SUSPENDED', 'RECEIVABLE_NOT_FOUND', 'INVALID_ORDER_TRANSITION', 'INSUFFICIENT_AVAILABLE_INVENTORY', 'ALIPAY_PAYMENT_REQUIRED', 'PAID_ORDER_REFUND_REQUIRED', 'ORDER_CANCELLATION_CONFLICT'].includes(message)) {
+    if (['QUOTE_REPRICE_REQUIRED', 'CREDIT_LIMIT_EXCEEDED', 'CREDIT_ACCOUNT_SUSPENDED', 'RECEIVABLE_NOT_FOUND', 'INVALID_ORDER_TRANSITION', 'INSUFFICIENT_AVAILABLE_INVENTORY', 'ALIPAY_PAYMENT_REQUIRED', 'PAID_ORDER_REFUND_REQUIRED', 'ORDER_CANCELLATION_CONFLICT'].includes(message)) {
       return NextResponse.json({ error: message }, { status: 409 });
     }
     if (message === 'INVALID_ORDER_STATUS') return NextResponse.json({ error: message }, { status: 400 });

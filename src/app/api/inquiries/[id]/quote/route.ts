@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { requireAdmin } from '@/lib/session';
 import { enqueueBackgroundTask } from '@/lib/background-tasks';
-import { quoteView } from '@/lib/quote-records';
+import { quoteView, quoteContentHash } from '@/lib/quote-records';
+import { jsonObject } from '@/lib/order-catalog-repricing';
 import { loadQuoteProductTaxonomy } from '@/lib/quote-item-taxonomy';
 import { writeAuditLog } from '@/lib/audit';
 import { reviewCommerceLinesWithCatalog } from '@/lib/commerce-line-catalog';
@@ -11,6 +12,7 @@ import {
   InquiryQuotePublishRejected,
   assessInquiryQuotePublish,
   claimInquiryForQuotePublish,
+  currentCatalogRepricingDraft,
 } from '@/lib/inquiry-quote-publish';
 import { AMBIGUOUS_PRODUCT_CATALOG_NUMBER, verifyAndPriceItems } from '@/lib/pricing';
 import { mergeQuoteConstraintMetadata, packageConstraintFromVariant, readExplicitQuantityConstraint } from '@/lib/quote-acceptance';
@@ -65,7 +67,12 @@ export async function POST(
     }
 
     const body = await req.json();
-    const items = body.items ?? inquiry.inquiryItems.map((item) => ({
+    const catalogDraft = await currentCatalogRepricingDraft(prisma, id);
+    if (catalogDraft && (body.catalogQuoteId !== catalogDraft.id || body.catalogQuoteHash !== quoteContentHash(catalogDraft))) {
+      return NextResponse.json({ error: '请核对当前重算报价后再发送，报价内容已变化时需刷新确认', code: 'QUOTE_VERSION_CONFLICT' }, { status: 409 });
+    }
+    const catalogLines = catalogDraft?.items.filter((line) => !jsonObject(line.metadata).repricingOrderId && line.quantity > line.orderedQty && line.available);
+    const items = catalogLines?.map((line) => ({ ...line, brand: metadataBrand(line.metadata), price: line.unitPrice })) ?? body.items ?? inquiry.inquiryItems.map((item) => ({
       productId: item.productId,
       catalogNumber: item.catalogNumber,
       brand: metadataBrand(item.metadata),
@@ -79,8 +86,11 @@ export async function POST(
       return NextResponse.json({ error: 'items must be a non-empty array' }, { status: 400 });
     }
     // 权限仍是 inquiries.write。单价和数量先做规则核对：硬错误直接拒绝，软警告需 confirmWarnings 后才发布。
+    const sourceInquiryItems = catalogLines
+      ? catalogLines.map((line) => inquiry.inquiryItems.find((item) => item.id === line.inquiryItemId))
+      : inquiry.inquiryItems;
     const quotedLines = (items as Array<Record<string, unknown>>).map((item, index) => {
-      const inquiryItem = inquiry.inquiryItems[index];
+      const inquiryItem = sourceInquiryItems[index];
       return {
         index,
         name: typeof item.name === 'string' ? item.name : inquiryItem?.name,
@@ -103,18 +113,19 @@ export async function POST(
         reason: '管理员人工报价',
       }]));
     const priced = await verifyAndPriceItems(items.map((item: Record<string, unknown>, position: number) => ({
-      productId: typeof item.productId === 'string' ? item.productId : inquiry.inquiryItems[position]?.productId,
-      catalogNumber: typeof item.catalogNumber === 'string' ? item.catalogNumber : inquiry.inquiryItems[position]?.catalogNumber,
+      productId: typeof item.productId === 'string' ? item.productId : sourceInquiryItems[position]?.productId,
+      variantId: catalogDraft ? metadataVariantId(typeof item.metadata === 'string' ? item.metadata : sourceInquiryItems[position]?.metadata) : undefined,
+      catalogNumber: typeof item.catalogNumber === 'string' ? item.catalogNumber : sourceInquiryItems[position]?.catalogNumber,
       brand: typeof item.brand === 'string' && item.brand.trim()
         ? item.brand.trim()
-        : metadataBrand(inquiry.inquiryItems[position]?.metadata),
-      name: String(item.name ?? inquiry.inquiryItems[position]?.name ?? 'Unknown'),
+        : metadataBrand(sourceInquiryItems[position]?.metadata),
+      name: String(item.name ?? sourceInquiryItems[position]?.name ?? 'Unknown'),
       price: Number(item.price ?? item.unitPrice),
       quantity: Number(quotedLines[position].quantity),
     })), { customerEmail: inquiry.email, manualAdjustments, allowManualAdjustment: true });
     const lineReview = await reviewCommerceLinesWithCatalog(priced.verifiedItems.map((pricedItem, index) => {
       const item = items[index] as Record<string, unknown>;
-      const inquiryItem = inquiry.inquiryItems[index];
+      const inquiryItem = sourceInquiryItems[index];
       return {
         index,
         productId: pricedItem.productId ?? (typeof item.productId === 'string' ? item.productId : inquiryItem?.productId),
@@ -133,7 +144,7 @@ export async function POST(
       .map((item, position) => item.variantId
         || (typeof (items[position] as Record<string, unknown>).variantId === 'string'
           ? (items[position] as Record<string, unknown>).variantId as string
-          : metadataVariantId(inquiry.inquiryItems[position]?.metadata)))
+          : metadataVariantId(sourceInquiryItems[position]?.metadata)))
       .filter((variantId): variantId is string => Boolean(variantId))));
     const variants = variantIds.length
       ? await prisma.productVariant.findMany({ where: { id: { in: variantIds } }, select: { id: true, packageType: true, baseQuantity: true } })
@@ -141,7 +152,7 @@ export async function POST(
     const variantsById = new Map(variants.map((variant) => [variant.id, variant]));
     const normalizedItems = priced.verifiedItems.map((pricedItem, position) => {
       const item = items[position] as Record<string, unknown>;
-      const inquiryItem = inquiry.inquiryItems[position];
+      const inquiryItem = sourceInquiryItems[position];
       const requestConstraint = readExplicitQuantityConstraint(item);
       const inquiryConstraint = readExplicitQuantityConstraint(metadataObject(inquiryItem?.metadata));
       const variantId = pricedItem.variantId
@@ -159,20 +170,24 @@ export async function POST(
         leadTime: typeof item.actualLeadTime === 'string' ? item.actualLeadTime : typeof item.leadTime === 'string' ? item.leadTime : null,
         available: item.available !== false,
         notes: typeof item.notes === 'string' ? item.notes : null,
-        metadata: mergeQuoteConstraintMetadata(inquiryItem?.metadata, {
+        metadata: mergeQuoteConstraintMetadata(catalogDraft && typeof item.metadata === 'string' ? item.metadata : inquiryItem?.metadata, {
           minQuantity: requestConstraint.minQuantity ?? inquiryConstraint.minQuantity ?? variantConstraint.minQuantity,
           quantityStep: requestConstraint.quantityStep ?? inquiryConstraint.quantityStep ?? variantConstraint.quantityStep,
         }, pricedItem.quantity),
         pricingSnapshot: pricedItem.pricingSnapshot,
       };
     });
+    if (catalogLines && normalizedItems.some((line, index) => line.unitPrice !== catalogLines[index]?.unitPrice
+      || line.quantity !== catalogLines[index]?.quantity || line.productId !== catalogLines[index]?.productId)) {
+      return NextResponse.json({ error: '重新核算的结果与本次显示的报价不同，请重新核对报价', code: 'QUOTE_VERSION_CONFLICT' }, { status: 409 });
+    }
     const sentAt = new Date();
     const validUntil = body.validUntil ? new Date(body.validUntil) : new Date(sentAt.getTime() + 30 * 86400000);
     if (Number.isNaN(validUntil.getTime()) || validUntil <= sentAt) {
       return NextResponse.json({ error: 'validUntil must be a future date' }, { status: 400 });
     }
     const quote = await prisma.$transaction(async (tx) => {
-      const claimed = await claimInquiryForQuotePublish(tx, id);
+      const claimed = await claimInquiryForQuotePublish(tx, id, catalogDraft ? { id: catalogDraft.id, hash: body.catalogQuoteHash } : undefined);
       if (claimed !== 1) {
         const decision = await assessInquiryQuotePublish(tx, id);
         throw new InquiryQuotePublishRejected(decision.ok

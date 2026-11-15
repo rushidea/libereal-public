@@ -144,6 +144,9 @@ export async function POST(
     }
 
     const quote = inquiry.quotes[0];
+    if (inquiry.hasUnresolvedPricing) {
+      return NextResponse.json({ error: '商品价格已变化，报价正在重新核算，请等待更新后的报价', code: 'QUOTE_REPRICE_REQUIRED' }, { status: 409 });
+    }
     if (!quote) {
       return NextResponse.json({ error: 'Quote not sent yet' }, { status: 400 });
     }

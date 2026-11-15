@@ -60,6 +60,7 @@ export type PriceAdjustmentRequest = {
   includeVariants: boolean;
   reason: string;
   stepUpToken?: string;
+  approvalHash?: string;
 };
 
 export type PriceAdjustmentSample = {
@@ -287,6 +288,7 @@ export function parsePriceAdjustmentRequest(body: unknown): { ok: true; value: P
       amount,
       includeVariants: input.includeVariants !== false,
       reason,
+      ...(typeof input.approvalHash === 'string' ? { approvalHash: input.approvalHash } : {}),
       ...(typeof input.stepUpToken === 'string' && input.stepUpToken.trim()
         ? { stepUpToken: text(input.stepUpToken) }
         : {}),

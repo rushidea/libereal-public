@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import { ADMIN_INQUIRY_TODO_STATUSES, notifyAdminInquiryTodoChanged } from '@/lib/admin-inquiry-todo';
 import { InquiryIdDisplay } from '@/components/InquiryIdDisplay';
+import { CatalogRepricingReview } from '@/components/admin/CatalogRepricingReview';
 import { effectiveInquiryStatus, presentedQuoteStatus } from '@/lib/quote-expiry';
 
 interface Inquiry {
@@ -26,7 +27,7 @@ interface Inquiry {
   paymentMethod?: string;
   notes?: string;
   userId?: string;
-  activeQuote?: { status: string; validUntil?: string | null; sentAt?: string; acceptedAt?: string; version: number; items: InquiryItem[] } | null;
+  activeQuote?: { id: string; status: string; catalogRepricing?: boolean; contentHash?: string; validUntil?: string | null; sentAt?: string; acceptedAt?: string; version: number; items: InquiryItem[] } | null;
   quoteVersions?: QuoteVersion[];
   operationLogs?: string;
 }
@@ -45,6 +46,8 @@ interface QuoteVersion {
 }
 
 interface InquiryItem {
+  metadata?: string | null;
+  available?: boolean | null;
   id?: string;
   name?: string;
   brand?: string;
@@ -341,8 +344,26 @@ function InquiryDetailPanel({
   inquiryTotal: number;
   fetchData: () => Promise<void>;
 }) {
+  const catalogDraft = inquiry.activeQuote?.status === 'draft' && inquiry.activeQuote.catalogRepricing ? inquiry.activeQuote : null;
+  const isOrderRevision = (item: InquiryItem) => {
+    try { return typeof JSON.parse(item.metadata || '{}').repricingOrderId === 'string'; } catch { return false; }
+  };
+  const remaining = catalogDraft?.items.filter((item) => !isOrderRevision(item) && item.available !== false) ?? [];
+  const pendingOrderReview = catalogDraft?.items.some((item) => isOrderRevision(item) && item.available !== false);
   return (
     <div className="bg-white rounded-lg border border-brand-300 shadow-sm p-4 space-y-4">
+      {inquiry.activeQuote?.status === 'draft' && <CatalogRepricingReview inquiryId={inquiry.id} quote={inquiry.activeQuote} onRecorded={fetchData} />}
+      {catalogDraft && remaining.length > 0 && <section className="space-y-2 rounded border border-blue-200 bg-blue-50 p-4">
+        <h3 className="font-semibold">重新核算后的待报价明细 · 第 {catalogDraft.version} 版</h3>
+        {remaining.map((line, index) => <p key={index} className="text-sm">{line.name} × {line.quantity} · 单价 ¥{Number(line.price).toFixed(2)} · 金额 ¥{(Number(line.price) * Number(line.quantity)).toFixed(2)}</p>)}
+        <button disabled={pendingOrderReview} className="rounded bg-brand-600 px-3 py-2 text-sm text-white disabled:opacity-50" onClick={async () => {
+          if (!confirm(`确认将当前显示的第 ${catalogDraft.version} 版重算报价发送给客户？`)) return;
+          const response = await fetch(`/api/inquiries/${inquiry.id}/quote`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ catalogQuoteId: catalogDraft.id, catalogQuoteHash: catalogDraft.contentHash }) });
+          const data = await response.json().catch(() => ({}));
+          if (!response.ok) { alert(data.error || '发送失败'); return; }
+          await fetchData(); alert('重算报价已提交发送');
+        }}>{pendingOrderReview ? '请先完成原订单价格复核' : '确认并发送这版重算报价'}</button>
+      </section>}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <div className="sm:col-span-2">
           <p className="text-xs text-gray-600 mb-1">询价编号</p>
@@ -404,6 +425,7 @@ function InquiryDetailPanel({
             className="text-sm px-2 py-1 border border-gray-200 rounded w-full text-gray-900" />
         </div>
       </div>
+      {!catalogDraft && <>
       <div>
         <p className="text-xs text-gray-600 mb-2">询价产品（可直接编辑价格和货期）</p>
         <div className="border border-gray-200 rounded-lg overflow-hidden">
@@ -501,6 +523,7 @@ function InquiryDetailPanel({
           提交报价
         </button>
       </div>
+      </>}
       {(inquiry.quoteVersions?.length || 0) > 0 && (
         <div className="border-t border-gray-200 pt-4">
           <p className="mb-2 text-xs font-medium text-gray-600">报价版本</p>

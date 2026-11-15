@@ -1,4 +1,5 @@
 import type { Prisma } from '@prisma/client';
+import { closeOrderRepricing } from '@/lib/order-catalog-repricing';
 import { writeAuditLog } from '@/lib/audit';
 import { releaseOrderReceivableOnCancellation } from '@/lib/customer-credit';
 import { releaseOrderInventory } from '@/lib/inventory';
@@ -163,4 +164,6 @@ async function withdrawOne(
     after: { status: nextStatus, archivedAt: now.toISOString() },
     reason: 'admin_withdraw',
   }, tx);
+  // Close the price review only after the original cancellation has been recorded.
+  await closeOrderRepricing(tx, order.id, actor);
 }

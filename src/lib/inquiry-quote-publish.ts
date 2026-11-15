@@ -1,4 +1,6 @@
 import { Prisma, type PrismaClient } from '@prisma/client';
+import { jsonObject, pendingOrderRepricing } from '@/lib/order-catalog-repricing';
+import { quoteContentHash } from '@/lib/quote-records';
 import {
   QUOTABLE_INQUIRY_STATUSES,
   inquiryQuotePublishBlock,
@@ -6,6 +8,23 @@ import {
 } from '@/lib/inquiry-status';
 
 type Db = Prisma.TransactionClient | PrismaClient;
+
+export async function currentCatalogRepricingDraft(db: Db, inquiryId: string) {
+  const latest = await db.quote.findFirst({ where: { inquiryId }, orderBy: { version: 'desc' }, include: {
+    items: { orderBy: { position: 'asc' } }, confirmations: { where: { action: 'catalog_repricing_prepared' } },
+  } });
+  return latest?.status === 'draft' && latest.confirmations.length === 1 ? latest : null;
+}
+
+async function readyCatalogRepricingDraft(db: Db, inquiryId: string) {
+  const draft = await currentCatalogRepricingDraft(db, inquiryId);
+  if (!draft) return null;
+  for (const line of draft.items) {
+    const orderId = jsonObject(line.metadata).repricingOrderId;
+    if (typeof orderId === 'string' && await pendingOrderRepricing(db, orderId)) return null;
+  }
+  return draft.items.some((line) => !jsonObject(line.metadata).repricingOrderId && line.quantity > line.orderedQty && line.available) ? draft : null;
+}
 
 export class InquiryQuotePublishRejected extends Error {
   status: number;
@@ -36,6 +55,7 @@ export async function assessInquiryQuotePublish(db: Db, inquiryId: string): Prom
   if (!inquiry) {
     return { ok: false, status: 404, code: 'INQUIRY_NOT_FOUND', error: 'Inquiry not found' };
   }
+  if (!inquiry.archivedAt && inquiry.status !== 'declined' && await readyCatalogRepricingDraft(db, inquiryId)) return { ok: true };
   const orderCount = await db.order.count({ where: { inquiryId } });
   const acceptedQuoteCount = await db.quote.count({ where: { inquiryId, status: 'accepted' } });
   const orderedLineCount = await db.quoteItem.count({
@@ -56,7 +76,15 @@ export async function assessInquiryQuotePublish(db: Db, inquiryId: string): Prom
  * Orders, accepted quotes, and lines with orderedQty are excluded in the same UPDATE.
  * Returns the number of rows updated (1 when the publish may continue).
  */
-export async function claimInquiryForQuotePublish(tx: Prisma.TransactionClient, inquiryId: string): Promise<number> {
+export async function claimInquiryForQuotePublish(tx: Prisma.TransactionClient, inquiryId: string, expectedDraft?: { id: string; hash: string }): Promise<number> {
+  const draft = await readyCatalogRepricingDraft(tx, inquiryId);
+  if (draft) {
+    if (!expectedDraft || draft.id !== expectedDraft.id || quoteContentHash(draft) !== expectedDraft.hash) return 0;
+    const claimed = await tx.inquiry.updateMany({ where: { id: inquiryId, archivedAt: null, status: { in: [...QUOTABLE_INQUIRY_STATUSES] } },
+      data: { status: 'quote_sent', hasUnresolvedPricing: false } });
+    return claimed.count;
+  }
+  if (expectedDraft) return 0;
   const updated = await tx.$executeRaw`
     UPDATE "Inquiry"
     SET "status" = 'quote_sent',

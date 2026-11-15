@@ -4,6 +4,8 @@ const mocks = vi.hoisted(() => ({
   requireActiveSession: vi.fn(),
   orderFindUnique: vi.fn(),
   userFindUnique: vi.fn(),
+  orderEventsFindMany: vi.fn(),
+  repricingResultFindUnique: vi.fn(),
   paymentAttemptCreate: vi.fn(),
   paymentAttemptFindFirst: vi.fn(),
   paymentAttemptFindUnique: vi.fn(),
@@ -14,6 +16,14 @@ const mocks = vi.hoisted(() => ({
 vi.mock('@/lib/session', () => ({ requireActiveSession: mocks.requireActiveSession }));
 vi.mock('@/lib/prisma', () => ({
   prisma: {
+    orderEvent: { findMany: mocks.orderEventsFindMany },
+    backgroundTask: { findUnique: mocks.repricingResultFindUnique },
+    $transaction: async (callback: (tx: unknown) => Promise<unknown>) => callback({
+      order: { findUnique: mocks.orderFindUnique },
+      orderEvent: { findMany: mocks.orderEventsFindMany },
+      backgroundTask: { findUnique: mocks.repricingResultFindUnique },
+      paymentAttempt: { create: mocks.paymentAttemptCreate },
+    }),
     order: { findUnique: mocks.orderFindUnique },
     user: { findUnique: mocks.userFindUnique },
     paymentAttempt: {
@@ -58,9 +68,26 @@ describe('Alipay order payment routes', () => {
       return null;
     });
     mocks.orderFindUnique.mockResolvedValue(order);
+    mocks.orderEventsFindMany.mockResolvedValue([]);
+    mocks.repricingResultFindUnique.mockResolvedValue(null);
     mocks.paymentAttemptFindFirst.mockResolvedValue(null);
     mocks.paymentAttemptCreate.mockImplementation(async ({ data }) => ({ ...data }));
     mocks.writeAuditLog.mockResolvedValue(undefined);
+  });
+
+  it('does not open another payment while the original order needs price confirmation', async () => {
+    mocks.orderEventsFindMany.mockResolvedValue([{ metadata: JSON.stringify({ quoteVersion: 2, quoteId: 'q2' }) }]);
+    const response = await createPayment(new Request('https://libereal.cn/api/orders/order-1/alipay', { method: 'POST' }), { params: Promise.resolve({ id: order.id }) });
+    expect(response.status).toBe(409);
+    expect((await response.json()).code).toBe('QUOTE_REPRICE_REQUIRED');
+    expect(mocks.paymentAttemptCreate).not.toHaveBeenCalled();
+  });
+
+  it('rechecks repricing inside the payment-creation transaction', async () => {
+    mocks.orderEventsFindMany.mockResolvedValueOnce([]).mockResolvedValueOnce([{ metadata: JSON.stringify({ quoteVersion: 2, quoteId: 'q2' }) }]);
+    const response = await createPayment(new Request('https://libereal.cn/api/orders/order-1/alipay', { method: 'POST' }), { params: Promise.resolve({ id: order.id }) });
+    expect(response.status).toBe(409);
+    expect(mocks.paymentAttemptCreate).not.toHaveBeenCalled();
   });
 
   it('creates a payment attempt and returns a same-origin redirect URL', async () => {

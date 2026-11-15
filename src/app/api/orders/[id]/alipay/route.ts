@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import { assertOrderPricingResolved, pendingOrderRepricing } from '@/lib/order-catalog-repricing';
 import { requireActiveSession } from '@/lib/session';
 import { alipayAmountToCents, getAlipaySdk } from '@/lib/alipay';
 import { writeAuditLog } from '@/lib/audit';
@@ -62,6 +63,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   }
   if (normalizeOrderPaymentMethod(order.paymentMethod) !== 'alipay') return NextResponse.json({ error: '订单付款方式不匹配' }, { status: 409 });
   if (order.paidAt) return NextResponse.json({ error: '订单已付款' }, { status: 409 });
+  if (await pendingOrderRepricing(prisma, id)) return NextResponse.json({ error: '原订单价格正在复核，请确认新价后再付款', code: 'QUOTE_REPRICE_REQUIRED' }, { status: 409 });
   if (!canPayOrderWithAlipay(order)) {
     return NextResponse.json({ error: '支付宝付款期限已过', expiresAt: getAlipayPaymentExpiresAt(order.createdAt).toISOString() }, { status: 410 });
   }
@@ -92,9 +94,15 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   if (!attempt) {
     const outTradeNo = `LP${Date.now()}${Math.random().toString(36).slice(2, 8)}`.slice(0, 64);
     try {
-      attempt = await prisma.paymentAttempt.create({ data: { orderId: id, provider: 'alipay', outTradeNo, amount: order.total } });
+      attempt = await prisma.$transaction(async (tx) => {
+        await assertOrderPricingResolved(tx, id);
+        const current = await tx.order.findUnique({ where: { id }, select: { total: true, status: true, paidAt: true } });
+        if (!current || current.paidAt || current.status !== order.status || !amountsEqualInCents(current.total, order.total)) throw new Error('QUOTE_REPRICE_REQUIRED');
+        return tx.paymentAttempt.create({ data: { orderId: id, provider: 'alipay', outTradeNo, amount: current.total } });
+      });
       await writeAuditLog({ actorId: user.id, actorEmail: user.email, action: 'payment.alipay_created', resource: 'payments', targetType: 'Order', targetId: id, after: { outTradeNo, amount: order.total } });
     } catch (error) {
+      if (error instanceof Error && error.message === 'QUOTE_REPRICE_REQUIRED') return NextResponse.json({ error: '订单价格已变化，请刷新核对', code: error.message }, { status: 409 });
       if (!isUniqueConstraintError(error)) throw error;
       attempt = await prisma.paymentAttempt.findFirst({
         where: { orderId: id, provider: 'alipay', status: { in: ACTIVE_ALIPAY_ATTEMPT_STATUSES } },

@@ -160,6 +160,7 @@ export function getVerifiedInventoryError(item: VerifiedItem): InventoryValidati
 }
 
 export interface PricingContext {
+  db?: Prisma.TransactionClient;
   userId?: string | null;
   customerEmail?: string | null;
   now?: Date;
@@ -371,13 +372,13 @@ const pricingProductSelect = {
 
 type PricingProduct = Prisma.ProductGetPayload<{ select: typeof pricingProductSelect }>;
 
-async function findProductByCatalogNumber(catalogNumber: string, brand?: string | null): Promise<PricingProduct | null> {
+async function findProductByCatalogNumber(catalogNumber: string, brand?: string | null, db: Prisma.TransactionClient = prisma): Promise<PricingProduct | null> {
   const where = {
     catalogNumber,
     ...(brand ? { brand } : {}),
   };
 
-  const products = await prisma.product.findMany({
+  const products = await db.product.findMany({
     where,
     orderBy: { createdAt: 'asc' },
     take: brand ? 1 : 2,
@@ -391,9 +392,9 @@ async function findProductByCatalogNumber(catalogNumber: string, brand?: string 
   return products[0] ?? null;
 }
 
-async function findPricingProduct(item: PriceLookupItem): Promise<PricingProduct | null> {
+async function findPricingProduct(item: PriceLookupItem, db: Prisma.TransactionClient = prisma): Promise<PricingProduct | null> {
   if (item.productId) {
-    const productById = await prisma.product.findUnique({
+    const productById = await db.product.findUnique({
       where: { id: item.productId },
       select: pricingProductSelect,
     }).catch(() => null);
@@ -404,7 +405,7 @@ async function findPricingProduct(item: PriceLookupItem): Promise<PricingProduct
   const catalogNumber = item.catalogNumber || item.productId;
   if (!catalogNumber) return null;
 
-  return findProductByCatalogNumber(catalogNumber, item.brand);
+  return findProductByCatalogNumber(catalogNumber, item.brand, db);
 }
 
 function explicitBrandDiscount(value: string | null | undefined, brand: string, subBrand?: string | null): number | null {
@@ -435,12 +436,13 @@ export async function verifyAndPriceItems(
   items: PriceLookupItem[],
   context: PricingContext = {},
 ): Promise<{ verifiedItems: VerifiedItem[]; verifiedSubtotal: number; mismatchedCount: number }> {
+  const db = context.db ?? prisma;
   const verifiedItems: VerifiedItem[] = [];
   let verifiedSubtotal = 0;
   let mismatchedCount = 0;
   const now = context.now || new Date();
   const user = context.userId || context.customerEmail
-    ? await prisma.user.findFirst({
+    ? await db.user.findFirst({
       where: context.userId ? { id: context.userId } : { email: context.customerEmail! },
       select: { tier: true, discountRate: true, brandDiscounts: true, isFrozen: true },
     })
@@ -477,12 +479,12 @@ export async function verifyAndPriceItems(
     let pricingSnapshot = '';
 
     if (lookupKey) {
-      const directProduct = item.variantId ? null : await findPricingProduct(item);
+      const directProduct = item.variantId ? null : await findPricingProduct(item, db);
       const variant = item.variantId
-        ? await prisma.productVariant.findUnique({ where: { id: item.variantId }, select: pricingVariantSelect }).catch(() => null)
-        : directProduct ? null : await prisma.productVariant.findFirst({ where: { catalogNumber: lookupKey }, select: pricingVariantSelect }).catch(() => null);
+        ? await db.productVariant.findUnique({ where: { id: item.variantId }, select: pricingVariantSelect }).catch(() => null)
+        : directProduct ? null : await db.productVariant.findFirst({ where: { catalogNumber: lookupKey }, select: pricingVariantSelect }).catch(() => null);
       if (item.variantId && !variant) throw new Error('PRODUCT_VARIANT_NOT_FOUND');
-      const product = directProduct || await prisma.product.findFirst({
+      const product = directProduct || await db.product.findFirst({
         where: variant
           ? { id: variant.productId }
           : { id: lookupKey },

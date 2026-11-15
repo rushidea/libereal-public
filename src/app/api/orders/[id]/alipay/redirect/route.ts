@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import { pendingOrderRepricing } from '@/lib/order-catalog-repricing';
 import { requireActiveSession } from '@/lib/session';
 import { formatAlipayAmount, alipayAmountToCents, getAlipaySdk } from '@/lib/alipay';
 import { getPublicSiteOrigin, isPublicHttpOrigin } from '@/lib/site-url';
@@ -54,6 +55,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
   if (!canPayOrderWithAlipay(attempt.order) || !isActivePaymentAttemptStatus(attempt.status)) {
     return NextResponse.json({ error: '订单付款状态不允许继续支付' }, { status: 409 });
   }
+  if (await pendingOrderRepricing(prisma, id)) return NextResponse.json({ error: '原订单价格正在复核，请确认新价后再付款', code: 'QUOTE_REPRICE_REQUIRED' }, { status: 409 });
 
   const siteUrl = getPublicSiteOrigin(new URL(req.url).origin);
   let paymentUrl: string;

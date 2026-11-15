@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { PricingAdjustmentDetails } from '@/components/admin/PricingAdjustmentDetails';
 import {
   AlertCircle,
   ArrowDown,
@@ -63,6 +64,9 @@ type PreviewSample = {
 };
 
 type PreviewResult = {
+  approvalHash?: string;
+  quoteImpact?: { quoteCount: number; pendingOrderCount: number };
+  repricedQuotes?: Array<{ quoteId: string; inquiryId: string; version: number; subtotal: number }>;
   matchedCount: number;
   changeCount: number;
   skippedInquiryCount: number;
@@ -653,8 +657,9 @@ export default function PricingAdjustmentsPage() {
         ));
         return;
       }
-      const { stepUpToken: _stepUpToken, ...frozen } = payload;
-      previewPayloadRef.current = frozen;
+      const frozen = { ...payload };
+      delete frozen.stepUpToken;
+      previewPayloadRef.current = { ...frozen, approvalHash: data.preview.approvalHash };
       setPreviewResult(data.preview);
       setPreviewVisible(true);
     } catch {
@@ -670,9 +675,13 @@ export default function PricingAdjustmentsPage() {
     }
   }
 
-  async function applyAdjustment(token?: string, allowMfaStepUp = true) {
+  async function applyAdjustment(token?: string, allowMfaStepUp = true, expectedApprovalHash?: unknown) {
     const frozen = previewPayloadRef.current;
     if (!previewResult || !frozen || previewLoading || (applyLoading && allowMfaStepUp)) return;
+    if (expectedApprovalHash && frozen.approvalHash !== expectedApprovalHash) {
+      setPreviewError('验证期间预览已变化，请核对当前预览后重新确认');
+      return;
+    }
     setApplyLoading(true);
     setApplyMessage('');
     setPreviewError('');
@@ -685,12 +694,16 @@ export default function PricingAdjustmentsPage() {
       const data = await response.json().catch(() => ({})) as { error?: string; result?: PreviewResult & { updatedCount: number } };
       if (allowMfaStepUp && isAdminMfaStepUpResponse(response.status, data.error)) {
         await beginMfaStepUp(async (grantToken) => {
-          await applyAdjustment(grantToken, false);
+          await applyAdjustment(grantToken, false, frozen.approvalHash);
         });
         return;
       }
       if (!response.ok) {
         setPreviewError(pricingActionError(data.error, '执行调价失败'));
+        return;
+      }
+      if (!data.result || data.result.approvalHash !== frozen.approvalHash || typeof data.result.updatedCount !== 'number') {
+        setPreviewError('未取得本次预览的执行结果，请核对后再操作');
         return;
       }
       const updatedCount = data.result?.updatedCount ?? 0;
@@ -1414,7 +1427,13 @@ export default function PricingAdjustmentsPage() {
                     {reviewRows.length > 0 ? '下方待审核货号确认后，再生成预览并执行，即可完成整批调价。' : '调整范围或规则后请重新预览。'}
                   </p>
                 ) : (previewResult.changeCount ?? 0) > 0 ? (
-                  <p className="text-xs text-gray-500">将写入 {previewResult.changeCount.toLocaleString('zh-CN')} 条价格。</p>
+                  <div className="space-y-1 text-xs text-gray-500">
+                    <p>将写入 {previewResult.changeCount.toLocaleString('zh-CN')} 条价格。</p>
+                    {previewResult.approvalHash && <PricingAdjustmentDetails key={previewResult.approvalHash} approvalHash={previewResult.approvalHash} />}
+                    {previewResult.quoteImpact && (
+                      <p>将核对 {previewResult.quoteImpact.quoteCount} 份报价、{previewResult.quoteImpact.pendingOrderCount} 笔待接受订单；价格变化的报价会重新核算并进入报价审核。Libereal 已接受订单保留原价。</p>
+                    )}
+                  </div>
                 ) : previewResult.skippedUnchangedCount > 0 && previewResult.matchedCount > 0 ? (
                   <p className="text-xs text-gray-500">库中价格已与本次规则一致。确认执行后价格保持当前值。</p>
                 ) : (
@@ -1423,6 +1442,12 @@ export default function PricingAdjustmentsPage() {
                       ? `当前范围 ${previewResult.skippedInquiryCount.toLocaleString('zh-CN')} 条都是询价商品，没有公开售价，不能按比例或金额调整。如需写入公开售价，请把调价方式改为「设置统一价格」。`
                       : `当前范围内没有可更新的价格，已跳过询价 ${previewResult.skippedInquiryCount.toLocaleString('zh-CN')} 条、未变化 ${previewResult.skippedUnchangedCount.toLocaleString('zh-CN')} 条。`}
                   </p>
+                )}
+                {previewResult.repricedQuotes && previewResult.repricedQuotes.length > 0 && (
+                  <div className="space-y-1 text-sm">
+                    <p>已重新核算 {previewResult.repricedQuotes.length} 份报价，待审核后发送。</p>
+                    <a className="underline" href="/admin/inquiries">查看待审核报价</a>
+                  </div>
                 )}
                 <button
                   type="button"
