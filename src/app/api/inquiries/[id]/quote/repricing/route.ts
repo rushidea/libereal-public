@@ -19,13 +19,14 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     const result = await prisma.$transaction((tx) => recordCustomerRepricingConfirmation(tx, {
       inquiryId: id, quoteId: body.quoteId, orderId: body.orderId, proposalHash: body.proposalHash,
       responseChannel: body.responseChannel.trim(), responseReference: body.responseReference.trim(),
+      confirmedTotal: typeof body.confirmedTotal === 'number' ? body.confirmedTotal : undefined,
       actor: { id: orderAdmin.id, email: orderAdmin.email },
     }));
-    return NextResponse.json({ result });
+    return NextResponse.json({ result }, { status: result.stage === 'awaiting_finance_review' ? 202 : 200 });
   } catch (error) {
     const code = error instanceof Error ? error.message : '';
     if (code === 'REPRICING_VERSION_CHANGED') return NextResponse.json({ code, error: '报价或原订单内容已变化，请刷新后重新核对和确认' }, { status: 409 });
-    if (code === 'REPRICING_FINANCE_REVIEW_REQUIRED') return NextResponse.json({ code, error: '原订单已有付款、活动支付或积分等金额记录，需要先核对差额；原记录已保留，尚未改价或接受订单' }, { status: 409 });
+    if (code === 'REPRICING_TOTAL_CONFIRMATION_REQUIRED') return NextResponse.json({ code, error: '请让客户核对包含原有金额调整的完整应付金额，再登记确认' }, { status: 409 });
     console.error('[quote/repricing]', error);
     return NextResponse.json({ error: '记录客户确认失败' }, { status: 500 });
   }

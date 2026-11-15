@@ -23,7 +23,9 @@ vi.mock('@/lib/pricing-adjustment-template', () => ({
 }));
 
 import { NextRequest } from 'next/server';
-import { PATCH as adminAcceptOrder } from '@/app/api/admin/orders/[id]/route';
+import { GET as adminOrderDetail, PATCH as adminAcceptOrder } from '@/app/api/admin/orders/[id]/route';
+import { ADMIN_ROLE_DEFINITIONS } from '@/lib/admin-permissions';
+import { GET as inquiryList } from '@/app/api/inquiries/route';
 import { PATCH as acceptOrder } from '@/app/api/orders/[id]/route';
 import { POST as orderQuote } from '@/app/api/orders/[id]/quote/route';
 import { GET as previewDetails } from '@/app/api/admin/pricing-adjustments/preview/details/route';
@@ -32,6 +34,7 @@ import { quoteContentHash } from '@/lib/quote-records';
 import { auth } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
 import { POST as recordRepricing } from '@/app/api/inquiries/[id]/quote/repricing/route';
+import { GET as previewRepricingFinance, POST as approveRepricingFinance } from '@/app/api/inquiries/[id]/quote/repricing/finance/route';
 import { assertOrderPricingResolved } from '@/lib/order-catalog-repricing';
 import { closeStalePendingOrders } from '@/lib/order-auto-close';
 import { requiresAdminMfaForPermission } from '@/lib/admin-mfa-settings';
@@ -77,6 +80,20 @@ async function seedQuoteCase(id: string, orderStatus?: string, actualQuantity = 
   const order = orderStatus ? await prisma.order.create({ data: { id: `order_${id}`, inquiryId: inquiry.id, email: inquiry.email, customerId: inquiry.userId, subtotal: actualQuantity * 100, total: actualQuantity * 100, status: orderStatus, orderItems: { create: [{ position: 0, productId: 'product_1', catalogNumber: 'CAT-1', name: '测试抗体', unitPrice: 100, quantity: actualQuantity, metadata: JSON.stringify({ brand: 'CST' }) }] } }, include: { orderItems: true } }) : null;
   if (order) await prisma.quoteConfirmation.create({ data: { quoteId: quote.id, email: inquiry.email, userId: inquiry.userId, action: 'accept', details: JSON.stringify({ orderId: order.id, items: [{ quoteItemId: quote.items[0].id, orderedQuantity: actualQuantity }] }) } });
   return { inquiry, quote, order };
+}
+
+async function prepareOrderRepricing(fixture: Awaited<ReturnType<typeof seedQuoteCase>>) {
+  await previewPricing(request('/preview', {}));
+  expect((await applyDisplayedPreview(request('/apply', {}))).status).toBe(200);
+  const draft = await prisma.quote.findFirstOrThrow({ where: { inquiryId: fixture.inquiry.id }, orderBy: { version: 'desc' }, include: { items: true } });
+  const metadata = JSON.parse(draft.items[0].metadata!);
+  return { quoteId: draft.id, orderId: fixture.order!.id, proposalHash: metadata.repricingProposalHash as string,
+    confirmedTotal: metadata.repricingProposedTotal as number, responseChannel: '测试邮件', responseReference: 'fixture customer response' };
+}
+
+async function financePreview(body: { quoteId: string; orderId: string; proposalHash: string }, inquiryId: string) {
+  const query = new URLSearchParams({ quoteId: body.quoteId, orderId: body.orderId, proposalHash: body.proposalHash });
+  return previewRepricingFinance(new Request(`http://localhost/finance?${query}`), { params: Promise.resolve({ id: inquiryId }) });
 }
 
 function seedProduct(overrides: {
@@ -257,14 +274,253 @@ describe('admin pricing adjustment routes', () => {
   it('keeps paid pending orders and their payment facts unchanged for financial reconciliation', async () => {
     const fixture = await seedQuoteCase('paid', 'pending');
     await prisma.order.update({ where: { id: fixture.order!.id }, data: { paidAt: new Date('2026-11-15T00:00:00Z') } });
-    await previewPricing(request('/preview', {}));
-    expect((await applyDisplayedPreview(request('/apply', {}))).status).toBe(200);
-    const draft = await prisma.quote.findFirstOrThrow({ where: { inquiryId: fixture.inquiry.id }, orderBy: { version: 'desc' }, include: { items: true } });
-    const response = await recordRepricing(request('/repricing', { quoteId: draft.id, orderId: fixture.order!.id, proposalHash: JSON.parse(draft.items[0].metadata!).repricingProposalHash, responseChannel: '测试邮件', responseReference: 'fixture response' }), { params: Promise.resolve({ id: fixture.inquiry.id }) });
-    expect(response.status).toBe(409);
-    expect((await response.json()).code).toBe('REPRICING_FINANCE_REVIEW_REQUIRED');
+    const payment = await prisma.paymentAttempt.create({ data: { orderId: fixture.order!.id, provider: 'alipay', outTradeNo: 'original-paid', amount: 200, status: 'paid', paidAt: new Date('2026-11-15T00:00:00Z') } });
+    const body = await prepareOrderRepricing(fixture);
+    const context = { params: Promise.resolve({ id: fixture.inquiry.id }) };
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const response = await recordRepricing(request('/repricing', body), context);
+      expect(response.status).toBe(202);
+      expect((await response.json()).result).toMatchObject({ stage: 'awaiting_finance_review', ownerId: 'admin_test_id', originalTotal: 200, proposedTotal: 220 });
+    }
+    expect(await prisma.quoteConfirmation.count({ where: { quoteId: body.quoteId, action: 'customer_repricing_recorded_by_staff' } })).toBe(1);
+    const preview = (await (await financePreview(body, fixture.inquiry.id)).json()).preview;
+    expect(preview).toMatchObject({ blocker: 'REPRICING_CASH_RESULT_REQUIRED', customerResponse: { responseReference: body.responseReference } });
+    const approve = await approveRepricingFinance(request('/finance', { ...body, financeApprovalHash: preview.financeApprovalHash, preserveOriginalAdjustments: true, reason: 'fixture review' }), context);
+    expect(approve.status).toBe(409);
+    expect((await approve.json()).code).toBe('REPRICING_CASH_RESULT_REQUIRED');
+    expect(await prisma.paymentAttempt.findUniqueOrThrow({ where: { id: payment.id } })).toEqual(payment);
     expect((await prisma.order.findUniqueOrThrow({ where: { id: fixture.order!.id } })).total).toBe(200);
     await expect(prisma.$transaction((tx) => assertOrderPricingResolved(tx, fixture.order!.id))).rejects.toThrow('QUOTE_REPRICE_REQUIRED');
+  });
+
+  it('requires the complete customer-approved total and finance review before preserving existing adjustments', async () => {
+    const fixture = await seedQuoteCase('adjustments', 'pending');
+    const adjustment = await prisma.orderAdjustment.create({ data: { orderId: fixture.order!.id, type: 'shipping', label: '原运费', amount: 12 } });
+    await prisma.order.update({ where: { id: fixture.order!.id }, data: { adjustmentTotal: 12, total: 212 } });
+    const body = await prepareOrderRepricing(fixture);
+    expect(body.confirmedTotal).toBe(232);
+    const context = { params: Promise.resolve({ id: fixture.inquiry.id }) };
+    const incomplete = await recordRepricing(request('/repricing', { ...body, confirmedTotal: 220 }), context);
+    expect(incomplete.status).toBe(409);
+    expect((await incomplete.json()).code).toBe('REPRICING_TOTAL_CONFIRMATION_REQUIRED');
+    expect(await prisma.quoteConfirmation.count({ where: { action: 'customer_repricing_recorded_by_staff' } })).toBe(0);
+    expect((await recordRepricing(request('/repricing', body), context)).status).toBe(202);
+    const preview = (await (await financePreview(body, fixture.inquiry.id)).json()).preview;
+    expect(preview).toMatchObject({ blocker: null, originalTotal: 212, amounts: { subtotal: 220, adjustmentTotal: 12, total: 232 } });
+    expect((await prisma.order.findUniqueOrThrow({ where: { id: fixture.order!.id } })).total).toBe(212);
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const approved = await approveRepricingFinance(request('/finance', { ...body, financeApprovalHash: preview.financeApprovalHash, preserveOriginalAdjustments: true, reason: '原运费仍适用，客户确认了完整金额' }), context);
+      expect(approved.status).toBe(200);
+      expect((await approved.json()).result).toMatchObject({ stage: 'applied', total: 232, financeApprovalHash: preview.financeApprovalHash });
+    }
+    const order = await prisma.order.findUniqueOrThrow({ where: { id: fixture.order!.id }, include: { orderItems: true, adjustments: true } });
+    expect(order).toMatchObject({ status: 'pending', total: 232, adjustmentTotal: 12 });
+    expect(order.orderItems[0]).toMatchObject({ id: fixture.order!.orderItems[0].id, unitPrice: 110 });
+    expect(order.adjustments).toEqual([adjustment]);
+    expect(await prisma.quoteConfirmation.count({ where: { action: 'catalog_repricing_finance_approved' } })).toBe(1);
+    await expect(prisma.$transaction((tx) => assertOrderPricingResolved(tx, order.id))).resolves.toBeUndefined();
+  });
+
+  it('preserves the original applied points and ledger without another deduction', async () => {
+    const fixture = await seedQuoteCase('points', 'pending');
+    await prisma.orderAdjustment.create({ data: { orderId: fixture.order!.id, type: 'points_redeem', label: '个人积分抵扣', amount: -10 } });
+    await prisma.order.update({ where: { id: fixture.order!.id }, data: { adjustmentTotal: -10, total: 190, pointsPersonal: 10, pointsDiscount: 10, pointsApplied: true } });
+    const log = await prisma.pointsLog.create({ data: { userId: 'admin_test_id', delta: -10, type: 'order_redeem', reason: 'fixture original redemption', relatedId: fixture.order!.id } });
+    const originalUser = await prisma.user.findUniqueOrThrow({ where: { id: 'admin_test_id' } });
+    const body = await prepareOrderRepricing(fixture);
+    const context = { params: Promise.resolve({ id: fixture.inquiry.id }) };
+    expect((await recordRepricing(request('/repricing', body), context)).status).toBe(202);
+    const preview = (await (await financePreview(body, fixture.inquiry.id)).json()).preview;
+    expect(preview.blocker).toBeNull();
+    expect((await approveRepricingFinance(request('/finance', { ...body, financeApprovalHash: preview.financeApprovalHash, preserveOriginalAdjustments: true, reason: '保留原积分抵扣' }), context)).status).toBe(200);
+    expect((await prisma.order.findUniqueOrThrow({ where: { id: fixture.order!.id } }))).toMatchObject({ total: 210, pointsPersonal: 10, pointsApplied: true, pointsRefundedPersonal: 0 });
+    expect((await prisma.user.findUniqueOrThrow({ where: { id: 'admin_test_id' } })).points).toBe(originalUser.points);
+    expect(await prisma.pointsLog.findMany({ where: { relatedId: fixture.order!.id } })).toEqual([log]);
+  });
+
+  it('requires a fresh finance preview after a payment closes and retains the original customer reply', async () => {
+    const fixture = await seedQuoteCase('payment_callback', 'pending');
+    const attempt = await prisma.paymentAttempt.create({ data: { orderId: fixture.order!.id, provider: 'alipay', outTradeNo: 'active-payment', amount: 200, status: 'created' } });
+    const body = await prepareOrderRepricing(fixture);
+    const context = { params: Promise.resolve({ id: fixture.inquiry.id }) };
+    expect((await recordRepricing(request('/repricing', body), context)).status).toBe(202);
+    const oldPreview = (await (await financePreview(body, fixture.inquiry.id)).json()).preview;
+    expect(oldPreview.blocker).toBe('REPRICING_PAYMENT_RECONCILIATION_REQUIRED');
+    await prisma.paymentAttempt.update({ where: { id: attempt.id }, data: { status: 'TRADE_CLOSED', notifiedAt: new Date() } });
+    const stale = await approveRepricingFinance(request('/finance', { ...body, financeApprovalHash: oldPreview.financeApprovalHash, preserveOriginalAdjustments: true, reason: 'stale fixture review' }), context);
+    expect(stale.status).toBe(409);
+    const fresh = (await (await financePreview(body, fixture.inquiry.id)).json()).preview;
+    expect(fresh.financeApprovalHash).not.toBe(oldPreview.financeApprovalHash);
+    expect(fresh).toMatchObject({ blocker: null, customerResponse: { responseReference: body.responseReference } });
+    expect((await approveRepricingFinance(request('/finance', { ...body, financeApprovalHash: fresh.financeApprovalHash, preserveOriginalAdjustments: true, reason: '原交易已关闭，尚无收款' }), context)).status).toBe(200);
+    expect(await prisma.quoteConfirmation.count({ where: { action: 'customer_repricing_recorded_by_staff' } })).toBe(1);
+    expect((await prisma.paymentAttempt.findUniqueOrThrow({ where: { id: attempt.id } })).status).toBe('TRADE_CLOSED');
+  });
+
+  it('rejects changed financial terms and cannot be approved by a model-claimed finance role', async () => {
+    const fixture = await seedQuoteCase('finance_permissions', 'pending');
+    const adjustment = await prisma.orderAdjustment.create({ data: { orderId: fixture.order!.id, type: 'shipping', label: '运费', amount: 12 } });
+    await prisma.order.update({ where: { id: fixture.order!.id }, data: { total: 212, adjustmentTotal: 12 } });
+    const body = await prepareOrderRepricing(fixture);
+    const context = { params: Promise.resolve({ id: fixture.inquiry.id }) };
+    const noResponse = (await (await financePreview(body, fixture.inquiry.id)).json()).preview;
+    expect((await approveRepricingFinance(request('/finance', { ...body, financeApprovalHash: noResponse.financeApprovalHash, preserveOriginalAdjustments: true, reason: 'no customer reply' }), context)).status).toBe(409);
+    await recordRepricing(request('/repricing', body), context);
+    const preview = (await (await financePreview(body, fixture.inquiry.id)).json()).preview;
+    await prisma.adminRole.update({ where: { id: 'role_super_admin' }, data: { key: 'catalog_test_staff' } });
+    await prisma.adminRolePermission.deleteMany({ where: { roleId: 'role_super_admin', permissionId: 'perm_finance_write' } });
+    const denied = await approveRepricingFinance(request('/finance', { ...body, role: 'finance', financeApprovalHash: preview.financeApprovalHash, preserveOriginalAdjustments: true, reason: 'model claims finance role' }), context);
+    expect(denied.status).toBe(403);
+    expect((await denied.json()).requiredPermission).toBe('finance.write');
+    await prisma.adminRole.update({ where: { id: 'role_super_admin' }, data: { key: 'super_admin' } });
+    await prisma.orderAdjustment.update({ where: { id: adjustment.id }, data: { amount: 15 } });
+    const changed = await approveRepricingFinance(request('/finance', { ...body, financeApprovalHash: preview.financeApprovalHash, preserveOriginalAdjustments: true, reason: 'old approval' }), context);
+    expect(changed.status).toBe(409);
+    expect((await prisma.order.findUniqueOrThrow({ where: { id: fixture.order!.id } })).total).toBe(212);
+  });
+
+  it('keeps points with an unresolved deduction or refund waiting without treating the customer reply as completion', async () => {
+    const fixture = await seedQuoteCase('unsettled_points', 'pending');
+    await prisma.order.update({ where: { id: fixture.order!.id }, data: { pointsPersonal: 10, pointsApplied: false } });
+    const body = await prepareOrderRepricing(fixture);
+    const context = { params: Promise.resolve({ id: fixture.inquiry.id }) };
+    expect((await recordRepricing(request('/repricing', body), context)).status).toBe(202);
+    let preview = (await (await financePreview(body, fixture.inquiry.id)).json()).preview;
+    expect(preview.blocker).toBe('REPRICING_POINTS_RECONCILIATION_REQUIRED');
+    await prisma.order.update({ where: { id: fixture.order!.id }, data: { pointsApplied: true, pointsRefundedPersonal: 1 } });
+    preview = (await (await financePreview(body, fixture.inquiry.id)).json()).preview;
+    expect(preview.blocker).toBe('REPRICING_POINTS_RECONCILIATION_REQUIRED');
+    expect((await approveRepricingFinance(request('/finance', { ...body, financeApprovalHash: preview.financeApprovalHash, preserveOriginalAdjustments: true, reason: 'fixture unresolved points' }), context)).status).toBe(409);
+    expect(await prisma.quoteConfirmation.count({ where: { action: 'catalog_repricing_finance_approved' } })).toBe(0);
+    expect((await prisma.order.findUniqueOrThrow({ where: { id: fixture.order!.id } })).total).toBe(200);
+  });
+
+  it.each(['missing', 'wrong_type', 'wrong_owner', 'under_deducted', 'unrecorded_refund'])('rejects pointsApplied when the original points ledger is %s', async (condition) => {
+    const fixture = await seedQuoteCase(`points_${condition}`, 'pending');
+    await prisma.order.update({ where: { id: fixture.order!.id }, data: { pointsPersonal: 10, pointsDiscount: 10, pointsApplied: true, adjustmentTotal: -10, total: 190 } });
+    await prisma.orderAdjustment.create({ data: { orderId: fixture.order!.id, type: 'points_redeem', label: '原积分抵扣', amount: -10 } });
+    if (condition === 'wrong_owner') seedAdmin(getTestDb(), 'other_customer', 'other@example.com');
+    if (condition !== 'missing') await prisma.pointsLog.create({ data: {
+      userId: condition === 'wrong_owner' ? 'other_customer' : 'admin_test_id', relatedId: fixture.order!.id,
+      type: condition === 'wrong_type' ? 'redeem' : 'order_redeem', delta: condition === 'under_deducted' ? -8 : -10,
+    } });
+    if (condition === 'unrecorded_refund') await prisma.pointsLog.create({ data: {
+      userId: 'admin_test_id', relatedId: fixture.order!.id, type: 'order_redeem_refund', delta: 2, reason: '已执行的退还',
+    } });
+    const body = await prepareOrderRepricing(fixture);
+    const context = { params: Promise.resolve({ id: fixture.inquiry.id }) };
+    expect((await recordRepricing(request('/repricing', body), context)).status).toBe(202);
+    const preview = (await (await financePreview(body, fixture.inquiry.id)).json()).preview;
+    expect(preview.blocker).toBe('REPRICING_POINTS_RECONCILIATION_REQUIRED');
+    const approved = await approveRepricingFinance(request('/finance', { ...body, financeApprovalHash: preview.financeApprovalHash, preserveOriginalAdjustments: true, reason: 'inconsistent points' }), context);
+    expect(approved.status).toBe(409);
+    expect((await prisma.order.findUniqueOrThrow({ where: { id: fixture.order!.id } })).total).toBe(190);
+  });
+
+  it('invalidates finance approval when only the group points ledger changes', async () => {
+    const fixture = await seedQuoteCase('group_points_drift', 'pending');
+    const group = await prisma.researchGroup.create({ data: { name: '测试课题组', status: 'approved', points: 90 } });
+    await prisma.order.update({ where: { id: fixture.order!.id }, data: { pointsGroup: 10, pointsGroupId: group.id, pointsDiscount: 10, pointsApplied: true, adjustmentTotal: -10, total: 190 } });
+    await prisma.orderAdjustment.create({ data: { orderId: fixture.order!.id, type: 'points_redeem', label: '原课题组积分抵扣', amount: -10 } });
+    await prisma.groupPointsLog.create({ data: { groupId: group.id, actorUserId: 'admin_test_id', relatedId: fixture.order!.id, type: 'order_redeem', delta: -10 } });
+    const body = await prepareOrderRepricing(fixture);
+    const context = { params: Promise.resolve({ id: fixture.inquiry.id }) };
+    await recordRepricing(request('/repricing', body), context);
+    const previous = (await (await financePreview(body, fixture.inquiry.id)).json()).preview;
+    expect(previous).toMatchObject({ blocker: null, pointsEvidence: { held: { personal: 0, group: 10 } } });
+    await prisma.groupPointsLog.create({ data: { groupId: group.id, actorUserId: 'admin_test_id', relatedId: fixture.order!.id, type: 'order_redeem_refund', delta: 1, reason: '真实退还记录' } });
+    const approved = await approveRepricingFinance(request('/finance', { ...body, financeApprovalHash: previous.financeApprovalHash, preserveOriginalAdjustments: true, reason: 'old ledger' }), context);
+    expect(approved.status).toBe(409);
+    const latest = (await (await financePreview(body, fixture.inquiry.id)).json()).preview;
+    expect(latest.financeApprovalHash).not.toBe(previous.financeApprovalHash);
+    expect(latest.blocker).toBe('REPRICING_POINTS_RECONCILIATION_REQUIRED');
+    expect((await prisma.researchGroup.findUniqueOrThrow({ where: { id: group.id } })).points).toBe(90);
+  });
+
+  it.each([{ condition: 'zero intent with a real deduction', points: 0, discount: 0 },
+    { condition: 'deduction worth less than the recorded discount', points: 10, discount: 100 }])('rejects $condition', async ({ condition, points, discount }) => {
+    const fixture = await seedQuoteCase(condition, 'pending');
+    await prisma.order.update({ where: { id: fixture.order!.id }, data: { pointsPersonal: points, pointsDiscount: discount, pointsApplied: true, adjustmentTotal: -discount, total: 200 - discount } });
+    if (discount) await prisma.orderAdjustment.create({ data: { orderId: fixture.order!.id, type: 'points_redeem', label: '原积分抵扣', amount: -discount } });
+    const original = await prisma.pointsLog.create({ data: { userId: 'admin_test_id', relatedId: fixture.order!.id, type: 'order_redeem', delta: -10 } });
+    const body = await prepareOrderRepricing(fixture);
+    const context = { params: Promise.resolve({ id: fixture.inquiry.id }) };
+    expect((await recordRepricing(request('/repricing', body), context)).status).toBe(202);
+    const preview = (await (await financePreview(body, fixture.inquiry.id)).json()).preview;
+    expect(preview).toMatchObject({ blocker: 'REPRICING_POINTS_RECONCILIATION_REQUIRED', pointsEvidence: { recordedNet: { personal: 10, group: 0 } } });
+    expect((await approveRepricingFinance(request('/finance', { ...body, financeApprovalHash: preview.financeApprovalHash, preserveOriginalAdjustments: true, reason: 'inconsistent original points' }), context)).status).toBe(409);
+    expect(await prisma.pointsLog.findMany({ where: { relatedId: fixture.order!.id } })).toEqual([original]);
+    expect((await prisma.order.findUniqueOrThrow({ where: { id: fixture.order!.id } })).total).toBe(200 - discount);
+  });
+
+  it.each(['pointsDiscount', 'pointsRefundedPersonal', 'pointsRefundedGroup', 'pointsRefundedCash'] as const)('cannot bypass finance through the customer-reply route when only %s is recorded', async (field) => {
+    const fixture = await seedQuoteCase(`reply_bypass_${field}`, 'pending');
+    await prisma.order.update({ where: { id: fixture.order!.id }, data: { [field]: 10 } });
+    const body = await prepareOrderRepricing(fixture);
+    await prisma.adminRole.update({ where: { id: 'role_super_admin' }, data: { key: 'order_and_inquiry_staff' } });
+    await prisma.adminRolePermission.deleteMany({ where: { roleId: 'role_super_admin' } });
+    await prisma.adminRolePermission.createMany({ data: ['inquiries.read', 'inquiries.write', 'orders.read', 'orders.write'].map((key) => ({ roleId: 'role_super_admin', permissionId: `perm_${key.replace('.', '_')}` })) });
+    const context = { params: Promise.resolve({ id: fixture.inquiry.id }) };
+    const recorded = await recordRepricing(request('/repricing', body), context);
+    expect(recorded.status).toBe(202);
+    expect((await recorded.json()).result.stage).toBe('awaiting_finance_review');
+    expect((await financePreview(body, fixture.inquiry.id)).status).toBe(403);
+    const original = await prisma.order.findUniqueOrThrow({ where: { id: fixture.order!.id }, include: { orderItems: true } });
+    expect(original.total).toBe(200);
+    expect(original.orderItems[0].unitPrice).toBe(100);
+    expect(await prisma.orderEvent.count({ where: { orderId: original.id, type: 'catalog_repricing_resolved' } })).toBe(0);
+    expect(await prisma.quoteConfirmation.count({ where: { quoteId: body.quoteId, action: 'customer_repricing_recorded_by_staff' } })).toBe(1);
+    await prisma.adminRole.update({ where: { id: 'role_super_admin' }, data: { key: 'super_admin' } });
+    const preview = (await (await financePreview(body, fixture.inquiry.id)).json()).preview;
+    expect(preview.blocker).toBe('REPRICING_POINTS_RECONCILIATION_REQUIRED');
+    expect((await approveRepricingFinance(request('/finance', { ...body, financeApprovalHash: preview.financeApprovalHash, preserveOriginalAdjustments: true, reason: 'unresolved original amounts' }), context)).status).toBe(409);
+  });
+
+  it('compares unchanged repriced totals against the actual payment rather than the edited order total', async () => {
+    const fixture = await seedQuoteCase('actual_receipt', 'pending', 1);
+    await prisma.product.update({ where: { id: 'product_2' }, data: { price: 100, pricingMode: 'fixed' } });
+    await prisma.quoteItem.update({ where: { id: fixture.quote.items[0].id }, data: { quantity: 1, lineTotal: 100 } });
+    const secondLine = await prisma.quoteItem.create({ data: { quoteId: fixture.quote.id, position: 1, productId: 'product_2', catalogNumber: 'CAT-2', name: '第二件测试商品', unitPrice: 100, quantity: 1, orderedQty: 1, lineTotal: 100, metadata: JSON.stringify({ brand: 'CST' }) } });
+    await prisma.orderItem.create({ data: { orderId: fixture.order!.id, position: 1, productId: 'product_2', catalogNumber: 'CAT-2', name: '第二件测试商品', unitPrice: 100, quantity: 1, metadata: JSON.stringify({ brand: 'CST' }) } });
+    await prisma.quoteConfirmation.updateMany({ where: { quoteId: fixture.quote.id, action: 'accept' }, data: { details: JSON.stringify({ orderId: fixture.order!.id, items: [{ quoteItemId: fixture.quote.items[0].id, orderedQuantity: 1 }, { quoteItemId: secondLine.id, orderedQuantity: 1 }] }) } });
+    const paidAt = new Date('2026-11-15T00:00:00Z');
+    await prisma.order.update({ where: { id: fixture.order!.id }, data: { subtotal: 200, adjustmentTotal: 12, total: 212, paymentMethod: 'alipay', paidAt } });
+    await prisma.orderAdjustment.create({ data: { orderId: fixture.order!.id, type: 'shipping', label: '收款之后增加的运费', amount: 12 } });
+    const payment = await prisma.paymentAttempt.create({ data: { orderId: fixture.order!.id, provider: 'alipay', outTradeNo: 'original-200', tradeNo: 'verified-trade-200', amount: 200, status: 'paid', paidAt } });
+    const change = { scope: 'catalog', mode: 'file', catalogItems: [{ catalogNumber: 'CAT-1', price: 110 }, { catalogNumber: 'CAT-2', price: 90 }] };
+    await previewPricing(request('/preview', change));
+    expect((await applyDisplayedPreview(request('/apply', change))).status).toBe(200);
+    const draft = await prisma.quote.findFirstOrThrow({ where: { inquiryId: fixture.inquiry.id }, orderBy: { version: 'desc' }, include: { items: true } });
+    const body = { quoteId: draft.id, orderId: fixture.order!.id, proposalHash: JSON.parse(draft.items[0].metadata!).repricingProposalHash, confirmedTotal: 212, responseChannel: '测试邮件', responseReference: '客户确认完整212元' };
+    const context = { params: Promise.resolve({ id: fixture.inquiry.id }) };
+    await recordRepricing(request('/repricing', body), context);
+    const preview = (await (await financePreview(body, fixture.inquiry.id)).json()).preview;
+    expect(preview).toMatchObject({ originalTotal: 212, amounts: { total: 212 }, verifiedPaidAmount: 200, blocker: 'REPRICING_CASH_RESULT_REQUIRED' });
+    const approved = await approveRepricingFinance(request('/finance', { ...body, financeApprovalHash: preview.financeApprovalHash, preserveOriginalAdjustments: true, reason: '仍少收12元' }), context);
+    expect(approved.status).toBe(409);
+    expect(await prisma.paymentAttempt.findUniqueOrThrow({ where: { id: payment.id } })).toEqual(payment);
+    expect(await prisma.orderEvent.count({ where: { orderId: fixture.order!.id, type: 'catalog_repricing_resolved' } })).toBe(0);
+  });
+
+  it('allows the standard finance role to discover and complete its review through the original order detail', async () => {
+    const fixture = await seedQuoteCase('finance_entry', 'pending');
+    await prisma.orderAdjustment.create({ data: { orderId: fixture.order!.id, type: 'shipping', label: '运费', amount: 12 } });
+    await prisma.order.update({ where: { id: fixture.order!.id }, data: { total: 212, adjustmentTotal: 12 } });
+    const body = await prepareOrderRepricing(fixture);
+    await recordRepricing(request('/repricing', body), { params: Promise.resolve({ id: fixture.inquiry.id }) });
+    await prisma.adminRole.update({ where: { id: 'role_super_admin' }, data: { key: 'finance_staff' } });
+    await prisma.adminRolePermission.deleteMany({ where: { roleId: 'role_super_admin' } });
+    await prisma.adminRolePermission.createMany({ data: ADMIN_ROLE_DEFINITIONS.finance_staff.permissions.map((key) => ({ roleId: 'role_super_admin', permissionId: `perm_${key.replace('.', '_')}` })) });
+    expect((await inquiryList(new NextRequest('http://localhost/api/inquiries'))).status).toBe(403);
+    const detail = await adminOrderDetail(new NextRequest('http://localhost/api/admin/orders/id'), { params: Promise.resolve({ id: fixture.order!.id }) });
+    expect(detail.status).toBe(200);
+    const identity = (await detail.json()).order.pendingCatalogRepricing;
+    expect(identity).toEqual({ inquiryId: fixture.inquiry.id, quoteId: body.quoteId, orderId: body.orderId, proposalHash: body.proposalHash });
+    const preview = (await (await financePreview(identity, identity.inquiryId)).json()).preview;
+    const approved = await approveRepricingFinance(request('/finance', { ...identity, financeApprovalHash: preview.financeApprovalHash, preserveOriginalAdjustments: true, reason: '财务通过订单详情完成原费用核对' }), { params: Promise.resolve({ id: identity.inquiryId }) });
+    expect(approved.status).toBe(200);
+    const completed = await adminOrderDetail(new NextRequest('http://localhost/api/admin/orders/id'), { params: Promise.resolve({ id: fixture.order!.id }) });
+    expect((await completed.json()).order).toMatchObject({ total: 232, status: 'pending', pendingCatalogRepricing: null });
   });
 
   it('exposes the complete immutable change list beyond the twenty sample rows', async () => {

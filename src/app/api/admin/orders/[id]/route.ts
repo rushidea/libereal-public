@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { assertOrderPricingResolved, closeOrderRepricing } from '@/lib/order-catalog-repricing';
+import { assertOrderPricingResolved, closeOrderRepricing, pendingOrderRepricing } from '@/lib/order-catalog-repricing';
 import type { Prisma } from '@prisma/client';
 import { orderItemView } from '@/lib/commerce-records';
 import { getAlipayPaymentSummary } from '@/data/alipay-payment';
@@ -36,11 +36,15 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
       return NextResponse.json({ error: 'Order not found' }, { status: 404 });
     }
     const { orderItems, paymentAttempts, ...rest } = order;
+    const pendingPricing = order.inquiryId && isAutoCloseableOrderStatus(order.status)
+      ? await pendingOrderRepricing(prisma, order.id) : null;
     return NextResponse.json({
       order: {
         ...rest,
         items: orderItems.map(orderItemView),
         payment: getAlipayPaymentSummary(rest, paymentAttempts[0]),
+        pendingCatalogRepricing: pendingPricing && typeof pendingPricing.quoteId === 'string' && typeof pendingPricing.proposalHash === 'string'
+          ? { inquiryId: order.inquiryId, quoteId: pendingPricing.quoteId, orderId: order.id, proposalHash: pendingPricing.proposalHash } : null,
       },
     });
   } catch (err) {

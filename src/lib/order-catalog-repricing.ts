@@ -1,6 +1,8 @@
 import type { Prisma } from '@prisma/client';
 import { pricingContentHash } from '@/lib/pricing-adjustment-approval';
 import { calculateOrderAmounts } from '@/lib/order-domain';
+import { heldOrderRedeemPoints, POINTS_DEDUCTION_ROLLBACK_REASON, PREPAY_POINTS_RELEASE_REASON } from '@/lib/points-checkout-service';
+import { pointsToYuan } from '@/lib/points-checkout';
 
 export function jsonObject(raw: string | null | undefined): Record<string, unknown> {
   try { const value = JSON.parse(raw ?? '{}'); return value && typeof value === 'object' && !Array.isArray(value) ? value : {}; }
@@ -11,18 +13,33 @@ export const REPRICING_ORDER_INCLUDE = {
   orderItems: { orderBy: { position: 'asc' as const } },
   adjustments: { orderBy: { id: 'asc' as const } },
   paymentAttempts: { orderBy: { id: 'asc' as const } },
+  addressSnapshot: true,
 } satisfies Prisma.OrderInclude;
 type RepricingOrder = Prisma.OrderGetPayload<{ include: typeof REPRICING_ORDER_INCLUDE }>;
 
-export function orderRepricingFingerprint(order: RepricingOrder) {
+// A payment callback can settle while a customer reply is awaited. It does not
+// change the proposed goods/quantity/amount; finance must review its fresh result.
+export function orderRepricingTermsFingerprint(order: RepricingOrder) {
   return pricingContentHash({
     id: order.id, inquiryId: order.inquiryId, customerId: order.customerId, email: order.email,
-    organizationId: order.organizationId, ownerScope: order.ownerScope, status: order.status,
-    paymentMethod: order.paymentMethod, paidAt: order.paidAt, archivedAt: order.archivedAt,
+    organizationId: order.organizationId, ownerScope: order.ownerScope,
+    status: ['pending', 'unpaid'].includes(order.status) ? 'awaiting_merchant_acceptance' : order.status,
+    paymentMethod: order.paymentMethod, archivedAt: order.archivedAt,
     subtotal: order.subtotal, total: order.total, adjustmentTotal: order.adjustmentTotal,
     pointsPersonal: order.pointsPersonal, pointsGroup: order.pointsGroup, pointsGroupId: order.pointsGroupId,
-    pointsDiscount: order.pointsDiscount, pointsApplied: order.pointsApplied,
-    items: order.orderItems, adjustments: order.adjustments, paymentAttempts: order.paymentAttempts,
+    pointsDiscount: order.pointsDiscount, addressSnapshot: order.addressSnapshot,
+    legalAcceptedIds: order.legalAcceptedIds, legalAcceptedSnapshot: order.legalAcceptedSnapshot,
+    items: order.orderItems, adjustments: order.adjustments,
+  });
+}
+
+export function orderRepricingFingerprint(order: RepricingOrder) {
+  return pricingContentHash({
+    terms: orderRepricingTermsFingerprint(order), status: order.status,
+    paidAt: order.paidAt, paymentAttempts: order.paymentAttempts,
+    pointsApplied: order.pointsApplied, pointsAppliedAt: order.pointsAppliedAt,
+    pointsRefundedPersonal: order.pointsRefundedPersonal,
+    pointsRefundedGroup: order.pointsRefundedGroup, pointsRefundedCash: order.pointsRefundedCash,
   });
 }
 
@@ -63,29 +80,32 @@ export async function closeOrderRepricing(tx: Prisma.TransactionClient, orderId:
   if (!remaining.length) await tx.inquiry.update({ where: { id: quote.inquiryId }, data: { hasUnresolvedPricing: false, status: 'closed' } });
 }
 
-/** Record a real customer's response received by staff; this is not merchant order acceptance. */
-export async function recordCustomerRepricingConfirmation(tx: Prisma.TransactionClient, input: {
-  inquiryId: string; quoteId: string; orderId: string; proposalHash: string;
-  responseChannel: string; responseReference: string; actor: { id: string; email: string };
-}) {
-  const dedupeKey = `catalog-order-price:${input.quoteId}:${input.orderId}`;
-  const recorded = await tx.backgroundTask.findUnique({ where: { dedupeKey } });
-  if (recorded && recorded.status !== 'succeeded') throw new Error('REPRICING_VERSION_CHANGED');
-  if (recorded?.result) {
-    const previous = JSON.parse(recorded.result);
-    if (previous.proposalHash !== input.proposalHash) throw new Error('REPRICING_VERSION_CHANGED');
-    return { ...previous, replayed: true };
-  }
+type RepricingIdentity = { inquiryId: string; quoteId: string; orderId: string; proposalHash: string };
+type Actor = { id: string; email: string };
+type CustomerResponse = RepricingIdentity & { responseChannel: string; responseReference: string; confirmedTotal?: number; actor: Actor };
+type AppliedResult = RepricingIdentity & { stage: 'applied'; before: number; total: number; status: string; financeApprovalHash: string | null; replayed?: boolean };
+
+async function completedRepricing(tx: Prisma.TransactionClient, input: RepricingIdentity) {
+  const record = await tx.backgroundTask.findUnique({ where: { dedupeKey: `catalog-order-price:${input.quoteId}:${input.orderId}` } });
+  if (record && record.status !== 'succeeded') throw new Error('REPRICING_VERSION_CHANGED');
+  if (!record?.result) return null;
+  const previous = jsonObject(record.result);
+  if (previous.proposalHash !== input.proposalHash || (previous.inquiryId && previous.inquiryId !== input.inquiryId)
+    || typeof previous.total !== 'number' || typeof previous.before !== 'number' || typeof previous.status !== 'string') throw new Error('REPRICING_VERSION_CHANGED');
+  return { ...input, before: previous.before, total: previous.total, status: previous.status,
+    financeApprovalHash: typeof previous.financeApprovalHash === 'string' ? previous.financeApprovalHash : null,
+    stage: 'applied', replayed: true } satisfies AppliedResult;
+}
+
+async function loadRepricingProposal(tx: Prisma.TransactionClient, input: RepricingIdentity) {
   const pending = await pendingOrderRepricing(tx, input.orderId);
   if (!pending || pending.quoteId !== input.quoteId || pending.proposalHash !== input.proposalHash) throw new Error('REPRICING_VERSION_CHANGED');
   const order = await tx.order.findUnique({ where: { id: input.orderId }, include: REPRICING_ORDER_INCLUDE });
   if (!order || order.inquiryId !== input.inquiryId || !['pending', 'unpaid'].includes(order.status)
-    || order.archivedAt || orderRepricingFingerprint(order) !== pending.orderFingerprint) throw new Error('REPRICING_VERSION_CHANGED');
-  // Never rewrite a payment/points fact to make a new catalogue price appear settled.
-  if (order.paidAt || order.paymentAttempts.some((attempt) => !['TRADE_CLOSED', 'closed', 'failed'].includes(attempt.status))
-    || order.pointsApplied || order.pointsPersonal || order.pointsGroup || order.adjustments.length) {
-    throw new Error('REPRICING_FINANCE_REVIEW_REQUIRED');
-  }
+    || order.archivedAt) throw new Error('REPRICING_VERSION_CHANGED');
+  if (typeof pending.orderTermsFingerprint === 'string'
+    ? orderRepricingTermsFingerprint(order) !== pending.orderTermsFingerprint
+    : orderRepricingFingerprint(order) !== pending.orderFingerprint) throw new Error('REPRICING_VERSION_CHANGED');
   const quote = await tx.quote.findUnique({ where: { id: input.quoteId }, include: { items: { orderBy: { position: 'asc' } } } });
   const latest = await tx.quote.findFirst({ where: { inquiryId: input.inquiryId }, orderBy: { version: 'desc' }, select: { id: true } });
   if (!quote || quote.inquiryId !== input.inquiryId || latest?.id !== quote.id || quote.status !== 'draft') throw new Error('REPRICING_VERSION_CHANGED');
@@ -96,18 +116,71 @@ export async function recordCustomerRepricingConfirmation(tx: Prisma.Transaction
   for (const item of order.orderItems) {
     const matches = lines.filter((line) => jsonObject(line.metadata).repricingOrderItemId === item.id);
     if (matches.length !== 1 || matches[0].quantity !== item.quantity) throw new Error('REPRICING_VERSION_CHANGED');
-    await tx.orderItem.update({ where: { id: item.id }, data: { unitPrice: matches[0].unitPrice, pricingSnapshot: matches[0].pricingSnapshot } });
   }
-  const amounts = calculateOrderAmounts(lines.map((line) => ({ unitPrice: line.unitPrice, quantity: line.quantity })), []);
+  const amounts = calculateOrderAmounts(lines.map((line) => ({ unitPrice: line.unitPrice, quantity: line.quantity })), order.adjustments);
+  return { pending, order, quote, lines, amounts };
+}
+
+type LoadedProposal = Awaited<ReturnType<typeof loadRepricingProposal>>;
+function needsFinanceReview(order: RepricingOrder) {
+  return Boolean(order.paidAt || order.paymentAttempts.length
+    || order.pointsApplied || order.pointsAppliedAt || order.pointsPersonal || order.pointsGroup || order.pointsDiscount
+    || order.pointsRefundedPersonal || order.pointsRefundedGroup || order.pointsRefundedCash || order.adjustments.length);
+}
+
+async function pointsEvidence(tx: Prisma.TransactionClient, order: RepricingOrder) {
+  const personal = await tx.pointsLog.findMany({ where: { relatedId: order.id }, orderBy: { id: 'asc' } });
+  const group = await tx.groupPointsLog.findMany({ where: { relatedId: order.id }, orderBy: { id: 'asc' } });
+  const held = await heldOrderRedeemPoints(tx, order);
+  const permittedTypes = ['order_redeem', 'order_redeem_refund'];
+  const holdRefunds = [POINTS_DEDUCTION_ROLLBACK_REASON, PREPAY_POINTS_RELEASE_REASON];
+  const invalidOwner = personal.some((row) => row.userId !== order.customerId) || group.some((row) => row.groupId !== order.pointsGroupId);
+  const unknown = [...personal, ...group].some((row) => !permittedTypes.includes(row.type));
+  const actualRefund = [...personal, ...group].some((row) => row.type === 'order_redeem_refund' && !holdRefunds.includes(row.reason ?? ''));
+  const ledgerNet = (rows: { type: string; reason: string | null; delta: number }[]) => -rows
+    .filter((row) => row.type === 'order_redeem' || (row.type === 'order_redeem_refund' && holdRefunds.includes(row.reason ?? '')))
+    .reduce((sum, row) => sum + row.delta, 0);
+  // The settlement helper intentionally skips zero intent. Audit all records here
+  // as well: a zero counter must not hide an actual deduction or excess reversal.
+  const recordedNet = { personal: ledgerNet(personal), group: ledgerNet(group) };
+  const invalidDirection = [...personal, ...group].some((row) => row.type === 'order_redeem' ? row.delta >= 0 : row.delta <= 0);
+  const pointsAdjustment = order.adjustments.filter((row) => row.type === 'points_redeem').reduce((sum, row) => sum + row.amount, 0);
+  const inconsistent = invalidOwner || unknown || actualRefund || invalidDirection
+    || order.pointsPersonal < 0 || order.pointsGroup < 0
+    || held.personal !== order.pointsPersonal || held.group !== order.pointsGroup
+    || recordedNet.personal !== order.pointsPersonal || recordedNet.group !== order.pointsGroup
+    || Math.round(pointsToYuan(order.pointsPersonal + order.pointsGroup) * 100) !== Math.round(order.pointsDiscount * 100)
+    || Math.round((order.pointsDiscount + pointsAdjustment) * 100) !== 0;
+  return { personal, group, held, recordedNet, inconsistent };
+}
+
+async function customerResponseRecord(tx: Prisma.TransactionClient, input: RepricingIdentity) {
+  const record = await tx.backgroundTask.findUnique({ where: { dedupeKey: `catalog-customer-price:${input.quoteId}:${input.orderId}` } });
+  const value = record?.result ? JSON.parse(record.result) : null;
+  if (value && (value.proposalHash !== input.proposalHash || value.inquiryId !== input.inquiryId)) throw new Error('REPRICING_VERSION_CHANGED');
+  return value as { id: string; proposalHash: string; ownerId: string; ownerEmail: string; responseChannel: string; responseReference: string } | null;
+}
+
+async function applyRepricing(tx: Prisma.TransactionClient, input: RepricingIdentity, loaded: LoadedProposal, actor: Actor, financeApprovalHash?: string) {
+  const { order, quote, lines, amounts } = loaded;
+  const response = await customerResponseRecord(tx, input);
+  if (!response) throw new Error('CUSTOMER_REPRICING_CONFIRMATION_REQUIRED');
+  for (const item of order.orderItems) {
+    const line = lines.find((row) => jsonObject(row.metadata).repricingOrderItemId === item.id)!;
+    await tx.orderItem.update({ where: { id: item.id }, data: { unitPrice: line.unitPrice, pricingSnapshot: line.pricingSnapshot } });
+  }
+  // Keep the original adjustment, payment and points records. Finance approval never creates a cash transfer.
   await tx.order.update({ where: { id: order.id }, data: amounts });
   await tx.quoteItem.updateMany({ where: { id: { in: lines.map((line) => line.id) } }, data: { available: false } });
-  const result = { orderId: order.id, quoteId: quote.id, proposalHash: input.proposalHash, before: order.total, total: amounts.total, status: order.status };
-  await tx.orderEvent.create({ data: { orderId: order.id, type: 'catalog_repricing_resolved', actorId: input.actor.id, actorEmail: input.actor.email,
-    message: '工作人员登记客户确认新价，原订单仍待 Libereal 审核接受', metadata: JSON.stringify({ ...result, responseChannel: input.responseChannel, responseReference: input.responseReference }) } });
-  await tx.quoteConfirmation.create({ data: { quoteId: quote.id, userId: input.actor.id, email: input.actor.email,
-    action: 'customer_repricing_recorded_by_staff', details: JSON.stringify({ ...result, responseChannel: input.responseChannel, responseReference: input.responseReference }) } });
-  await tx.backgroundTask.create({ data: { type: 'quote.order_reprice', status: 'succeeded', completedAt: new Date(), dedupeKey,
-    payload: JSON.stringify({ quoteId: quote.id, orderId: order.id, actorId: input.actor.id }), result: JSON.stringify(result) } });
+  const result = { inquiryId: input.inquiryId, orderId: order.id, quoteId: quote.id, proposalHash: input.proposalHash,
+    before: order.total, total: amounts.total, status: order.status, stage: 'applied' as const, financeApprovalHash: financeApprovalHash ?? null };
+  await tx.orderEvent.create({ data: { orderId: order.id, type: 'catalog_repricing_resolved', actorId: actor.id, actorEmail: actor.email,
+    message: '客户新价确认及必要的金额复核已完成，原订单仍待 Libereal 审核接受',
+    metadata: JSON.stringify({ ...result, customerResponseId: response.id, responseOwnerId: response.ownerId,
+      responseChannel: response.responseChannel, responseReference: response.responseReference }) } });
+  await tx.backgroundTask.create({ data: { type: 'quote.order_reprice', status: 'succeeded', completedAt: new Date(),
+    dedupeKey: `catalog-order-price:${input.quoteId}:${input.orderId}`,
+    payload: JSON.stringify({ quoteId: quote.id, orderId: order.id, actorId: actor.id }), result: JSON.stringify(result) } });
   const pendingOrders = await tx.order.findMany({ where: { inquiryId: input.inquiryId, status: { in: ['pending', 'unpaid'] } }, select: { id: true } });
   let unresolved = false;
   for (const target of pendingOrders) if (await pendingOrderRepricing(tx, target.id)) unresolved = true;
@@ -117,4 +190,87 @@ export async function recordCustomerRepricingConfirmation(tx: Prisma.Transaction
     await tx.inquiry.update({ where: { id: input.inquiryId }, data: { hasUnresolvedPricing: false, status: 'closed' } });
   }
   return result;
+}
+
+/** A recorded customer reply survives the wait for finance; it never impersonates a customer message. */
+export async function recordCustomerRepricingConfirmation(tx: Prisma.TransactionClient, input: CustomerResponse) {
+  const completed = await completedRepricing(tx, input);
+  if (completed) return completed;
+  const loaded = await loadRepricingProposal(tx, input);
+  const points = await pointsEvidence(tx, loaded.order);
+  const financeRequired = needsFinanceReview(loaded.order) || points.inconsistent || points.personal.length > 0 || points.group.length > 0;
+  if (financeRequired && input.confirmedTotal !== loaded.amounts.total) throw new Error('REPRICING_TOTAL_CONFIRMATION_REQUIRED');
+  let response = await customerResponseRecord(tx, input);
+  if (!response) {
+    const recorded = await tx.quoteConfirmation.create({ data: { quoteId: input.quoteId, userId: input.actor.id, email: input.actor.email,
+      action: 'customer_repricing_recorded_by_staff', details: JSON.stringify({ ...input, actor: undefined,
+        ownerId: input.actor.id, amounts: loaded.amounts, adjustmentTreatment: 'preserve_original_amounts_pending_finance_review' }) } });
+    response = { id: recorded.id, proposalHash: input.proposalHash, ownerId: input.actor.id, ownerEmail: input.actor.email,
+      responseChannel: input.responseChannel, responseReference: input.responseReference };
+    await tx.backgroundTask.create({ data: { type: 'quote.customer_price_response', status: 'succeeded', completedAt: new Date(),
+      dedupeKey: `catalog-customer-price:${input.quoteId}:${input.orderId}`,
+      payload: JSON.stringify({ inquiryId: input.inquiryId, orderId: input.orderId, quoteId: input.quoteId, actorId: input.actor.id }),
+      result: JSON.stringify({ ...response, inquiryId: input.inquiryId }) } });
+  }
+  if (financeRequired) return { stage: 'awaiting_finance_review' as const,
+    inquiryId: input.inquiryId, orderId: input.orderId, quoteId: input.quoteId, proposalHash: input.proposalHash,
+    ownerId: response.ownerId, customerResponseId: response.id, originalTotal: loaded.order.total, proposedTotal: loaded.amounts.total };
+  return applyRepricing(tx, input, loaded, input.actor);
+}
+
+export async function previewRepricingFinance(tx: Prisma.TransactionClient, input: RepricingIdentity) {
+  const completed = await completedRepricing(tx, input);
+  if (completed) return completed;
+  const loaded = await loadRepricingProposal(tx, input);
+  const response = await customerResponseRecord(tx, input);
+  const { order, amounts } = loaded;
+  const activePayment = order.paymentAttempts.some((attempt) => ['created', 'redirected', 'WAIT_BUYER_PAY'].includes(attempt.status));
+  const unknownPayment = order.paymentAttempts.some((attempt) => !['created', 'redirected', 'WAIT_BUYER_PAY', 'TRADE_CLOSED', 'closed', 'failed', 'paid'].includes(attempt.status));
+  const paidAttempts = order.paymentAttempts.filter((attempt) => attempt.status === 'paid');
+  const paid = Boolean(order.paidAt || paidAttempts.length);
+  // Existing Alipay orders have one successful full payment. Never infer a bank
+  // receipt from paidAt, or invent an allocation by adding ambiguous transactions.
+  const singlePaid = paidAttempts.length === 1 ? paidAttempts[0] : null;
+  const verifiedPaidAmount = singlePaid?.provider === 'alipay' && singlePaid.tradeNo && singlePaid.paidAt && order.paidAt
+    && Number.isFinite(singlePaid.amount) && singlePaid.amount > 0 ? singlePaid.amount : null;
+  const cashDifference = paid && (verifiedPaidAmount === null || Math.round(amounts.total * 100) !== Math.round(verifiedPaidAmount * 100));
+  const ledger = await pointsEvidence(tx, order);
+  const unsettledPoints = Boolean((order.pointsPersonal || order.pointsGroup) && !order.pointsApplied)
+    || Boolean(order.pointsRefundedPersonal || order.pointsRefundedGroup || order.pointsRefundedCash) || ledger.inconsistent;
+  const blocker = !response ? 'CUSTOMER_REPRICING_CONFIRMATION_REQUIRED'
+    : activePayment || unknownPayment ? 'REPRICING_PAYMENT_RECONCILIATION_REQUIRED'
+    : cashDifference ? 'REPRICING_CASH_RESULT_REQUIRED'
+    : unsettledPoints ? 'REPRICING_POINTS_RECONCILIATION_REQUIRED' : null;
+  const snapshot = {
+    inquiryId: input.inquiryId, quoteId: input.quoteId, orderId: order.id, proposalHash: input.proposalHash,
+    orderFingerprint: orderRepricingFingerprint(order), customerResponseId: response?.id ?? null,
+    customerResponse: response,
+    customerId: order.customerId, customerEmail: order.email, paymentMethod: order.paymentMethod,
+    originalTotal: order.total, amounts, adjustmentTreatment: 'preserve_original_amounts' as const,
+    adjustments: order.adjustments, paymentAttempts: order.paymentAttempts, originalPaidAt: order.paidAt, verifiedPaidAmount,
+    pointsEvidence: ledger,
+    points: { personal: order.pointsPersonal, group: order.pointsGroup, groupId: order.pointsGroupId,
+      discount: order.pointsDiscount, applied: order.pointsApplied,
+      refundedPersonal: order.pointsRefundedPersonal, refundedGroup: order.pointsRefundedGroup, refundedCash: order.pointsRefundedCash },
+  };
+  return { ...snapshot, stage: response ? 'awaiting_finance_review' as const : 'awaiting_customer_response' as const,
+    ownerId: response?.ownerId ?? null, blocker, financeApprovalHash: pricingContentHash(snapshot) };
+}
+
+/** Explicit finance decision on the displayed existing adjustments. No payment, refund, or points transfer. */
+export async function approveRepricingFinance(tx: Prisma.TransactionClient, input: RepricingIdentity & {
+  financeApprovalHash: string; preserveOriginalAdjustments: boolean; reason: string; actor: Actor;
+}) {
+  const completed = await completedRepricing(tx, input);
+  if (completed) {
+    if (completed.financeApprovalHash !== input.financeApprovalHash) throw new Error('REPRICING_VERSION_CHANGED');
+    return completed;
+  }
+  const preview = await previewRepricingFinance(tx, input);
+  if (preview.stage === 'applied' || preview.financeApprovalHash !== input.financeApprovalHash || input.preserveOriginalAdjustments !== true) throw new Error('REPRICING_VERSION_CHANGED');
+  if (preview.blocker) throw new Error(preview.blocker);
+  const loaded = await loadRepricingProposal(tx, input);
+  await tx.quoteConfirmation.create({ data: { quoteId: input.quoteId, userId: input.actor.id, email: input.actor.email,
+    action: 'catalog_repricing_finance_approved', details: JSON.stringify({ ...preview, reason: input.reason, actorId: input.actor.id }) } });
+  return applyRepricing(tx, input, loaded, input.actor, input.financeApprovalHash);
 }

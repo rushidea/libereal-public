@@ -1,9 +1,10 @@
 import { createHash } from 'crypto';
 import type { Prisma } from '@prisma/client';
 import { verifyAndPriceItems } from '@/lib/pricing';
+import { calculateOrderAmounts } from '@/lib/order-domain';
 import type { PricingQuoteImpact } from '@/lib/pricing-adjustment-impact';
 import { pricingContentHash } from '@/lib/pricing-adjustment-approval';
-import { jsonObject, orderRepricingFingerprint, REPRICING_ORDER_INCLUDE } from '@/lib/order-catalog-repricing';
+import { jsonObject, orderRepricingFingerprint, orderRepricingTermsFingerprint, REPRICING_ORDER_INCLUDE } from '@/lib/order-catalog-repricing';
 
 type Change = { productId: string; variantId?: string | null; catalogNumber: string; brand?: string };
 type Line = { productId: string | null; catalogNumber: string | null; name: string; unitPrice: number; quantity: number; metadata: string | null; pricingSnapshot: string | null };
@@ -99,13 +100,16 @@ export async function repriceQuotesAfterCatalogChange(tx: Prisma.TransactionClie
       const orderFingerprint = orderRepricingFingerprint(order);
       const lines = orderLines.map(({ item, next }) => ({ orderItemId: item.id, quantity: item.quantity, ...next }));
       const proposalHash = pricingContentHash({ orderFingerprint, lines });
-      proposals.push({ orderId: order.id, orderFingerprint, proposalHash });
+      const proposedAmounts = calculateOrderAmounts(orderLines.map(({ item, next }) => ({ unitPrice: next.unitPrice, quantity: item.quantity })), order.adjustments);
+      proposals.push({ orderId: order.id, orderFingerprint, orderTermsFingerprint: orderRepricingTermsFingerprint(order), proposalHash });
       for (const { item, source, next } of orderLines) items.push({
         position: items.length, productId: item.productId, catalogNumber: source.catalogNumber,
         name: item.name, quantity: item.quantity, orderedQty: 0, ...next,
         lineTotal: Math.round(next.unitPrice * item.quantity * 100) / 100, leadTime: item.leadTime,
         available: true, metadata: JSON.stringify({ ...jsonObject(item.metadata ?? source.metadata),
           repricingOrderId: order.id, repricingOrderItemId: item.id, repricingProposalHash: proposalHash,
+          repricingOriginalTotal: order.total, repricingProposedTotal: proposedAmounts.total,
+          repricingPreservedAdjustments: order.adjustments.map((adjustment) => ({ label: adjustment.label, amount: adjustment.amount })),
           previousUnitPrice: item.unitPrice, sourceQuoteItemId: source.id, sourceConfirmationId: acceptance.id }),
       });
     }
