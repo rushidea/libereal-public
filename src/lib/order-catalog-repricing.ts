@@ -3,6 +3,7 @@ import { pricingContentHash } from '@/lib/pricing-adjustment-approval';
 import { calculateOrderAmounts } from '@/lib/order-domain';
 import { heldOrderRedeemPoints, POINTS_DEDUCTION_ROLLBACK_REASON, PREPAY_POINTS_RELEASE_REASON } from '@/lib/points-checkout-service';
 import { pointsToYuan } from '@/lib/points-checkout';
+import { assertBrandDiscountPricesCurrent } from '@/lib/pricing';
 
 export function jsonObject(raw: string | null | undefined): Record<string, unknown> {
   try { const value = JSON.parse(raw ?? '{}'); return value && typeof value === 'object' && !Array.isArray(value) ? value : {}; }
@@ -106,7 +107,7 @@ async function loadRepricingProposal(tx: Prisma.TransactionClient, input: Repric
   if (typeof pending.orderTermsFingerprint === 'string'
     ? orderRepricingTermsFingerprint(order) !== pending.orderTermsFingerprint
     : orderRepricingFingerprint(order) !== pending.orderFingerprint) throw new Error('REPRICING_VERSION_CHANGED');
-  const quote = await tx.quote.findUnique({ where: { id: input.quoteId }, include: { items: { orderBy: { position: 'asc' } } } });
+  const quote = await tx.quote.findUnique({ where: { id: input.quoteId }, include: { items: { orderBy: { position: 'asc' } }, inquiry: { select: { userId: true, email: true } } } });
   const latest = await tx.quote.findFirst({ where: { inquiryId: input.inquiryId }, orderBy: { version: 'desc' }, select: { id: true } });
   if (!quote || quote.inquiryId !== input.inquiryId || latest?.id !== quote.id || quote.status !== 'draft') throw new Error('REPRICING_VERSION_CHANGED');
   const lines = quote.items.filter((line) => jsonObject(line.metadata).repricingOrderId === order.id);
@@ -116,6 +117,17 @@ async function loadRepricingProposal(tx: Prisma.TransactionClient, input: Repric
   for (const item of order.orderItems) {
     const matches = lines.filter((line) => jsonObject(line.metadata).repricingOrderItemId === item.id);
     if (matches.length !== 1 || matches[0].quantity !== item.quantity) throw new Error('REPRICING_VERSION_CHANGED');
+  }
+  try {
+    await assertBrandDiscountPricesCurrent(tx, lines.map((line) => ({
+      productId: line.productId, catalogNumber: line.catalogNumber, name: line.name, unitPrice: line.unitPrice,
+      quantity: line.quantity, lineTotal: line.lineTotal, pricingSnapshot: line.pricingSnapshot ?? '{}',
+      source: 'db' as const, priceMismatch: false,
+      variantId: typeof jsonObject(line.pricingSnapshot).variantId === 'string' ? jsonObject(line.pricingSnapshot).variantId as string : null,
+    })), { userId: quote.inquiry.userId, customerEmail: quote.inquiry.email, requireDiscountPriority: true });
+  } catch (error) {
+    if (error instanceof Error && error.message === 'BRAND_DISCOUNT_PRICE_DRIFT') throw new Error('REPRICING_VERSION_CHANGED');
+    throw error;
   }
   const amounts = calculateOrderAmounts(lines.map((line) => ({ unitPrice: line.unitPrice, quantity: line.quantity })), order.adjustments);
   return { pending, order, quote, lines, amounts };

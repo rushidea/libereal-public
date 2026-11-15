@@ -15,6 +15,8 @@ import {
   currentCatalogRepricingDraft,
 } from '@/lib/inquiry-quote-publish';
 import { AMBIGUOUS_PRODUCT_CATALOG_NUMBER, verifyAndPriceItems } from '@/lib/pricing';
+import { assertBrandDiscountPricesCurrent, discountPricingFailure } from '@/lib/pricing';
+import { refreshCatalogRepricingDraft } from '@/lib/quote-catalog-repricing';
 import { mergeQuoteConstraintMetadata, packageConstraintFromVariant, readExplicitQuantityConstraint } from '@/lib/quote-acceptance';
 
 function metadataBrand(metadata: string | null | undefined): string | null {
@@ -61,12 +63,18 @@ export async function POST(
     if (!inquiry) {
       return NextResponse.json({ error: 'Inquiry not found' }, { status: 404 });
     }
+    const body = await req.json();
+    if (body.refreshCatalogQuote === true) {
+      const result = await prisma.$transaction((tx) => refreshCatalogRepricingDraft(tx, {
+        inquiryId: id, quoteId: body.catalogQuoteId, quoteHash: body.catalogQuoteHash, actor: { id: user.id, email: user.email },
+      }), { timeout: 60_000 });
+      return NextResponse.json({ result });
+    }
     const publishDecision = await assessInquiryQuotePublish(prisma, id);
     if (!publishDecision.ok) {
       return NextResponse.json({ error: publishDecision.error, code: publishDecision.code }, { status: publishDecision.status });
     }
 
-    const body = await req.json();
     const catalogDraft = await currentCatalogRepricingDraft(prisma, id);
     if (catalogDraft && (body.catalogQuoteId !== catalogDraft.id || body.catalogQuoteHash !== quoteContentHash(catalogDraft))) {
       return NextResponse.json({ error: '请核对当前重算报价后再发送，报价内容已变化时需刷新确认', code: 'QUOTE_VERSION_CONFLICT' }, { status: 409 });
@@ -122,7 +130,7 @@ export async function POST(
       name: String(item.name ?? sourceInquiryItems[position]?.name ?? 'Unknown'),
       price: Number(item.price ?? item.unitPrice),
       quantity: Number(quotedLines[position].quantity),
-    })), { customerEmail: inquiry.email, manualAdjustments, allowManualAdjustment: true });
+    })), { customerEmail: inquiry.email, manualAdjustments, allowManualAdjustment: true, requireDiscountPriority: Boolean(catalogDraft) });
     const lineReview = await reviewCommerceLinesWithCatalog(priced.verifiedItems.map((pricedItem, index) => {
       const item = items[index] as Record<string, unknown>;
       const inquiryItem = sourceInquiryItems[index];
@@ -178,7 +186,9 @@ export async function POST(
       };
     });
     if (catalogLines && normalizedItems.some((line, index) => line.unitPrice !== catalogLines[index]?.unitPrice
-      || line.quantity !== catalogLines[index]?.quantity || line.productId !== catalogLines[index]?.productId)) {
+      || line.quantity !== catalogLines[index]?.quantity || line.productId !== catalogLines[index]?.productId
+      || !jsonObject(catalogLines[index]?.pricingSnapshot).discountInputsHash
+      || jsonObject(line.pricingSnapshot).discountInputsHash !== jsonObject(catalogLines[index]?.pricingSnapshot).discountInputsHash)) {
       return NextResponse.json({ error: '重新核算的结果与本次显示的报价不同，请重新核对报价', code: 'QUOTE_VERSION_CONFLICT' }, { status: 409 });
     }
     const sentAt = new Date();
@@ -187,6 +197,7 @@ export async function POST(
       return NextResponse.json({ error: 'validUntil must be a future date' }, { status: 400 });
     }
     const quote = await prisma.$transaction(async (tx) => {
+      await assertBrandDiscountPricesCurrent(tx, priced.verifiedItems, { customerEmail: inquiry.email, manualAdjustments, allowManualAdjustment: true, requireDiscountPriority: Boolean(catalogDraft) });
       const claimed = await claimInquiryForQuotePublish(tx, id, catalogDraft ? { id: catalogDraft.id, hash: body.catalogQuoteHash } : undefined);
       if (claimed !== 1) {
         const decision = await assessInquiryQuotePublish(tx, id);
@@ -258,6 +269,9 @@ export async function POST(
     const quoteTaxonomy = await loadQuoteProductTaxonomy(quote.items.map((item) => item.productId));
     return NextResponse.json({ success: true, quote: quoteView(quote, quoteTaxonomy) });
   } catch (err) {
+    if (err instanceof Error && err.message === 'REPRICING_VERSION_CHANGED') return NextResponse.json({ error: '当前草稿已变化，请刷新后重新核对', code: 'QUOTE_VERSION_CONFLICT' }, { status: 409 });
+    const discountError = discountPricingFailure(err);
+    if (discountError) return NextResponse.json({ error: discountError }, { status: 409 });
     if (err instanceof InquiryQuotePublishRejected) {
       return NextResponse.json({ error: err.message, code: err.code }, { status: err.status });
     }

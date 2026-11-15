@@ -2,7 +2,9 @@
 
 import { useEffect, useState } from 'react';
 
-type Detail = { productId: string; variantId: string | null; brand: string; catalogNumber: string; name: string; field: string; before: number | null; after: number };
+type Detail = { productId: string; variantId: string | null; brand: string; catalogNumber: string; name: string; field: string; before: number | null; after: number; unit?: 'rate' };
+const valueLabel = (value: number | null, row: Detail) => value == null ? '未设置'
+  : row.unit === 'rate' ? `${Number((value * 100).toPrecision(15))}%` : `¥${value.toFixed(2)}`;
 export function PricingAdjustmentDetails({ approvalHash }: { approvalHash: string }) {
   const [open, setOpen] = useState(false);
   const [offset, setOffset] = useState(0);
@@ -32,7 +34,7 @@ export function PricingAdjustmentDetails({ approvalHash }: { approvalHash: strin
         <div className="mb-3 flex items-center justify-between"><h2 id="pricing-details-title" className="font-semibold">本次预览的完整变更明细</h2><button type="button" autoFocus onClick={() => setOpen(false)} className="rounded border px-3 py-1">关闭</button></div>
         {error ? <p role="alert">{error}</p> : !data ? <p>正在读取…</p> : <>
           <div className="overflow-auto"><table className="w-full text-left text-sm"><thead><tr><th className="p-2">品牌 / 货号</th><th className="p-2">商品</th><th className="p-2">价格项目</th><th className="p-2">原值</th><th className="p-2">新值</th></tr></thead><tbody>
-            {data.rows.map((row, index) => <tr key={`${row.productId}:${row.variantId}:${index}`} className="border-t"><td className="p-2">{row.brand} / {row.catalogNumber}</td><td className="p-2">{row.name}</td><td className="p-2">{row.field}</td><td className="p-2">{row.before == null ? '未设置' : `¥${row.before.toFixed(2)}`}</td><td className="p-2">¥{row.after.toFixed(2)}</td></tr>)}
+            {data.rows.map((row, index) => <tr key={`${row.productId}:${row.variantId}:${index}`} className="border-t"><td className="p-2">{row.brand} / {row.catalogNumber}</td><td className="p-2">{row.name}</td><td className="p-2">{row.field}</td><td className="p-2">{valueLabel(row.before, row)}</td><td className="p-2">{valueLabel(row.after, row)}</td></tr>)}
           </tbody></table></div>
           <div className="mt-3 flex items-center justify-between text-sm"><button type="button" disabled={offset === 0} onClick={() => changePage(Math.max(0, offset - 100))}>上一页</button><span>共 {data.total} 项，当前 {data.total ? offset + 1 : 0}–{Math.min(offset + 100, data.total)}</span><button type="button" disabled={offset + 100 >= data.total} onClick={() => changePage(offset + 100)}>下一页</button></div>
         </>}

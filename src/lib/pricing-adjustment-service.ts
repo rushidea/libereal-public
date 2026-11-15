@@ -6,7 +6,8 @@ import { invalidateProductFilters } from '@/lib/product-filter-cache';
 import { recordProductPriceChanges } from '@/lib/product-catalog-records';
 import { getEphemeralStore } from '@/lib/ephemeral-store';
 import { isPriceAdjustmentApprovalHash, priceAdjustmentApprovalHash } from '@/lib/pricing-adjustment-approval';
-import { findPricingQuoteImpact, type PricingQuoteImpact } from '@/lib/pricing-adjustment-impact';
+import { brandDiscountImpactProducts, findPricingQuoteImpact, type PricingQuoteImpact } from '@/lib/pricing-adjustment-impact';
+import { CONFIRMED_TIER_DISCOUNT_RATES } from '@/lib/discount';
 import { repriceQuotesAfterCatalogChange } from '@/lib/quote-catalog-repricing';
 import {
   applyPublicPriceFloor,
@@ -92,6 +93,7 @@ export type FilePreviewDraft = {
 };
 
 export type PriceAdjustmentPreview = {
+  brandDefaultChange?: { brandId: string; brandName: string; beforeRate: number | null; afterRate: number };
   approvalHash?: string;
   quoteImpact?: { quoteCount: number; pendingOrderCount: number };
   matchedCount: number;
@@ -110,6 +112,7 @@ const productSelect = {
   id: true,
   name: true,
   brand: true,
+  brandRecordId: true,
   catalogNumber: true,
   pricingMode: true,
   price: true,
@@ -734,7 +737,7 @@ function planCacheKey(approvalHash: string): string {
 
 type FrozenPlan = { preview: PriceAdjustmentPreview; changes: PlannedChange[]; impact?: PricingQuoteImpact; source?: unknown };
 
-async function sourceSnapshot(changes: PlannedChange[], db: Prisma.TransactionClient = prisma) {
+async function sourceSnapshot(changes: Array<{ productId: string }>, db: Prisma.TransactionClient = prisma, targetBrandId?: string) {
   const rows = [];
   for (const ids of chunk([...new Set(changes.map((change) => change.productId))].sort(), CATALOG_CHUNK)) {
     rows.push(...await db.product.findMany({
@@ -743,7 +746,27 @@ async function sourceSnapshot(changes: PlannedChange[], db: Prisma.TransactionCl
         variants: { ...productSelect.variants, orderBy: { id: 'asc' } } },
     }));
   }
-  return rows;
+  // Brand and tier policy are authoritative inputs too, including a previously unset default.
+  const brandIds = [...new Set([...(targetBrandId ? [targetBrandId] : []), ...rows.flatMap((row) => row.brandRecordId ? [row.brandRecordId] : [])])];
+  const brandNames = [...new Set(rows.filter((row) => !row.brandRecordId).map((row) => row.brand))];
+  const brands = await db.brand.findMany({ where: { OR: [{ id: { in: brandIds } }, { name: { in: brandNames } }] }, orderBy: { id: 'asc' },
+    select: { id: true, name: true, isActive: true, defaultDiscountRate: true, updatedAt: true } });
+  return { products: rows, brands, tiers: CONFIRMED_TIER_DISCOUNT_RATES, discountPolicyVersion: 1 };
+}
+
+function assertDisplayedBrandSource(preview: PriceAdjustmentPreview, source: Awaited<ReturnType<typeof sourceSnapshot>>) {
+  const displayed = preview.brandDefaultChange;
+  if (!displayed) return;
+  const actual = source.brands.find((brand) => brand.id === displayed.brandId);
+  if (!actual?.isActive || actual.name !== displayed.brandName || actual.defaultDiscountRate !== displayed.beforeRate) {
+    throw new PriceAdjustmentApprovalChangedError();
+  }
+}
+
+async function affectedProducts(plan: FrozenPlan, db: Prisma.TransactionClient = prisma) {
+  const change = plan.preview.brandDefaultChange;
+  return change && change.beforeRate !== change.afterRate
+    ? brandDiscountImpactProducts(change.brandId, change.brandName, db) : plan.changes;
 }
 
 async function readFrozenPlan(approvalHash: string): Promise<FrozenPlan | null> {
@@ -762,8 +785,10 @@ async function readFrozenPlan(approvalHash: string): Promise<FrozenPlan | null> 
 const PLAN_STORE_LIMIT = 8 * 1024 * 1024;
 
 async function writeFrozenPlan(request: PriceAdjustmentRequest, plan: { preview: PriceAdjustmentPreview; changes: PlannedChange[] }): Promise<PriceAdjustmentPreview> {
-  const impact = await findPricingQuoteImpact(plan.changes);
-  const source = await sourceSnapshot(plan.changes);
+  const products = await affectedProducts(plan);
+  const impact = await findPricingQuoteImpact(products);
+  const source = await sourceSnapshot(products, prisma, plan.preview.brandDefaultChange?.brandId);
+  assertDisplayedBrandSource(plan.preview, source);
   const unboundPreview = { ...plan.preview };
   delete unboundPreview.approvalHash;
   const preview = { ...unboundPreview, quoteImpact: { quoteCount: impact.quoteIds.length, pendingOrderCount: impact.pendingOrderIds.length } };
@@ -780,6 +805,15 @@ async function writeFrozenPlan(request: PriceAdjustmentRequest, plan: { preview:
 export async function readPriceAdjustmentDetails(approvalHash: string, offset: number) {
   const plan = await readFrozenPlan(approvalHash);
   if (!plan) return null;
+  const brandChange = plan.preview.brandDefaultChange;
+  if (brandChange) {
+    const rows = brandChange.beforeRate === brandChange.afterRate ? [] : [{
+      productId: brandChange.brandId, variantId: null, brand: brandChange.brandName,
+      catalogNumber: '全品牌', name: brandChange.brandName, field: '全店默认折扣',
+      unit: 'rate', before: brandChange.beforeRate, after: brandChange.afterRate,
+    }];
+    return { approvalHash, offset, total: rows.length, rows: rows.slice(offset, offset + 100) };
+  }
   const rows = plan.changes.flatMap((change) => FILE_PRICE_FIELDS
     .filter((field) => change.patch[field] != null && !pricesMatch(change.before[field], change.patch[field]))
     .map((field) => ({ productId: change.productId, variantId: change.variantId, brand: change.brand,
@@ -858,6 +892,19 @@ export async function matchCatalogItems(brand: string, items: CatalogPriceItem[]
 }
 
 export async function previewPriceAdjustment(request: PriceAdjustmentRequest): Promise<PriceAdjustmentPreview> {
+  if (request.target === 'brand_default_discount') {
+    const brand = await prisma.brand.findUnique({ where: { name: request.brand } });
+    if (!brand?.isActive) throw new Error('BRAND_NOT_ACTIVE');
+    const rate = request.brandDefaultDiscountRate;
+    if (typeof rate !== 'number' || !Number.isFinite(rate) || rate <= 0 || rate > 1) throw new Error('INVALID_DISCOUNT_RATE');
+    const changed = brand.defaultDiscountRate !== rate;
+    return writeFrozenPlan(request, { changes: [], preview: {
+      brandDefaultChange: { brandId: brand.id, brandName: brand.name, beforeRate: brand.defaultDiscountRate, afterRate: rate },
+      matchedCount: 1, changeCount: changed ? 1 : 0, skippedUnchangedCount: changed ? 0 : 1,
+      skippedInquiryCount: 0, skippedMissingCount: 0, flooredCount: 0,
+      unmatchedCatalogs: [], reviewCount: 0, reviewItems: [], samples: [],
+    } });
+  }
   const loaded = await loadProducts(request);
   const planned = planChanges(loaded.products, request, loaded.unmatchedCatalogs);
   return writeFrozenPlan(request, planned);
@@ -881,13 +928,20 @@ export async function applyPriceAdjustment(
       if (prior?.status === 'succeeded' && prior.result) {
         return { ...JSON.parse(prior.result), updatedCount: 0 };
       }
-      const currentSource = await sourceSnapshot(planned.changes, tx);
-      const currentImpact = await findPricingQuoteImpact(planned.changes, tx);
+      const products = await affectedProducts(planned, tx);
+      const currentSource = await sourceSnapshot(products, tx, planned.preview.brandDefaultChange?.brandId);
+      assertDisplayedBrandSource(planned.preview, currentSource);
+      const currentImpact = await findPricingQuoteImpact(products, tx);
       if (priceAdjustmentApprovalHash(request, planned.source) !== priceAdjustmentApprovalHash(request, currentSource)
         || priceAdjustmentApprovalHash(request, planned.impact) !== priceAdjustmentApprovalHash(request, currentImpact)) {
         throw new PriceAdjustmentApprovalChangedError();
       }
       let updatedCount = 0;
+      const brandChange = planned.preview.brandDefaultChange;
+      if (brandChange && brandChange.beforeRate !== brandChange.afterRate) {
+        await tx.brand.update({ where: { id: brandChange.brandId }, data: { defaultDiscountRate: brandChange.afterRate } });
+        updatedCount = 1;
+      }
       for (const change of planned.changes) {
         const fields = FILE_PRICE_FIELDS.filter((field) => change.patch[field] != null);
         if (fields.length === 0) continue;
@@ -942,17 +996,18 @@ export async function applyPriceAdjustment(
         updatedCount += 1;
       }
       const repricedQuotes = await repriceQuotesAfterCatalogChange(tx, {
-        impact: currentImpact, changes: planned.changes, approvalHash, actor,
+        impact: currentImpact, changes: products, approvalHash, actor,
       });
       await writeAuditLog({
     actorId: actor.id,
     actorEmail: actor.email,
     action: 'pricing.bulk_adjusted',
     resource: 'pricing',
-    targetType: 'Product',
-    targetId: request.brand,
-    before: { matchedCount: planned.preview.matchedCount },
-    after: { updatedCount, changeCount: planned.preview.changeCount, priceField: request.priceField, mode: request.mode, approvalHash, repricedQuotes },
+    targetType: brandChange ? 'Brand' : 'Product',
+    targetId: brandChange?.brandId ?? request.brand,
+    before: { matchedCount: planned.preview.matchedCount, ...(brandChange ? { defaultDiscountRate: brandChange.beforeRate } : {}) },
+    after: { updatedCount, changeCount: planned.preview.changeCount, priceField: request.priceField, mode: request.mode, approvalHash, repricedQuotes,
+      ...(brandChange ? { defaultDiscountRate: brandChange.afterRate } : {}) },
     reason: request.reason,
       }, tx);
       const completed = { ...planned.preview, updatedCount, repricedQuotes };

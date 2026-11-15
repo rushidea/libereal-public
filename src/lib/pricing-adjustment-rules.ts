@@ -47,6 +47,8 @@ export const MAX_PRICE_ADJUSTMENT_CATALOGS = 50000;
 export const PRICE_ADJUSTMENT_SAMPLE_LIMIT = 20;
 
 export type PriceAdjustmentRequest = {
+  target?: 'brand_default_discount';
+  brandDefaultDiscountRate?: number;
   brand: string;
   scope: PriceAdjustmentScope;
   category?: string;
@@ -211,6 +213,21 @@ export function parsePriceAdjustmentRequest(body: unknown): { ok: true; value: P
   const input = body as Record<string, unknown>;
   const brand = text(input.brand);
   const scope = text(input.scope);
+  if (input.target !== undefined) {
+    if (input.target !== 'brand_default_discount') return { ok: false, error: '调整项目无效' };
+    const rate = input.brandDefaultDiscountRate;
+    const reason = text(input.reason);
+    if (!brand) return { ok: false, error: '请选择需要设置全店默认折扣的品牌' };
+    if (typeof rate !== 'number' || !Number.isFinite(rate) || rate <= 0 || rate > 1) return { ok: false, error: '品牌默认折扣必须大于 0 且不超过 100%' };
+    if (reason.length < 2 || reason.length > 200) return { ok: false, error: '请填写 2 到 200 字的调整原因' };
+    return { ok: true, value: {
+      target: 'brand_default_discount', brandDefaultDiscountRate: rate, brand,
+      scope: 'category', priceField: 'originalPrice', mode: 'set', direction: 'increase',
+      amount: rate, includeVariants: false, reason,
+      ...(typeof input.approvalHash === 'string' ? { approvalHash: input.approvalHash } : {}),
+      ...(typeof input.stepUpToken === 'string' ? { stepUpToken: text(input.stepUpToken) } : {}),
+    } };
+  }
   const mode = text(input.mode);
   const direction = text(input.direction) || 'increase';
   const reason = text(input.reason);

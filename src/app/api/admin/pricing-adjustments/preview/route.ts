@@ -1,7 +1,8 @@
 import { NextResponse } from 'next/server';
 import { requireAdminPricingRead } from '@/lib/admin-pricing-step-up';
 import { parsePriceAdjustmentRequest } from '@/lib/pricing-adjustment-rules';
-import { previewPriceAdjustment } from '@/lib/pricing-adjustment-service';
+import { previewPriceAdjustment, PriceAdjustmentApprovalChangedError } from '@/lib/pricing-adjustment-service';
+import { discountPricingFailure } from '@/lib/pricing';
 
 export const maxDuration = 300;
 
@@ -55,6 +56,9 @@ export async function POST(request: Request) {
     });
     return jsonResponse(payload);
   } catch (error) {
+    if (error instanceof PriceAdjustmentApprovalChangedError) return jsonResponse({ error: error.message }, 409);
+    const businessError = discountPricingFailure(error);
+    if (businessError) return jsonResponse({ error: businessError }, 409);
     console.error('[admin/pricing-adjustments/preview]', error);
     return jsonResponse({ error: previewFailureMessage(error) }, 500);
   }

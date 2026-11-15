@@ -74,6 +74,9 @@ async function applyDisplayedPreview(req: Request) {
 }
 
 async function seedQuoteCase(id: string, orderStatus?: string, actualQuantity = 2) {
+  // Synthetic, explicitly confirmed brand policy; catalogue is distinct from the legacy market price.
+  await prisma.brand.upsert({ where: { name: 'CST' }, create: { id: 'brand_cst', name: 'CST', defaultDiscountRate: 1 }, update: {} });
+  await prisma.product.update({ where: { id: 'product_1' }, data: { originalPrice: 100 } });
   const inquiry = await prisma.inquiry.create({ data: { id: `inquiry_${id}`, userId: 'admin_test_id', name: '测试客户', email: 'admin@test.com', phone: 'test', institution: 'test', subtotal: 200, status: orderStatus ? 'closed' : 'quote_sent' } });
   const inquiryItem = await prisma.inquiryItem.create({ data: { inquiryId: inquiry.id, position: 0, productId: 'product_1', catalogNumber: 'CAT-1', name: '测试抗体', unitPrice: 100, quantity: 2, lineTotal: 200, metadata: JSON.stringify({ brand: 'CST' }) } });
   const quote = await prisma.quote.create({ data: { id: `quote_${id}`, inquiryId: inquiry.id, version: 1, status: orderStatus ? 'accepted' : 'sent', subtotal: 200, items: { create: [{ inquiryItemId: inquiryItem.id, position: 0, productId: 'product_1', catalogNumber: 'CAT-1', name: '测试抗体', quantity: 2, orderedQty: orderStatus ? actualQuantity : 0, unitPrice: 100, lineTotal: 200, metadata: JSON.stringify({ brand: 'CST' }) }] } }, include: { items: true } });
@@ -83,8 +86,8 @@ async function seedQuoteCase(id: string, orderStatus?: string, actualQuantity = 
 }
 
 async function prepareOrderRepricing(fixture: Awaited<ReturnType<typeof seedQuoteCase>>) {
-  await previewPricing(request('/preview', {}));
-  expect((await applyDisplayedPreview(request('/apply', {}))).status).toBe(200);
+  await previewPricing(catalogRequest('/preview', {}));
+  expect((await applyDisplayedPreview(catalogRequest('/apply', {}))).status).toBe(200);
   const draft = await prisma.quote.findFirstOrThrow({ where: { inquiryId: fixture.inquiry.id }, orderBy: { version: 'desc' }, include: { items: true } });
   const metadata = JSON.parse(draft.items[0].metadata!);
   return { quoteId: draft.id, orderId: fixture.order!.id, proposalHash: metadata.repricingProposalHash as string,
@@ -145,6 +148,10 @@ function request(path: string, body: Record<string, unknown>) {
       ...body,
     }),
   });
+}
+
+function catalogRequest(path: string, body: Record<string, unknown>) {
+  return request(path, { priceField: 'originalPrice', ...body });
 }
 
 describe('admin pricing adjustment routes', () => {
@@ -208,8 +215,8 @@ describe('admin pricing adjustment routes', () => {
   it('recalculates a sent quote into the existing review flow while preserving merchant-accepted prices', async () => {
     const open = await seedQuoteCase('open');
     const locked = await seedQuoteCase('locked', 'confirmed');
-    await previewPricing(request('/preview', {}));
-    const response = await applyDisplayedPreview(request('/apply', {}));
+    await previewPricing(catalogRequest('/preview', {}));
+    const response = await applyDisplayedPreview(catalogRequest('/apply', {}));
     expect(response.status).toBe(200);
     const result = (await response.json()).result;
     expect(result.repricedQuotes).toHaveLength(1);
@@ -223,8 +230,8 @@ describe('admin pricing adjustment routes', () => {
 
   it('uses the actual pending order quantity and resumes the same order after recorded customer confirmation', async () => {
     const fixture = await seedQuoteCase('pending', 'pending', 3);
-    await previewPricing(request('/preview', {}));
-    expect((await applyDisplayedPreview(request('/apply', {}))).status).toBe(200);
+    await previewPricing(catalogRequest('/preview', {}));
+    expect((await applyDisplayedPreview(catalogRequest('/apply', {}))).status).toBe(200);
     const draft = await prisma.quote.findFirstOrThrow({ where: { inquiryId: fixture.inquiry.id }, orderBy: { version: 'desc' }, include: { items: true } });
     expect(draft).toMatchObject({ status: 'draft', subtotal: 330 });
     expect(draft.items[0]).toMatchObject({ quantity: 3, unitPrice: 110 });
@@ -247,11 +254,11 @@ describe('admin pricing adjustment routes', () => {
 
   it('creates only one successor on a second catalogue change and rejects the superseded customer confirmation', async () => {
     const fixture = await seedQuoteCase('twice', 'pending');
-    await previewPricing(request('/preview', {}));
-    await applyDisplayedPreview(request('/apply', {}));
+    await previewPricing(catalogRequest('/preview', {}));
+    await applyDisplayedPreview(catalogRequest('/apply', {}));
     const first = await prisma.quote.findFirstOrThrow({ where: { inquiryId: fixture.inquiry.id }, orderBy: { version: 'desc' }, include: { items: true } });
-    await previewPricing(request('/preview', {}));
-    const second = await applyDisplayedPreview(request('/apply', {}));
+    await previewPricing(catalogRequest('/preview', {}));
+    const second = await applyDisplayedPreview(catalogRequest('/apply', {}));
     expect(second.status).toBe(200);
     expect((await second.json()).result.repricedQuotes).toHaveLength(1);
     expect(await prisma.quote.count({ where: { inquiryId: fixture.inquiry.id } })).toBe(3);
@@ -264,9 +271,9 @@ describe('admin pricing adjustment routes', () => {
 
   it('binds quote contents as well as IDs to the price-change preview', async () => {
     const fixture = await seedQuoteCase('drift');
-    await previewPricing(request('/preview', {}));
+    await previewPricing(catalogRequest('/preview', {}));
     await prisma.quoteItem.update({ where: { id: fixture.quote.items[0].id }, data: { quantity: 4 } });
-    expect((await applyDisplayedPreview(request('/apply', {}))).status).toBe(409);
+    expect((await applyDisplayedPreview(catalogRequest('/apply', {}))).status).toBe(409);
     expect((await prisma.product.findUniqueOrThrow({ where: { id: 'product_1' } })).price).toBe(100);
     expect(await prisma.quote.count()).toBe(1);
   });
@@ -478,7 +485,7 @@ describe('admin pricing adjustment routes', () => {
 
   it('compares unchanged repriced totals against the actual payment rather than the edited order total', async () => {
     const fixture = await seedQuoteCase('actual_receipt', 'pending', 1);
-    await prisma.product.update({ where: { id: 'product_2' }, data: { price: 100, pricingMode: 'fixed' } });
+    await prisma.product.update({ where: { id: 'product_2' }, data: { price: 100, originalPrice: 100, pricingMode: 'fixed' } });
     await prisma.quoteItem.update({ where: { id: fixture.quote.items[0].id }, data: { quantity: 1, lineTotal: 100 } });
     const secondLine = await prisma.quoteItem.create({ data: { quoteId: fixture.quote.id, position: 1, productId: 'product_2', catalogNumber: 'CAT-2', name: '第二件测试商品', unitPrice: 100, quantity: 1, orderedQty: 1, lineTotal: 100, metadata: JSON.stringify({ brand: 'CST' }) } });
     await prisma.orderItem.create({ data: { orderId: fixture.order!.id, position: 1, productId: 'product_2', catalogNumber: 'CAT-2', name: '第二件测试商品', unitPrice: 100, quantity: 1, metadata: JSON.stringify({ brand: 'CST' }) } });
@@ -487,9 +494,9 @@ describe('admin pricing adjustment routes', () => {
     await prisma.order.update({ where: { id: fixture.order!.id }, data: { subtotal: 200, adjustmentTotal: 12, total: 212, paymentMethod: 'alipay', paidAt } });
     await prisma.orderAdjustment.create({ data: { orderId: fixture.order!.id, type: 'shipping', label: '收款之后增加的运费', amount: 12 } });
     const payment = await prisma.paymentAttempt.create({ data: { orderId: fixture.order!.id, provider: 'alipay', outTradeNo: 'original-200', tradeNo: 'verified-trade-200', amount: 200, status: 'paid', paidAt } });
-    const change = { scope: 'catalog', mode: 'file', catalogItems: [{ catalogNumber: 'CAT-1', price: 110 }, { catalogNumber: 'CAT-2', price: 90 }] };
-    await previewPricing(request('/preview', change));
-    expect((await applyDisplayedPreview(request('/apply', change))).status).toBe(200);
+    const change = { scope: 'catalog', mode: 'file', catalogItems: [{ catalogNumber: 'CAT-1', originalPrice: 110 }, { catalogNumber: 'CAT-2', originalPrice: 90 }] };
+    await previewPricing(catalogRequest('/preview', change));
+    expect((await applyDisplayedPreview(catalogRequest('/apply', change))).status).toBe(200);
     const draft = await prisma.quote.findFirstOrThrow({ where: { inquiryId: fixture.inquiry.id }, orderBy: { version: 'desc' }, include: { items: true } });
     const body = { quoteId: draft.id, orderId: fixture.order!.id, proposalHash: JSON.parse(draft.items[0].metadata!).repricingProposalHash, confirmedTotal: 212, responseChannel: '测试邮件', responseReference: '客户确认完整212元' };
     const context = { params: Promise.resolve({ id: fixture.inquiry.id }) };
@@ -539,8 +546,8 @@ describe('admin pricing adjustment routes', () => {
 
   it('blocks all three merchant-acceptance entrances until original-order repricing is resolved', async () => {
     const fixture = await seedQuoteCase('acceptance_guard', 'pending');
-    await previewPricing(request('/preview', {}));
-    expect((await applyDisplayedPreview(request('/apply', {}))).status).toBe(200);
+    await previewPricing(catalogRequest('/preview', {}));
+    expect((await applyDisplayedPreview(catalogRequest('/apply', {}))).status).toBe(200);
     for (const handler of [adminAcceptOrder, acceptOrder]) {
       const response = await handler(new NextRequest(`http://localhost/order/${fixture.order!.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: 'confirmed' }) }), { params: Promise.resolve({ id: fixture.order!.id }) });
       expect(response.status).toBe(409);
@@ -552,8 +559,8 @@ describe('admin pricing adjustment routes', () => {
 
   it('publishes exactly the recalculated quote that the administrator reviewed', async () => {
     const fixture = await seedQuoteCase('publish');
-    await previewPricing(request('/preview', {}));
-    await applyDisplayedPreview(request('/apply', {}));
+    await previewPricing(catalogRequest('/preview', {}));
+    await applyDisplayedPreview(catalogRequest('/apply', {}));
     const draft = await prisma.quote.findFirstOrThrow({ where: { inquiryId: fixture.inquiry.id }, orderBy: { version: 'desc' }, include: { items: { orderBy: { position: 'asc' } } } });
     const response = await publishQuote(new NextRequest('http://localhost/inquiry/quote', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ catalogQuoteId: draft.id, catalogQuoteHash: quoteContentHash(draft) }) }), { params: Promise.resolve({ id: fixture.inquiry.id }) });
     expect(response.status).toBe(200);
@@ -565,10 +572,10 @@ describe('admin pricing adjustment routes', () => {
 
   it('invalidates the old proposal when the catalogue returns to the original order price', async () => {
     const fixture = await seedQuoteCase('return_price', 'pending');
-    await previewPricing(request('/preview', {})); await applyDisplayedPreview(request('/apply', {}));
+    await previewPricing(catalogRequest('/preview', {})); await applyDisplayedPreview(catalogRequest('/apply', {}));
     const first = await prisma.quote.findFirstOrThrow({ where: { inquiryId: fixture.inquiry.id }, orderBy: { version: 'desc' }, include: { items: true } });
-    await previewPricing(request('/preview', { mode: 'set', amount: 100 }));
-    expect((await applyDisplayedPreview(request('/apply', { mode: 'set', amount: 100 }))).status).toBe(200);
+    await previewPricing(catalogRequest('/preview', { mode: 'set', amount: 100 }));
+    expect((await applyDisplayedPreview(catalogRequest('/apply', { mode: 'set', amount: 100 }))).status).toBe(200);
     const latest = await prisma.quote.findFirstOrThrow({ where: { inquiryId: fixture.inquiry.id }, orderBy: { version: 'desc' }, include: { items: true } });
     expect(latest).toMatchObject({ version: 3, subtotal: 200 });
     const stale = await recordRepricing(request('/repricing', { quoteId: first.id, orderId: fixture.order!.id, proposalHash: JSON.parse(first.items[0].metadata!).repricingProposalHash, responseChannel: '测试邮件', responseReference: 'outdated response' }), { params: Promise.resolve({ id: fixture.inquiry.id }) });
@@ -580,7 +587,7 @@ describe('admin pricing adjustment routes', () => {
     const fixture = await seedQuoteCase(`close_${closure}`, 'pending', 1);
     await prisma.quote.update({ where: { id: fixture.quote.id }, data: { status: 'sent' } });
     await prisma.inquiry.update({ where: { id: fixture.inquiry.id }, data: { status: 'quote_sent' } });
-    await previewPricing(request('/preview', {})); await applyDisplayedPreview(request('/apply', {}));
+    await previewPricing(catalogRequest('/preview', {})); await applyDisplayedPreview(catalogRequest('/apply', {}));
     if (closure === 'manual cancellation') {
       const response = await adminAcceptOrder(new NextRequest('http://localhost/order', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: 'cancelled' }) }), { params: Promise.resolve({ id: fixture.order!.id }) });
       expect(response.status).toBe(200);
@@ -598,11 +605,11 @@ describe('admin pricing adjustment routes', () => {
 
   it('preserves variant identity from the pricing snapshot through recalculation and publication', async () => {
     const fixture = await seedQuoteCase('snapshot_variant');
-    await prisma.productVariant.create({ data: { id: 'variant_snapshot', productId: 'product_1', catalogNumber: 'CAT-1-10', spec: '10 ml', price: 100 } });
+    await prisma.productVariant.create({ data: { id: 'variant_snapshot', productId: 'product_1', catalogNumber: 'CAT-1-10', spec: '10 ml', price: 100, originalPrice: 100 } });
     await prisma.quoteItem.update({ where: { id: fixture.quote.items[0].id }, data: { catalogNumber: 'CAT-1-10', pricingSnapshot: JSON.stringify({ variantId: 'variant_snapshot' }) } });
     const rule = { scope: 'catalog', catalogNumbers: ['CAT-1-10'], includeVariants: true };
-    await previewPricing(request('/preview', rule));
-    expect((await applyDisplayedPreview(request('/apply', rule))).status).toBe(200);
+    await previewPricing(catalogRequest('/preview', rule));
+    expect((await applyDisplayedPreview(catalogRequest('/apply', rule))).status).toBe(200);
     const draft = await prisma.quote.findFirstOrThrow({ where: { inquiryId: fixture.inquiry.id }, orderBy: { version: 'desc' }, include: { items: { orderBy: { position: 'asc' } } } });
     expect(JSON.parse(draft.items[0].metadata!).variantId).toBe('variant_snapshot');
     const response = await publishQuote(new NextRequest('http://localhost/inquiry/quote', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ catalogQuoteId: draft.id, catalogQuoteHash: quoteContentHash(draft) }) }), { params: Promise.resolve({ id: fixture.inquiry.id }) });
@@ -618,6 +625,180 @@ describe('admin pricing adjustment routes', () => {
     expect(body.preview.skippedInquiryCount).toBe(1);
     expect(body.preview.samples[0]).toMatchObject({ catalogNumber: 'CAT-1', currentPrice: 100, nextPrice: 110 });
     expect(JSON.stringify(body)).not.toContain('costPrice');
+  });
+
+  it('confirms a specific shop-wide brand discount and continues all unaccepted quotes while preserving accepted orders', async () => {
+    const open = await seedQuoteCase('brand_open');
+    const pending = await seedQuoteCase('brand_pending', 'pending');
+    const locked = await seedQuoteCase('brand_locked', 'confirmed');
+    await prisma.brand.update({ where: { name: 'CST' }, data: { defaultDiscountRate: null } });
+    const draft = { target: 'brand_default_discount', brandDefaultDiscountRate: 0.8, reason: '测试资料已核实' };
+    const preview = await previewPricing(request('/preview', draft));
+    expect(preview.status).toBe(200);
+    const shown = (await preview.json()).preview;
+    expect(shown).toMatchObject({ changeCount: 1, brandDefaultChange: { brandName: 'CST', beforeRate: null, afterRate: 0.8 },
+      quoteImpact: { quoteCount: 2, pendingOrderCount: 1 } });
+    const details = await previewDetails(new Request(`http://localhost/details?approvalHash=${shown.approvalHash}&offset=0`));
+    expect((await details.json()).rows).toMatchObject([{ brand: 'CST', unit: 'rate', before: null, after: 0.8 }]);
+    expect((await prisma.brand.findUniqueOrThrow({ where: { name: 'CST' } })).defaultDiscountRate).toBeNull();
+    const applied = await applyDisplayedPreview(request('/apply', draft));
+    expect(applied.status).toBe(200);
+    expect((await applied.json()).result).toMatchObject({ updatedCount: 1, approvalHash: shown.approvalHash });
+    for (const fixture of [open, pending]) {
+      const latest = await prisma.quote.findFirstOrThrow({ where: { inquiryId: fixture.inquiry.id }, orderBy: { version: 'desc' }, include: { items: true } });
+      expect(latest).toMatchObject({ version: 2, status: 'draft', subtotal: 160 });
+      expect(JSON.parse(latest.items[0].pricingSnapshot!).appliedSource).toBe('brand_default_discount');
+    }
+    expect((await prisma.order.findUniqueOrThrow({ where: { id: pending.order!.id } })).total).toBe(200);
+    await expect(assertOrderPricingResolved(prisma, pending.order!.id)).rejects.toThrow();
+    expect(await prisma.order.findUniqueOrThrow({ where: { id: locked.order!.id }, include: { orderItems: true } })).toEqual(locked.order);
+    expect((await prisma.quote.findUniqueOrThrow({ where: { id: locked.quote.id } })).version).toBe(1);
+    expect((await prisma.product.findUniqueOrThrow({ where: { id: 'product_1' } })).price).toBe(100);
+    const repeated = await applyDisplayedPreview(request('/apply', draft));
+    expect((await repeated.json()).result.updatedCount).toBe(0);
+    expect(await prisma.quote.count()).toBe(5);
+  });
+
+  it.each(['request rate', 'brand record', 'customer conditions'])('rejects old brand approval after a change to %s', async (changed) => {
+    await seedQuoteCase('brand_changed');
+    const draft = { target: 'brand_default_discount', brandDefaultDiscountRate: 0.8, reason: '核实测试资料' };
+    await previewPricing(request('/preview', draft));
+    if (changed === 'brand record') await prisma.brand.update({ where: { name: 'CST' }, data: { defaultDiscountRate: 0.95 } });
+    if (changed === 'customer conditions') await prisma.user.update({ where: { id: 'admin_test_id' }, data: { brandDiscounts: '{"CST":0.9}' } });
+    const response = await applyDisplayedPreview(request('/apply', { ...draft, ...(changed === 'request rate' ? { brandDefaultDiscountRate: 0.7 } : {}) }));
+    expect(response.status).toBe(409);
+    expect((await prisma.brand.findUniqueOrThrow({ where: { name: 'CST' } })).defaultDiscountRate).toBe(changed === 'brand record' ? 0.95 : 1);
+    expect(await prisma.quote.count()).toBe(1);
+    expect(await prisma.backgroundTask.count({ where: { type: 'pricing.apply' } })).toBe(0);
+  });
+
+  it('matches a catalogue-only specification to its brand and excludes another brand with the same catalogue', async () => {
+    const target = await seedQuoteCase('brand_variant');
+    const other = await seedQuoteCase('other_brand_variant');
+    await prisma.productVariant.create({ data: { id: 'brand_variant', productId: 'product_1', catalogNumber: 'SAME-VARIANT', spec: '2 ml', price: 900, originalPrice: 300 } });
+    for (const [fixture, brand] of [[target, 'CST'], [other, 'Other']] as const) {
+      await prisma.quoteItem.update({ where: { id: fixture.quote.items[0].id }, data: {
+        productId: null, catalogNumber: 'SAME-VARIANT', unitPrice: 300, lineTotal: 600, metadata: JSON.stringify({ brand }),
+      } });
+    }
+    const draft = { target: 'brand_default_discount', brandDefaultDiscountRate: 0.8, reason: '测试品牌折扣' };
+    const shown = (await (await previewPricing(request('/preview', draft))).json()).preview;
+    expect(shown.quoteImpact.quoteCount).toBe(1);
+    const response = await applyDisplayedPreview(request('/apply', draft));
+    expect(response.status).toBe(200);
+    const latest = await prisma.quote.findFirstOrThrow({ where: { inquiryId: target.inquiry.id }, orderBy: { version: 'desc' }, include: { items: true } });
+    expect(latest).toMatchObject({ version: 2, subtotal: 480 });
+    expect(JSON.parse(latest.items[0].pricingSnapshot!).variantId).toBe('brand_variant');
+    expect(latest.items[0].productId).toBe('product_1');
+    const publish = (confirmWarnings = false) => publishQuote(new NextRequest('http://localhost/inquiry/quote', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ catalogQuoteId: latest.id, catalogQuoteHash: quoteContentHash(latest), confirmWarnings }),
+    }), { params: Promise.resolve({ id: target.inquiry.id }) });
+    const warning = await publish();
+    expect(warning.status).toBe(409);
+    expect((await warning.json()).code).toBe('COMMERCE_LINE_WARNINGS');
+    expect((await prisma.quote.findUniqueOrThrow({ where: { id: latest.id } })).status).toBe('draft');
+    const published = await publish(true);
+    expect(published.status).toBe(200);
+    expect((await published.json()).quote).toMatchObject({ status: 'sent', subtotal: 480, items: [{ productId: 'product_1', variantId: 'brand_variant', price: 240 }] });
+    expect((await prisma.quoteItem.findUniqueOrThrow({ where: { id: target.quote.items[0].id } })).productId).toBeNull();
+    expect(await prisma.quote.count({ where: { inquiryId: other.inquiry.id } })).toBe(1);
+  });
+
+  it('rejects a brand preview if the underlying before value changes between its two reads', async () => {
+    await seedQuoteCase('brand_read_race');
+    const original = prisma.brand.findUnique.bind(prisma.brand);
+    const spy = vi.spyOn(prisma.brand, 'findUnique').mockImplementationOnce((async (args: Parameters<typeof original>[0]) => {
+      const previous = await original(args);
+      await prisma.brand.update({ where: { name: 'CST' }, data: { defaultDiscountRate: 0.9 } });
+      return previous;
+    }) as unknown as typeof prisma.brand.findUnique);
+    try {
+      const response = await previewPricing(request('/preview', { target: 'brand_default_discount', brandDefaultDiscountRate: 0.7, reason: '测试并发变化' }));
+      expect(response.status).toBe(409);
+      expect((await response.json()).preview).toBeUndefined();
+      expect((await prisma.brand.findUniqueOrThrow({ where: { name: 'CST' } })).defaultDiscountRate).toBe(0.9);
+      expect(await prisma.quote.count()).toBe(1);
+    } finally { spy.mockRestore(); }
+  });
+
+  it.each(['customer discount without brand default', 'same amount with different sources'])('never publishes old catalogue confirmation after %s', async (condition) => {
+    const fixture = await seedQuoteCase('publish_sources');
+    if (condition === 'customer discount without brand default') {
+      await prisma.brand.update({ where: { name: 'CST' }, data: { defaultDiscountRate: null } });
+      await prisma.user.update({ where: { id: 'admin_test_id' }, data: { brandDiscounts: '{"CST":0.8}' } });
+    } else await prisma.brand.update({ where: { name: 'CST' }, data: { defaultDiscountRate: 0.8 } });
+    await previewPricing(catalogRequest('/preview', {}));
+    expect((await applyDisplayedPreview(catalogRequest('/apply', {}))).status).toBe(200);
+    const draft = await prisma.quote.findFirstOrThrow({ where: { inquiryId: fixture.inquiry.id }, orderBy: { version: 'desc' }, include: { items: { orderBy: { position: 'asc' } } } });
+    expect(draft.items[0].unitPrice).toBe(88);
+    if (condition === 'customer discount without brand default') {
+      await prisma.user.update({ where: { id: 'admin_test_id' }, data: { brandDiscounts: '{"CST":0.7}' } });
+    } else {
+      await prisma.brand.update({ where: { name: 'CST' }, data: { defaultDiscountRate: 0.4 } });
+      await prisma.product.update({ where: { id: 'product_1' }, data: { originalPrice: 220 } });
+    }
+    const response = await publishQuote(new NextRequest('http://localhost/inquiry/quote', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ catalogQuoteId: draft.id, catalogQuoteHash: quoteContentHash(draft) }),
+    }), { params: Promise.resolve({ id: fixture.inquiry.id }) });
+    expect(response.status).toBe(409);
+    expect(await prisma.quote.count({ where: { inquiryId: fixture.inquiry.id } })).toBe(2);
+    expect((await prisma.quote.findUniqueOrThrow({ where: { id: draft.id } })).status).toBe('draft');
+    const refresh = await publishQuote(new NextRequest('http://localhost/inquiry/quote', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refreshCatalogQuote: true, catalogQuoteId: draft.id, catalogQuoteHash: quoteContentHash(draft) }),
+    }), { params: Promise.resolve({ id: fixture.inquiry.id }) });
+    expect(refresh.status).toBe(200);
+    expect((await refresh.json()).result).toMatchObject({ refreshed: true, status: 'draft' });
+    const revised = await prisma.quote.findFirstOrThrow({ where: { inquiryId: fixture.inquiry.id }, orderBy: { version: 'desc' }, include: { items: { orderBy: { position: 'asc' } } } });
+    expect(revised.version).toBe(3);
+    expect(revised.items[0].unitPrice).toBe(condition === 'customer discount without brand default' ? 77 : 88);
+    const sent = await publishQuote(new NextRequest('http://localhost/inquiry/quote', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ catalogQuoteId: revised.id, catalogQuoteHash: quoteContentHash(revised) }),
+    }), { params: Promise.resolve({ id: fixture.inquiry.id }) });
+    expect(sent.status).toBe(200);
+    expect((await sent.json()).quote.status).toBe('sent');
+  });
+
+  it('refreshes a stale pending-order proposal in the same inquiry without reusing the old customer approval', async () => {
+    const fixture = await seedQuoteCase('pending_policy_refresh', 'pending');
+    const old = await prepareOrderRepricing(fixture);
+    const context = { params: Promise.resolve({ id: fixture.inquiry.id }) };
+    const previous = await prisma.quote.findUniqueOrThrow({ where: { id: old.quoteId }, include: { items: { orderBy: { position: 'asc' } } } });
+    await prisma.user.update({ where: { id: 'admin_test_id' }, data: { brandDiscounts: '{"CST":0.7}' } });
+    expect((await recordRepricing(request('/repricing', old), context)).status).toBe(409);
+    expect((await prisma.order.findUniqueOrThrow({ where: { id: fixture.order!.id } })).total).toBe(200);
+    const response = await publishQuote(new NextRequest('http://localhost/inquiry/quote', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refreshCatalogQuote: true, catalogQuoteId: previous.id, catalogQuoteHash: quoteContentHash(previous) }),
+    }), context);
+    expect(response.status).toBe(200);
+    const latest = await prisma.quote.findFirstOrThrow({ where: { inquiryId: fixture.inquiry.id }, orderBy: { version: 'desc' }, include: { items: true } });
+    expect(latest).toMatchObject({ version: 3, status: 'draft', subtotal: 154 });
+    expect((await recordRepricing(request('/repricing', old), context)).status).toBe(409);
+    const metadata = JSON.parse(latest.items[0].metadata!);
+    const fresh = { ...old, quoteId: latest.id, proposalHash: metadata.repricingProposalHash, confirmedTotal: 154, responseReference: '客户确认新版154元' };
+    expect((await recordRepricing(request('/repricing', fresh), context)).status).toBe(200);
+    const sameOrder = await prisma.order.findUniqueOrThrow({ where: { id: fixture.order!.id }, include: { orderItems: true } });
+    expect(sameOrder).toMatchObject({ id: fixture.order!.id, total: 154, status: 'pending' });
+    expect(sameOrder.orderItems[0].id).toBe(fixture.order!.orderItems[0].id);
+    expect(await prisma.order.count()).toBe(1);
+    expect((await prisma.quote.findUniqueOrThrow({ where: { id: previous.id } })).status).toBe('superseded');
+  });
+
+  it.each(['missing catalogue', 'unresolved customer scalar'])('preserves all original facts when repricing requires review: %s', async (condition) => {
+    await seedQuoteCase('brand_review');
+    if (condition === 'missing catalogue') await prisma.product.update({ where: { id: 'product_1' }, data: { originalPrice: null } });
+    else await prisma.user.update({ where: { id: 'admin_test_id' }, data: { discountRate: 0.6 } });
+    const draft = { target: 'brand_default_discount', brandDefaultDiscountRate: 0.8, reason: '测试资料确认' };
+    await previewPricing(request('/preview', draft));
+    const response = await applyDisplayedPreview(request('/apply', draft));
+    expect(response.status).toBe(409);
+    expect((await prisma.brand.findUniqueOrThrow({ where: { name: 'CST' } })).defaultDiscountRate).toBe(1);
+    expect(await prisma.quote.count()).toBe(1);
+    expect((await prisma.user.findUniqueOrThrow({ where: { id: 'admin_test_id' } })).discountRate).toBe(condition === 'missing catalogue' ? null : 0.6);
   });
 
   it('applies public prices, keeps cost price unchanged, and floors to minimum sale price', async () => {

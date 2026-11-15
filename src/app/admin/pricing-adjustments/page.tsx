@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { PricingAdjustmentDetails } from '@/components/admin/PricingAdjustmentDetails';
+import { BrandDefaultDiscountForm } from '@/components/admin/BrandDefaultDiscountForm';
 import {
   AlertCircle,
   ArrowDown,
@@ -1197,6 +1198,7 @@ export default function PricingAdjustmentsPage() {
         </div>
       </section>
 
+      <BrandDefaultDiscountForm key={selectedBrand} brand={selectedBrand} />
       <section className={`rounded-xl ${uiSurfaces.panel}`}>
         <div className="border-b border-gray-100 px-4 py-4 sm:px-5">
           <div className="flex items-center gap-3">

@@ -1158,6 +1158,7 @@ model Brand {
   logoUrl     String?
   isActive    Boolean   @default(true)
   sortOrder   Int       @default(0)
+  defaultDiscountRate Float? // 本品牌全店默认折扣；null 表示尚未确认，不从客户历史单值推断
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
   products    Product[]

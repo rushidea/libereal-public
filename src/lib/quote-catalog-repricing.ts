@@ -4,10 +4,15 @@ import { verifyAndPriceItems } from '@/lib/pricing';
 import { calculateOrderAmounts } from '@/lib/order-domain';
 import type { PricingQuoteImpact } from '@/lib/pricing-adjustment-impact';
 import { pricingContentHash } from '@/lib/pricing-adjustment-approval';
+import { quoteContentHash } from '@/lib/quote-records';
 import { jsonObject, orderRepricingFingerprint, orderRepricingTermsFingerprint, REPRICING_ORDER_INCLUDE } from '@/lib/order-catalog-repricing';
 
 type Change = { productId: string; variantId?: string | null; catalogNumber: string; brand?: string };
 type Line = { productId: string | null; catalogNumber: string | null; name: string; unitPrice: number; quantity: number; metadata: string | null; pricingSnapshot: string | null };
+
+function priceInputsChanged(before: string | null, after: string | null) {
+  return jsonObject(before).discountInputsHash !== jsonObject(after).discountInputsHash;
+}
 
 function affected(line: Line, changes: Change[]) {
   const metadata = jsonObject(line.metadata);
@@ -23,7 +28,7 @@ function affected(line: Line, changes: Change[]) {
 }
 
 async function priceLine(tx: Prisma.TransactionClient, line: Line, inquiry: { userId: string | null; email: string }, changes: Change[]) {
-  if (!affected(line, changes)) return { unitPrice: line.unitPrice, pricingSnapshot: line.pricingSnapshot };
+  if (!affected(line, changes)) return { productId: line.productId, unitPrice: line.unitPrice, pricingSnapshot: line.pricingSnapshot };
   const metadata = jsonObject(line.metadata);
   const snapshot = jsonObject(line.pricingSnapshot);
   const variantId = typeof metadata.variantId === 'string' ? metadata.variantId
@@ -32,15 +37,15 @@ async function priceLine(tx: Prisma.TransactionClient, line: Line, inquiry: { us
     productId: line.productId, catalogNumber: line.catalogNumber, variantId,
     brand: typeof metadata.brand === 'string' ? metadata.brand : undefined,
     name: line.name, price: line.unitPrice, quantity: line.quantity,
-  }], { db: tx, userId: inquiry.userId, customerEmail: inquiry.email, allowClientFallback: false, strictQuantity: true });
+  }], { db: tx, userId: inquiry.userId, customerEmail: inquiry.email, allowClientFallback: false, strictQuantity: true, requireDiscountPriority: true });
   const next = priced.verifiedItems[0];
   if (!next || next.source !== 'db' || next.quoteRequired) throw new Error('CATALOG_REPRICING_REQUIRES_REVIEW');
-  return { unitPrice: next.unitPrice, pricingSnapshot: next.pricingSnapshot };
+  return { productId: next.productId, unitPrice: next.unitPrice, pricingSnapshot: next.pricingSnapshot };
 }
 
 /** One current successor per inquiry. Merchant-accepted orders are never recalculated. */
 export async function repriceQuotesAfterCatalogChange(tx: Prisma.TransactionClient, input: {
-  impact: PricingQuoteImpact; changes: Change[]; approvalHash: string; actor: { id: string; email: string };
+  impact: PricingQuoteImpact; changes: Change[]; approvalHash: string; operationKey?: string; actor: { id: string; email: string };
 }) {
   const results = [];
   for (const previousQuoteId of input.impact.quoteIds) {
@@ -48,16 +53,16 @@ export async function repriceQuotesAfterCatalogChange(tx: Prisma.TransactionClie
       items: { orderBy: { position: 'asc' } }, inquiry: true,
     } });
     if (!previous || previous.inquiry.archivedAt || !['draft', 'sent', 'accepted', 'expired'].includes(previous.status)) continue;
-    const quoteId = `catalog_quote_${createHash('sha256').update(`${input.approvalHash}:${previous.id}`).digest('hex').slice(0, 32)}`;
+    const quoteId = `catalog_quote_${createHash('sha256').update(`${input.operationKey ?? input.approvalHash}:${previous.id}`).digest('hex').slice(0, 32)}`;
     const items: Prisma.QuoteItemCreateWithoutQuoteInput[] = [];
     let changed = false;
     for (const line of previous.items) {
       if (jsonObject(line.metadata).repricingOrderId || line.quantity <= line.orderedQty || !line.available) continue;
       const quantity = line.quantity - line.orderedQty;
       const next = await priceLine(tx, { ...line, quantity }, previous.inquiry, input.changes);
-      if (Math.round(next.unitPrice * 100) !== Math.round(line.unitPrice * 100)) changed = true;
+      if (Math.round(next.unitPrice * 100) !== Math.round(line.unitPrice * 100) || priceInputsChanged(line.pricingSnapshot, next.pricingSnapshot)) changed = true;
       items.push({ position: items.length, ...(line.inquiryItemId ? { inquiryItem: { connect: { id: line.inquiryItemId } } } : {}),
-        productId: line.productId, catalogNumber: line.catalogNumber, name: line.name, quantity, orderedQty: 0,
+        catalogNumber: line.catalogNumber, name: line.name, quantity, orderedQty: 0,
         ...next, lineTotal: Math.round(next.unitPrice * quantity * 100) / 100,
         leadTime: line.leadTime, available: line.available, notes: line.notes, metadata: line.metadata });
     }
@@ -88,9 +93,10 @@ export async function repriceQuotesAfterCatalogChange(tx: Prisma.TransactionClie
         const priorProposal = previous.items.find((prior) => prior.available
           && jsonObject(prior.metadata).repricingOrderItemId === item.id);
         const next = priorProposal && !affected(line, input.changes)
-          ? { unitPrice: priorProposal.unitPrice, pricingSnapshot: priorProposal.pricingSnapshot }
+          ? { productId: priorProposal.productId, unitPrice: priorProposal.unitPrice, pricingSnapshot: priorProposal.pricingSnapshot }
           : await priceLine(tx, line, previous.inquiry, input.changes);
-        if (Math.round(next.unitPrice * 100) !== Math.round((priorProposal?.unitPrice ?? item.unitPrice) * 100)) orderChanged = true;
+        if (Math.round(next.unitPrice * 100) !== Math.round((priorProposal?.unitPrice ?? item.unitPrice) * 100)
+          || priceInputsChanged(priorProposal?.pricingSnapshot ?? item.pricingSnapshot ?? source.pricingSnapshot, next.pricingSnapshot)) orderChanged = true;
         orderLines.push({ item, source, next });
       }
       // Keep an unresolved earlier proposal even when this catalogue change targets another line.
@@ -98,12 +104,13 @@ export async function repriceQuotesAfterCatalogChange(tx: Prisma.TransactionClie
       if (!orderChanged && !oldProposal) continue;
       changed ||= orderChanged;
       const orderFingerprint = orderRepricingFingerprint(order);
-      const lines = orderLines.map(({ item, next }) => ({ orderItemId: item.id, quantity: item.quantity, ...next }));
+      const lines = orderLines.map(({ item, next }) => ({ orderItemId: item.id, quantity: item.quantity,
+        unitPrice: next.unitPrice, pricingSnapshot: next.pricingSnapshot }));
       const proposalHash = pricingContentHash({ orderFingerprint, lines });
       const proposedAmounts = calculateOrderAmounts(orderLines.map(({ item, next }) => ({ unitPrice: next.unitPrice, quantity: item.quantity })), order.adjustments);
       proposals.push({ orderId: order.id, orderFingerprint, orderTermsFingerprint: orderRepricingTermsFingerprint(order), proposalHash });
       for (const { item, source, next } of orderLines) items.push({
-        position: items.length, productId: item.productId, catalogNumber: source.catalogNumber,
+        position: items.length, catalogNumber: source.catalogNumber,
         name: item.name, quantity: item.quantity, orderedQty: 0, ...next,
         lineTotal: Math.round(next.unitPrice * item.quantity * 100) / 100, leadTime: item.leadTime,
         available: true, metadata: JSON.stringify({ ...jsonObject(item.metadata ?? source.metadata),
@@ -133,14 +140,41 @@ export async function repriceQuotesAfterCatalogChange(tx: Prisma.TransactionClie
     await tx.inquiry.update({ where: { id: previous.inquiryId }, data: { subtotal, hasUnresolvedPricing: true, status: '待人工审核' } });
     await tx.quoteConfirmation.create({ data: {
       quoteId, userId: input.actor.id, email: input.actor.email, action: 'catalog_repricing_prepared',
-      details: JSON.stringify({ approvalHash: input.approvalHash, previousQuoteId, pendingOrderIds: proposals.map((proposal) => proposal.orderId) }),
+      details: JSON.stringify({ approvalHash: input.approvalHash, previousQuoteId, pendingOrderIds: proposals.map((proposal) => proposal.orderId),
+        ...(input.operationKey ? { kind: 'pricing_refresh', operationKey: input.operationKey } : {}) }),
     } });
     for (const proposal of proposals) await tx.orderEvent.create({ data: { orderId: proposal.orderId,
       type: 'catalog_repricing_required', actorId: input.actor.id, actorEmail: input.actor.email,
-      message: '目录价格变更，已生成原订单价格复核，等待客户确认后继续审核',
+      message: '目录价格或适用折扣变化，已生成原订单价格复核，等待客户确认后继续审核',
       metadata: JSON.stringify({ ...proposal, quoteId, quoteVersion: created.version, approvalHash: input.approvalHash }),
     } });
     results.push({ previousQuoteId, quoteId, inquiryId: previous.inquiryId, version: created.version, subtotal, pendingOrderIds: proposals.map((proposal) => proposal.orderId) });
   }
   return results;
+}
+
+/** Recompute only the current draft in the original inquiry; no data approval, send or order acceptance. */
+export async function refreshCatalogRepricingDraft(tx: Prisma.TransactionClient, input: {
+  inquiryId: string; quoteId: string; quoteHash: string; actor: { id: string; email: string };
+}) {
+  const draft = await tx.quote.findFirst({ where: { inquiryId: input.inquiryId }, orderBy: { version: 'desc' }, include: {
+    items: { orderBy: { position: 'asc' } }, inquiry: true, confirmations: { where: { action: 'catalog_repricing_prepared' } },
+  } });
+  if (!draft || draft.id !== input.quoteId || draft.status !== 'draft' || draft.confirmations.length !== 1
+    || draft.inquiry.archivedAt || draft.inquiry.status === 'declined' || quoteContentHash(draft) !== input.quoteHash) throw new Error('REPRICING_VERSION_CHANGED');
+  const approvalHash = jsonObject(draft.confirmations[0].details).approvalHash;
+  if (typeof approvalHash !== 'string') throw new Error('REPRICING_VERSION_CHANGED');
+  const changes: Change[] = draft.items.filter((line) => line.available).map((line) => {
+    const productId = line.productId ?? jsonObject(line.pricingSnapshot).productId;
+    const brand = jsonObject(line.metadata).brand;
+    if (typeof productId !== 'string' || typeof line.catalogNumber !== 'string') throw new Error('CATALOG_REPRICING_REQUIRES_REVIEW');
+    return { productId, catalogNumber: line.catalogNumber, ...(typeof brand === 'string' ? { brand } : {}) };
+  });
+  const pendingOrderIds = draft.items.map((line) => jsonObject(line.metadata).repricingOrderId).filter((id): id is string => typeof id === 'string');
+  const result = await repriceQuotesAfterCatalogChange(tx, {
+    impact: { quoteIds: [draft.id], pendingOrderIds: [...new Set(pendingOrderIds)], contents: [] },
+    changes, approvalHash, actor: input.actor,
+    operationKey: pricingContentHash({ kind: 'quote_pricing_refresh', quoteId: draft.id, quoteHash: input.quoteHash }),
+  });
+  return { quoteId: result[0]?.quoteId ?? draft.id, refreshed: result.length > 0, status: 'draft' };
 }

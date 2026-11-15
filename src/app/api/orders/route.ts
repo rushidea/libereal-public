@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { requireActiveSession, requireAdmin } from '@/lib/session';
 import { AMBIGUOUS_PRODUCT_CATALOG_NUMBER, CustomerUnavailableProductError, getVerifiedInventoryError, revalidateReferencePriceEvidence, verifyAndPriceItems, type PriceLookupItem } from '@/lib/pricing';
+import { assertBrandDiscountPricesCurrent, discountPricingFailure } from '@/lib/pricing';
 import { reportError } from '@/lib/errorReporting';
 import type { Prisma } from '@prisma/client';
 import { sendAdminOperationalEmail } from '@/lib/mail';
@@ -483,6 +484,7 @@ export async function POST(req: NextRequest) {
 
           // Recheck activity-bound prices in this transaction regardless of whether the order has a coupon.
           // Coupon identity uncertainty is handled by coupon scope checks and must not masquerade as price drift.
+          await assertBrandDiscountPricesCurrent(tx, verifiedItems, { userId: session.user!.id as string });
           const eligibleReferenceRows = verifiedItems.filter((item) => item.referencePriceEligible);
           const referencePriceEvidence = eligibleReferenceRows
             .map((item) => item.promotionPricingEvidence)
@@ -584,6 +586,8 @@ export async function POST(req: NextRequest) {
         const msg = error.message.replace(/^COUPON_APPLY:/, '');
         return NextResponse.json({ error: msg }, { status: 400 });
       }
+      const discountError = discountPricingFailure(error);
+      if (discountError) return NextResponse.json({ error: discountError }, { status: 409 });
       if (error instanceof Error && error.message === 'REFERENCE_PRICE_DRIFT') {
         return NextResponse.json({ error: '活动参考价已变化，请刷新后重新确认', code: 'REFERENCE_PRICE_DRIFT' }, { status: 409 });
       }
@@ -623,6 +627,8 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ order, orderId: order.id });
   } catch (err) {
+    const discountError = discountPricingFailure(err);
+    if (discountError) return NextResponse.json({ error: discountError }, { status: 409 });
     if (err instanceof CustomerUnavailableProductError) {
       return NextResponse.json(
         { error: `${err.productName} 已下架，无法提交订单`, catalogNumber: err.catalogNumber },

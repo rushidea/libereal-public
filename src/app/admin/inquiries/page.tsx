@@ -10,6 +10,7 @@ import { ADMIN_INQUIRY_TODO_STATUSES, notifyAdminInquiryTodoChanged } from '@/li
 import { InquiryIdDisplay } from '@/components/InquiryIdDisplay';
 import { CatalogRepricingReview } from '@/components/admin/CatalogRepricingReview';
 import { effectiveInquiryStatus, presentedQuoteStatus } from '@/lib/quote-expiry';
+import { commerceLineWarningList, commerceLineWarningPrompt } from '@/lib/commerce-line-review';
 
 interface Inquiry {
   id: string;
@@ -94,7 +95,10 @@ function InquiriesPanel() {
     try {
       const res = await fetch('/api/inquiries');
       const data = await res.json();
-      setInquiries(Array.isArray(data) ? data : []);
+      const rows: Inquiry[] = Array.isArray(data) ? data : [];
+      setInquiries(rows);
+      const requestedId = new URLSearchParams(window.location.search).get('inquiryId');
+      setSelectedInquiry((current) => rows.find((row) => row.id === (current?.id ?? requestedId)) ?? null);
     } catch (e) {
       console.error(e);
     } finally {
@@ -352,14 +356,31 @@ function InquiryDetailPanel({
   const pendingOrderReview = catalogDraft?.items.some((item) => isOrderRevision(item) && item.available !== false);
   return (
     <div className="bg-white rounded-lg border border-brand-300 shadow-sm p-4 space-y-4">
+      {catalogDraft && <div className="flex flex-wrap items-center gap-3 text-sm">
+        <span>目录价、折扣或客户条件变化后，可在本询价重新核算并查看新版草稿。</span>
+        <button type="button" className="rounded border px-3 py-2" onClick={async () => {
+          const response = await fetch(`/api/inquiries/${inquiry.id}/quote`, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ refreshCatalogQuote: true, catalogQuoteId: catalogDraft.id, catalogQuoteHash: catalogDraft.contentHash }) });
+          const data = await response.json().catch(() => ({}));
+          if (!response.ok || data.result?.status !== 'draft') { alert(data.error || '未取得新版草稿，请核对后重试'); return; }
+          await fetchData();
+        }}>重新核算并预览</button>
+      </div>}
       {inquiry.activeQuote?.status === 'draft' && <CatalogRepricingReview inquiryId={inquiry.id} quote={inquiry.activeQuote} onRecorded={fetchData} />}
       {catalogDraft && remaining.length > 0 && <section className="space-y-2 rounded border border-blue-200 bg-blue-50 p-4">
         <h3 className="font-semibold">重新核算后的待报价明细 · 第 {catalogDraft.version} 版</h3>
         {remaining.map((line, index) => <p key={index} className="text-sm">{line.name} × {line.quantity} · 单价 ¥{Number(line.price).toFixed(2)} · 金额 ¥{(Number(line.price) * Number(line.quantity)).toFixed(2)}</p>)}
         <button disabled={pendingOrderReview} className="rounded bg-brand-600 px-3 py-2 text-sm text-white disabled:opacity-50" onClick={async () => {
           if (!confirm(`确认将当前显示的第 ${catalogDraft.version} 版重算报价发送给客户？`)) return;
-          const response = await fetch(`/api/inquiries/${inquiry.id}/quote`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ catalogQuoteId: catalogDraft.id, catalogQuoteHash: catalogDraft.contentHash }) });
-          const data = await response.json().catch(() => ({}));
+          const send = (confirmWarnings = false) => fetch(`/api/inquiries/${inquiry.id}/quote`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ catalogQuoteId: catalogDraft.id, catalogQuoteHash: catalogDraft.contentHash, confirmWarnings }) });
+          let response = await send();
+          let data = await response.json().catch(() => ({}));
+          const warnings = commerceLineWarningList(data);
+          if (response.status === 409 && warnings?.length) {
+            if (!confirm(commerceLineWarningPrompt(warnings, '发送当前这版报价'))) return;
+            response = await send(true);
+            data = await response.json().catch(() => ({}));
+          }
           if (!response.ok) { alert(data.error || '发送失败'); return; }
           await fetchData(); alert('重算报价已提交发送');
         }}>{pendingOrderReview ? '请先完成原订单价格复核' : '确认并发送这版重算报价'}</button>

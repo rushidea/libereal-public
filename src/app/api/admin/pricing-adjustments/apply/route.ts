@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { requireAdminPricingMutation } from '@/lib/admin-pricing-step-up';
 import { parsePriceAdjustmentRequest } from '@/lib/pricing-adjustment-rules';
 import { applyPriceAdjustment, PriceAdjustmentApprovalChangedError, PriceAdjustmentPlanMissingError } from '@/lib/pricing-adjustment-service';
+import { discountPricingFailure } from '@/lib/pricing';
 
 export async function POST(request: Request) {
   const body = await request.json().catch(() => null);
@@ -15,6 +16,8 @@ export async function POST(request: Request) {
     const result = await applyPriceAdjustment(parsed.value, { id: admin.id, email: admin.email });
     return NextResponse.json({ result });
   } catch (error) {
+    const businessError = discountPricingFailure(error);
+    if (businessError) return NextResponse.json({ error: businessError }, { status: 409 });
     if (error instanceof PriceAdjustmentPlanMissingError || error instanceof PriceAdjustmentApprovalChangedError) {
       return NextResponse.json({ error: error.message }, { status: 409 });
     }

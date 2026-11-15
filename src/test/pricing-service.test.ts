@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { AMBIGUOUS_PRODUCT_CATALOG_NUMBER, getVerifiedInventoryError, revalidateCouponPromotionEvidence, revalidateReferencePriceEvidence, verifyAndPriceItems } from '@/lib/pricing';
 import { withPromotionRepository } from '@/lib/promotion-repository';
+import { assertBrandDiscountPricesCurrent } from '@/lib/pricing';
 import { prisma } from '@/lib/prisma';
 import { clearAllTables, closeTestDb, getTestDb, seedUser } from './db-helpers';
 
@@ -14,6 +15,46 @@ function seedProduct() {
 const originalReferencePriceConfig = process.env.REFERENCE_PRICE_PROMOTION_CONFIG;
 
 describe('pricing service', () => {
+  async function confirmBrand(rate = 0.8) {
+    await prisma.brand.create({ data: { id: 'brand_fixture', name: 'CST', defaultDiscountRate: rate } });
+    await prisma.product.update({ where: { id: 'product_1' }, data: { originalPrice: 100, promotionalPrice: 20 } });
+  }
+  it('uses catalogue times one applicable brand/customer/tier rate, not the market price or legacy minimum', async () => {
+    await confirmBrand();
+    const line = [{ productId: 'product_1', name: '测试', price: 1, quantity: 2 }];
+    const price = async () => (await verifyAndPriceItems(line, { userId: 'user_1' })).verifiedItems[0];
+    expect(await price()).toMatchObject({ unitPrice: 80, lineTotal: 160, source: 'db' });
+    await prisma.user.update({ where: { id: 'user_1' }, data: { tier: 'tier-2' } });
+    expect(await price()).toMatchObject({ unitPrice: 80 });
+    await prisma.user.update({ where: { id: 'user_1' }, data: { brandDiscounts: '{"CST":0.9}' } });
+    expect(await price()).toMatchObject({ unitPrice: 90 });
+    expect(JSON.parse((await price()).pricingSnapshot)).toMatchObject({ discountPolicy: 'brand_priority', appliedSource: 'customer_brand_discount', minimumPriceApplied: false });
+  });
+  it('revalidates catalogue/discount/customer facts inside order commit even if the final amount is unchanged', async () => {
+    await confirmBrand();
+    const { verifiedItems } = await verifyAndPriceItems([{ productId: 'product_1', name: '测试', price: 1 }], { userId: 'user_1' });
+    await prisma.$transaction((tx) => assertBrandDiscountPricesCurrent(tx, verifiedItems, { userId: 'user_1' }));
+    await prisma.brand.update({ where: { id: 'brand_fixture' }, data: { defaultDiscountRate: 0.4 } });
+    await prisma.product.update({ where: { id: 'product_1' }, data: { originalPrice: 200 } });
+    await expect(prisma.$transaction((tx) => assertBrandDiscountPricesCurrent(tx, verifiedItems, { userId: 'user_1' }))).rejects.toThrow('BRAND_DISCOUNT_PRICE_DRIFT');
+  });
+  it('does not borrow a parent product catalogue price for a specification lacking its own price', async () => {
+    await confirmBrand();
+    await prisma.productVariant.create({ data: { id: 'variant_catalog', productId: 'product_1', catalogNumber: 'CAT-V', spec: '2 ml', price: 500 } });
+    const items = [{ productId: 'product_1', variantId: 'variant_catalog', name: '测试', price: 1 }];
+    await expect(verifyAndPriceItems(items, { userId: 'user_1' })).rejects.toThrow('BRAND_CATALOG_PRICE_REQUIRED');
+    await prisma.productVariant.update({ where: { id: 'variant_catalog' }, data: { originalPrice: 300 } });
+    expect((await verifyAndPriceItems(items, { userId: 'user_1' })).verifiedItems[0].unitPrice).toBe(240);
+  });
+  it('preserves an unresolved customer scalar and fails closed for malformed brand-specific discounts', async () => {
+    await confirmBrand();
+    const items = [{ productId: 'product_1', name: '测试', price: 1 }];
+    await prisma.user.update({ where: { id: 'user_1' }, data: { discountRate: 0.5 } });
+    await expect(verifyAndPriceItems(items, { userId: 'user_1' })).rejects.toThrow('LEGACY_CUSTOMER_DISCOUNT_REVIEW_REQUIRED');
+    await prisma.user.update({ where: { id: 'user_1' }, data: { brandDiscounts: '{"CST":-1}' } });
+    await expect(verifyAndPriceItems(items, { userId: 'user_1' })).rejects.toThrow('INVALID_CUSTOMER_BRAND_DISCOUNT');
+    expect((await prisma.user.findUniqueOrThrow({ where: { id: 'user_1' } })).discountRate).toBe(0.5);
+  });
   it.each([0, -1, 1.5, NaN, Infinity])('rejects invalid quantity %s', async (quantity) => {
     await expect(verifyAndPriceItems([{ productId: 'product_1', name: '测试', price: 1, quantity }], { strictQuantity: true })).rejects.toThrow('INVALID_QUANTITY');
   });
