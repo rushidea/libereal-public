@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   orderFindUnique: vi.fn(),
   transactionOrderUpdateMany: vi.fn(),
   transactionOrderUpdate: vi.fn(),
+  transactionOrderFindUnique: vi.fn(),
   notificationCreate: vi.fn(),
   releaseOrderInventory: vi.fn(),
   restoreRedeemedOrderCoupons: vi.fn(),
@@ -33,7 +34,8 @@ vi.mock('@/lib/prisma', () => ({
     user: { findUnique: mocks.userFindUnique },
     cart: { findUnique: mocks.cartFindUnique, upsert: mocks.cartUpsert },
     $transaction: async (callback: (tx: unknown) => Promise<unknown>) => callback({
-      order: { update: mocks.transactionOrderUpdate, updateMany: mocks.transactionOrderUpdateMany },
+      order: { findUnique: mocks.transactionOrderFindUnique, update: mocks.transactionOrderUpdate, updateMany: mocks.transactionOrderUpdateMany },
+      orderEvent: { findMany: vi.fn(async () => []) },
     }),
   },
 }));
@@ -98,6 +100,7 @@ describe('customer order actions', () => {
     mocks.requireAdmin.mockResolvedValue({ id: 'user-1', email: 'buyer@example.com', role: 'customer' });
     mocks.orderFindUnique.mockResolvedValue(customerOrder());
     mocks.transactionOrderUpdate.mockResolvedValue({});
+    mocks.transactionOrderFindUnique.mockResolvedValue({ id: 'order-1', status: 'cancelled', inquiryId: null });
     mocks.transactionOrderUpdateMany.mockResolvedValue({ count: 1 });
     mocks.notificationCreate.mockResolvedValue({});
     mocks.releaseOrderInventory.mockResolvedValue(undefined);

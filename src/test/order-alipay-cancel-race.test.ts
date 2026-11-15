@@ -121,6 +121,7 @@ const db = vi.hoisted(() => {
       updateMany: shared.attemptUpdateMany,
     },
     accountReceivable: { findUnique: vi.fn(async () => null) },
+    orderEvent: { findMany: vi.fn(async () => []) },
   };
   return {
     tx,
