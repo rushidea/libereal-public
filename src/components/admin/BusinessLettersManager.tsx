@@ -30,8 +30,7 @@ export default function BusinessLettersManager({ initialReviewId = '', initialRe
   const [notice, setNotice] = useState('');
   const invalidate = () => { setPreview(null); setConfirmed(false); setNotice(''); };
 
-  const load = useCallback(async () => {
-    const response = await fetch('/api/admin/business-letter-templates', { cache: 'no-store' });
+  const load = useCallback(() => fetch('/api/admin/business-letter-templates', { cache: 'no-store' }).then(async response => {
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || '加载失败');
     setTemplates(data.templates); setRights(data);
@@ -41,7 +40,7 @@ export default function BusinessLettersManager({ initialReviewId = '', initialRe
       if (!result.ok) throw new Error(records.error || '信函记录加载失败');
       setLetters(records.letters);
     }
-  }, []);
+  }), []);
   useEffect(() => {
     void load().catch(e => setError(e.message));
   }, [load]);
