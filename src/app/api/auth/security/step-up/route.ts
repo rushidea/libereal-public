@@ -24,11 +24,11 @@ function mapError(error: string): { message: string; status: number } {
   }
 }
 
-export async function GET(request?: Request) {
+export async function GET(request: Request) {
   const user = await requireActiveSession();
   if (user instanceof NextResponse) return user;
   try {
-    const action = request ? new URL(request.url).searchParams.get('action') : null;
+    const action = new URL(request.url).searchParams.get('action');
     return NextResponse.json(await getSecurityStepUpAvailability(user.id, isSecurityStepUpAction(action) ? action : undefined), { headers: { 'Cache-Control': 'no-store' } });
   } catch (error) {
     console.error('[security.step-up.availability] failed:', error instanceof Error ? error.message : 'unknown');
