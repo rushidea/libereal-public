@@ -228,6 +228,69 @@ describe('written supplier quotation in the original inquiry', () => {
     expect(await prisma.order.findUniqueOrThrow({ where: { id: order.id }, include: { orderItems: true } })).toEqual(order);
   });
 
+  it.each([false, true])('rejects copied or split supplier lines before saving (confirm=%s)', async confirm => {
+    const order = await acceptedPendingOrder(); const original = order.orderItems[0];
+    for (const quantity of [2, 1]) {
+      const line = { ...original, price: original.unitPrice, quantity };
+      const response = await updateOrder(request({ items: [line, line], confirmWarnings: true, ...(confirm ? { status: 'confirmed' } : {}) }),
+        { params: Promise.resolve({ id: order.id }) });
+      const rejection = await response.json();
+      expect(response.status, JSON.stringify(rejection)).toBe(409); expect(rejection.code).toBe('QUOTE_REPRICE_REQUIRED');
+      expect(await prisma.order.findUniqueOrThrow({ where: { id: order.id }, include: { orderItems: true } })).toEqual(order);
+    }
+  });
+
+  it.each(['changed', 'removed'] as const)('rejects %s policy labels and unapproved terms in separate saves and edit-confirm', async policy => {
+    const order = await acceptedPendingOrder(); const original = order.orderItems[0];
+    for (const confirm of [false, true]) {
+      const snapshot = JSON.parse(original.pricingSnapshot!);
+      if (policy === 'changed') snapshot.discountPolicy = 'brand_priority'; else delete snapshot.discountPolicy;
+      snapshot.customerSupplyConditions = 'Unapproved customer supply terms';
+      const response = await updateOrder(request({ items: [{ ...original, price: original.unitPrice,
+        leadTime: 'Unapproved 7 day delivery', pricingSnapshot: JSON.stringify(snapshot) }], confirmWarnings: true,
+        ...(confirm ? { status: 'confirmed' } : {}) }), { params: Promise.resolve({ id: order.id }) });
+      const rejection = await response.json();
+      expect(response.status, JSON.stringify(rejection)).toBe(409); expect(rejection.code).toBe('QUOTE_REPRICE_REQUIRED');
+      expect(await prisma.order.findUniqueOrThrow({ where: { id: order.id }, include: { orderItems: true } })).toEqual(order);
+    }
+  });
+
+  it('saves canonical server evidence for an unchanged valid order edit', async () => {
+    const order = await acceptedPendingOrder(); const original = order.orderItems[0];
+    const response = await updateOrder(request({ items: [{ ...original, price: original.unitPrice,
+      pricingSnapshot: JSON.stringify({ ...JSON.parse(original.pricingSnapshot!), inventedApproval: 'not authority' }) }], confirmWarnings: true }),
+      { params: Promise.resolve({ id: order.id }) });
+    expect(response.status, await response.text()).toBe(200);
+    const saved = await prisma.order.findUniqueOrThrow({ where: { id: order.id }, include: { orderItems: true } });
+    expect(saved.status).toBe(order.status);
+    expect(JSON.parse(saved.orderItems[0].pricingSnapshot!)).not.toHaveProperty('inventedApproval');
+    expect(saved.orderItems[0].leadTime).toBe(original.leadTime);
+    await prisma.$transaction(tx => assertOrderPricingResolved(tx, order.id));
+  });
+
+  it('allows two independently evidenced inquiry lines while rejecting substitution of the original scope', async () => {
+    await prisma.inquiryItem.create({ data: { id: 'line_supplier_2', inquiryId: 'inquiry_supplier', position: 1,
+      productId: 'product_supplier', catalogNumber: 'EX-1', name: 'Example item', quantity: 2, unitPrice: 640,
+      lineTotal: 1280, metadata: JSON.stringify({ brand: 'Example Brand' }) } });
+    await activate(); const first = await prepare(); expect((await record(first)).status).toBe(200);
+    const secondResponse = await supplierAction(request({ action: 'prepare', inquiryItemId: 'line_supplier_2', quantity: 2 }), params);
+    const second = (await secondResponse.json()).result;
+    expect(secondResponse.status).toBe(200); expect((await record(second)).status).toBe(200);
+    expect((await publish(request({}), params)).status).toBe(200);
+    const quote = await prisma.quote.findFirstOrThrow();
+    vi.mocked(auth).mockResolvedValue({ user: { id: 'customer_supplier', email: 'customer@example.test', role: 'customer', sessionId: 'session-customer' } } as never);
+    expect((await acceptQuote(request({ quoteId: quote.id, quoteVersion: quote.version, itemIndices: [0, 1] }), params)).status).toBe(200);
+    vi.mocked(auth).mockResolvedValue({ user: { id: 'admin_test_id', email: 'admin@test.com', role: 'admin', sessionId: 'session-1' } } as never);
+    const order = await prisma.order.findFirstOrThrow({ include: { orderItems: { orderBy: { position: 'asc' } } } });
+    const items = order.orderItems.map(line => ({ ...line, price: line.unitPrice }));
+    const saved = await updateOrder(request({ items, confirmWarnings: true }), { params: Promise.resolve({ id: order.id }) });
+    expect(saved.status, await saved.text()).toBe(200);
+    const replaced = await updateOrder(request({ items: [items[1]], confirmWarnings: true, status: 'confirmed' }), { params: Promise.resolve({ id: order.id }) });
+    expect(replaced.status, await replaced.text()).toBe(409);
+    expect(await prisma.orderItem.count({ where: { orderId: order.id } })).toBe(2);
+    expect((await prisma.order.findUniqueOrThrow({ where: { id: order.id } })).status).toBe(order.status);
+  });
+
   it('checks a pre-existing direct pending order even without an inquiry or pricing snapshot', async () => {
     const { order } = await seedQuote('pending');
     await prisma.order.update({ where: { id: order!.id }, data: { inquiryId: null } });

@@ -211,32 +211,44 @@ export function discountPricingFailure(error: unknown): string | null {
 export async function assertBrandDiscountPricesCurrent(
   tx: Prisma.TransactionClient, items: VerifiedItem[], context: PricingContext,
 ) {
-  for (const item of items) {
+  const canonical = items.map(item => ({ ...item }));
+  const supplierLines = new Set<string>();
+  for (const [index, item] of items.entries()) {
     if (item.source !== 'db' || !item.productId || item.quoteRequired) continue;
-    const expected = JSON.parse(item.pricingSnapshot) as { discountPolicy?: string; discountInputsHash?: string;
-      inquiryId?: string; inquiryItemId?: string; customerSupplyConditions?: string };
+    const expected = JSON.parse(item.pricingSnapshot) as Record<string, unknown>;
     if (context.inquiryId && expected.inquiryId && context.inquiryId !== expected.inquiryId) throw new Error('BRAND_DISCOUNT_PRICE_DRIFT');
     const product = await tx.product.findUnique({ where: { id: item.productId }, select: { brand: true, brandRecordId: true } });
     const brand = product ? await tx.brand.findUnique({
       where: product.brandRecordId ? { id: product.brandRecordId } : { name: product.brand },
       select: { defaultDiscountRate: true, supplierQuoteRequiredAbove: true },
     }) : null;
-    if (!['brand_priority', 'supplier_written_reply'].includes(expected.discountPolicy ?? '') && brand?.defaultDiscountRate == null && brand?.supplierQuoteRequiredAbove == null) continue;
+    if (!['brand_priority', 'supplier_written_reply'].includes(typeof expected.discountPolicy === 'string' ? expected.discountPolicy : '') && brand?.defaultDiscountRate == null && brand?.supplierQuoteRequiredAbove == null) continue;
     try {
       const current = await verifyAndPriceItems([{
         productId: item.productId, variantId: item.variantId, catalogNumber: item.catalogNumber,
-        inquiryItemId: expected.inquiryItemId,
+        inquiryItemId: typeof expected.inquiryItemId === 'string' ? expected.inquiryItemId : undefined,
         name: item.name, price: item.unitPrice, quantity: item.quantity,
-      }], { ...context, inquiryId: context.inquiryId ?? expected.inquiryId,
+      }], { ...context, inquiryId: context.inquiryId ?? (typeof expected.inquiryId === 'string' ? expected.inquiryId : undefined),
         db: tx, requireDiscountPriority: true, allowClientFallback: false });
       const actual = current.verifiedItems[0];
-      const snapshot = JSON.parse(actual.pricingSnapshot) as { discountInputsHash?: string; customerSupplyConditions?: string };
+      const snapshot = JSON.parse(actual.pricingSnapshot) as Record<string, unknown>;
       if (actual.unitPrice !== item.unitPrice || !expected.discountInputsHash
-        || snapshot.discountInputsHash !== expected.discountInputsHash
-        || (expected.discountPolicy === 'supplier_written_reply' && ((item.leadTime ?? null) !== (actual.leadTime ?? null)
-          || expected.customerSupplyConditions !== snapshot.customerSupplyConditions))) throw new Error('BRAND_DISCOUNT_PRICE_DRIFT');
+        || snapshot.discountInputsHash !== expected.discountInputsHash) throw new Error('BRAND_DISCOUNT_PRICE_DRIFT');
+      // The server result decides which authority must be present. A caller's
+      // category label or copied hash cannot turn these checks off.
+      if (snapshot.discountPolicy === 'supplier_written_reply') {
+        const scopeKey = JSON.stringify([snapshot.inquiryId, snapshot.inquiryItemId]);
+        if (supplierLines.has(scopeKey) || (item.leadTime ?? null) !== (actual.leadTime ?? null)
+          || ['discountPolicy', 'inquiryId', 'inquiryItemId', 'supplierQuoteReviewId', 'supplierQuoteReplyHash',
+            'supplierQuoteValidUntil', 'customerSupplyConditions'].some(key => expected[key] !== snapshot[key])) {
+          throw new Error('BRAND_DISCOUNT_PRICE_DRIFT');
+        }
+        supplierLines.add(scopeKey);
+      }
+      canonical[index] = { ...item, pricingSnapshot: actual.pricingSnapshot };
     } catch { throw new Error('BRAND_DISCOUNT_PRICE_DRIFT'); }
   }
+  return canonical;
 }
 
 export class CustomerUnavailableProductError extends Error {

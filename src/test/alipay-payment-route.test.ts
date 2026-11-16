@@ -55,12 +55,13 @@ const order = {
   paymentMethod: 'alipay',
   paidAt: null,
   status: 'pending',
+  orderItems: [],
   createdAt: new Date('2099-07-16T00:00:00.000Z'),
 };
 
 describe('Alipay order payment routes', () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    vi.resetAllMocks();
     mocks.requireActiveSession.mockResolvedValue(user);
     mocks.userFindUnique.mockImplementation(async ({ where }: { where: { id: string } }) => {
       if (where.id === user.id) return { email: user.email, emailVerified: new Date('2026-01-01T00:00:00.000Z') };

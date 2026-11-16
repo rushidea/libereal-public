@@ -88,7 +88,8 @@ export async function assertOrderPricingResolved(tx: Prisma.TransactionClient, o
       const protectedLine = snapshot.supplierQuoteReviewId || requiresWrittenSupplierQuote(variant?.originalPrice ?? product?.originalPrice, brand?.supplierQuoteRequiredAbove);
       // A generic edit cannot erase the identity of goods awaiting a scoped review.
       if (protectedLine && !prospectiveItems.some(line => line.productId === (product?.id ?? original.productId)
-        && (jsonObject(line.metadata).variantId ?? jsonObject(line.pricingSnapshot).variantId ?? null) === (variantId ?? null))) {
+        && (jsonObject(line.metadata).variantId ?? jsonObject(line.pricingSnapshot).variantId ?? null) === (variantId ?? null)
+        && (!snapshot.inquiryItemId || jsonObject(line.pricingSnapshot).inquiryItemId === snapshot.inquiryItemId))) {
         throw new Error('QUOTE_REPRICE_REQUIRED');
       }
     }
@@ -121,9 +122,11 @@ export async function assertOrderPricingResolved(tx: Prisma.TransactionClient, o
         source: 'db' as const, priceMismatch: false, variantId,
       });
     }
-    await assertBrandDiscountPricesCurrent(tx, lines, {
+    const verified = await assertBrandDiscountPricesCurrent(tx, lines, {
       inquiryId: order.inquiryId ?? undefined, userId: order.customerId, customerEmail: order.email,
     });
+    // Persist the server-generated evidence, not arbitrary fields copied from a request.
+    if (prospectiveItems) prospectiveItems.forEach((line, index) => { line.pricingSnapshot = verified[index].pricingSnapshot; });
   } catch { throw new Error('QUOTE_REPRICE_REQUIRED'); }
 }
 
