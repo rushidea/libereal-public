@@ -189,7 +189,8 @@ export async function POST(
         leadTime: jsonObject(pricedItem.pricingSnapshot).discountPolicy === 'supplier_written_reply' ? pricedItem.leadTime
           : typeof item.actualLeadTime === 'string' ? item.actualLeadTime : typeof item.leadTime === 'string' ? item.leadTime : null,
         available: item.available !== false,
-        notes: typeof item.notes === 'string' ? item.notes : null,
+        notes: typeof jsonObject(pricedItem.pricingSnapshot).customerSupplyConditions === 'string'
+          ? jsonObject(pricedItem.pricingSnapshot).customerSupplyConditions as string : typeof item.notes === 'string' ? item.notes : null,
         metadata: mergeQuoteConstraintMetadata(catalogDraft && typeof item.metadata === 'string' ? item.metadata : inquiryItem?.metadata, {
           minQuantity: requestConstraint.minQuantity ?? inquiryConstraint.minQuantity ?? variantConstraint.minQuantity,
           quantityStep: requestConstraint.quantityStep ?? inquiryConstraint.quantityStep ?? variantConstraint.quantityStep,
@@ -199,6 +200,7 @@ export async function POST(
     });
     if (catalogLines && normalizedItems.some((line, index) => line.unitPrice !== catalogLines[index]?.unitPrice
       || line.quantity !== catalogLines[index]?.quantity || line.productId !== catalogLines[index]?.productId
+      || (line.leadTime ?? null) !== catalogLines[index]?.leadTime || line.notes !== catalogLines[index]?.notes
       || !jsonObject(catalogLines[index]?.pricingSnapshot).discountInputsHash
       || jsonObject(line.pricingSnapshot).discountInputsHash !== jsonObject(catalogLines[index]?.pricingSnapshot).discountInputsHash)) {
       return NextResponse.json({ error: '重新核算的结果与本次显示的报价不同，请重新核对报价', code: 'QUOTE_VERSION_CONFLICT' }, { status: 409 });

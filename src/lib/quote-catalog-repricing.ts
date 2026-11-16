@@ -10,7 +10,7 @@ import { prepareSupplierQuoteReview } from '@/lib/supplier-quote-review';
 import { SUPPLIER_WRITTEN_QUOTE_REQUIRED } from '@/lib/supplier-quote-policy';
 
 type Change = { productId: string; variantId?: string | null; catalogNumber: string; brand?: string };
-type Line = { inquiryItemId?: string | null; productId: string | null; catalogNumber: string | null; name: string; unitPrice: number; quantity: number; metadata: string | null; pricingSnapshot: string | null };
+type Line = { inquiryItemId?: string | null; productId: string | null; catalogNumber: string | null; name: string; unitPrice: number; quantity: number; metadata: string | null; pricingSnapshot: string | null; leadTime?: string | null; notes?: string | null };
 function supplierPending(snapshot: string | null | undefined) {
   return jsonObject(snapshot).reason === SUPPLIER_WRITTEN_QUOTE_REQUIRED;
 }
@@ -33,7 +33,7 @@ function affected(line: Line, changes: Change[]) {
 }
 
 async function priceLine(tx: Prisma.TransactionClient, line: Line, inquiry: { id: string; userId: string | null; email: string }, changes: Change[]) {
-  if (!affected(line, changes)) return { productId: line.productId, unitPrice: line.unitPrice, pricingSnapshot: line.pricingSnapshot };
+  if (!affected(line, changes)) return { productId: line.productId, unitPrice: line.unitPrice, pricingSnapshot: line.pricingSnapshot, leadTime: line.leadTime ?? null, notes: line.notes ?? null };
   const metadata = jsonObject(line.metadata);
   const snapshot = jsonObject(line.pricingSnapshot);
   const variantId = typeof metadata.variantId === 'string' ? metadata.variantId
@@ -47,7 +47,7 @@ async function priceLine(tx: Prisma.TransactionClient, line: Line, inquiry: { id
     allowQuoteRequired: true, strictQuantity: true, requireDiscountPriority: true });
   const next = priced.verifiedItems[0];
   if (next?.quoteRequired && supplierPending(next.pricingSnapshot) && line.inquiryItemId) {
-    return { productId: next.productId, unitPrice: 0, pricingSnapshot: JSON.stringify({
+    return { productId: next.productId, unitPrice: 0, leadTime: null, notes: null, pricingSnapshot: JSON.stringify({
       ...jsonObject(next.pricingSnapshot), inquiryId: inquiry.id, inquiryItemId: line.inquiryItemId,
       discountInputsHash: pricingContentHash({ kind: 'supplier_written_quote_pending', productId: next.productId,
         quantity: line.quantity, cataloguePrice: jsonObject(next.pricingSnapshot).cataloguePrice,
@@ -55,12 +55,15 @@ async function priceLine(tx: Prisma.TransactionClient, line: Line, inquiry: { id
     }) };
   }
   if (!next || next.source !== 'db' || next.quoteRequired) throw new Error('CATALOG_REPRICING_REQUIRES_REVIEW');
-  return { productId: next.productId, unitPrice: next.unitPrice, pricingSnapshot: next.pricingSnapshot };
+  return { productId: next.productId, unitPrice: next.unitPrice, pricingSnapshot: next.pricingSnapshot,
+    leadTime: jsonObject(next.pricingSnapshot).supplierQuoteReviewId ? next.leadTime ?? null : line.leadTime ?? null,
+    notes: typeof jsonObject(next.pricingSnapshot).customerSupplyConditions === 'string'
+      ? jsonObject(next.pricingSnapshot).customerSupplyConditions as string : line.notes ?? null };
 }
 
 /** One current successor per inquiry. Merchant-accepted orders are never recalculated. */
 export async function repriceQuotesAfterCatalogChange(tx: Prisma.TransactionClient, input: {
-  impact: PricingQuoteImpact; changes: Change[]; approvalHash: string; operationKey?: string; supplierReviewId?: string; actor: { id: string; email: string };
+  impact: PricingQuoteImpact; changes: Change[]; approvalHash: string; operationKey?: string; supplierReviewId?: string; quantityChange?: { inquiryItemId: string; quantity: number }; actor: { id: string; email: string };
 }) {
   const results = [];
   for (const previousQuoteId of input.impact.quoteIds) {
@@ -73,13 +76,15 @@ export async function repriceQuotesAfterCatalogChange(tx: Prisma.TransactionClie
     let changed = false;
     for (const line of previous.items) {
       if (jsonObject(line.metadata).repricingOrderId || line.quantity <= line.orderedQty || (!line.available && !supplierPending(line.pricingSnapshot))) continue;
-      const quantity = line.quantity - line.orderedQty;
+      const quantity = input.quantityChange?.inquiryItemId === line.inquiryItemId
+        ? input.quantityChange.quantity : line.quantity - line.orderedQty;
       const next = await priceLine(tx, { ...line, quantity }, previous.inquiry, input.changes);
-      if (Math.round(next.unitPrice * 100) !== Math.round(line.unitPrice * 100) || priceInputsChanged(line.pricingSnapshot, next.pricingSnapshot)) changed = true;
+      if (quantity !== line.quantity - line.orderedQty || next.leadTime !== line.leadTime || next.notes !== line.notes
+        || Math.round(next.unitPrice * 100) !== Math.round(line.unitPrice * 100) || priceInputsChanged(line.pricingSnapshot, next.pricingSnapshot)) changed = true;
       items.push({ position: items.length, ...(line.inquiryItemId ? { inquiryItem: { connect: { id: line.inquiryItemId } } } : {}),
         catalogNumber: line.catalogNumber, name: line.name, quantity, orderedQty: 0,
         ...next, lineTotal: Math.round(next.unitPrice * quantity * 100) / 100,
-        leadTime: line.leadTime, available: !supplierPending(next.pricingSnapshot), notes: line.notes,
+        available: !supplierPending(next.pricingSnapshot),
         metadata: JSON.stringify({ ...jsonObject(line.metadata), supplierQuotePending: supplierPending(next.pricingSnapshot) }) });
     }
     const proposals = [];
@@ -105,11 +110,11 @@ export async function repriceQuotesAfterCatalogChange(tx: Prisma.TransactionClie
         const source = acceptance.quote.items.find((line) => line.id === link?.quoteItemId);
         if (!source || source.productId !== item.productId || (link.orderedQuantity ?? link.quantity) !== item.quantity) throw new Error('CATALOG_REPRICING_ORDER_LINK_REQUIRED');
         const line = { ...source, quantity: item.quantity, unitPrice: item.unitPrice,
-          metadata: item.metadata ?? source.metadata, pricingSnapshot: item.pricingSnapshot ?? source.pricingSnapshot };
+          metadata: item.metadata ?? source.metadata, pricingSnapshot: item.pricingSnapshot ?? source.pricingSnapshot, leadTime: item.leadTime, notes: typeof jsonObject(item.pricingSnapshot).customerSupplyConditions === 'string' ? jsonObject(item.pricingSnapshot).customerSupplyConditions as string : source.notes };
         const priorProposal = previous.items.find((prior) => (prior.available || supplierPending(prior.pricingSnapshot))
           && jsonObject(prior.metadata).repricingOrderItemId === item.id);
         const next = priorProposal && !affected(line, input.changes)
-          ? { productId: priorProposal.productId, unitPrice: priorProposal.unitPrice, pricingSnapshot: priorProposal.pricingSnapshot }
+          ? { productId: priorProposal.productId, unitPrice: priorProposal.unitPrice, pricingSnapshot: priorProposal.pricingSnapshot, leadTime: priorProposal.leadTime, notes: priorProposal.notes }
           : await priceLine(tx, line, previous.inquiry, input.changes);
         if (Math.round(next.unitPrice * 100) !== Math.round((priorProposal?.unitPrice ?? item.unitPrice) * 100)
           || priceInputsChanged(priorProposal?.pricingSnapshot ?? item.pricingSnapshot ?? source.pricingSnapshot, next.pricingSnapshot)) orderChanged = true;
@@ -121,7 +126,7 @@ export async function repriceQuotesAfterCatalogChange(tx: Prisma.TransactionClie
       changed ||= orderChanged;
       const orderFingerprint = orderRepricingFingerprint(order);
       const lines = orderLines.map(({ item, next }) => ({ orderItemId: item.id, quantity: item.quantity,
-        unitPrice: next.unitPrice, pricingSnapshot: next.pricingSnapshot }));
+        unitPrice: next.unitPrice, pricingSnapshot: next.pricingSnapshot, leadTime: next.leadTime, notes: next.notes }));
       const proposalHash = pricingContentHash({ orderFingerprint, lines });
       const proposedAmounts = calculateOrderAmounts(orderLines.map(({ item, next }) => ({ unitPrice: next.unitPrice, quantity: item.quantity })), order.adjustments);
       proposals.push({ orderId: order.id, orderFingerprint, orderTermsFingerprint: orderRepricingTermsFingerprint(order), proposalHash });
@@ -129,13 +134,13 @@ export async function repriceQuotesAfterCatalogChange(tx: Prisma.TransactionClie
         position: items.length, catalogNumber: source.catalogNumber,
         ...(source.inquiryItemId ? { inquiryItem: { connect: { id: source.inquiryItemId } } } : {}),
         name: item.name, quantity: item.quantity, orderedQty: 0, ...next,
-        lineTotal: Math.round(next.unitPrice * item.quantity * 100) / 100, leadTime: item.leadTime,
+        lineTotal: Math.round(next.unitPrice * item.quantity * 100) / 100,
         available: !supplierPending(next.pricingSnapshot), metadata: JSON.stringify({ ...jsonObject(item.metadata ?? source.metadata),
           supplierQuotePending: supplierPending(next.pricingSnapshot),
           repricingOrderId: order.id, repricingOrderItemId: item.id, repricingProposalHash: proposalHash,
           repricingOriginalTotal: order.total, repricingProposedTotal: proposedAmounts.total,
           repricingPreservedAdjustments: order.adjustments.map((adjustment) => ({ label: adjustment.label, amount: adjustment.amount })),
-          previousUnitPrice: item.unitPrice, sourceQuoteItemId: source.id, sourceConfirmationId: acceptance.id }),
+          previousUnitPrice: item.unitPrice, previousLeadTime: item.leadTime, previousNotes: jsonObject(item.pricingSnapshot).customerSupplyConditions ?? source.notes, sourceQuoteItemId: source.id, sourceConfirmationId: acceptance.id }),
       });
     }
     if (!changed) continue;
@@ -159,7 +164,7 @@ export async function repriceQuotesAfterCatalogChange(tx: Prisma.TransactionClie
     }
     if (previous.status !== 'accepted') await tx.quote.update({ where: { id: previous.id }, data: { status: 'superseded' } });
     for (const item of items) if (item.inquiryItem?.connect?.id && !jsonObject(item.metadata).repricingOrderId) await tx.inquiryItem.update({
-      where: { id: item.inquiryItem.connect.id }, data: { unitPrice: item.unitPrice, lineTotal: item.lineTotal, pricingSource: 'catalog_repricing' },
+      where: { id: item.inquiryItem.connect.id }, data: { unitPrice: item.unitPrice, lineTotal: item.lineTotal, leadTime: item.leadTime, pricingSource: 'catalog_repricing' },
     });
     await tx.inquiry.update({ where: { id: previous.inquiryId }, data: { subtotal, hasUnresolvedPricing: true, status: '待人工审核' } });
     await tx.quoteConfirmation.create({ data: {

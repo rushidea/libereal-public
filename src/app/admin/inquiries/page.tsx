@@ -48,6 +48,7 @@ interface QuoteVersion {
 }
 
 interface InquiryItem {
+  notes?: string | null;
   metadata?: string | null;
   available?: boolean | null;
   id?: string;
@@ -371,7 +372,10 @@ function InquiryDetailPanel({
       {inquiry.activeQuote?.status === 'draft' && <CatalogRepricingReview inquiryId={inquiry.id} quote={inquiry.activeQuote} onRecorded={fetchData} />}
       {catalogDraft && remaining.length > 0 && <section className="space-y-2 rounded border border-blue-200 bg-blue-50 p-4">
         <h3 className="font-semibold">重新核算后的待报价明细 · 第 {catalogDraft.version} 版</h3>
-        {remaining.map((line, index) => <p key={index} className="text-sm">{line.name} × {line.quantity} · 单价 ¥{Number(line.price).toFixed(2)} · 金额 ¥{(Number(line.price) * Number(line.quantity)).toFixed(2)}</p>)}
+        {remaining.map((line, index) => <div key={index} className="text-sm">
+          <p>{line.name} × {line.quantity} · 单价 ¥{Number(line.price).toFixed(2)} · 金额 ¥{(Number(line.price) * Number(line.quantity)).toFixed(2)}</p>
+          <p>货期：{line.leadTime || '未记录'}；供货条件：{line.notes || '未记录'}</p>
+        </div>)}
         <button disabled={pendingOrderReview} className="rounded bg-brand-600 px-3 py-2 text-sm text-white disabled:opacity-50" onClick={async () => {
           if (!confirm(`确认将当前显示的第 ${catalogDraft.version} 版重算报价发送给客户？`)) return;
           const send = (confirmWarnings = false) => fetch(`/api/inquiries/${inquiry.id}/quote`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ catalogQuoteId: catalogDraft.id, catalogQuoteHash: catalogDraft.contentHash, confirmWarnings }) });

@@ -35,7 +35,7 @@ vi.mock('@/lib/prisma', () => ({
     notification: { create: mocks.notificationCreate },
     user: { update: mocks.userUpdate },
     $transaction: async (callback: (tx: unknown) => Promise<unknown>) => callback({
-      order: { update: mocks.orderUpdate },
+      order: { findUnique: mocks.orderFindUnique, update: mocks.orderUpdate },
       orderEvent: { findMany: mocks.orderEventFindMany },
       backgroundTask: { findUnique: mocks.backgroundTaskFindUnique },
     }),
@@ -95,6 +95,7 @@ describe('organization order review permission', () => {
       pointsDiscount: 0,
       inquiryId: null,
       adjustments: [],
+      orderItems: [],
       paymentAttempts: [],
     });
     mocks.orderUpdate.mockResolvedValue({ id: 'org-order-1', status: 'confirmed' });

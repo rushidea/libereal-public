@@ -265,7 +265,7 @@ export async function POST(
           const snapshot = jsonObject(line.pricingSnapshot);
           return { productId: line.productId, catalogNumber: line.catalogNumber, name: line.name,
             unitPrice: line.unitPrice, quantity: acceptedLine.quantity, lineTotal: line.unitPrice * acceptedLine.quantity,
-            pricingSnapshot: line.pricingSnapshot ?? '{}', source: 'db' as const, priceMismatch: false,
+            pricingSnapshot: line.pricingSnapshot ?? '{}', source: 'db' as const, priceMismatch: false, leadTime: line.leadTime,
             variantId: typeof snapshot.variantId === 'string' ? snapshot.variantId : null };
         }), { inquiryId: id, userId: inquiry.userId, customerEmail: inquiry.email });
         if (settled?.pointsBreakdown && pointsUserId) {

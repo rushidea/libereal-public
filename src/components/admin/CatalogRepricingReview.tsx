@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { CatalogRepricingFinance } from '@/components/admin/CatalogRepricingFinance';
 
-type Line = { name?: string; price?: number; quantity?: number; available?: boolean | null; metadata?: string | null };
+type Line = { name?: string; leadTime?: string | null; notes?: string | null; price?: number; quantity?: number; available?: boolean | null; metadata?: string | null };
 function metadata(line: Line): Record<string, unknown> {
   try { return JSON.parse(line.metadata || '{}'); } catch { return {}; }
 }
@@ -16,7 +16,7 @@ export function CatalogRepricingReview({ inquiryId, quote, onRecorded }: {
   if (!orders.length) return null;
   return <section className="space-y-3 rounded-lg border border-amber-200 bg-amber-50 p-4">
     <h3 className="font-semibold text-gray-900">原订单价格复核 · 报价第 {quote.version} 版</h3>
-    <p className="text-sm text-gray-700">这些订单由客户提交，尚未由 Libereal 接受。请先向客户确认新价格，再登记实际收到的回复。登记后仍需单独审核接受订单。</p>
+    <p className="text-sm text-gray-700">这些订单由客户提交，尚未由 Libereal 接受。请先向客户确认新价格与供货条件，再登记实际收到的回复。登记后仍需单独审核接受订单。</p>
     {orders.map((orderId) => <OrderReview key={`${quote.id}:${orderId}`} inquiryId={inquiryId} quoteId={quote.id} orderId={orderId}
       lines={quote.items.filter((line) => metadata(line).repricingOrderId === orderId)} onRecorded={onRecorded} />)}
   </section>;
@@ -37,13 +37,18 @@ function OrderReview({ inquiryId, quoteId, orderId, lines, onRecorded }: {
   const hasAmounts = Number.isFinite(before) && Number.isFinite(after);
   return <div className="space-y-2 border-t border-amber-200 pt-3">
         <a href={`/admin/orders?search=${encodeURIComponent(orderId)}`} className="font-medium underline">原订单 {orderId}</a>
-        {lines.map((line, index) => <p key={index} className="text-sm">{line.name} × {line.quantity}：单价 ¥{Number(metadata(line).previousUnitPrice).toFixed(2)} → ¥{Number(line.price).toFixed(2)}</p>)}
+        {lines.map((line, index) => <div key={index} className="text-sm">
+          <p>{line.name} × {line.quantity}：单价 ¥{Number(metadata(line).previousUnitPrice).toFixed(2)} → ¥{Number(line.price).toFixed(2)}</p>
+          <p>货期：{String(metadata(line).previousLeadTime || '未记录')} → {line.leadTime || '未记录'}</p>
+          <p>原供货条件：{String(metadata(line).previousNotes || '未记录')}</p>
+          <p>本次供货条件：{line.notes || '未记录'}</p>
+        </div>)}
         {hasAmounts ? <p className="font-medium">完整应付金额 ¥{before.toFixed(2)} → ¥{after.toFixed(2)}</p> : <p role="status">未取得完整应付金额，请刷新核对，暂不能登记确认。</p>}
         {adjustments.length > 0 && <p className="text-sm">上面的应付金额已保留原有金额调整：{adjustments.map((row) => `${row.label} ¥${row.amount.toFixed(2)}`).join('；')}。仍需财务核对。</p>}
         <label className="block text-sm">客户回复渠道<input className="ml-2 rounded border px-2 py-1" value={channel} onChange={(event) => setChannel(event.target.value)} /></label>
         <label className="block text-sm">客户确认记录<textarea className="mt-1 block w-full rounded border p-2" placeholder="填写邮件主题和时间、通话记录位置等可核对的信息" value={reference} onChange={(event) => setReference(event.target.value)} /></label>
         <button disabled={busy || !hasAmounts || !reference.trim() || !channel.trim()} className="rounded bg-brand-600 px-3 py-2 text-sm text-white disabled:opacity-50" onClick={async () => {
-          if (!confirm(`已收到客户对原订单 ${orderId} 完整应付金额 ¥${after.toFixed(2)} 的明确确认？有付款、积分或其他金额调整时，登记后还要进行财务核对。订单仍待 Libereal 审核接受。`)) return;
+          if (!confirm(`已收到客户对原订单 ${orderId} 完整应付金额 ¥${after.toFixed(2)}、货期与供货条件的明确确认？有付款、积分或其他金额调整时，登记后还要进行财务核对。订单仍待 Libereal 审核接受。`)) return;
           setBusy(true); setMessage('');
           try {
             const response = await fetch(`/api/inquiries/${inquiryId}/quote/repricing`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
@@ -62,7 +67,7 @@ function OrderReview({ inquiryId, quoteId, orderId, lines, onRecorded }: {
               : '客户确认已登记，原订单价格已更新，等待 Libereal 审核接受。');
           } catch { setMessage('未取得登记结果，请刷新核对后重试。'); }
           finally { setBusy(false); }
-        }}>{busy ? '正在登记…' : '登记客户对完整金额的确认'}</button>
+        }}>{busy ? '正在登记…' : '登记客户对金额与供货条件的确认'}</button>
     {message && <p role="status" className="text-sm text-gray-800">{message}</p>}
     <CatalogRepricingFinance inquiryId={inquiryId} quoteId={quoteId} orderId={orderId} proposalHash={proposalHash} onRecorded={onRecorded} />
   </div>;

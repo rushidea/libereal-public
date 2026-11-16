@@ -4,6 +4,7 @@ import { calculateOrderAmounts } from '@/lib/order-domain';
 import { heldOrderRedeemPoints, POINTS_DEDUCTION_ROLLBACK_REASON, PREPAY_POINTS_RELEASE_REASON } from '@/lib/points-checkout-service';
 import { pointsToYuan } from '@/lib/points-checkout';
 import { assertBrandDiscountPricesCurrent } from '@/lib/pricing';
+import { requiresWrittenSupplierQuote } from '@/lib/supplier-quote-policy';
 
 export function jsonObject(raw: string | null | undefined): Record<string, unknown> {
   try { const value = JSON.parse(raw ?? '{}'); return value && typeof value === 'object' && !Array.isArray(value) ? value : {}; }
@@ -56,18 +57,73 @@ export async function pendingOrderRepricing(tx: Prisma.TransactionClient, orderI
   return resolved && ['succeeded', 'cancelled'].includes(resolved.status) ? null : latest.details;
 }
 
-export async function assertOrderPricingResolved(tx: Prisma.TransactionClient, orderId: string) {
+export async function assertOrderPricingResolved(tx: Prisma.TransactionClient, orderId: string,
+  prospectiveItems?: Prisma.OrderItemCreateWithoutOrderInput[]) {
   if (await pendingOrderRepricing(tx, orderId)) throw new Error('QUOTE_REPRICE_REQUIRED');
   const order = await tx.order.findUnique({ where: { id: orderId }, include: { orderItems: true } });
-  if (!order?.inquiryId || !['pending', 'unpaid'].includes(order.status)) return;
-  const supplierLines = order.orderItems.filter(line => jsonObject(line.pricingSnapshot).discountPolicy === 'supplier_written_reply');
+  if (!order) throw new Error('QUOTE_REPRICE_REQUIRED');
+  if (!['pending', 'unpaid'].includes(order.status)) {
+    if (prospectiveItems) throw new Error('QUOTE_REPRICE_REQUIRED');
+    return;
+  }
+  // Inspect the exact replacement that will be persisted in this transaction.
+  // Missing inquiry/snapshot fields are not an exemption from current brand policy.
   try {
-    await assertBrandDiscountPricesCurrent(tx, supplierLines.map(line => ({
-      productId: line.productId, catalogNumber: line.catalogNumber, name: line.name, unitPrice: line.unitPrice,
-      quantity: line.quantity, lineTotal: line.unitPrice * line.quantity, pricingSnapshot: line.pricingSnapshot ?? '{}',
-      source: 'db' as const, priceMismatch: false,
-      variantId: typeof jsonObject(line.pricingSnapshot).variantId === 'string' ? jsonObject(line.pricingSnapshot).variantId as string : null,
-    })), { inquiryId: order.inquiryId, userId: order.customerId, customerEmail: order.email });
+    if (prospectiveItems) for (const original of order.orderItems) {
+      const snapshot = jsonObject(original.pricingSnapshot);
+      const metadata = jsonObject(original.metadata);
+      const variantId = metadata.variantId ?? snapshot.variantId;
+      let product = original.productId ? await tx.product.findUnique({ where: { id: original.productId },
+        select: { id: true, brand: true, brandRecordId: true, originalPrice: true } }) : null;
+      if (!product && original.catalogNumber) {
+        const matches = await tx.product.findMany({ where: { catalogNumber: original.catalogNumber,
+          ...(typeof metadata.brand === 'string' ? { brand: metadata.brand } : {}) }, take: 2,
+          select: { id: true, brand: true, brandRecordId: true, originalPrice: true } });
+        if (matches.length > 1) throw new Error('QUOTE_REPRICE_REQUIRED');
+        product = matches[0] ?? null;
+      }
+      const brand = product ? await tx.brand.findUnique({ where: product.brandRecordId ? { id: product.brandRecordId } : { name: product.brand },
+        select: { supplierQuoteRequiredAbove: true } }) : null;
+      const variant = typeof variantId === 'string' ? await tx.productVariant.findUnique({ where: { id: variantId }, select: { originalPrice: true } }) : null;
+      const protectedLine = snapshot.supplierQuoteReviewId || requiresWrittenSupplierQuote(variant?.originalPrice ?? product?.originalPrice, brand?.supplierQuoteRequiredAbove);
+      // A generic edit cannot erase the identity of goods awaiting a scoped review.
+      if (protectedLine && !prospectiveItems.some(line => line.productId === (product?.id ?? original.productId)
+        && (jsonObject(line.metadata).variantId ?? jsonObject(line.pricingSnapshot).variantId ?? null) === (variantId ?? null))) {
+        throw new Error('QUOTE_REPRICE_REQUIRED');
+      }
+    }
+    const lines = [];
+    for (const line of prospectiveItems ?? order.orderItems) {
+      const quantity = line.quantity;
+      if (typeof quantity !== 'number' || !Number.isInteger(quantity) || quantity <= 0) throw new Error('QUOTE_REPRICE_REQUIRED');
+      const metadata = jsonObject(line.metadata);
+      const snapshot = jsonObject(line.pricingSnapshot);
+      const variantId = typeof metadata.variantId === 'string' ? metadata.variantId
+        : typeof snapshot.variantId === 'string' ? snapshot.variantId : null;
+      const product = line.productId ? await tx.product.findUnique({ where: { id: line.productId },
+        select: { id: true, catalogNumber: true } }) : null;
+      let productId = product?.id ?? null;
+      if (product && line.catalogNumber && product.catalogNumber !== line.catalogNumber) {
+        const variant = variantId ? await tx.productVariant.findUnique({ where: { id: variantId },
+          select: { productId: true, catalogNumber: true } }) : null;
+        if (!variant || variant.productId !== product.id || variant.catalogNumber !== line.catalogNumber) throw new Error('QUOTE_REPRICE_REQUIRED');
+      }
+      if (!productId && line.catalogNumber) {
+        const matches = await tx.product.findMany({ where: { catalogNumber: line.catalogNumber,
+          ...(typeof metadata.brand === 'string' ? { brand: metadata.brand } : {}) }, select: { id: true }, take: 2 });
+        if (matches.length > 1) throw new Error('QUOTE_REPRICE_REQUIRED');
+        productId = matches[0]?.id ?? null;
+      }
+      if (snapshot.inquiryId && snapshot.inquiryId !== order.inquiryId) throw new Error('QUOTE_REPRICE_REQUIRED');
+      lines.push({
+        productId, catalogNumber: line.catalogNumber ?? null, name: line.name, unitPrice: line.unitPrice,
+        quantity, lineTotal: line.unitPrice * quantity, leadTime: line.leadTime, pricingSnapshot: line.pricingSnapshot ?? '{}',
+        source: 'db' as const, priceMismatch: false, variantId,
+      });
+    }
+    await assertBrandDiscountPricesCurrent(tx, lines, {
+      inquiryId: order.inquiryId ?? undefined, userId: order.customerId, customerEmail: order.email,
+    });
   } catch { throw new Error('QUOTE_REPRICE_REQUIRED'); }
 }
 
@@ -122,7 +178,7 @@ async function loadRepricingProposal(tx: Prisma.TransactionClient, input: Repric
   const latest = await tx.quote.findFirst({ where: { inquiryId: input.inquiryId }, orderBy: { version: 'desc' }, select: { id: true } });
   if (!quote || quote.inquiryId !== input.inquiryId || latest?.id !== quote.id || quote.status !== 'draft') throw new Error('REPRICING_VERSION_CHANGED');
   const lines = quote.items.filter((line) => jsonObject(line.metadata).repricingOrderId === order.id);
-  const content = lines.map((line) => ({ orderItemId: jsonObject(line.metadata).repricingOrderItemId, unitPrice: line.unitPrice, quantity: line.quantity, pricingSnapshot: line.pricingSnapshot }));
+  const content = lines.map((line) => ({ orderItemId: jsonObject(line.metadata).repricingOrderItemId, unitPrice: line.unitPrice, quantity: line.quantity, pricingSnapshot: line.pricingSnapshot, leadTime: line.leadTime, notes: line.notes }));
   if (pricingContentHash({ orderFingerprint: pending.orderFingerprint, lines: content }) !== input.proposalHash
     || lines.length !== order.orderItems.length) throw new Error('REPRICING_VERSION_CHANGED');
   for (const item of order.orderItems) {
@@ -132,7 +188,7 @@ async function loadRepricingProposal(tx: Prisma.TransactionClient, input: Repric
   try {
     await assertBrandDiscountPricesCurrent(tx, lines.map((line) => ({
       productId: line.productId, catalogNumber: line.catalogNumber, name: line.name, unitPrice: line.unitPrice,
-      quantity: line.quantity, lineTotal: line.lineTotal, pricingSnapshot: line.pricingSnapshot ?? '{}',
+      quantity: line.quantity, lineTotal: line.lineTotal, leadTime: line.leadTime, pricingSnapshot: line.pricingSnapshot ?? '{}',
       source: 'db' as const, priceMismatch: false,
       variantId: typeof jsonObject(line.pricingSnapshot).variantId === 'string' ? jsonObject(line.pricingSnapshot).variantId as string : null,
     })), { inquiryId: input.inquiryId, userId: quote.inquiry.userId, customerEmail: quote.inquiry.email, requireDiscountPriority: true });
@@ -190,7 +246,7 @@ async function applyRepricing(tx: Prisma.TransactionClient, input: RepricingIden
   if (!response) throw new Error('CUSTOMER_REPRICING_CONFIRMATION_REQUIRED');
   for (const item of order.orderItems) {
     const line = lines.find((row) => jsonObject(row.metadata).repricingOrderItemId === item.id)!;
-    await tx.orderItem.update({ where: { id: item.id }, data: { unitPrice: line.unitPrice, pricingSnapshot: line.pricingSnapshot } });
+    await tx.orderItem.update({ where: { id: item.id }, data: { unitPrice: line.unitPrice, pricingSnapshot: line.pricingSnapshot, leadTime: line.leadTime } });
   }
   // Keep the original adjustment, payment and points records. Finance approval never creates a cash transfer.
   await tx.order.update({ where: { id: order.id }, data: amounts });

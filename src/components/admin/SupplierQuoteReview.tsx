@@ -5,7 +5,8 @@ import type { SupplierQuoteReply } from '@/lib/supplier-quote-review';
 
 type Entry = {
   inquiryItemId: string; name: string; error?: string;
-  scope?: { catalogNumber: string; brand: string; quantity: number; cataloguePrice: number; currency: string };
+  scope?: { catalogNumber: string; brand: string; quantity: number; cataloguePrice: number; currency: string; customerPricing: { finalPrice: number; steps: { reason: string }[] } };
+  quantityChangeSource?: { quoteId: string; quoteHash: string } | null;
   reviewId?: string | null; requestHash?: string | null; status?: string; owner?: string | null;
   reply?: SupplierQuoteReply | null;
 };
@@ -44,8 +45,11 @@ function SupplierReplyForm({ entry, inquiryId, onSaved }: { entry: Entry; inquir
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [renewalReason, setRenewalReason] = useState('');
-  const [form, setForm] = useState({ supplier: '', channel: '', reference: '', supplierUnitPrice: '', customerUnitPrice: '',
-    taxBasis: '', leadTime: '', validUntil: '', conditions: '' });
+  const [requestedQuantity, setRequestedQuantity] = useState(String(entry.scope?.quantity ?? ''));
+  const [quantityChannel, setQuantityChannel] = useState('');
+  const [quantityReference, setQuantityReference] = useState('');
+  const [form, setForm] = useState({ supplier: '', channel: '', reference: '', supplierUnitPrice: '',
+    taxBasis: '', leadTime: '', validUntil: '', conditions: '', customerConditions: '' });
   async function send(body: Record<string, unknown>) {
     setBusy(true); setError('');
     try {
@@ -64,14 +68,15 @@ function SupplierReplyForm({ entry, inquiryId, onSaved }: { entry: Entry; inquir
   const inputClass = 'w-full rounded border border-gray-300 bg-white px-3 py-2 text-sm';
   const fields = [
     ['supplier', '回复供应商'], ['channel', '沟通渠道'], ['reference', '书面回复依据（邮件编号、链接或归档记录）'],
-    ['supplierUnitPrice', '供应商每包报价（元）'], ['customerUnitPrice', '本次确认的客户每包报价（元）'],
+    ['supplierUnitPrice', '供应商每包报价（元）'],
     ['leadTime', '确认货期'], ['validUntil', '供应商报价有效期'],
   ] as const;
   return <div className="space-y-3 rounded border border-amber-200 bg-white p-4">
     <p className="text-sm font-medium">{scope.brand} · {scope.catalogNumber} · {scope.quantity} 包</p>
     <p className="text-sm text-gray-700">每包目录价 ¥{scope.cataloguePrice.toFixed(2)} · {statuses[entry.status ?? ''] || '待核对'}{entry.owner ? ` · 负责人：${entry.owner}` : ''}</p>
+    <p className="text-sm text-gray-700">客户每包售价 ¥{scope.customerPricing.finalPrice.toFixed(2)} · {scope.customerPricing.steps.at(-1)?.reason}。供应商采购报价单独记录。</p>
     {error && <p role="alert" className="text-sm text-red-700">{error}</p>}
-    {entry.reply && <p className="text-sm text-gray-700">已记录 {entry.reply.supplier} 的回复：供应商单价 ¥{entry.reply.supplierUnitPrice.toFixed(2)}，本次客户单价 ¥{entry.reply.customerUnitPrice.toFixed(2)}；有效期至 {new Date(entry.reply.validUntil).toLocaleString('zh-CN')}。</p>}
+    {entry.reply && <p className="text-sm text-gray-700">已记录 {entry.reply.supplier} 的回复：供应商单价 ¥{entry.reply.supplierUnitPrice.toFixed(2)}，本次客户单价 ¥{entry.reply.customerUnitPrice.toFixed(2)}；有效期至 {new Date(entry.reply.validUntil).toLocaleString('zh-CN')}。货期：{entry.reply.leadTime}；客户供货条件：{entry.reply.customerConditions}。</p>}
     {entry.status !== 'awaiting_human' && <div className="flex flex-wrap items-end gap-3">
       {entry.status === 'succeeded' && <label className="space-y-1 text-sm">重新询价原因
         <input className={inputClass} value={renewalReason} maxLength={500} disabled={busy} onChange={event => setRenewalReason(event.target.value)} />
@@ -83,6 +88,24 @@ function SupplierReplyForm({ entry, inquiryId, onSaved }: { entry: Entry; inquir
         {entry.status === 'not_prepared' ? '由我负责，准备询价' : '重新准备询价'}
       </button>
     </div>}
+    {entry.quantityChangeSource && <details className="text-sm">
+      <summary className="cursor-pointer font-medium">客户提出了新的数量</summary>
+      <div className="mt-3 grid gap-3 sm:grid-cols-2">
+        <label>本次询价数量（包）<input type="number" min="1" step="1" className={inputClass} value={requestedQuantity}
+          disabled={busy} onChange={event => setRequestedQuantity(event.target.value)} /></label>
+        <label>客户沟通渠道<input className={inputClass} value={quantityChannel} maxLength={200}
+          disabled={busy} onChange={event => setQuantityChannel(event.target.value)} /></label>
+        <label className="sm:col-span-2">客户提出新数量的记录<textarea className={inputClass} value={quantityReference} maxLength={2000}
+          disabled={busy} onChange={event => setQuantityReference(event.target.value)} /></label>
+        <button type="button" className="rounded border border-gray-400 px-3 py-2 disabled:opacity-50 sm:col-span-2"
+          disabled={busy || !Number.isInteger(Number(requestedQuantity)) || Number(requestedQuantity) <= 0 || Number(requestedQuantity) === scope.quantity || !quantityChannel.trim() || !quantityReference.trim()}
+          onClick={() => {
+            if (!confirm(`登记客户的新需求：${scope.quantity} 包改为 ${requestedQuantity} 包。\n依据：${quantityChannel}／${quantityReference}\n将保留原报价与回复，生成新数量的询价和报价草稿，等待供应商重新确认。`)) return;
+            void send({ action: 'prepare', inquiryItemId: entry.inquiryItemId, quantity: Number(requestedQuantity),
+              quantityChange: { ...entry.quantityChangeSource, fromQuantity: scope.quantity, channel: quantityChannel.trim(), reference: quantityReference.trim() } });
+          }}>登记新数量，重新准备询价</button>
+      </div>
+    </details>}
     {entry.status === 'awaiting_human' && <>
       <details className="text-sm"><summary className="cursor-pointer font-medium">发函内容参考</summary>
         <p className="mt-2 whitespace-pre-wrap">请就 {scope.brand} {scope.catalogNumber}，数量 {scope.quantity} 包，提供书面报价和供货确认。请注明每包人民币金额、含税口径、运费及其他费用、有效期、实际货期和付款条件。本函仅为询价，不构成采购或付款承诺。</p>
@@ -90,8 +113,8 @@ function SupplierReplyForm({ entry, inquiryId, onSaved }: { entry: Entry; inquir
       <form onSubmit={event => {
         event.preventDefault();
         const reply = { ...form, currency: 'CNY', supplierUnitPrice: Number(form.supplierUnitPrice),
-          customerUnitPrice: Number(form.customerUnitPrice), validUntil: new Date(form.validUntil).toISOString() };
-        if (!confirm(`请核对本次回复：\n${scope.brand} ${scope.catalogNumber} × ${scope.quantity}\n供应商：${reply.supplier}\n依据：${reply.channel}／${reply.reference}\n供应商单价 ¥${reply.supplierUnitPrice}；客户单价 ¥${reply.customerUnitPrice}\n${reply.taxBasis === 'included' ? '含税' : '未税'}；货期：${reply.leadTime}\n有效期：${form.validUntil}\n条件：${reply.conditions}\n\n确认后回填原询价并重新核算已有草稿，客户发送和采购审批仍按原流程办理。`)) return;
+          customerUnitPrice: scope.customerPricing.finalPrice, validUntil: new Date(form.validUntil).toISOString() };
+        if (!confirm(`请核对本次回复：\n${scope.brand} ${scope.catalogNumber} × ${scope.quantity}\n供应商：${reply.supplier}\n依据：${reply.channel}／${reply.reference}\n供应商单价 ¥${reply.supplierUnitPrice}；客户单价 ¥${reply.customerUnitPrice}\n${reply.taxBasis === 'included' ? '含税' : '未税'}；货期：${reply.leadTime}\n有效期：${form.validUntil}\n供应商条件：${reply.conditions}\n向客户报价的供货条件：${reply.customerConditions}\n\n确认后回填原询价并重新核算已有草稿，客户发送和采购审批仍按原流程办理。`)) return;
         void send({ action: 'record_reply', reviewId: entry.reviewId, requestHash: entry.requestHash, reply });
       }}>
         <fieldset disabled={busy} className="grid gap-3 sm:grid-cols-2">
@@ -101,15 +124,19 @@ function SupplierReplyForm({ entry, inquiryId, onSaved }: { entry: Entry; inquir
               {...(key.endsWith('UnitPrice') ? { min: '0.01', max: '1000000000', step: '0.01' } : {})}
               onChange={event => setForm({ ...form, [key]: event.target.value })} />
           </label>)}
-          <label className="space-y-1 text-sm">含税口径
+          <label className="space-y-1 text-sm">供应商报价含税口径
             <select required className={inputClass} value={form.taxBasis} onChange={event => setForm({ ...form, taxBasis: event.target.value })}>
               <option value="">按书面回复选择</option><option value="included">含税</option><option value="excluded">未税</option>
             </select>
           </label>
-          <label className="space-y-1 text-sm sm:col-span-2">供货、付款及费用条件
+          <label className="space-y-1 text-sm sm:col-span-2">供应商供货、付款及费用条件（内部记录）
             <textarea required maxLength={2000} rows={3} className={inputClass} value={form.conditions} onChange={event => setForm({ ...form, conditions: event.target.value })} />
           </label>
-          <p className="text-xs text-gray-600 sm:col-span-2">供应商报价与客户售价分别核对。请把确认的税费、运费及其他费用写清楚；未明确的条件先向供应商确认。</p>
+          <label className="space-y-1 text-sm sm:col-span-2">向客户报价的供货条件
+            <textarea required maxLength={2000} rows={3} className={inputClass} value={form.customerConditions}
+              onChange={event => setForm({ ...form, customerConditions: event.target.value })} />
+          </label>
+          <p className="text-xs text-gray-600 sm:col-span-2">客户售价按已确认的折扣规则计算，不能在这里改价。客户供货条件会进入报价，请写明已核实的税费、运费和交付条件；供应商采购价及内部付款条件只在内部记录。</p>
           <button className="rounded bg-brand-600 px-3 py-2 text-sm text-white disabled:opacity-50 sm:col-span-2" type="submit">{busy ? '正在核对并接续…' : '核对回复与客户报价，接续原询价'}</button>
         </fieldset>
       </form>

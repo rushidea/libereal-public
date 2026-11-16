@@ -13,8 +13,10 @@ import { POST as apply } from '@/app/api/admin/pricing-adjustments/apply/route';
 import { GET as view, POST as supplierAction } from '@/app/api/inquiries/[id]/supplier-quote/route';
 import { POST as publish } from '@/app/api/inquiries/[id]/quote/route';
 import { POST as acceptQuote } from '@/app/api/orders/[id]/confirm-items/route';
+import { PATCH as updateOrder } from '@/app/api/orders/[id]/route';
+import { quoteContentHash } from '@/lib/quote-records';
 import { verifyAndPriceItems } from '@/lib/pricing';
-import { assertOrderPricingResolved } from '@/lib/order-catalog-repricing';
+import { assertOrderPricingResolved, recordCustomerRepricingConfirmation } from '@/lib/order-catalog-repricing';
 import { enqueueBackgroundTask } from '@/lib/background-tasks';
 import { clearAllTables, closeTestDb, getTestDb, seedAdmin } from './db-helpers';
 
@@ -23,8 +25,8 @@ function request(body: object) { return new NextRequest('http://localhost/api/te
 const policy = { target: 'brand_default_discount', brand: 'Example Brand', brandDefaultDiscountRate: 0.8,
   supplierQuoteRequiredAbove: 500, reason: 'Synthetic confirmed policy' };
 const reply = () => ({ supplier: 'Example Supplier', channel: 'Test email', reference: 'fixture:written-reply', supplierUnitPrice: 400,
-  customerUnitPrice: 650, currency: 'CNY', taxBasis: 'included', leadTime: 'Confirmed test lead time',
-  validUntil: new Date(Date.now() + 2 * 86400000).toISOString(), conditions: 'Synthetic written payment, freight and supply terms' });
+  customerUnitPrice: 640, currency: 'CNY', taxBasis: 'included', leadTime: 'Confirmed test lead time',
+  validUntil: new Date(Date.now() + 2 * 86400000).toISOString(), conditions: 'Private supplier payment terms', customerConditions: 'Confirmed customer freight and supply terms' });
 const priceInput = (quantity = 2) => ({ productId: 'product_supplier', catalogNumber: 'EX-1', inquiryItemId: 'line_supplier',
   name: 'Example item', price: 640, quantity });
 const priceContext = { inquiryId: 'inquiry_supplier', userId: 'customer_supplier', customerEmail: 'customer@example.test' };
@@ -93,14 +95,14 @@ describe('written supplier quotation in the original inquiry', () => {
     expect(await prisma.backgroundTask.count({ where: { type: 'inquiry.supplier_written_quote' } })).toBe(1);
     expect(vi.mocked(enqueueBackgroundTask).mock.calls.filter(call => call[0] === 'email.send')).toHaveLength(0);
     const priced = await verifyAndPriceItems([priceInput()], priceContext);
-    expect(priced.verifiedItems[0].unitPrice).toBe(650);
+    expect(priced.verifiedItems[0].unitPrice).toBe(640);
     const changedDisplay = await publish(request({ items: [{ ...priceInput(), price: 700 }] }), params);
     expect(changedDisplay.status).toBe(409);
     expect(await prisma.quote.count()).toBe(0);
     const published = await publish(request({}), params); const body = await published.json();
     expect(published.status, JSON.stringify(body)).toBe(200);
     const quote = await prisma.quote.findFirstOrThrow({ include: { items: true } });
-    expect(quote.items[0]).toMatchObject({ inquiryItemId: 'line_supplier', unitPrice: 650 });
+    expect(quote.items[0]).toMatchObject({ inquiryItemId: 'line_supplier', unitPrice: 640 });
     expect(quote.validUntil?.toISOString()).toBe(value.validUntil);
     expect(await prisma.inquiryItem.count()).toBe(1);
     const item = await prisma.inquiryItem.findUniqueOrThrow({ where: { id: 'line_supplier' } });
@@ -135,8 +137,8 @@ describe('written supplier quotation in the original inquiry', () => {
     expect((await publish(request({}), params)).status).toBe(409);
     const prepared = await prepare(); expect((await record(prepared)).status).toBe(200);
     const successor = await prisma.quote.findFirstOrThrow({ orderBy: { version: 'desc' }, include: { items: true } });
-    expect(successor).toMatchObject({ status: 'draft', version: 3, subtotal: 1300 });
-    expect(successor.items[0]).toMatchObject({ available: true, unitPrice: 650, inquiryItemId: 'line_supplier' });
+    expect(successor).toMatchObject({ status: 'draft', version: 3, subtotal: 1280 });
+    expect(successor.items[0]).toMatchObject({ available: true, unitPrice: 640, inquiryItemId: 'line_supplier' });
     expect(vi.mocked(enqueueBackgroundTask).mock.calls.filter(call => call[0] === 'email.send')).toHaveLength(0);
   });
 
@@ -147,7 +149,7 @@ describe('written supplier quotation in the original inquiry', () => {
     expect(await prisma.orderEvent.count({ where: { type: 'catalog_repricing_required' } })).toBe(1);
     const prepared = await prepare(1); expect((await record(prepared)).status).toBe(200);
     const draft = await prisma.quote.findFirstOrThrow({ orderBy: { version: 'desc' }, include: { items: true } });
-    expect(draft.items.every(line => line.unitPrice === 650 && line.quantity === 1 && line.available)).toBe(true);
+    expect(draft.items.every(line => line.unitPrice === 640 && line.quantity === 1 && line.available)).toBe(true);
     expect((await prisma.order.findUniqueOrThrow({ where: { id: order!.id } })).total).toBe(640);
   });
 
@@ -187,7 +189,7 @@ describe('written supplier quotation in the original inquiry', () => {
     const recorded = await record(renewed); const result = await recorded.json(); expect(recorded.status, JSON.stringify(result)).toBe(200);
     expect(await prisma.order.findUniqueOrThrow({ where: { id: order.id }, include: { orderItems: true } })).toEqual(order);
     const successor = await prisma.quote.findFirstOrThrow({ orderBy: { version: 'desc' }, include: { items: true } });
-    expect(successor.status).toBe('draft'); expect(successor.items[0].unitPrice).toBe(650);
+    expect(successor.status).toBe('draft'); expect(successor.items[0].unitPrice).toBe(640);
     expect(await prisma.orderEvent.count({ where: { orderId: order.id, type: 'catalog_repricing_required' } })).toBeGreaterThan(0);
     expect((await prisma.backgroundTask.findUniqueOrThrow({ where: { id: prepared.reviewId } })).status).toBe('succeeded');
   });
@@ -198,4 +200,107 @@ describe('written supplier quotation in the original inquiry', () => {
     const body = await response.json(); expect(response.status).toBe(200);
     expect(body.entries[0]).toMatchObject({ owner: 'admin@test.com', status: 'awaiting_human', scope: { quantity: 2, cataloguePrice: 800 } });
   });
+
+  async function acceptedPendingOrder() {
+    await activate(); const prepared = await prepare(); expect((await record(prepared)).status).toBe(200);
+    expect((await publish(request({}), params)).status).toBe(200);
+    const quote = await prisma.quote.findFirstOrThrow();
+    vi.mocked(auth).mockResolvedValue({ user: { id: 'customer_supplier', email: 'customer@example.test', role: 'customer', sessionId: 'session-customer' } } as never);
+    expect((await acceptQuote(request({ quoteId: quote.id, quoteVersion: quote.version, itemIndices: [0] }), params)).status).toBe(200);
+    vi.mocked(auth).mockResolvedValue({ user: { id: 'admin_test_id', email: 'admin@test.com', role: 'admin', sessionId: 'session-1' } } as never);
+    return prisma.order.findFirstOrThrow({ include: { orderItems: true } });
+  }
+
+  it.each(['quantity', 'price', 'clear_snapshot', 'clear_identity', 'erase_all_identity', 'foreign_product_id', 'lead_time'] as const)('rejects an order edit/confirm bypass via %s and rolls back every write', async change => {
+    const order = await acceptedPendingOrder();
+    const line = order.orderItems[0];
+    const items = [{ ...line, price: line.unitPrice, ...(change === 'quantity' ? { quantity: 3 } : {}),
+      ...(change === 'price' ? { price: 1 } : {}), ...(change === 'clear_snapshot' ? { pricingSnapshot: null } : {}),
+      ...(change === 'clear_identity' ? { productId: null, catalogNumber: 'EX-1', pricingSnapshot: null } : {}),
+      ...(change === 'erase_all_identity' ? { productId: null, catalogNumber: null, metadata: null, pricingSnapshot: null } : {}),
+      ...(change === 'foreign_product_id' ? { productId: 'nonexistent', catalogNumber: 'EX-1', pricingSnapshot: null } : {}),
+      ...(change === 'lead_time' ? { leadTime: 'Unapproved new lead time' } : {}) }];
+    const response = await updateOrder(request({ items, confirmWarnings: true, ...(change !== 'clear_snapshot' ? { status: 'confirmed' } : {}) }),
+      { params: Promise.resolve({ id: order.id }) });
+    const rejection = await response.json();
+    expect(response.status, JSON.stringify(rejection)).toBe(409);
+    expect(rejection.code).toBe('QUOTE_REPRICE_REQUIRED');
+    expect(await prisma.order.findUniqueOrThrow({ where: { id: order.id }, include: { orderItems: true } })).toEqual(order);
+  });
+
+  it('checks a pre-existing direct pending order even without an inquiry or pricing snapshot', async () => {
+    const { order } = await seedQuote('pending');
+    await prisma.order.update({ where: { id: order!.id }, data: { inquiryId: null } });
+    await prisma.brand.update({ where: { id: 'brand_supplier' }, data: { supplierQuoteRequiredAbove: 500 } });
+    const response = await updateOrder(request({ status: 'confirmed' }), { params: Promise.resolve({ id: order!.id }) });
+    expect(response.status, await response.text()).toBe(409);
+    expect((await prisma.order.findUniqueOrThrow({ where: { id: order!.id } })).status).toBe('pending');
+  });
+
+  it('keeps customer-specific discount priority and invalidates a reply when that source changes', async () => {
+    await activate();
+    await prisma.user.update({ where: { id: 'customer_supplier' }, data: { brandDiscounts: JSON.stringify({ 'Example Brand': 0.75 }) } });
+    const prepared = await prepare();
+    expect((await record(prepared, reply())).status).toBe(409);
+    expect((await record(prepared, { ...reply(), customerUnitPrice: 600 })).status).toBe(200);
+    const priced = (await verifyAndPriceItems([priceInput()], priceContext)).verifiedItems[0];
+    expect(priced.unitPrice).toBe(600);
+    expect(JSON.parse(priced.pricingSnapshot).appliedSource).toBe('customer_brand_discount');
+    await prisma.user.update({ where: { id: 'customer_supplier' }, data: { brandDiscounts: JSON.stringify({ 'Example Brand': 0.7 }) } });
+    await expect(verifyAndPriceItems([priceInput()], priceContext)).rejects.toThrow('SUPPLIER_WRITTEN_QUOTE_REQUIRED');
+    expect((await prisma.backgroundTask.findUniqueOrThrow({ where: { id: prepared.reviewId } })).status).toBe('succeeded');
+    const successor = await prepare(); expect(successor.reviewId).not.toBe(prepared.reviewId);
+    expect((await record(successor, { ...reply(), customerUnitPrice: 560 })).status).toBe(200);
+    expect((await verifyAndPriceItems([priceInput()], priceContext)).verifiedItems[0].unitPrice).toBe(560);
+  });
+
+  it.each([5, 12])('records a real customer request for %i packages and resumes with a distinct reply and successor quote', async quantity => {
+    await prisma.inquiryItem.update({ where: { id: 'line_supplier' }, data: { quantity: 10, lineTotal: 6400 } });
+    const { quote } = await seedQuote();
+    await prisma.quoteItem.update({ where: { id: quote.items[0].id }, data: { quantity: 10, lineTotal: 6400 } });
+    await prisma.quote.update({ where: { id: quote.id }, data: { subtotal: 6400 } });
+    await activate(); const original = await prepare(10); expect((await record(original)).status).toBe(200);
+    const entries = (await (await view(new NextRequest('http://localhost/api/test'), params)).json()).entries;
+    expect((await supplierAction(request({ action: 'prepare', inquiryItemId: 'line_supplier', quantity }), params)).status).toBe(409);
+    const preparedResponse = await supplierAction(request({ action: 'prepare', inquiryItemId: 'line_supplier', quantity,
+      quantityChange: { ...entries[0].quantityChangeSource, fromQuantity: 10, channel: 'Test email', reference: 'fixture:customer-changed-quantity' } }), params);
+    const prepared = await preparedResponse.json(); expect(preparedResponse.status, JSON.stringify(prepared)).toBe(200);
+    expect(prepared.result.reviewId).not.toBe(original.reviewId);
+    let latest = await prisma.quote.findFirstOrThrow({ orderBy: { version: 'desc' }, include: { items: { orderBy: { position: 'asc' } } } });
+    expect(latest.items[0]).toMatchObject({ quantity, available: false, unitPrice: 0 });
+    const recorded = await record(prepared.result); expect(recorded.status, await recorded.text()).toBe(200);
+    latest = await prisma.quote.findFirstOrThrow({ orderBy: { version: 'desc' }, include: { items: { orderBy: { position: 'asc' } } } });
+    expect(latest.items[0]).toMatchObject({ quantity, available: true, unitPrice: 640 });
+    const published = await publish(request({ catalogQuoteId: latest.id, catalogQuoteHash: quoteContentHash(latest) }), params);
+    expect(published.status).toBe(200);
+    const sent = (await published.json()).quote;
+    expect(sent.items[0]).toMatchObject({ quantity, leadTime: reply().leadTime, notes: reply().customerConditions });
+    expect((await prisma.inquiryItem.findUniqueOrThrow({ where: { id: 'line_supplier' } })).quantity).toBe(10);
+    expect((await prisma.backgroundTask.findUniqueOrThrow({ where: { id: original.reviewId } })).status).toBe('succeeded');
+    expect((await prisma.quoteItem.findUniqueOrThrow({ where: { id: quote.items[0].id } })).quantity).toBe(10);
+  });
+
+  it('binds the new lead time and customer conditions to the displayed order proposal and applies them only after customer confirmation', async () => {
+    const { order } = await seedQuote('pending');
+    await prisma.orderItem.update({ where: { id: order!.orderItems[0].id }, data: { leadTime: '7 days' } });
+    await activate(); const prepared = await prepare();
+    expect((await record(prepared, { ...reply(), leadTime: '90 days' })).status).toBe(200);
+    const draft = await prisma.quote.findFirstOrThrow({ orderBy: { version: 'desc' }, include: { items: true } });
+    const line = draft.items[0]; const metadata = JSON.parse(line.metadata!);
+    expect(line).toMatchObject({ leadTime: '90 days', notes: reply().customerConditions });
+    expect(JSON.stringify(line)).not.toContain(reply().conditions);
+    expect(metadata.previousLeadTime).toBe('7 days');
+    expect((await prisma.orderItem.findUniqueOrThrow({ where: { id: order!.orderItems[0].id } })).leadTime).toBe('7 days');
+    const identity = { inquiryId: 'inquiry_supplier', orderId: order!.id, quoteId: draft.id, proposalHash: metadata.repricingProposalHash,
+      responseChannel: 'Test email', responseReference: 'fixture:customer-accepts-new-terms', actor: { id: 'admin_test_id', email: 'admin@test.com' } };
+    await prisma.quoteItem.update({ where: { id: line.id }, data: { leadTime: 'Altered after display' } });
+    await expect(prisma.$transaction(tx => recordCustomerRepricingConfirmation(tx, identity))).rejects.toThrow('REPRICING_VERSION_CHANGED');
+    await prisma.quoteItem.update({ where: { id: line.id }, data: { leadTime: '90 days' } });
+    const result = await prisma.$transaction(tx => recordCustomerRepricingConfirmation(tx, identity));
+    expect(result.stage).toBe('applied');
+    const applied = await prisma.order.findUniqueOrThrow({ where: { id: order!.id }, include: { orderItems: true } });
+    expect(applied.status).toBe('pending'); expect(applied.orderItems[0].leadTime).toBe('90 days');
+    expect(JSON.parse(applied.orderItems[0].pricingSnapshot!).customerSupplyConditions).toBe(reply().customerConditions);
+  });
+
 });

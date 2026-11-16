@@ -53,6 +53,7 @@ interface Order {
 }
 
 interface OrderItem {
+  customerSupplyConditions?: string | null;
   id?: string;
   productId?: string;
   isQuickOrder?: boolean;
@@ -1216,6 +1217,7 @@ function OrderDetailPanel({
                           className="text-sm px-2 py-1 border border-gray-200 rounded w-full text-gray-900" />
                       </div>
                     </div>
+                    {item.customerSupplyConditions && <p className="mt-2 text-sm text-gray-700">供货条件：{item.customerSupplyConditions}</p>}
                     <div className="mt-2 text-right"><p className="text-xs text-gray-600">小计 {formatPrice((item.price || 0) * (item.quantity || 1))}</p></div>
                   </div>
                 );

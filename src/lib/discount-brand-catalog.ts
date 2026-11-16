@@ -226,3 +226,17 @@ export function lookupBrandDiscountRate(
 
   return null;
 }
+
+export function explicitBrandDiscount(value: string | null | undefined, brand: string, subBrand?: string | null, strict = false): number | null {
+  if (!value) return null;
+  try {
+    const discounts = JSON.parse(value) as Record<string, number>;
+    if (!discounts || Array.isArray(discounts) || typeof discounts !== 'object') throw new Error('INVALID_CUSTOMER_BRAND_DISCOUNT');
+    const rate = lookupBrandDiscountRate(discounts, brand, subBrand);
+    if (strict && rate != null && (typeof rate !== 'number' || !Number.isFinite(rate) || rate <= 0 || rate > 1)) throw new Error('INVALID_CUSTOMER_BRAND_DISCOUNT');
+    return typeof rate === 'number' && rate > 0 && rate <= 1 ? rate : null;
+  } catch {
+    if (strict) throw new Error('INVALID_CUSTOMER_BRAND_DISCOUNT');
+    return null;
+  }
+}

@@ -1,6 +1,10 @@
 import type { Prisma } from '@prisma/client';
 import { pricingContentHash } from '@/lib/pricing-adjustment-approval';
 import { requiresWrittenSupplierQuote } from '@/lib/supplier-quote-policy';
+import { calculatePrice } from '@/lib/price-engine';
+import { explicitBrandDiscount } from '@/lib/discount-brand-catalog';
+import { CONFIRMED_TIER_DISCOUNT_RATES } from '@/lib/discount';
+import { quoteContentHash } from '@/lib/quote-records';
 
 type Db = Prisma.TransactionClient;
 type Actor = { id: string; email: string };
@@ -59,7 +63,15 @@ export async function loadSupplierQuoteScope(db: Db, inquiryId: string, inquiryI
   const cataloguePrice = variant ? variant.originalPrice : product.originalPrice;
   if (cataloguePrice == null || !Number.isFinite(cataloguePrice) || cataloguePrice <= 0) fail('BRAND_CATALOG_PRICE_REQUIRED');
   if (!requiresWrittenSupplierQuote(cataloguePrice, brand.supplierQuoteRequiredAbove)) fail('SUPPLIER_QUOTE_NOT_REQUIRED');
-  const scope = { version: 1, inquiryId, inquiryItemId, userId: inquiry.userId, customerEmail: inquiry.email,
+  const customer = await db.user.findFirst({ where: inquiry.userId ? { id: inquiry.userId } : { email: inquiry.email },
+    select: { id: true, email: true, tier: true, discountRate: true, brandDiscounts: true, isFrozen: true } });
+  const eligible = customer && !customer.isFrozen;
+  const customerPricing = calculatePrice({ discountPolicy: 'brand_priority', basePrice: cataloguePrice,
+    brandDefaultDiscountRate: brand.defaultDiscountRate, tier: eligible ? customer.tier : undefined,
+    personalDiscountRate: eligible ? customer.discountRate : null,
+    brandDiscountRate: eligible ? explicitBrandDiscount(customer.brandDiscounts, product.brand, product.subBrand, true) : null,
+  });
+  const scope = { version: 2, customerPricing, customerPricingSource: { customer, tiers: CONFIRMED_TIER_DISCOUNT_RATES }, inquiryId, inquiryItemId, userId: inquiry.userId, customerEmail: inquiry.email,
     productId: product.id, variantId, catalogNumber: variant?.catalogNumber ?? product.catalogNumber,
     name: product.name, brand: product.brand, subBrand: product.subBrand, specification: variant?.spec ?? null,
     inquiryQuantity: item.quantity, quantity: requestedQuantity, cataloguePrice, currency: 'CNY', brandPolicy: brand };
@@ -69,8 +81,21 @@ export async function loadSupplierQuoteScope(db: Db, inquiryId: string, inquiryI
 
 export async function prepareSupplierQuoteReview(db: Db, input: {
   inquiryId: string; inquiryItemId: string; quantity?: number; actor: Actor; renewalReason?: string;
+  quantityChange?: { quoteId: string; quoteHash: string; fromQuantity: number; channel: string; reference: string };
 }) {
-  const current = await loadSupplierQuoteScope(db, input.inquiryId, input.inquiryItemId, input.quantity, true);
+  if (input.quantityChange) {
+    const change = input.quantityChange;
+    const latest = await db.quote.findFirst({ where: { inquiryId: input.inquiryId }, orderBy: { version: 'desc' },
+      include: { items: { orderBy: { position: 'asc' } } } });
+    const lines = latest?.items.filter(line => line.inquiryItemId === input.inquiryItemId
+      && !object(line.metadata).repricingOrderId && line.quantity > line.orderedQty) ?? [];
+    if (!latest || !['draft', 'sent'].includes(latest.status) || latest.id !== change.quoteId
+      || quoteContentHash(latest) !== change.quoteHash || lines.length !== 1
+      || lines[0].quantity - lines[0].orderedQty !== change.fromQuantity
+      || input.quantity === change.fromQuantity || !change.channel?.trim() || !change.reference?.trim()
+      || change.channel.length > 200 || change.reference.length > 2000) fail('SUPPLIER_QUOTE_QUANTITY_CHANGE_INVALID');
+  }
+  const current = await loadSupplierQuoteScope(db, input.inquiryId, input.inquiryItemId, input.quantity, !input.quantityChange);
   const metadata = object(current.item.metadata);
   const requests = references(metadata, 'supplierQuoteRequests');
   const currentId = requests[String(current.scope.quantity)];
@@ -79,18 +104,18 @@ export async function prepareSupplierQuoteReview(db: Db, input: {
   const previousReply = object(previous?.result).reply as { validUntil?: string } | undefined;
   const expired = previous?.status === 'succeeded' && typeof previousReply?.validUntil === 'string'
     && new Date(previousReply.validUntil) <= new Date();
-  if (previous?.type === TASK_TYPE && previousPayload.sourceHash === current.requestHash && !input.renewalReason && !expired) {
+  if (previous?.type === TASK_TYPE && previousPayload.sourceHash === current.requestHash && !input.renewalReason && !input.quantityChange && !expired) {
     return { reviewId: previous.id, requestHash: previousPayload.requestHash as string, status: previous.status, scope: current.scope };
   }
   const requestHash = pricingContentHash({ sourceHash: current.requestHash, previousReviewId: previous?.id ?? null,
-    renewalReason: input.renewalReason?.trim() || (expired ? '前次供应商报价已失效' : null) });
+    renewalReason: input.renewalReason?.trim() || (expired ? '前次供应商报价已失效' : null), quantityChange: input.quantityChange ?? null });
   const dedupeKey = `supplier-written-quote:${requestHash}`;
   const prior = await db.backgroundTask.findUnique({ where: { dedupeKey } });
   if (prior) return { reviewId: prior.id, requestHash, status: prior.status, scope: current.scope };
   const task = await db.backgroundTask.create({ data: { type: TASK_TYPE, status: 'awaiting_human', dedupeKey,
     payload: JSON.stringify({ requestHash, sourceHash: current.requestHash, scope: current.scope, previousReviewId: previous?.id ?? null,
       renewalReason: input.renewalReason?.trim() || (expired ? '前次供应商报价已失效' : null),
-      ownerId: input.actor.id, ownerEmail: input.actor.email, requestedAt: new Date().toISOString(),
+      quantityChange: input.quantityChange ?? null, ownerId: input.actor.id, ownerEmail: input.actor.email, requestedAt: new Date().toISOString(),
       action: '人工发函询价；回填供应商书面回复并确认本次客户报价，系统核对后接续原询价',
       outboundSent: false }), maxAttempts: 1 } });
   await db.inquiryItem.update({ where: { id: current.item.id }, data: {
@@ -103,13 +128,13 @@ export async function prepareSupplierQuoteReview(db: Db, input: {
 export type SupplierQuoteReply = {
   supplier: string; channel: string; reference: string; supplierUnitPrice: number;
   customerUnitPrice: number; currency: 'CNY'; taxBasis: 'included' | 'excluded';
-  leadTime: string; validUntil: string; conditions: string;
+  leadTime: string; validUntil: string; conditions: string; customerConditions: string;
 };
 export function validateSupplierQuoteReply(value: unknown): SupplierQuoteReply {
   if (!value || typeof value !== 'object' || Array.isArray(value)) fail('SUPPLIER_QUOTE_REPLY_INVALID');
   const raw = value as Record<string, unknown>;
-  const reply = Object.fromEntries(['supplier', 'channel', 'reference', 'leadTime', 'conditions', 'validUntil']
-    .map(key => [key, typeof raw[key] === 'string' ? raw[key].trim() : ''])) as Pick<SupplierQuoteReply, 'supplier' | 'channel' | 'reference' | 'leadTime' | 'conditions' | 'validUntil'>;
+  const reply = Object.fromEntries(['supplier', 'channel', 'reference', 'leadTime', 'conditions', 'customerConditions', 'validUntil']
+    .map(key => [key, typeof raw[key] === 'string' ? raw[key].trim() : ''])) as Pick<SupplierQuoteReply, 'supplier' | 'channel' | 'reference' | 'leadTime' | 'conditions' | 'customerConditions' | 'validUntil'>;
   if (Object.values(reply).some(entry => !entry || entry.length > 2000)
     || raw.currency !== 'CNY' || !['included', 'excluded'].includes(String(raw.taxBasis))) fail('SUPPLIER_QUOTE_REPLY_INVALID');
   for (const key of ['supplierUnitPrice', 'customerUnitPrice']) {
@@ -137,6 +162,7 @@ export async function recordSupplierQuoteReply(db: Db, input: {
   const currentMetadata = object(current.item.metadata);
   if (current.requestHash !== request.sourceHash || references(currentMetadata, 'supplierQuoteRequests')[String(current.scope.quantity)] !== task.id) fail('SUPPLIER_QUOTE_REVIEW_CHANGED');
   const reply = validateSupplierQuoteReply(input.reply);
+  if (reply.customerUnitPrice !== current.scope.customerPricing.finalPrice) fail('SUPPLIER_QUOTE_CUSTOMER_PRICE_CHANGED');
   const replyHash = pricingContentHash({ requestHash: input.requestHash, reply });
   if (task.status === 'succeeded') {
     const previous = object(task.result);
@@ -147,7 +173,7 @@ export async function recordSupplierQuoteReply(db: Db, input: {
   const changed = await db.backgroundTask.updateMany({ where: { id: task.id, type: TASK_TYPE, status: 'awaiting_human', payload: task.payload },
     data: { status: 'succeeded', completedAt: new Date(), result: JSON.stringify({ requestHash: input.requestHash,
       replyHash, reply, confirmedBy: input.actor.id, confirmedByEmail: input.actor.email, confirmedAt: new Date().toISOString(),
-      meaning: 'Supplier reply checked and this customer unit price explicitly confirmed; no purchase, payment or customer send.' }) } });
+      meaning: 'Supplier reply checked; customer price follows the current approved discount priority. No purchase, payment or customer send.' }) } });
   if (changed.count !== 1) fail('SUPPLIER_QUOTE_REVIEW_CHANGED');
   await db.inquiryItem.update({ where: { id: current.item.id }, data: {
     ...(current.scope.quantity === current.item.quantity ? { productId: current.scope.productId, unitPrice: reply.customerUnitPrice,
@@ -170,7 +196,7 @@ export async function supplierQuoteReviewView(db: Db, inquiryId: string) {
     id: true, inquiryItems: { orderBy: { position: 'asc' }, select: { id: true, name: true, quantity: true, metadata: true } },
   } });
   if (!inquiry) fail('SUPPLIER_QUOTE_INQUIRY_NOT_ACTIVE');
-  const latest = await db.quote.findFirst({ where: { inquiryId }, orderBy: { version: 'desc' }, include: { items: true } });
+  const latest = await db.quote.findFirst({ where: { inquiryId }, orderBy: { version: 'desc' }, include: { items: { orderBy: { position: 'asc' } } } });
   const entries = [];
   for (const item of inquiry.inquiryItems) {
     const quoteQuantities = latest && ['draft', 'sent'].includes(latest.status)
@@ -185,9 +211,13 @@ export async function supplierQuoteReviewView(db: Db, inquiryId: string) {
       const currentRequest = task?.type === TASK_TYPE && request.sourceHash === current.requestHash;
       const reply = result.reply as SupplierQuoteReply | undefined;
       const expired = task?.status === 'succeeded' && (!reply?.validUntil || new Date(reply.validUntil) <= new Date());
+      const changeable = latest && ['draft', 'sent'].includes(latest.status)
+        && latest.items.filter(line => line.inquiryItemId === item.id && !object(line.metadata).repricingOrderId
+          && line.quantity > line.orderedQty && line.quantity - line.orderedQty === quantity).length === 1;
       entries.push({ inquiryItemId: item.id, name: item.name,
+        quantityChangeSource: changeable ? { quoteId: latest.id, quoteHash: quoteContentHash(latest) } : null,
         scope: { catalogNumber: current.scope.catalogNumber, brand: current.scope.brand,
-          quantity: current.scope.quantity, cataloguePrice: current.scope.cataloguePrice, currency: current.scope.currency },
+          quantity: current.scope.quantity, cataloguePrice: current.scope.cataloguePrice, currency: current.scope.currency, customerPricing: current.scope.customerPricing },
         reviewId: task?.id ?? null, requestHash: currentRequest ? request.requestHash as string : null,
         status: currentRequest ? expired ? 'expired' : task!.status : task ? 'source_changed' : 'not_prepared',
         owner: typeof request.ownerEmail === 'string' ? request.ownerEmail : null,
@@ -211,8 +241,10 @@ export function supplierQuoteErrorMessage(error: unknown) {
     BRAND_CATALOG_PRICE_REQUIRED: '请先核对并确认该销售包装的目录价，再判断供应商询价条件',
     BRAND_NOT_ACTIVE: '品牌资料未启用，请先核对品牌资料',
     SUPPLIER_QUOTE_NOT_REQUIRED: '当前商品不符合已确认的金额门槛，无需创建这项供应商询价',
+    SUPPLIER_QUOTE_QUANTITY_CHANGE_INVALID: '数量变更必须对应当前报价，并登记客户提出新数量的实际依据，请刷新核对',
     SUPPLIER_QUOTE_QUANTITY_INVALID: '原询价数量无效，请先核对数量',
-    SUPPLIER_QUOTE_REPLY_INVALID: '请完整填写供应商、联系渠道、回复依据、收付价格、含税口径、货期、有效期及供货条件',
+    SUPPLIER_QUOTE_CUSTOMER_PRICE_CHANGED: '客户售价必须按当前目录价与既定折扣核算，请刷新后重新核对',
+    SUPPLIER_QUOTE_REPLY_INVALID: '请完整填写供应商、联系渠道、回复依据、采购价、含税口径、货期、有效期及对客户的供货条件',
     SUPPLIER_QUOTE_REPLY_EXPIRED: '供应商报价有效期已过或无效，请重新询价取得有效回复',
     SUPPLIER_QUOTE_REVIEW_NOT_FOUND: '未找到原供应商询价记录，请先准备询价',
     SUPPLIER_QUOTE_REVIEW_CHANGED: '商品、数量、目录价或适用规则已变化，请重新准备询价并核对回复',

@@ -11,7 +11,7 @@ import { jsonObject } from '@/lib/order-catalog-repricing';
 async function continueOriginalQuote(tx: Prisma.TransactionClient, inquiryId: string, reviewId: string, actor: { id: string; email: string }) {
   const task = await tx.backgroundTask.findUniqueOrThrow({ where: { id: reviewId } });
   const request = jsonObject(task.payload);
-  const scope = request.scope as { productId: string; variantId?: string | null; catalogNumber: string; brand: string };
+  const scope = request.scope as { inquiryItemId: string; quantity: number; productId: string; variantId?: string | null; catalogNumber: string; brand: string };
   const latest = await tx.quote.findFirst({ where: { inquiryId }, orderBy: { version: 'desc' } });
   if (!latest || !['draft', 'sent', 'accepted', 'expired'].includes(latest.status)) return null;
   const orders = await tx.order.findMany({ where: { inquiryId, archivedAt: null, status: { in: ['pending', 'unpaid'] } }, select: { id: true } });
@@ -20,6 +20,7 @@ async function continueOriginalQuote(tx: Prisma.TransactionClient, inquiryId: st
     changes: [{ productId: scope.productId, variantId: scope.variantId, catalogNumber: scope.catalogNumber, brand: scope.brand }],
     // This is a source-bound quote review, not a new foundation-data approval.
     approvalHash: request.requestHash as string, supplierReviewId: reviewId,
+    ...(request.quantityChange ? { quantityChange: { inquiryItemId: scope.inquiryItemId, quantity: scope.quantity } } : {}),
     operationKey: pricingContentHash({ kind: 'supplier_quote_review', reviewId, status: task.status, previousQuoteId: latest.id }), actor,
   });
 }
@@ -50,7 +51,8 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
         }
         if (body.quantity !== undefined && (typeof body.quantity !== 'number' || !Number.isInteger(body.quantity))) throw new Error('SUPPLIER_QUOTE_QUANTITY_INVALID');
         const prepared = await prepareSupplierQuoteReview(tx, { inquiryId: id, inquiryItemId: body.inquiryItemId, quantity: body.quantity as number | undefined,
-          actor, ...(typeof body.renewalReason === 'string' ? { renewalReason: body.renewalReason } : {}) });
+          actor, ...(body.quantityChange ? { quantityChange: body.quantityChange as Parameters<typeof prepareSupplierQuoteReview>[1]['quantityChange'] } : {}),
+          ...(typeof body.renewalReason === 'string' ? { renewalReason: body.renewalReason } : {}) });
         const continuation = await continueOriginalQuote(tx, id, prepared.reviewId, actor);
         await writeAuditLog({ actorId: actor.id, actorEmail: actor.email, action: 'inquiry.supplier_quote_prepared',
           resource: 'inquiries', targetType: 'Inquiry', targetId: id,

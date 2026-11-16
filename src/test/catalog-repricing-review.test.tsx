@@ -9,9 +9,9 @@ vi.mock('@/components/admin/AdminMfaStepUpDialog', () => ({
   useAdminMfaStepUp: () => ({ begin: mfa.begin, dialog: null }),
 }));
 const identity = { inquiryId: 'inquiry-1', quoteId: 'quote-2', orderId: 'order-1', proposalHash: 'proposal-1' };
-const quote = { id: identity.quoteId, version: 2, items: [{ name: '测试商品', price: 110, quantity: 2, available: true,
+const quote = { id: identity.quoteId, version: 2, items: [{ name: '测试商品', price: 110, quantity: 2, available: true, leadTime: '90 days', notes: 'Confirmed customer freight',
   metadata: JSON.stringify({ repricingOrderId: identity.orderId, repricingProposalHash: identity.proposalHash,
-    previousUnitPrice: 100, repricingOriginalTotal: 212, repricingProposedTotal: 232,
+    previousUnitPrice: 100, previousLeadTime: '7 days', previousNotes: 'Original supply terms', repricingOriginalTotal: 212, repricingProposedTotal: 232,
     repricingPreservedAdjustments: [{ label: '运费', amount: 12 }] }) }] };
 function response(body: unknown, status = 200) { return Response.json(body, { status }); }
 const preview = { stage: 'awaiting_finance_review', financeApprovalHash: 'a'.repeat(64), blocker: null,
@@ -30,8 +30,10 @@ describe('catalogue repricing human confirmation', () => {
     const fetcher = vi.fn().mockResolvedValue(response({ result: { ...identity, stage: 'awaiting_finance_review' } }, 202));
     vi.stubGlobal('fetch', fetcher);
     render(<CatalogRepricingReview inquiryId={identity.inquiryId} quote={quote} onRecorded={vi.fn(async () => {})} />);
+    expect(screen.getByText('货期：7 days → 90 days')).toBeTruthy();
+    expect(screen.getByText('本次供货条件：Confirmed customer freight')).toBeTruthy();
     fireEvent.change(screen.getByLabelText('客户确认记录'), { target: { value: 'fixture response' } });
-    fireEvent.click(screen.getByRole('button', { name: '登记客户对完整金额的确认' }));
+    fireEvent.click(screen.getByRole('button', { name: '登记客户对金额与供货条件的确认' }));
     await screen.findByText('客户回复已保存，等待财务核对。原订单金额尚未更新。');
     expect(JSON.parse(fetcher.mock.calls[0][1].body)).toMatchObject({ confirmedTotal: 232, proposalHash: identity.proposalHash });
     expect(screen.queryByText('客户确认已登记，原订单价格已更新，等待 Libereal 审核接受。')).toBeNull();
@@ -42,7 +44,7 @@ describe('catalogue repricing human confirmation', () => {
     const recorded = vi.fn(async () => {});
     render(<CatalogRepricingReview inquiryId={identity.inquiryId} quote={quote} onRecorded={recorded} />);
     fireEvent.change(screen.getByLabelText('客户确认记录'), { target: { value: 'fixture response' } });
-    fireEvent.click(screen.getByRole('button', { name: '登记客户对完整金额的确认' }));
+    fireEvent.click(screen.getByRole('button', { name: '登记客户对金额与供货条件的确认' }));
     await screen.findByText('返回结果与本次复核不一致，请刷新核对。');
     expect(recorded).not.toHaveBeenCalled();
   });

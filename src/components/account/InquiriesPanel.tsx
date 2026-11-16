@@ -19,6 +19,7 @@ import { describeCheckoutPayable } from '@/lib/checkout-payment';
 import { startAlipayCheckout } from '@/lib/alipay-checkout-client';
 
 interface InquiryItem {
+  notes?: string | null;
   id?: string;
   isQuickOrder?: boolean;
   name?: string;
@@ -598,6 +599,7 @@ export default function InquiriesPanel() {
                               <div>
                                 <p className={`mb-1 text-xs ${uiSurfaces.mutedText}`}>货期</p>
                                 <p className={`text-xs font-medium ${uiSurfaces.textSecondary}`}>{leadTime || '-'}</p>
+                                {item.notes && <p className={`text-xs ${uiSurfaces.textSecondary}`}>{item.notes}</p>}
                               </div>
                             </div>
                           </div>
