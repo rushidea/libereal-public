@@ -10,7 +10,9 @@ type EditTemplate = Omit<LetterTemplate, 'id' | 'revision'> & { id?: string; rev
 type ViewSnapshot = { message: { to: string[]; from: string; replyTo: string; subject: string; html: string; text: string };
   source: { reviewId: string; scope: { brand: string; catalogNumber: string; quantity: number } } | null };
 
-export default function BusinessLettersManager() {
+export default function BusinessLettersManager({ initialReviewId = '', initialReference = '' }: {
+  initialReviewId?: string; initialReference?: string;
+} = {}) {
   const [templates, setTemplates] = useState<LetterTemplate[]>([]);
   const [letters, setLetters] = useState<LetterDraft[]>([]);
   const [rights, setRights] = useState({ canManage: false, canSend: false, canReadLetters: false });
@@ -18,8 +20,8 @@ export default function BusinessLettersManager() {
   const [templatePreview, setTemplatePreview] = useState<{ html: string; text: string } | null>(null);
   const [templateId, setTemplateId] = useState('');
   const [to, setTo] = useState('');
-  const [reference, setReference] = useState('');
-  const [reviewId, setReviewId] = useState('');
+  const [reference, setReference] = useState(initialReference);
+  const [reviewId, setReviewId] = useState(initialReviewId);
   const [fields, setFields] = useState<LetterFields>(emptyFields);
   const [preview, setPreview] = useState<LetterDraft | null>(null);
   const [confirmed, setConfirmed] = useState(false);
@@ -41,8 +43,6 @@ export default function BusinessLettersManager() {
     }
   }, []);
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    setReviewId(params.get('reviewId') || ''); setReference(params.get('reference') || '');
     void load().catch(e => setError(e.message));
   }, [load]);
 

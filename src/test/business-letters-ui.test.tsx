@@ -13,8 +13,9 @@ describe('business letter manager', () => {
       if (!options?.method) return Response.json({ letters: [] });
       return Response.json({ letter });
     }); vi.stubGlobal('fetch', fetch);
-    render(<BusinessLettersManager />);
+    render(<BusinessLettersManager initialReference="EX-INITIAL" />);
     fireEvent.click(await screen.findByRole('button', { name: '调用模板' }));
+    expect(screen.getByLabelText('业务编号')).toHaveValue('EX-INITIAL');
     fireEvent.change(screen.getByLabelText('收件人邮箱'), { target: { value: 'recipient@example.test' } });
     fireEvent.change(screen.getByLabelText('业务编号'), { target: { value: 'EX-1' } });
     fireEvent.click(screen.getByRole('button', { name: '生成完整预览' }));
