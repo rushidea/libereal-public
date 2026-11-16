@@ -58,6 +58,17 @@ export async function pendingOrderRepricing(tx: Prisma.TransactionClient, orderI
 
 export async function assertOrderPricingResolved(tx: Prisma.TransactionClient, orderId: string) {
   if (await pendingOrderRepricing(tx, orderId)) throw new Error('QUOTE_REPRICE_REQUIRED');
+  const order = await tx.order.findUnique({ where: { id: orderId }, include: { orderItems: true } });
+  if (!order?.inquiryId || !['pending', 'unpaid'].includes(order.status)) return;
+  const supplierLines = order.orderItems.filter(line => jsonObject(line.pricingSnapshot).discountPolicy === 'supplier_written_reply');
+  try {
+    await assertBrandDiscountPricesCurrent(tx, supplierLines.map(line => ({
+      productId: line.productId, catalogNumber: line.catalogNumber, name: line.name, unitPrice: line.unitPrice,
+      quantity: line.quantity, lineTotal: line.unitPrice * line.quantity, pricingSnapshot: line.pricingSnapshot ?? '{}',
+      source: 'db' as const, priceMismatch: false,
+      variantId: typeof jsonObject(line.pricingSnapshot).variantId === 'string' ? jsonObject(line.pricingSnapshot).variantId as string : null,
+    })), { inquiryId: order.inquiryId, userId: order.customerId, customerEmail: order.email });
+  } catch { throw new Error('QUOTE_REPRICE_REQUIRED'); }
 }
 
 /** Follow an actual order cancellation/closure; do not cancel any business action here. */
@@ -124,7 +135,7 @@ async function loadRepricingProposal(tx: Prisma.TransactionClient, input: Repric
       quantity: line.quantity, lineTotal: line.lineTotal, pricingSnapshot: line.pricingSnapshot ?? '{}',
       source: 'db' as const, priceMismatch: false,
       variantId: typeof jsonObject(line.pricingSnapshot).variantId === 'string' ? jsonObject(line.pricingSnapshot).variantId as string : null,
-    })), { userId: quote.inquiry.userId, customerEmail: quote.inquiry.email, requireDiscountPriority: true });
+    })), { inquiryId: input.inquiryId, userId: quote.inquiry.userId, customerEmail: quote.inquiry.email, requireDiscountPriority: true });
   } catch (error) {
     if (error instanceof Error && error.message === 'BRAND_DISCOUNT_PRICE_DRIFT') throw new Error('REPRICING_VERSION_CHANGED');
     throw error;

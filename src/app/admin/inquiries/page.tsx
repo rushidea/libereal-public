@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { SupplierQuoteReview } from '@/components/admin/SupplierQuoteReview';
 import { useRouter } from 'next/navigation';
 
 import {
@@ -356,6 +357,7 @@ function InquiryDetailPanel({
   const pendingOrderReview = catalogDraft?.items.some((item) => isOrderRevision(item) && item.available !== false);
   return (
     <div className="bg-white rounded-lg border border-brand-300 shadow-sm p-4 space-y-4">
+      <SupplierQuoteReview key={inquiry.id} inquiryId={inquiry.id} onRecorded={fetchData} />
       {catalogDraft && <div className="flex flex-wrap items-center gap-3 text-sm">
         <span>目录价、折扣或客户条件变化后，可在本询价重新核算并查看新版草稿。</span>
         <button type="button" className="rounded border px-3 py-2" onClick={async () => {
@@ -528,17 +530,8 @@ function InquiryDetailPanel({
             alert('提交失败：' + (err.error || '未知错误'));
             return;
           }
-          const patchRes = await fetch(`/api/inquiries/${inquiry.id}`, {
-            method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ items: inquiryItems }),
-          });
           notifyAdminInquiryTodoChanged(wasAwaitingQuote ? -1 : undefined);
           fetchData();
-          if (!patchRes.ok) {
-            const err = await patchRes.json().catch(() => ({}));
-            alert('报价已提交，询价明细保存失败：' + (err.error || '未知错误'));
-            return;
-          }
           alert('报价已提交');
         }} className="w-full py-3 bg-brand-600 text-white rounded-lg font-medium hover:bg-brand-700">
           提交报价

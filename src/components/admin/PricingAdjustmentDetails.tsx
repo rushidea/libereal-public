@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 
-type Detail = { productId: string; variantId: string | null; brand: string; catalogNumber: string; name: string; field: string; before: number | null; after: number; unit?: 'rate' };
+type Detail = { productId: string; variantId: string | null; brand: string; catalogNumber: string; name: string; field: string; before: number | null; after: number | null; unit?: 'rate' | 'money' };
 const valueLabel = (value: number | null, row: Detail) => value == null ? '未设置'
   : row.unit === 'rate' ? `${Number((value * 100).toPrecision(15))}%` : `¥${value.toFixed(2)}`;
 export function PricingAdjustmentDetails({ approvalHash }: { approvalHash: string }) {

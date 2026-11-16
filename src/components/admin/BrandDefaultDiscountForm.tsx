@@ -5,7 +5,8 @@ import type { PriceAdjustmentPreview } from '@/lib/pricing-adjustment-service';
 import { isAdminMfaStepUpResponse, useAdminMfaStepUp } from './AdminMfaStepUpDialog';
 import { PricingAdjustmentDetails } from './PricingAdjustmentDetails';
 
-type Draft = { target: 'brand_default_discount'; brand: string; brandDefaultDiscountRate: number; reason: string };
+type Draft = { target: 'brand_default_discount'; brand: string; brandDefaultDiscountRate: number;
+  supplierQuoteRequiredAbove?: number | null; reason: string };
 type Result = PriceAdjustmentPreview & {
   updatedCount: number;
   repricedQuotes: Array<{ inquiryId: string; version: number; subtotal: number; pendingOrderIds: string[] }>;
@@ -16,6 +17,8 @@ const percent = (value: number) => `${Number((value * 100).toPrecision(15))}%`;
 export function BrandDefaultDiscountForm({ brand }: { brand: string }) {
   const [rate, setRate] = useState('');
   const [reason, setReason] = useState('');
+  const [limitMode, setLimitMode] = useState<'keep' | 'set' | 'clear'>('keep');
+  const [quoteLimit, setQuoteLimit] = useState('');
   const [preview, setPreview] = useState<PriceAdjustmentPreview | null>(null);
   const [result, setResult] = useState<Result | null>(null);
   const [busy, setBusy] = useState(false);
@@ -90,14 +93,32 @@ export function BrandDefaultDiscountForm({ brand }: { brand: string }) {
             onChange={(event) => { invalidate(); setReason(event.target.value); }}
             className="ml-2 rounded border p-2" placeholder="资料来源及调整原因" />
         </label>
-        <button type="button" disabled={busy || !rate || Number(rate) <= 0 || Number(rate) > 100 || reason.trim().length < 2}
+        <label className="text-sm">供应商书面询价
+          <select aria-label="供应商书面询价规则" value={limitMode} disabled={busy}
+            onChange={(event) => { invalidate(); setLimitMode(event.target.value as 'keep' | 'set' | 'clear'); }} className="ml-2 rounded border p-2">
+            <option value="keep">保留现有门槛</option>
+            <option value="set">超过指定目录价先人工询价</option>
+            <option value="clear">取消金额门槛</option>
+          </select>
+        </label>
+        {limitMode === 'set' && <label className="text-sm">单个销售包装目录价超过
+          <input aria-label="供应商询价目录价门槛" type="number" min="0.01" max="1000000000" step="0.01"
+            value={quoteLimit} disabled={busy} onChange={(event) => { invalidate(); setQuoteLimit(event.target.value); }}
+            className="ml-2 w-32 rounded border p-2" /> 元
+        </label>}
+        <button type="button" disabled={busy || !rate || Number(rate) <= 0 || Number(rate) > 100 || reason.trim().length < 2
+          || (limitMode === 'set' && (!Number.isFinite(Number(quoteLimit)) || Number(quoteLimit) <= 0 || Number(quoteLimit) > 1_000_000_000))}
           className="rounded border px-3 py-2 text-sm disabled:opacity-50"
-          onClick={() => { invalidate(); void createPreview({ target: 'brand_default_discount', brand, brandDefaultDiscountRate: Number(rate) / 100, reason: reason.trim() }, revision.current); }}>
+          onClick={() => { invalidate(); void createPreview({ target: 'brand_default_discount', brand, brandDefaultDiscountRate: Number(rate) / 100,
+            ...(limitMode === 'set' ? { supplierQuoteRequiredAbove: Number(quoteLimit) } : limitMode === 'clear' ? { supplierQuoteRequiredAbove: null } : {}),
+            reason: reason.trim() }, revision.current); }}>
           {busy ? '正在处理…' : '预览品牌折扣变更'}
         </button>
       </div>
       {preview?.brandDefaultChange && <div className="space-y-2 rounded border border-brand-200 p-3 text-sm">
         <p>{preview.brandDefaultChange.brandName}：{preview.brandDefaultChange.beforeRate == null ? '未确认' : percent(preview.brandDefaultChange.beforeRate)} → <strong>{percent(preview.brandDefaultChange.afterRate)}</strong></p>
+        <p>供应商书面询价门槛：{preview.brandDefaultChange.beforeQuoteLimit == null ? '未设置' : `¥${preview.brandDefaultChange.beforeQuoteLimit.toFixed(2)}`}
+          {' → '}{preview.brandDefaultChange.afterQuoteLimit == null ? '不设金额门槛' : `单个销售包装目录价超过 ¥${preview.brandDefaultChange.afterQuoteLimit.toFixed(2)} 时，先人工发函并核验供应商回复，再继续报价`}</p>
         <p>预计复核 {preview.quoteImpact?.quoteCount ?? 0} 份未锁价报价、{preview.quoteImpact?.pendingOrderCount ?? 0} 笔待接受订单。已由 Libereal 接受的订单保留原价。</p>
         <PricingAdjustmentDetails key={preview.approvalHash} approvalHash={preview.approvalHash!} />
         {!result && <div><button type="button" disabled={busy || !preview.changeCount}

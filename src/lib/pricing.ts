@@ -4,6 +4,8 @@ import { lookupBrandDiscountRate } from '@/lib/discount-brand-catalog';
 import type { Prisma } from '@prisma/client';
 import { CONFIRMED_TIER_DISCOUNT_RATES } from '@/lib/discount';
 import { pricingContentHash } from '@/lib/pricing-adjustment-approval';
+import { requiresWrittenSupplierQuote, SUPPLIER_WRITTEN_QUOTE_REQUIRED } from '@/lib/supplier-quote-policy';
+import { readApprovedSupplierQuote } from '@/lib/supplier-quote-review';
 
 const pricingVariantSelect = {
   id: true,
@@ -20,6 +22,7 @@ const pricingVariantSelect = {
 export const AMBIGUOUS_PRODUCT_CATALOG_NUMBER = 'AMBIGUOUS_PRODUCT_CATALOG_NUMBER';
 
 export interface PriceLookupItem {
+  inquiryItemId?: string | null;
   productId?: string | null;
   catalogNumber?: string | null;
   brand?: string | null;
@@ -163,6 +166,8 @@ export function getVerifiedInventoryError(item: VerifiedItem): InventoryValidati
 }
 
 export interface PricingContext {
+  /** Set from the server-loaded inquiry, never accepted as a customer pricing override. */
+  inquiryId?: string;
   /** Catalogue updates must not silently reuse the legacy lowest-price policy. */
   requireDiscountPriority?: boolean;
   db?: Prisma.TransactionClient;
@@ -186,6 +191,11 @@ export function discountPricingFailure(error: unknown): string | null {
     BRAND_NOT_ACTIVE: '该品牌尚未启用，请先核对品牌资料',
     BRAND_DEFAULT_DISCOUNT_REQUIRED: '该品牌尚无已确认的适用折扣，请先预览并确认品牌默认折扣',
     BRAND_CATALOG_PRICE_REQUIRED: '商品或规格缺少有效目录价，请先核对目录价',
+    SUPPLIER_WRITTEN_QUOTE_REQUIRED: '该销售包装须先人工发函并核验供应商书面回复，再继续报价',
+    INVALID_SUPPLIER_QUOTE_POLICY: '品牌的人工询价门槛无效，请先核对已确认的品牌资料',
+    SUPPLIER_QUOTE_REPLY_EXPIRED: '供应商书面报价已失效，请重新询价并核对回复',
+    SUPPLIER_QUOTE_REVIEW_CHANGED: '询价内容或适用条件已变化，请重新核对供应商回复',
+    SUPPLIER_QUOTE_CUSTOMER_PRICE_CHANGED: '填写的客户报价与已核对的回复记录不同，请重新核对并确认本次客户报价',
     LEGACY_CUSTOMER_DISCOUNT_REVIEW_REQUIRED: '客户仍有旧版个人折扣，须核清适用品牌和授权后再报价',
     INVALID_CUSTOMER_BRAND_DISCOUNT: '客户品牌折扣数据无效，请先核对原记录',
     INVALID_DISCOUNT_RATE: '适用折扣数据无效，请先核对原记录',
@@ -203,18 +213,22 @@ export async function assertBrandDiscountPricesCurrent(
 ) {
   for (const item of items) {
     if (item.source !== 'db' || !item.productId || item.quoteRequired) continue;
-    const expected = JSON.parse(item.pricingSnapshot) as { discountPolicy?: string; discountInputsHash?: string };
+    const expected = JSON.parse(item.pricingSnapshot) as { discountPolicy?: string; discountInputsHash?: string;
+      inquiryId?: string; inquiryItemId?: string };
+    if (context.inquiryId && expected.inquiryId && context.inquiryId !== expected.inquiryId) throw new Error('BRAND_DISCOUNT_PRICE_DRIFT');
     const product = await tx.product.findUnique({ where: { id: item.productId }, select: { brand: true, brandRecordId: true } });
     const brand = product ? await tx.brand.findUnique({
       where: product.brandRecordId ? { id: product.brandRecordId } : { name: product.brand },
-      select: { defaultDiscountRate: true },
+      select: { defaultDiscountRate: true, supplierQuoteRequiredAbove: true },
     }) : null;
-    if (expected.discountPolicy !== 'brand_priority' && brand?.defaultDiscountRate == null) continue;
+    if (!['brand_priority', 'supplier_written_reply'].includes(expected.discountPolicy ?? '') && brand?.defaultDiscountRate == null && brand?.supplierQuoteRequiredAbove == null) continue;
     try {
       const current = await verifyAndPriceItems([{
         productId: item.productId, variantId: item.variantId, catalogNumber: item.catalogNumber,
+        inquiryItemId: expected.inquiryItemId,
         name: item.name, price: item.unitPrice, quantity: item.quantity,
-      }], { ...context, db: tx, requireDiscountPriority: true, allowClientFallback: false });
+      }], { ...context, inquiryId: context.inquiryId ?? expected.inquiryId,
+        db: tx, requireDiscountPriority: true, allowClientFallback: false });
       const actual = current.verifiedItems[0];
       const snapshot = JSON.parse(actual.pricingSnapshot) as { discountInputsHash?: string };
       if (actual.unitPrice !== item.unitPrice || !expected.discountInputsHash
@@ -552,16 +566,23 @@ export async function verifyAndPriceItems(
       if (product && item.brand && item.brand !== product.brand) throw new Error('PRODUCT_BRAND_MISMATCH');
       const brandPolicy = product ? await db.brand.findUnique({
         where: product.brandRecordId ? { id: product.brandRecordId } : { name: product.brand },
-        select: { id: true, name: true, isActive: true, defaultDiscountRate: true },
+        select: { id: true, name: true, isActive: true, defaultDiscountRate: true, supplierQuoteRequiredAbove: true },
       }) : null;
       const discountPriority = Boolean(context.requireDiscountPriority || brandPolicy?.defaultDiscountRate != null);
       const cataloguePrice = variant ? variant.originalPrice : product?.originalPrice;
+      const supplierQuoteRequired = Boolean(product && requiresWrittenSupplierQuote(cataloguePrice, brandPolicy?.supplierQuoteRequiredAbove));
+      const supplierQuote = supplierQuoteRequired && product && typeof cataloguePrice === 'number' && cataloguePrice > 0 ? await readApprovedSupplierQuote(db, {
+        inquiryId: context.inquiryId, inquiryItemId: item.inquiryItemId, productId: product.id,
+        variantId: variant?.id, quantity: qty, userId: user?.id ?? context.userId, customerEmail: context.customerEmail,
+      }) : null;
       if (product && discountPriority && brandPolicy && !brandPolicy.isActive) throw new Error('BRAND_NOT_ACTIVE');
       if (product && discountPriority && item.promoMark) throw new Error('PROMOTION_REQUIRES_QUOTE_REVIEW');
-      if (product && discountPriority && !(typeof cataloguePrice === 'number' && Number.isFinite(cataloguePrice) && cataloguePrice > 0)) {
+      if (product && (discountPriority || brandPolicy?.supplierQuoteRequiredAbove != null)
+        && !(typeof cataloguePrice === 'number' && Number.isFinite(cataloguePrice) && cataloguePrice > 0)) {
         if (!context.allowQuoteRequired) throw new Error('BRAND_CATALOG_PRICE_REQUIRED');
         quoteRequired = true;
       }
+      if (supplierQuoteRequired && !supplierQuote && !context.allowQuoteRequired) throw new Error(SUPPLIER_WRITTEN_QUOTE_REQUIRED);
       if (product) {
         available = product.inStock;
         leadTime = product.leadTime;
@@ -582,13 +603,15 @@ export async function verifyAndPriceItems(
           ?? (item.catalogNumber ? context.manualAdjustments?.[item.catalogNumber] : undefined)
           ?? (item.productId ? context.manualAdjustments?.[item.productId] : undefined)
         : undefined;
-      if (product?.pricingMode === 'inquiry' && !(manualAdjustment && context.allowManualAdjustment)) {
+      if (product && !supplierQuote && (supplierQuoteRequired || (product.pricingMode === 'inquiry' && !(manualAdjustment && context.allowManualAdjustment)))) {
         if (!context.allowQuoteRequired) throw new Error('PRODUCT_REQUIRES_INQUIRY');
         quoteRequired = true;
         pricingSnapshot = JSON.stringify({
           calculatedAt: now.toISOString(), productId: product.id, variantId: variant?.id || null,
           catalogNumber: variant?.catalogNumber || product.catalogNumber,
           status: 'quote_required', available, leadTime, stockQuantity,
+          ...(supplierQuoteRequired ? { reason: SUPPLIER_WRITTEN_QUOTE_REQUIRED,
+            cataloguePrice, supplierQuoteRequiredAbove: brandPolicy?.supplierQuoteRequiredAbove } : {}),
         });
       }
       if (product?.hazardous && !context.allowHazardousProducts) {
@@ -621,7 +644,24 @@ export async function verifyAndPriceItems(
       if (promotionEvidence) {
         promotionEvidence = { ...promotionEvidence, referencePriceApplied: referenceApplies, referencePriceEligible: inReferenceScope };
       }
-      if (!quoteRequired && product && (discountPriority || referenceApplies || product.price > 0 || (variant?.price || 0) > 0)) {
+      if (supplierQuote && product) {
+        if (manualAdjustment && context.allowManualAdjustment && manualAdjustment.value !== supplierQuote.reply.customerUnitPrice) {
+          throw new Error('SUPPLIER_QUOTE_CUSTOMER_PRICE_CHANGED');
+        }
+        unitPrice = supplierQuote.reply.customerUnitPrice;
+        baseUnitPrice = cataloguePrice ?? undefined;
+        source = 'db';
+        pricingSnapshot = JSON.stringify({ calculatedAt: now.toISOString(), currency: 'CNY', productId: product.id,
+          variantId: variant?.id ?? null, catalogNumber: variant?.catalogNumber ?? product.catalogNumber,
+          finalPrice: unitPrice, discountPolicy: 'supplier_written_reply', appliedSource: 'confirmed_customer_quote',
+          inquiryId: context.inquiryId, inquiryItemId: item.inquiryItemId,
+          supplierQuoteReviewId: supplierQuote.reviewId, supplierQuoteReplyHash: supplierQuote.replyHash,
+          supplierQuoteValidUntil: supplierQuote.reply.validUntil, supplierQuoteTaxBasis: supplierQuote.reply.taxBasis,
+          discountInputsHash: pricingContentHash({ requestHash: supplierQuote.requestHash, replyHash: supplierQuote.replyHash,
+            productId: product.id, variantId: variant?.id ?? null, quantity: qty }),
+        });
+        leadTime = supplierQuote.reply.leadTime;
+      } else if (!quoteRequired && product && (discountPriority || referenceApplies || product.price > 0 || (variant?.price || 0) > 0)) {
         const activeDatabasePromotionIds = new Set(activePromotionLinks.map((link) => link.promotion.id));
         const promotions: PromotionCandidate[] = activePromotionLinks.map((link) => ({
             id: link.promotion.id,

@@ -93,7 +93,8 @@ export type FilePreviewDraft = {
 };
 
 export type PriceAdjustmentPreview = {
-  brandDefaultChange?: { brandId: string; brandName: string; beforeRate: number | null; afterRate: number };
+  brandDefaultChange?: { brandId: string; brandName: string; beforeRate: number | null; afterRate: number;
+    beforeQuoteLimit?: number | null; afterQuoteLimit?: number | null };
   approvalHash?: string;
   quoteImpact?: { quoteCount: number; pendingOrderCount: number };
   matchedCount: number;
@@ -750,7 +751,7 @@ async function sourceSnapshot(changes: Array<{ productId: string }>, db: Prisma.
   const brandIds = [...new Set([...(targetBrandId ? [targetBrandId] : []), ...rows.flatMap((row) => row.brandRecordId ? [row.brandRecordId] : [])])];
   const brandNames = [...new Set(rows.filter((row) => !row.brandRecordId).map((row) => row.brand))];
   const brands = await db.brand.findMany({ where: { OR: [{ id: { in: brandIds } }, { name: { in: brandNames } }] }, orderBy: { id: 'asc' },
-    select: { id: true, name: true, isActive: true, defaultDiscountRate: true, updatedAt: true } });
+    select: { id: true, name: true, isActive: true, defaultDiscountRate: true, supplierQuoteRequiredAbove: true, updatedAt: true } });
   return { products: rows, brands, tiers: CONFIRMED_TIER_DISCOUNT_RATES, discountPolicyVersion: 1 };
 }
 
@@ -758,14 +759,15 @@ function assertDisplayedBrandSource(preview: PriceAdjustmentPreview, source: Awa
   const displayed = preview.brandDefaultChange;
   if (!displayed) return;
   const actual = source.brands.find((brand) => brand.id === displayed.brandId);
-  if (!actual?.isActive || actual.name !== displayed.brandName || actual.defaultDiscountRate !== displayed.beforeRate) {
+  if (!actual?.isActive || actual.name !== displayed.brandName || actual.defaultDiscountRate !== displayed.beforeRate
+    || (actual.supplierQuoteRequiredAbove ?? null) !== (displayed.beforeQuoteLimit ?? null)) {
     throw new PriceAdjustmentApprovalChangedError();
   }
 }
 
 async function affectedProducts(plan: FrozenPlan, db: Prisma.TransactionClient = prisma) {
   const change = plan.preview.brandDefaultChange;
-  return change && change.beforeRate !== change.afterRate
+  return change && (change.beforeRate !== change.afterRate || (change.beforeQuoteLimit ?? null) !== (change.afterQuoteLimit ?? null))
     ? brandDiscountImpactProducts(change.brandId, change.brandName, db) : plan.changes;
 }
 
@@ -807,11 +809,17 @@ export async function readPriceAdjustmentDetails(approvalHash: string, offset: n
   if (!plan) return null;
   const brandChange = plan.preview.brandDefaultChange;
   if (brandChange) {
-    const rows = brandChange.beforeRate === brandChange.afterRate ? [] : [{
+    const rows: Array<{ productId: string; variantId: null; brand: string; catalogNumber: string; name: string;
+      field: string; unit: 'rate' | 'money'; before: number | null; after: number | null }> = brandChange.beforeRate === brandChange.afterRate ? [] : [{
       productId: brandChange.brandId, variantId: null, brand: brandChange.brandName,
       catalogNumber: '全品牌', name: brandChange.brandName, field: '全店默认折扣',
       unit: 'rate', before: brandChange.beforeRate, after: brandChange.afterRate,
     }];
+    if ((brandChange.beforeQuoteLimit ?? null) !== (brandChange.afterQuoteLimit ?? null)) rows.push({
+      productId: brandChange.brandId, variantId: null, brand: brandChange.brandName,
+      catalogNumber: '单个销售包装', name: brandChange.brandName, field: '目录价超过此金额先核验供应商书面回复',
+      unit: 'money', before: brandChange.beforeQuoteLimit ?? null, after: brandChange.afterQuoteLimit ?? null,
+    });
     return { approvalHash, offset, total: rows.length, rows: rows.slice(offset, offset + 100) };
   }
   const rows = plan.changes.flatMap((change) => FILE_PRICE_FIELDS
@@ -897,10 +905,13 @@ export async function previewPriceAdjustment(request: PriceAdjustmentRequest): P
     if (!brand?.isActive) throw new Error('BRAND_NOT_ACTIVE');
     const rate = request.brandDefaultDiscountRate;
     if (typeof rate !== 'number' || !Number.isFinite(rate) || rate <= 0 || rate > 1) throw new Error('INVALID_DISCOUNT_RATE');
-    const changed = brand.defaultDiscountRate !== rate;
+    const beforeQuoteLimit = brand.supplierQuoteRequiredAbove ?? null;
+    const afterQuoteLimit = request.supplierQuoteRequiredAbove === undefined ? beforeQuoteLimit : request.supplierQuoteRequiredAbove;
+    if (afterQuoteLimit !== null && (!Number.isFinite(afterQuoteLimit) || afterQuoteLimit <= 0 || afterQuoteLimit > 1_000_000_000)) throw new Error('INVALID_SUPPLIER_QUOTE_POLICY');
+    const changeCount = Number(brand.defaultDiscountRate !== rate) + Number(beforeQuoteLimit !== afterQuoteLimit);
     return writeFrozenPlan(request, { changes: [], preview: {
-      brandDefaultChange: { brandId: brand.id, brandName: brand.name, beforeRate: brand.defaultDiscountRate, afterRate: rate },
-      matchedCount: 1, changeCount: changed ? 1 : 0, skippedUnchangedCount: changed ? 0 : 1,
+      brandDefaultChange: { brandId: brand.id, brandName: brand.name, beforeRate: brand.defaultDiscountRate, afterRate: rate, beforeQuoteLimit, afterQuoteLimit },
+      matchedCount: 1, changeCount, skippedUnchangedCount: changeCount ? 0 : 1,
       skippedInquiryCount: 0, skippedMissingCount: 0, flooredCount: 0,
       unmatchedCatalogs: [], reviewCount: 0, reviewItems: [], samples: [],
     } });
@@ -938,8 +949,11 @@ export async function applyPriceAdjustment(
       }
       let updatedCount = 0;
       const brandChange = planned.preview.brandDefaultChange;
-      if (brandChange && brandChange.beforeRate !== brandChange.afterRate) {
-        await tx.brand.update({ where: { id: brandChange.brandId }, data: { defaultDiscountRate: brandChange.afterRate } });
+      if (brandChange && (brandChange.beforeRate !== brandChange.afterRate || (brandChange.beforeQuoteLimit ?? null) !== (brandChange.afterQuoteLimit ?? null))) {
+        await tx.brand.update({ where: { id: brandChange.brandId }, data: {
+          defaultDiscountRate: brandChange.afterRate,
+          ...(brandChange.afterQuoteLimit !== undefined ? { supplierQuoteRequiredAbove: brandChange.afterQuoteLimit } : {}),
+        } });
         updatedCount = 1;
       }
       for (const change of planned.changes) {
@@ -1005,9 +1019,9 @@ export async function applyPriceAdjustment(
     resource: 'pricing',
     targetType: brandChange ? 'Brand' : 'Product',
     targetId: brandChange?.brandId ?? request.brand,
-    before: { matchedCount: planned.preview.matchedCount, ...(brandChange ? { defaultDiscountRate: brandChange.beforeRate } : {}) },
+    before: { matchedCount: planned.preview.matchedCount, ...(brandChange ? { defaultDiscountRate: brandChange.beforeRate, supplierQuoteRequiredAbove: brandChange.beforeQuoteLimit } : {}) },
     after: { updatedCount, changeCount: planned.preview.changeCount, priceField: request.priceField, mode: request.mode, approvalHash, repricedQuotes,
-      ...(brandChange ? { defaultDiscountRate: brandChange.afterRate } : {}) },
+      ...(brandChange ? { defaultDiscountRate: brandChange.afterRate, supplierQuoteRequiredAbove: brandChange.afterQuoteLimit } : {}) },
     reason: request.reason,
       }, tx);
       const completed = { ...planned.preview, updatedCount, repricedQuotes };

@@ -120,9 +120,20 @@ export async function POST(
         value: Number(item.price ?? item.unitPrice),
         reason: '管理员人工报价',
       }]));
+    const sourceVariantIds = sourceInquiryItems.map(item => metadataVariantId(item?.metadata)).filter((value): value is string => Boolean(value));
+    const sourceProductIds = sourceInquiryItems.map(item => item?.productId).filter((value): value is string => Boolean(value));
+    const [sourceVariants, sourceProducts] = await Promise.all([
+      prisma.productVariant.findMany({ where: { id: { in: sourceVariantIds } }, select: { id: true } }),
+      prisma.product.findMany({ where: { id: { in: sourceProductIds } }, select: { id: true } }),
+    ]);
+    const knownVariants = new Set(sourceVariants.map(item => item.id));
+    const knownProducts = new Set(sourceProducts.map(item => item.id));
     const priced = await verifyAndPriceItems(items.map((item: Record<string, unknown>, position: number) => ({
+      inquiryItemId: sourceInquiryItems[position]?.id,
       productId: typeof item.productId === 'string' ? item.productId : sourceInquiryItems[position]?.productId,
-      variantId: catalogDraft ? metadataVariantId(typeof item.metadata === 'string' ? item.metadata : sourceInquiryItems[position]?.metadata) : undefined,
+      variantId: catalogDraft ? metadataVariantId(typeof item.metadata === 'string' ? item.metadata : sourceInquiryItems[position]?.metadata)
+        : (knownVariants.has(metadataVariantId(sourceInquiryItems[position]?.metadata) ?? '')
+          || knownProducts.has(sourceInquiryItems[position]?.productId ?? '')) ? metadataVariantId(sourceInquiryItems[position]?.metadata) : undefined,
       catalogNumber: typeof item.catalogNumber === 'string' ? item.catalogNumber : sourceInquiryItems[position]?.catalogNumber,
       brand: typeof item.brand === 'string' && item.brand.trim()
         ? item.brand.trim()
@@ -130,7 +141,7 @@ export async function POST(
       name: String(item.name ?? sourceInquiryItems[position]?.name ?? 'Unknown'),
       price: Number(item.price ?? item.unitPrice),
       quantity: Number(quotedLines[position].quantity),
-    })), { customerEmail: inquiry.email, manualAdjustments, allowManualAdjustment: true, requireDiscountPriority: Boolean(catalogDraft) });
+    })), { inquiryId: id, userId: inquiry.userId, customerEmail: inquiry.email, manualAdjustments, allowManualAdjustment: true, requireDiscountPriority: Boolean(catalogDraft) });
     const lineReview = await reviewCommerceLinesWithCatalog(priced.verifiedItems.map((pricedItem, index) => {
       const item = items[index] as Record<string, unknown>;
       const inquiryItem = sourceInquiryItems[index];
@@ -175,7 +186,8 @@ export async function POST(
         unitPrice: pricedItem.unitPrice,
         quantity: pricedItem.quantity,
         lineTotal: pricedItem.lineTotal,
-        leadTime: typeof item.actualLeadTime === 'string' ? item.actualLeadTime : typeof item.leadTime === 'string' ? item.leadTime : null,
+        leadTime: jsonObject(pricedItem.pricingSnapshot).discountPolicy === 'supplier_written_reply' ? pricedItem.leadTime
+          : typeof item.actualLeadTime === 'string' ? item.actualLeadTime : typeof item.leadTime === 'string' ? item.leadTime : null,
         available: item.available !== false,
         notes: typeof item.notes === 'string' ? item.notes : null,
         metadata: mergeQuoteConstraintMetadata(catalogDraft && typeof item.metadata === 'string' ? item.metadata : inquiryItem?.metadata, {
@@ -192,12 +204,15 @@ export async function POST(
       return NextResponse.json({ error: '重新核算的结果与本次显示的报价不同，请重新核对报价', code: 'QUOTE_VERSION_CONFLICT' }, { status: 409 });
     }
     const sentAt = new Date();
-    const validUntil = body.validUntil ? new Date(body.validUntil) : new Date(sentAt.getTime() + 30 * 86400000);
+    let validUntil = body.validUntil ? new Date(body.validUntil) : new Date(sentAt.getTime() + 30 * 86400000);
+    const supplierExpiries = priced.verifiedItems.map(item => jsonObject(item.pricingSnapshot).supplierQuoteValidUntil)
+      .filter((value): value is string => typeof value === 'string').map(value => new Date(value).getTime());
+    if (supplierExpiries.length) validUntil = new Date(Math.min(validUntil.getTime(), ...supplierExpiries));
     if (Number.isNaN(validUntil.getTime()) || validUntil <= sentAt) {
       return NextResponse.json({ error: 'validUntil must be a future date' }, { status: 400 });
     }
     const quote = await prisma.$transaction(async (tx) => {
-      await assertBrandDiscountPricesCurrent(tx, priced.verifiedItems, { customerEmail: inquiry.email, manualAdjustments, allowManualAdjustment: true, requireDiscountPriority: Boolean(catalogDraft) });
+      await assertBrandDiscountPricesCurrent(tx, priced.verifiedItems, { inquiryId: id, userId: inquiry.userId, customerEmail: inquiry.email, manualAdjustments, allowManualAdjustment: true, requireDiscountPriority: Boolean(catalogDraft) });
       const claimed = await claimInquiryForQuotePublish(tx, id, catalogDraft ? { id: catalogDraft.id, hash: body.catalogQuoteHash } : undefined);
       if (claimed !== 1) {
         const decision = await assessInquiryQuotePublish(tx, id);
@@ -220,6 +235,21 @@ export async function POST(
         },
         include: { items: { orderBy: { position: 'asc' } } },
       });
+      // Save the quoted values without deleting inquiry lines or their supplier evidence.
+      for (const line of normalizedItems) if (line.inquiryItemId) {
+        await tx.inquiryItem.update({ where: { id: line.inquiryItemId }, data: {
+          productId: line.productId, catalogNumber: line.catalogNumber, name: line.name,
+          unitPrice: line.unitPrice, ...(!catalogDraft ? { quantity: line.quantity } : {}), lineTotal: line.lineTotal,
+          leadTime: line.leadTime, available: line.available,
+        } });
+      }
+      const currentLog = await tx.inquiry.findUniqueOrThrow({ where: { id }, select: { operationLogs: true } });
+      const previousLogs = currentLog.operationLogs ? JSON.parse(currentLog.operationLogs) : [];
+      if (!Array.isArray(previousLogs)) throw new Error('INQUIRY_LOG_INVALID');
+      await tx.inquiry.update({ where: { id }, data: { subtotal: created.subtotal,
+        operationLogs: JSON.stringify([...previousLogs, { adminId: user.id, adminEmail: user.email, time: sentAt.toISOString(),
+          quoteId: created.id, items: normalizedItems.map(line => ({ name: line.name, price: line.unitPrice, quantity: line.quantity, leadTime: line.leadTime })) }]),
+      } });
       await enqueueBackgroundTask('quote.expire', { quoteId: created.id }, {
         runAt: validUntil,
         priority: 10,

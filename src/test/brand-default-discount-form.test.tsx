@@ -20,6 +20,24 @@ async function prepare() {
 describe('brand default approval', () => {
   beforeEach(() => mfa.begin.mockReset());
   afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
+  it('shows the supplier enquiry condition and invalidates approval when that condition changes', async () => {
+    const fetcher = vi.fn().mockResolvedValueOnce(Response.json({ preview: { ...preview, changeCount: 2,
+      brandDefaultChange: { ...preview.brandDefaultChange, beforeQuoteLimit: null, afterQuoteLimit: 500 } } }));
+    vi.stubGlobal('fetch', fetcher);
+    render(<BrandDefaultDiscountForm brand="测试品牌" />);
+    fireEvent.change(screen.getByLabelText('品牌默认折扣百分比'), { target: { value: '80' } });
+    fireEvent.change(screen.getByLabelText('品牌折扣确认依据'), { target: { value: '已核对测试资料及人工询价条件' } });
+    fireEvent.change(screen.getByLabelText('供应商书面询价规则'), { target: { value: 'set' } });
+    expect((screen.getByRole('button', { name: '预览品牌折扣变更' }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.change(screen.getByLabelText('供应商询价目录价门槛'), { target: { value: '500' } });
+    fireEvent.click(screen.getByRole('button', { name: '预览品牌折扣变更' }));
+    await screen.findByRole('button', { name: '确认所示变更并处理受影响报价' });
+    expect(screen.getByText(/单个销售包装目录价超过 ¥500.00/)).toBeTruthy();
+    expect(JSON.parse(fetcher.mock.calls[0][1].body)).toMatchObject({ supplierQuoteRequiredAbove: 500 });
+    fireEvent.change(screen.getByLabelText('供应商书面询价规则'), { target: { value: 'clear' } });
+    expect(screen.queryByRole('button', { name: '确认所示变更并处理受影响报价' })).toBeNull();
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
   it('requires a preview and binds MFA to that exact version despite later input changes', async () => {
     const fetcher = vi.fn().mockResolvedValueOnce(Response.json({ preview }))
       .mockResolvedValueOnce(Response.json({ error: 'Admin MFA required' }, { status: 403 }));

@@ -1159,6 +1159,7 @@ model Brand {
   isActive    Boolean   @default(true)
   sortOrder   Int       @default(0)
   defaultDiscountRate Float? // 本品牌全店默认折扣；null 表示尚未确认，不从客户历史单值推断
+  supplierQuoteRequiredAbove Float? // 单个销售包装目录价超过此金额时，先核验供应商书面询价回复
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
   products    Product[]

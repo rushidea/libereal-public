@@ -19,6 +19,7 @@ export async function currentCatalogRepricingDraft(db: Db, inquiryId: string) {
 async function readyCatalogRepricingDraft(db: Db, inquiryId: string) {
   const draft = await currentCatalogRepricingDraft(db, inquiryId);
   if (!draft) return null;
+  if (draft.items.some(line => jsonObject(line.metadata).supplierQuotePending)) return null;
   for (const line of draft.items) {
     const orderId = jsonObject(line.metadata).repricingOrderId;
     if (typeof orderId === 'string' && await pendingOrderRepricing(db, orderId)) return null;
@@ -55,6 +56,10 @@ export async function assessInquiryQuotePublish(db: Db, inquiryId: string): Prom
   if (!inquiry) {
     return { ok: false, status: 404, code: 'INQUIRY_NOT_FOUND', error: 'Inquiry not found' };
   }
+  const draft = await currentCatalogRepricingDraft(db, inquiryId);
+  if (draft?.items.some(line => jsonObject(line.metadata).supplierQuotePending)) {
+    return { ok: false, status: 409, code: 'INQUIRY_NOT_QUOTABLE', error: '请先取得并核对供应商书面报价，系统接续重算后再发送' };
+  }
   if (!inquiry.archivedAt && inquiry.status !== 'declined' && await readyCatalogRepricingDraft(db, inquiryId)) return { ok: true };
   const orderCount = await db.order.count({ where: { inquiryId } });
   const acceptedQuoteCount = await db.quote.count({ where: { inquiryId, status: 'accepted' } });
@@ -85,6 +90,8 @@ export async function claimInquiryForQuotePublish(tx: Prisma.TransactionClient, 
     return claimed.count;
   }
   if (expectedDraft) return 0;
+  const currentDraft = await currentCatalogRepricingDraft(tx, inquiryId);
+  if (currentDraft?.items.some(line => jsonObject(line.metadata).supplierQuotePending)) return 0;
   const updated = await tx.$executeRaw`
     UPDATE "Inquiry"
     SET "status" = 'quote_sent',

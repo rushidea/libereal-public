@@ -49,6 +49,7 @@ export const PRICE_ADJUSTMENT_SAMPLE_LIMIT = 20;
 export type PriceAdjustmentRequest = {
   target?: 'brand_default_discount';
   brandDefaultDiscountRate?: number;
+  supplierQuoteRequiredAbove?: number | null;
   brand: string;
   scope: PriceAdjustmentScope;
   category?: string;
@@ -216,12 +217,19 @@ export function parsePriceAdjustmentRequest(body: unknown): { ok: true; value: P
   if (input.target !== undefined) {
     if (input.target !== 'brand_default_discount') return { ok: false, error: '调整项目无效' };
     const rate = input.brandDefaultDiscountRate;
+    const quoteLimit = input.supplierQuoteRequiredAbove;
     const reason = text(input.reason);
     if (!brand) return { ok: false, error: '请选择需要设置全店默认折扣的品牌' };
     if (typeof rate !== 'number' || !Number.isFinite(rate) || rate <= 0 || rate > 1) return { ok: false, error: '品牌默认折扣必须大于 0 且不超过 100%' };
+    if (quoteLimit !== undefined && quoteLimit !== null
+      && (typeof quoteLimit !== 'number' || !Number.isFinite(quoteLimit) || quoteLimit <= 0 || quoteLimit > 1_000_000_000
+        || Math.abs(Math.round(quoteLimit * 100) - quoteLimit * 100) > 0.000001)) {
+      return { ok: false, error: '人工供应商询价门槛必须是有效的正金额，或明确不设置门槛' };
+    }
     if (reason.length < 2 || reason.length > 200) return { ok: false, error: '请填写 2 到 200 字的调整原因' };
     return { ok: true, value: {
       target: 'brand_default_discount', brandDefaultDiscountRate: rate, brand,
+      ...(quoteLimit !== undefined ? { supplierQuoteRequiredAbove: quoteLimit as number | null } : {}),
       scope: 'category', priceField: 'originalPrice', mode: 'set', direction: 'increase',
       amount: rate, includeVariants: false, reason,
       ...(typeof input.approvalHash === 'string' ? { approvalHash: input.approvalHash } : {}),
