@@ -46,7 +46,7 @@ import {
 } from '@/lib/pricing-adjustment-import';
 import { buildPreviewChunkBody, splitPreviewUpload } from '@/lib/pricing-adjustment-preview-chunks';
 import type { CatalogMatchResult, CatalogNameReviewItem } from '@/lib/pricing-adjustment-rules';
-import { refreshConfirmedPricingPreview } from '@/lib/pricing-confirmation-refresh';
+import { resumeConfirmedPricingApplication } from '@/lib/pricing-confirmation-refresh';
 
 type ScopeMode = 'category' | 'catalog';
 type PriceField = 'price' | 'promotionalPrice' | 'originalPrice';
@@ -80,6 +80,7 @@ type PreviewResult = {
   reviewItems?: CatalogNameReviewItem[];
   samples: PreviewSample[];
   updatedCount?: number;
+  recovered?: boolean;
 };
 
 const REVIEW_LIST_LIMIT = 200;
@@ -699,12 +700,12 @@ export default function PricingAdjustmentsPage() {
     setApplyMessage('');
     setPreviewError('');
     try {
-      if (token && !(await refreshConfirmedPricingPreview(frozen, stillCurrent))) return;
-      const response = await fetch('/api/admin/pricing-adjustments/apply', {
+      const response = token ? await resumeConfirmedPricingApplication(frozen, token, stillCurrent) : await fetch('/api/admin/pricing-adjustments/apply', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ...frozen, ...(token ? { stepUpToken: token } : {}) }),
       });
+      if (!response) return;
       const data = await response.json().catch(() => ({})) as { error?: string; result?: PreviewResult & { updatedCount: number } };
       if (!stillCurrent()) return;
       if (allowMfaStepUp && isAdminMfaStepUpResponse(response.status, data.error)) {
@@ -732,7 +733,7 @@ export default function PricingAdjustmentsPage() {
         setAppliedCatalogKeys((current) => [...new Set([...current, ...writtenKeys])]);
       }
       setPreviewResult(data.result ?? previewResult);
-      setApplyMessage(updatedCount > 0
+      setApplyMessage(data.result.recovered ? '已核实此前调价成功，本次没有重复改写价格。' : updatedCount > 0
         ? `已更新 ${updatedCount.toLocaleString('zh-CN')} 条价格${skippedUnchanged > 0 ? `，另有 ${skippedUnchanged.toLocaleString('zh-CN')} 条匹配后价格未变` : ''}`
         : '价格已与本次预览一致，没有需要改写的条目。');
     } catch (cause) {

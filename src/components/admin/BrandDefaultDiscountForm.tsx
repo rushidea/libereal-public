@@ -4,12 +4,13 @@ import { useEffect, useRef, useState } from 'react';
 import type { PriceAdjustmentPreview } from '@/lib/pricing-adjustment-service';
 import { isAdminMfaStepUpResponse, useAdminMfaStepUp } from './AdminMfaStepUpDialog';
 import { PricingAdjustmentDetails } from './PricingAdjustmentDetails';
-import { refreshConfirmedPricingPreview } from '@/lib/pricing-confirmation-refresh';
+import { resumeConfirmedPricingApplication } from '@/lib/pricing-confirmation-refresh';
 
 type Draft = { target: 'brand_default_discount'; brand: string; brandDefaultDiscountRate: number;
   supplierQuoteRequiredAbove?: number | null; reason: string };
 type Result = PriceAdjustmentPreview & {
   updatedCount: number;
+  recovered?: boolean;
   repricedQuotes: Array<{ inquiryId: string; version: number; subtotal: number; pendingOrderIds: string[] }>;
 };
 const percent = (value: number) => `${Number((value * 100).toPrecision(15))}%`;
@@ -62,11 +63,11 @@ export function BrandDefaultDiscountForm({ brand }: { brand: string }) {
     const stillCurrent = () => mounted.current && frozen.current === approved;
     setBusy(true); setError('');
     try {
-      if (token && !(await refreshConfirmedPricingPreview(approved, stillCurrent))) return;
-      const response = await fetch('/api/admin/pricing-adjustments/apply', {
+      const response = token ? await resumeConfirmedPricingApplication(approved, token, stillCurrent) : await fetch('/api/admin/pricing-adjustments/apply', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ...approved, ...(token ? { stepUpToken: token } : {}) }),
       });
+      if (!response) return;
       const data = await response.json();
       if (!stillCurrent()) return;
       if (!token && isAdminMfaStepUpResponse(response.status, data.error)) {
@@ -129,7 +130,7 @@ export function BrandDefaultDiscountForm({ brand }: { brand: string }) {
           onClick={() => { if (preview.approvalHash) void apply(preview.approvalHash); }}>确认所示变更并处理受影响报价</button></div>}
       </div>}
       {result && <div role="status" className="space-y-2 text-sm">
-        <p>品牌默认折扣已与本次确认一致。{result.repricedQuotes.length ? '已生成以下报价复核，需按原流程审核及取得客户回复。' : '本次没有需要改变成交金额的未锁价报价。'}</p>
+        <p>{result.recovered ? '已核实此前品牌折扣变更成功，本次没有重复改写。' : '品牌默认折扣已与本次确认一致。'}{result.repricedQuotes.length ? '已生成以下报价复核，需按原流程审核及取得客户回复。' : '本次没有需要改变成交金额的未锁价报价。'}</p>
         {result.repricedQuotes.map((quote) => <p key={quote.inquiryId}>
           <a className="text-brand-600 underline" href={`/admin/inquiries?inquiryId=${encodeURIComponent(quote.inquiryId)}`}>打开原询价的第 {quote.version} 版报价</a>
           {' · '}¥{quote.subtotal.toFixed(2)}{quote.pendingOrderIds.length > 0 ? ` · ${quote.pendingOrderIds.length} 笔待接受订单需接续复核` : ''}

@@ -42,7 +42,7 @@ import { isMfaAdminRequired, isMfaPhase1Enabled } from '@/lib/security/mfa-confi
 import { readPricingAdjustmentTemplate } from '@/lib/pricing-adjustment-template';
 import { POST as previewPricingRoute } from '@/app/api/admin/pricing-adjustments/preview/route';
 import { POST as previewChunkRoute } from '@/app/api/admin/pricing-adjustments/preview/chunk/route';
-import { POST as applyPricingRoute } from '@/app/api/admin/pricing-adjustments/apply/route';
+import { GET as readPricingResult, POST as applyPricingRoute } from '@/app/api/admin/pricing-adjustments/apply/route';
 import { POST as matchPricing } from '@/app/api/admin/pricing-adjustments/match/route';
 import { POST as createMissingPricing } from '@/app/api/admin/pricing-adjustments/create-missing/route';
 import { POST as classifyPreviewPricing } from '@/app/api/admin/pricing-adjustments/classify-preview/route';
@@ -182,6 +182,67 @@ describe('admin pricing adjustment routes', () => {
     }
     expect(getTestDb().prepare('SELECT price FROM Product WHERE id = ?').get('product_1')).toEqual({ price: 100 });
     expect(getTestDb().prepare('SELECT COUNT(*) AS n FROM ProductPrice').get()).toEqual({ n: 0 });
+  });
+
+  it('recovers the committed result and quote continuation even after its preview cache is gone', async () => {
+    const open = await seedQuoteCase('lost_response');
+    await previewPricing(catalogRequest('/preview', {}));
+    const applied = await applyDisplayedPreview(catalogRequest('/apply', {}));
+    expect(applied.status).toBe(200);
+    const original = (await applied.json()).result;
+    expect(original.repricedQuotes).toHaveLength(1);
+    const prices = await prisma.productPrice.findMany();
+    const audits = await prisma.auditLog.findMany();
+    const quotes = await prisma.quote.findMany({ where: { inquiryId: open.inquiry.id } });
+    const product = await prisma.product.findUniqueOrThrow({ where: { id: 'product_1' } });
+    const key = `price-adjustment-plan:${displayedApprovalHash}`;
+    expect((await prisma.transientEntry.deleteMany({ where: { key } })).count).toBe(1);
+    phase1EnabledMock.mockReturnValue(true);
+    const recovered = await readPricingResult(new Request(`http://localhost/apply?approvalHash=${displayedApprovalHash}`));
+    expect(recovered.status).toBe(200);
+    expect(recovered.headers.get('cache-control')).toBe('private, no-store');
+    expect((await recovered.json()).result).toEqual({ ...original, updatedCount: 0, recovered: true });
+    expect(await prisma.productPrice.findMany()).toEqual(prices);
+    expect(await prisma.auditLog.findMany()).toEqual(audits);
+    expect(await prisma.quote.findMany({ where: { inquiryId: open.inquiry.id } })).toEqual(quotes);
+    expect(await prisma.product.findUniqueOrThrow({ where: { id: 'product_1' } })).toEqual(product);
+    expect(await prisma.backgroundTask.count({ where: { type: 'pricing.apply' } })).toBe(1);
+    // Read recovery neither performs nor grants a new sensitive mutation.
+    expect((await applyDisplayedPreview(catalogRequest('/apply', {}))).status).toBe(403);
+  });
+
+  it('requires authenticated pricing permission for result recovery without trusting a claimed role', async () => {
+    const req = () => new Request(`http://localhost/apply?approvalHash=${'a'.repeat(64)}`);
+    authMock.mockResolvedValue(null);
+    expect((await readPricingResult(req())).status).toBe(401);
+    authMock.mockResolvedValue({ user: { id: 'admin_test_id', email: 'admin@test.com', role: 'admin', sessionId: 'session-1' } });
+    await prisma.adminRole.update({ where: { id: 'role_super_admin' }, data: { key: 'catalog_test_staff' } });
+    await prisma.adminRolePermission.deleteMany({ where: { roleId: 'role_super_admin', permissionId: 'perm_pricing_write' } });
+    expect((await readPricingResult(req())).status).toBe(403);
+  });
+
+  it('distinguishes an absent result from an invalid confirmation identifier', async () => {
+    expect((await readPricingResult(new Request('http://localhost/apply?approvalHash=invalid'))).status).toBe(400);
+    const response = await readPricingResult(new Request(`http://localhost/apply?approvalHash=${'a'.repeat(64)}`));
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ result: null });
+    expect(await prisma.backgroundTask.count()).toBe(0);
+    expect(await prisma.productPrice.count()).toBe(0);
+  });
+
+  it.each([
+    { type: 'pricing.apply', status: 'running', result: '{}' },
+    { type: 'pricing.apply', status: 'succeeded', result: 'invalid json' },
+    { type: 'pricing.apply', status: 'succeeded', result: JSON.stringify({ approvalHash: 'b'.repeat(64), updatedCount: 1, repricedQuotes: [] }) },
+    { type: 'other', status: 'succeeded', result: JSON.stringify({ approvalHash: 'a'.repeat(64), updatedCount: 1, repricedQuotes: [] }) },
+  ])('does not report an unresolved saved operation as a safe new write: %j', async data => {
+    const approvalHash = 'a'.repeat(64);
+    await prisma.backgroundTask.create({ data: { ...data, dedupeKey: `pricing-apply:${approvalHash}`, payload: '{}' } });
+    const response = await readPricingResult(new Request(`http://localhost/apply?approvalHash=${approvalHash}`));
+    expect(response.status).toBe(409);
+    expect((await response.json()).error).toContain('未能核清原调价结果');
+    expect(await prisma.backgroundTask.count()).toBe(1);
+    expect(await prisma.productPrice.count()).toBe(0);
   });
 
   it('does not execute a newer preview with an older approval', async () => {

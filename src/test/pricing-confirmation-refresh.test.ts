@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { refreshConfirmedPricingPreview } from '@/lib/pricing-confirmation-refresh';
+import { refreshConfirmedPricingPreview, resumeConfirmedPricingApplication } from '@/lib/pricing-confirmation-refresh';
 
 const hash = 'a'.repeat(64);
 const approved = { brand: 'Fixture', scope: 'catalog', mode: 'file', includeVariants: false,
@@ -54,6 +54,39 @@ describe('pricing preview after identity verification', () => {
     const fetcher = vi.fn().mockResolvedValue(Response.json({ error: 'Forbidden' }, { status: 403 }));
     vi.stubGlobal('fetch', fetcher);
     await expect(refreshConfirmedPricingPreview(approved, () => true)).rejects.toThrow('Forbidden');
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
+  it('recovers a concurrent commit between result lookup and preview refresh without applying again', async () => {
+    const result = { approvalHash: hash, updatedCount: 0, recovered: true, repricedQuotes: [] };
+    const fetcher = vi.fn().mockResolvedValueOnce(Response.json({ result: null }))
+      .mockResolvedValueOnce(Response.json({ preview: { approvalHash: 'b'.repeat(64) } }))
+      .mockResolvedValueOnce(Response.json({ result }));
+    vi.stubGlobal('fetch', fetcher);
+    const response = await resumeConfirmedPricingApplication(approved, 'grant', () => true);
+    expect(await response?.json()).toEqual({ result });
+    expect(fetcher).toHaveBeenCalledTimes(3);
+    expect(fetcher.mock.calls.filter(call => call[1]?.method === 'POST').map(call => call[0]))
+      .toEqual(['/api/admin/pricing-adjustments/preview']);
+  });
+
+  it.each([
+    { status: 409, body: { error: 'Original result is unresolved' } },
+    { status: 200, body: {} },
+    { status: 200, body: { result: { approvalHash: 'b'.repeat(64), updatedCount: 0, recovered: true } } },
+  ])('never treats an unknown or mismatched saved result as permission to write: %j', async ({ status, body }) => {
+    const fetcher = vi.fn().mockResolvedValue(Response.json(body, { status }));
+    vi.stubGlobal('fetch', fetcher);
+    await expect(resumeConfirmedPricingApplication(approved, 'grant', () => true)).rejects.toThrow();
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(fetcher.mock.calls[0][1]?.method).toBeUndefined();
+  });
+
+  it('does not renew or apply if the displayed approval is invalidated during result lookup', async () => {
+    let current = true;
+    const fetcher = vi.fn(async () => { current = false; return Response.json({ result: null }); });
+    vi.stubGlobal('fetch', fetcher);
+    expect(await resumeConfirmedPricingApplication(approved, 'grant', () => current)).toBeNull();
     expect(fetcher).toHaveBeenCalledTimes(1);
   });
 });
