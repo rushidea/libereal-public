@@ -53,6 +53,38 @@ describe('brand default approval', () => {
     expect(JSON.parse(fetcher.mock.calls[1][1].body)).toMatchObject({ brand: '测试品牌', brandDefaultDiscountRate: 0.8, approvalHash: preview.approvalHash });
     expect(screen.queryByRole('button', { name: '确认所示变更并处理受影响报价' })).toBeNull();
   });
+  it('refreshes an unchanged preview after MFA before using the one-time grant to apply', async () => {
+    const fetcher = vi.fn().mockResolvedValueOnce(Response.json({ preview }))
+      .mockResolvedValueOnce(Response.json({ error: 'Admin MFA required' }, { status: 403 }))
+      .mockResolvedValueOnce(Response.json({ preview }))
+      .mockResolvedValueOnce(Response.json({ result: { ...preview, updatedCount: 1, repricedQuotes: [] } }));
+    vi.stubGlobal('fetch', fetcher);
+    await prepare();
+    fireEvent.click(screen.getByRole('button', { name: '确认所示变更并处理受影响报价' }));
+    await waitFor(() => expect(mfa.begin).toHaveBeenCalledTimes(1));
+    await act(async () => { await mfa.begin.mock.calls[0][0]('verified-token'); });
+    await screen.findByRole('status');
+    expect(fetcher.mock.calls.map(call => call[0])).toEqual([
+      '/api/admin/pricing-adjustments/preview', '/api/admin/pricing-adjustments/apply',
+      '/api/admin/pricing-adjustments/preview', '/api/admin/pricing-adjustments/apply',
+    ]);
+    expect(JSON.parse(fetcher.mock.calls[2][1].body).stepUpToken).toBeUndefined();
+    expect(JSON.parse(fetcher.mock.calls[3][1].body)).toMatchObject({ approvalHash: preview.approvalHash, stepUpToken: 'verified-token' });
+    expect(mfa.begin).toHaveBeenCalledTimes(1);
+  });
+  it('requires a new confirmation when affected business changes during MFA', async () => {
+    const fetcher = vi.fn().mockResolvedValueOnce(Response.json({ preview }))
+      .mockResolvedValueOnce(Response.json({ error: 'Admin MFA required' }, { status: 403 }))
+      .mockResolvedValueOnce(Response.json({ preview: { ...preview, approvalHash: 'b'.repeat(64), quoteImpact: { quoteCount: 2, pendingOrderCount: 1 } } }));
+    vi.stubGlobal('fetch', fetcher);
+    await prepare();
+    fireEvent.click(screen.getByRole('button', { name: '确认所示变更并处理受影响报价' }));
+    await waitFor(() => expect(mfa.begin).toHaveBeenCalledTimes(1));
+    await act(async () => { await mfa.begin.mock.calls[0][0]('verified-token'); });
+    await screen.findByText('验证期间价格、范围或报价影响发生变化，请重新生成预览并确认');
+    expect(fetcher).toHaveBeenCalledTimes(3);
+    expect(screen.queryByRole('status')).toBeNull();
+  });
   it('shows the original inquiry continuation only after a matching result; an unrelated success is not completion', async () => {
     const fetcher = vi.fn().mockResolvedValueOnce(Response.json({ preview }))
       .mockResolvedValueOnce(Response.json({ result: { ...preview, approvalHash: 'b'.repeat(64), updatedCount: 1, repricedQuotes: [] } }))

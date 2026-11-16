@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { PriceAdjustmentPreview } from '@/lib/pricing-adjustment-service';
 import { isAdminMfaStepUpResponse, useAdminMfaStepUp } from './AdminMfaStepUpDialog';
 import { PricingAdjustmentDetails } from './PricingAdjustmentDetails';
+import { refreshConfirmedPricingPreview } from '@/lib/pricing-confirmation-refresh';
 
 type Draft = { target: 'brand_default_discount'; brand: string; brandDefaultDiscountRate: number;
   supplierQuoteRequiredAbove?: number | null; reason: string };
@@ -58,14 +59,16 @@ export function BrandDefaultDiscountForm({ brand }: { brand: string }) {
   async function apply(expectedHash: string, token?: string) {
     const approved = frozen.current;
     if (!mounted.current || !approved || approved.approvalHash !== expectedHash) return;
+    const stillCurrent = () => mounted.current && frozen.current === approved;
     setBusy(true); setError('');
     try {
+      if (token && !(await refreshConfirmedPricingPreview(approved, stillCurrent))) return;
       const response = await fetch('/api/admin/pricing-adjustments/apply', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ...approved, ...(token ? { stepUpToken: token } : {}) }),
       });
       const data = await response.json();
-      if (!mounted.current || frozen.current?.approvalHash !== expectedHash) return;
+      if (!stillCurrent()) return;
       if (!token && isAdminMfaStepUpResponse(response.status, data.error)) {
         await begin((grant) => apply(expectedHash, grant)); return;
       }
@@ -74,7 +77,7 @@ export function BrandDefaultDiscountForm({ brand }: { brand: string }) {
         || typeof data.result.updatedCount !== 'number') throw new Error('未取得本次确认的执行结果，请核对后重试');
       setResult(data.result);
     } catch (cause) {
-      if (mounted.current && frozen.current?.approvalHash === expectedHash) setError(cause instanceof Error ? cause.message : '执行失败');
+      if (stillCurrent()) setError(cause instanceof Error ? cause.message : '执行失败');
     } finally { if (mounted.current) setBusy(false); }
   }
   return <section className="space-y-3 rounded-xl border border-gray-200 bg-white p-5">

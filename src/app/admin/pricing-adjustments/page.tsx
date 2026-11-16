@@ -46,6 +46,7 @@ import {
 } from '@/lib/pricing-adjustment-import';
 import { buildPreviewChunkBody, splitPreviewUpload } from '@/lib/pricing-adjustment-preview-chunks';
 import type { CatalogMatchResult, CatalogNameReviewItem } from '@/lib/pricing-adjustment-rules';
+import { refreshConfirmedPricingPreview } from '@/lib/pricing-confirmation-refresh';
 
 type ScopeMode = 'category' | 'catalog';
 type PriceField = 'price' | 'promotionalPrice' | 'originalPrice';
@@ -303,6 +304,16 @@ export default function PricingAdjustmentsPage() {
   const [sheetProgress, setSheetProgress] = useState<SheetProgress | null>(null);
   const previewPayloadRef = useRef<Record<string, unknown> | null>(null);
   const previewGenerationRef = useRef(0);
+  const mounted = useRef(true);
+
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      previewPayloadRef.current = null;
+      previewGenerationRef.current++;
+    };
+  }, []);
 
   function invalidatePreview() {
     previewGenerationRef.current += 1;
@@ -683,16 +694,19 @@ export default function PricingAdjustmentsPage() {
       setPreviewError('验证期间预览已变化，请核对当前预览后重新确认');
       return;
     }
+    const stillCurrent = () => mounted.current && previewPayloadRef.current === frozen;
     setApplyLoading(true);
     setApplyMessage('');
     setPreviewError('');
     try {
+      if (token && !(await refreshConfirmedPricingPreview(frozen, stillCurrent))) return;
       const response = await fetch('/api/admin/pricing-adjustments/apply', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ...frozen, ...(token ? { stepUpToken: token } : {}) }),
       });
       const data = await response.json().catch(() => ({})) as { error?: string; result?: PreviewResult & { updatedCount: number } };
+      if (!stillCurrent()) return;
       if (allowMfaStepUp && isAdminMfaStepUpResponse(response.status, data.error)) {
         await beginMfaStepUp(async (grantToken) => {
           await applyAdjustment(grantToken, false, frozen.approvalHash);
@@ -721,10 +735,10 @@ export default function PricingAdjustmentsPage() {
       setApplyMessage(updatedCount > 0
         ? `已更新 ${updatedCount.toLocaleString('zh-CN')} 条价格${skippedUnchanged > 0 ? `，另有 ${skippedUnchanged.toLocaleString('zh-CN')} 条匹配后价格未变` : ''}`
         : '价格已与本次预览一致，没有需要改写的条目。');
-    } catch {
-      setPreviewError('执行调价失败，请稍后重试');
+    } catch (cause) {
+      if (stillCurrent()) setPreviewError(cause instanceof Error ? cause.message : '执行调价失败，请稍后重试');
     } finally {
-      setApplyLoading(false);
+      if (mounted.current) setApplyLoading(false);
     }
   }
 
