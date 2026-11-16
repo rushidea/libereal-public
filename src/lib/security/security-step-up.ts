@@ -7,8 +7,9 @@ import { getMfaAuthenticatorPresence, createMfaStepUpChallenge, verifyMfaStepUpC
 import type { MfaStepUpVerification } from './mfa-service';
 import { enforceMfaRateLimits } from './mfa-rate-limit';
 import { isMfaPhase1Enabled } from './mfa-config';
+import { getStagingMfaTestConfig, hashStagingMfaTestCode } from './staging-mfa-test';
 
-export const SECURITY_STEP_UP_METHODS = ['totp', 'sms', 'email'] as const;
+export const SECURITY_STEP_UP_METHODS = ['totp', 'sms', 'email', 'staging_test'] as const;
 export type SecurityStepUpMethod = typeof SECURITY_STEP_UP_METHODS[number];
 
 export const SECURITY_STEP_UP_ACTIONS = [
@@ -37,6 +38,8 @@ type StepUpIntent = {
   method: SecurityStepUpMethod;
   codeHash?: string;
   attempts?: number;
+  expiresAt?: number;
+  testScope?: string;
 };
 
 function intentKey(challengeId: string): string {
@@ -63,7 +66,15 @@ export function isSecurityStepUpAction(value: unknown): value is SecurityStepUpA
   return typeof value === 'string' && (SECURITY_STEP_UP_ACTIONS as readonly string[]).includes(value);
 }
 
-export async function getSecurityStepUpAvailability(userId: string): Promise<{
+async function currentTestConfig(userId: string, action: SecurityStepUpAction) {
+  if (action !== 'admin_sensitive') return null;
+  const config = getStagingMfaTestConfig(userId);
+  if (!config) return null;
+  const user = await prisma.user.findUnique({ where: { id: userId }, select: { role: true, isFrozen: true } });
+  return user?.role === 'admin' && !user.isFrozen ? config : null;
+}
+
+export async function getSecurityStepUpAvailability(userId: string, action?: SecurityStepUpAction): Promise<{
   methods: SecurityStepUpMethod[];
   preferredMethod: SecurityStepUpMethod | null;
 }> {
@@ -78,6 +89,7 @@ export async function getSecurityStepUpAvailability(userId: string): Promise<{
   if (presence.hasTotp && isMfaPhase1Enabled()) methods.push('totp');
   if (user.phone && user.phoneVerifiedAt) methods.push('sms');
   if (user.email && user.emailVerified) methods.push('email');
+  if (action && await currentTestConfig(userId, action)) methods.unshift('staging_test');
   return { methods, preferredMethod: methods[0] ?? null };
 }
 
@@ -144,7 +156,7 @@ export async function startSecurityStepUp(input: {
   ip?: string | null;
 }): Promise<{ challengeId: string; method: SecurityStepUpMethod; expiresAt: Date; challengeToken?: string }> {
   await enforceStartRateLimit(input.userId, input.action, input.method, input.ip);
-  const availability = await getSecurityStepUpAvailability(input.userId);
+  const availability = await getSecurityStepUpAvailability(input.userId, input.action);
   if (!availability.methods.includes(input.method)) throw new Error('SECURITY_STEP_UP_METHOD_UNAVAILABLE');
 
   const challengeId = randomUUID();
@@ -154,7 +166,18 @@ export async function startSecurityStepUp(input: {
     sessionId: input.sessionId,
     action: input.action,
     method: input.method,
+    expiresAt: Date.now() + CODE_TTL_MS,
   };
+
+  if (input.method === 'staging_test') {
+    const config = await currentTestConfig(input.userId, input.action);
+    if (!config) throw new Error('SECURITY_STEP_UP_METHOD_UNAVAILABLE');
+    intent.testScope = config.scope;
+    intent.codeHash = config.codeHash;
+    intent.attempts = 0;
+    await store.set(intentKey(challengeId), JSON.stringify(intent), CODE_TTL_MS);
+    return { challengeId, method: input.method, expiresAt: new Date(intent.expiresAt!) };
+  }
 
   if (input.method === 'totp') {
     const challenge = await createMfaStepUpChallenge(input.userId, input.ip);
@@ -210,6 +233,11 @@ export async function completeSecurityStepUp(input: {
   if (intent.userId !== input.userId || intent.sessionId !== input.sessionId || intent.action !== input.action || intent.method !== input.method) {
     return { error: 'invalid' };
   }
+  if (intent.expiresAt !== undefined && intent.expiresAt <= Date.now()) return { error: 'expired' };
+  if (input.method === 'staging_test') {
+    const config = await currentTestConfig(input.userId, input.action);
+    if (!config || intent.testScope !== config.scope) return { error: 'invalid' };
+  }
 
   if (input.method === 'totp') {
     if (!input.totpToken) return { error: 'invalid' };
@@ -232,7 +260,10 @@ export async function completeSecurityStepUp(input: {
     if (!currentRaw) return { error: 'expired' };
     const current = JSON.parse(currentRaw) as StepUpIntent;
     const expected = current.codeHash ?? '';
-    const actual = hashCode(input.userId, input.action, input.method, input.code.trim());
+    const remaining = current.expiresAt === undefined ? CODE_TTL_MS : current.expiresAt - Date.now();
+    if (remaining <= 0) return { error: 'expired' };
+    const actual = input.method === 'staging_test' ? hashStagingMfaTestCode(input.code.trim())
+      : hashCode(input.userId, input.action, input.method, input.code.trim());
     if (!sameHash(expected, actual)) {
       const attempts = (current.attempts ?? 0) + 1;
       if (attempts >= MAX_CODE_ATTEMPTS) {
@@ -240,21 +271,21 @@ export async function completeSecurityStepUp(input: {
         await recordStepUpEvent({ userId: input.userId, eventType: 'SECURITY_STEP_UP_FAILED', action: input.action, method: input.method, ip: input.ip, reason: 'locked' });
         return { error: 'locked' };
       }
-      await store.set(key, JSON.stringify({ ...current, attempts }), CODE_TTL_MS);
+      await store.set(key, JSON.stringify({ ...current, attempts }), remaining);
       await recordStepUpEvent({ userId: input.userId, eventType: 'SECURITY_STEP_UP_FAILED', action: input.action, method: input.method, ip: input.ip, reason: 'invalid_code' });
       return { error: 'invalid' };
     }
     if (!(await store.compareAndDelete(key, currentRaw))) return { error: 'invalid' };
     await recordStepUpEvent({ userId: input.userId, eventType: 'SECURITY_STEP_UP_SUCCESS', action: input.action, method: input.method, ip: input.ip });
-    return issueSecurityStepUpGrant(input.userId, input.sessionId, input.action, Date.now());
+    return issueSecurityStepUpGrant(input.userId, input.sessionId, input.action, Date.now(), current.testScope);
   } finally {
     await store.releaseLock(`security-step-up:verify-lock:${input.challengeId}`, lock);
   }
 }
 
-async function issueSecurityStepUpGrant(userId: string, sessionId: string, action: SecurityStepUpAction, verifiedAt: number): Promise<{ grantToken: string; verifiedAt: number }> {
+async function issueSecurityStepUpGrant(userId: string, sessionId: string, action: SecurityStepUpAction, verifiedAt: number, testScope?: string): Promise<{ grantToken: string; verifiedAt: number }> {
   const grantToken = randomUUID().replace(/-/g, '') + randomUUID().replace(/-/g, '');
-  await getEphemeralStore().set(grantKey(grantToken), JSON.stringify({ userId, sessionId, action }), GRANT_TTL_MS);
+  await getEphemeralStore().set(grantKey(grantToken), JSON.stringify({ userId, sessionId, action, ...(testScope ? { testScope } : {}) }), GRANT_TTL_MS);
   return { grantToken, verifiedAt };
 }
 
@@ -264,6 +295,7 @@ export async function hasSecurityStepUpGrant(token: string, input: { userId: str
   if (!raw) return false;
   try {
     const grant = JSON.parse(raw) as Partial<StepUpIntent>;
+    if (grant.testScope && (await currentTestConfig(input.userId, input.action))?.scope !== grant.testScope) return false;
     return grant.userId === input.userId && grant.sessionId === input.sessionId && grant.action === input.action;
   } catch {
     return false;
@@ -278,6 +310,7 @@ export async function consumeSecurityStepUpGrant(token: string, input: { userId:
   if (!raw) return false;
   try {
     const grant = JSON.parse(raw) as Partial<StepUpIntent>;
+    if (grant.testScope && (await currentTestConfig(input.userId, input.action))?.scope !== grant.testScope) return false;
     if (grant.userId !== input.userId || grant.sessionId !== input.sessionId || grant.action !== input.action) return false;
     return store.compareAndDelete(key, raw);
   } catch {

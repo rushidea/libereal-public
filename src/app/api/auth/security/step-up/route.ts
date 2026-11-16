@@ -24,11 +24,12 @@ function mapError(error: string): { message: string; status: number } {
   }
 }
 
-export async function GET() {
+export async function GET(request?: Request) {
   const user = await requireActiveSession();
   if (user instanceof NextResponse) return user;
   try {
-    return NextResponse.json(await getSecurityStepUpAvailability(user.id), { headers: { 'Cache-Control': 'no-store' } });
+    const action = request ? new URL(request.url).searchParams.get('action') : null;
+    return NextResponse.json(await getSecurityStepUpAvailability(user.id, isSecurityStepUpAction(action) ? action : undefined), { headers: { 'Cache-Control': 'no-store' } });
   } catch (error) {
     console.error('[security.step-up.availability] failed:', error instanceof Error ? error.message : 'unknown');
     return errorResponse('可用的验证方式暂时无法读取', 503);
@@ -96,8 +97,11 @@ export async function POST(request: Request) {
     return errorResponse(mapped.message, mapped.status);
   }
 
-  const marked = await markSecuritySessionMfaVerified(user.id, user.sessionId, new Date(result.verifiedAt));
-  if (!marked) return errorResponse('当前会话已失效', 401);
+  // A test grant proves only this staged action; never mark the whole session as real MFA verified.
+  if (method !== 'staging_test') {
+    const marked = await markSecuritySessionMfaVerified(user.id, user.sessionId, new Date(result.verifiedAt));
+    if (!marked) return errorResponse('当前会话已失效', 401);
+  }
   if (method === 'totp') await clearMfaChallengeCookie(challengeId);
   return NextResponse.json(result, { headers: { 'Cache-Control': 'no-store' } });
 }
