@@ -40,7 +40,7 @@ describe('mail templates', () => {
     }, siteUrl);
 
     expect(html).toContain('display:none');
-    expect(html).toContain('brand-logo-email.png');
+    expect(html).toContain('libereal-wordmark.svg');
     expect(html).toContain('support@libereal.cn');
     expect(html).toContain('libereal.cn');
   });

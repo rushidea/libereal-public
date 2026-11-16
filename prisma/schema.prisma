@@ -1568,6 +1568,39 @@ model SystemSettings {
   updatedAt           DateTime @updatedAt
 }
 
+model BusinessLetterTemplate {
+  id String @id
+  name String
+  subject String
+  body String
+  enabled Int @default(0)
+  revision Int @default(1)
+  updatedAt String
+  drafts BusinessLetterDraft[]
+}
+
+model BusinessLetterDraft {
+  id String @id
+  templateId String
+  templateRevision Int
+  businessReference String
+  snapshot String
+  approvalHash String @unique
+  // Partial unique sending/terminal index is maintained in the SQL migration.
+  deliveryKey String
+  status String @default("draft")
+  origin String
+  createdBy String
+  approvedBy String?
+  approvedAt String?
+  result String?
+  createdAt String
+  updatedAt String
+  template BusinessLetterTemplate @relation(fields: [templateId], references: [id], onDelete: Restrict)
+
+  @@index([createdAt])
+}
+
 model OrganizationCreationGrant {
   id             String   @id @default(cuid())
   userId         String   @unique @map("user_id")

@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import Link from 'next/link';
 import type { SupplierQuoteReply } from '@/lib/supplier-quote-review';
 
 type Entry = {
@@ -15,7 +16,7 @@ const statuses: Record<string, string> = {
   expired: '回复已过期，需重新询价', source_changed: '商品或条件已变化，需重新核对',
 };
 
-/** A hand-back into the original inquiry. No supplier send, purchase or payment action. */
+/** A hand-back into the original inquiry; correspondence is separately previewed and approved. */
 export function SupplierQuoteReview({ inquiryId, onRecorded }: { inquiryId: string; onRecorded: () => Promise<void> }) {
   const [entries, setEntries] = useState<Entry[]>([]);
   const [error, setError] = useState('');
@@ -73,6 +74,7 @@ function SupplierReplyForm({ entry, inquiryId, onSaved }: { entry: Entry; inquir
   ] as const;
   return <div className="space-y-3 rounded border border-amber-200 bg-white p-4">
     <p className="text-sm font-medium">{scope.brand} · {scope.catalogNumber} · {scope.quantity} 包</p>
+    {entry.reviewId && entry.status === 'awaiting_human' && <Link className="inline-block text-sm text-brand-600 underline" href={`/admin/business-letters?reviewId=${encodeURIComponent(entry.reviewId)}&reference=${encodeURIComponent(inquiryId)}`}>选用模板准备询价函</Link>}
     <p className="text-sm text-gray-700">每包目录价 ¥{scope.cataloguePrice.toFixed(2)} · {statuses[entry.status ?? ''] || '待核对'}{entry.owner ? ` · 负责人：${entry.owner}` : ''}</p>
     <p className="text-sm text-gray-700">客户每包售价 ¥{scope.customerPricing.finalPrice.toFixed(2)} · {scope.customerPricing.steps.at(-1)?.reason}。供应商采购报价单独记录。</p>
     {error && <p role="alert" className="text-sm text-red-700">{error}</p>}

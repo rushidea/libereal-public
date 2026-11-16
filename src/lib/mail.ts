@@ -1,4 +1,5 @@
 import { buildNotificationMail, buildPasswordResetMail } from '@/lib/mail-templates';
+import fs from 'node:fs';
 
 type EmailProviderName = 'console' | 'resend' | 'http' | 'smtp' | 'directmail' | 'disabled';
 
@@ -16,6 +17,8 @@ export type MailResult = {
   provider: EmailProviderName;
   skipped?: boolean;
   error?: string;
+  providerMessageId?: string;
+  deliveryState?: 'accepted' | 'rejected' | 'unknown' | 'not_sent';
 };
 
 type MailConfig = {
@@ -76,7 +79,7 @@ function publicSiteUrl(): string {
   ).replace(/\/$/, '');
 }
 
-async function sendViaResend(message: MailMessage, config: MailConfig): Promise<MailResult> {
+async function sendViaResend(message: MailMessage, config: MailConfig, idempotencyKey?: string): Promise<MailResult> {
   if (!config.resendApiKey) {
     return { ok: false, provider: 'resend', skipped: true, error: 'RESEND_API_KEY is not configured' };
   }
@@ -86,7 +89,9 @@ async function sendViaResend(message: MailMessage, config: MailConfig): Promise<
     headers: {
       Authorization: `Bearer ${config.resendApiKey}`,
       'Content-Type': 'application/json',
+      ...(idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : {}),
     },
+    ...(idempotencyKey ? { redirect: 'error' as const, signal: AbortSignal.timeout(25000) } : {}),
     body: JSON.stringify({
       from: message.from || config.from,
       to: recipients(message.to),
@@ -100,11 +105,61 @@ async function sendViaResend(message: MailMessage, config: MailConfig): Promise<
   });
 
   if (!response.ok) {
+    if (idempotencyKey) return { ok: false, provider: 'resend',
+      deliveryState: response.status >= 500 || response.status === 408 || response.status === 409 ? 'unknown' : 'rejected',
+      error: `Resend returned ${response.status}` };
     const detail = await response.text().catch(() => '');
     return { ok: false, provider: 'resend', error: `Resend returned ${response.status}${detail ? `: ${detail}` : ''}` };
   }
 
+  if (idempotencyKey) {
+    const receipt = await response.json().catch(() => null);
+    if (typeof receipt?.id !== 'string' || !receipt.id) return { ok: false, provider: 'resend', deliveryState: 'unknown', error: 'Missing provider receipt' };
+    return { ok: true, provider: 'resend', deliveryState: 'accepted', providerMessageId: receipt.id };
+  }
   return { ok: true, provider: 'resend' };
+}
+
+/** Separate business credentials; never fall back to notification credentials or console delivery. */
+function businessMailKey(): string | undefined {
+  if (process.env.BUSINESS_MAIL_CREDENTIAL_FILE) {
+    const fd = fs.openSync(process.env.BUSINESS_MAIL_CREDENTIAL_FILE, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
+    try {
+      const stat = fs.fstatSync(fd);
+      const owner = typeof process.getuid === 'function' ? process.getuid() : -1;
+      const privateMode = (stat.mode & 0o077) === 0;
+      const systemdMode = stat.uid === 0 && stat.gid === 0 && (stat.mode & 0o7777) === 0o440;
+      if (!stat.isFile() || stat.nlink !== 1 || stat.size > 16384 || ![0, owner].includes(stat.uid) || !(privateMode || systemdMode)) throw new Error('Invalid business credential');
+      const data = JSON.parse(fs.readFileSync(fd, 'utf8'));
+      if (data.EMAIL_PROVIDER !== 'resend' || typeof data.RESEND_API_KEY !== 'string') throw new Error('Invalid business credential');
+      return data.RESEND_API_KEY.trim() || undefined;
+    } finally { fs.closeSync(fd); }
+  }
+  return process.env.BUSINESS_MAIL_RESEND_API_KEY?.trim() || undefined;
+}
+
+export function businessMailAvailable(): boolean {
+  try { return process.env.BUSINESS_MAIL_ENABLED === 'true' && Boolean(businessMailKey()); }
+  catch { return false; }
+}
+
+export async function sendBusinessMailNow(message: MailMessage, idempotencyKey: string): Promise<MailResult> {
+  let key: string | undefined;
+  try { key = businessMailKey(); } catch { /* A credential error must not expose its content or path. */ }
+  if (process.env.BUSINESS_MAIL_ENABLED !== 'true' || !key) {
+    return { ok: false, provider: 'resend', skipped: true, deliveryState: 'not_sent', error: '商务发信尚未启用' };
+  }
+  const allowed = process.env.BUSINESS_MAIL_ALLOWED_RECIPIENTS?.split(',').map(value => value.trim().toLowerCase()).filter(Boolean);
+  if (allowed?.length && recipients(message.to).some(to => !allowed.includes(to.toLowerCase()))) {
+    return { ok: false, provider: 'resend', skipped: true, deliveryState: 'not_sent', error: '该收件人不在当前环境获准的发信范围内' };
+  }
+  if (!/^business-letter-[a-f0-9]{64}$/.test(idempotencyKey)) throw new Error('Invalid business message identity');
+  try {
+    return await sendViaResend(message, { provider: 'resend', from: message.from!, replyTo: message.replyTo, resendApiKey: key }, idempotencyKey);
+  } catch {
+    // A timeout does not establish rejection. The persisted claim prevents automatic retry.
+    return { ok: false, provider: 'resend', deliveryState: 'unknown', error: '发送结果未知，请核对服务商记录，勿重复发送' };
+  }
 }
 
 async function sendViaHttp(message: MailMessage, config: MailConfig): Promise<MailResult> {

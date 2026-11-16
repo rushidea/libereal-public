@@ -5,6 +5,7 @@ import { sendMail, sendQuoteNotificationEmailNow, type MailMessage } from '@/lib
 import { prisma } from '@/lib/prisma';
 import { settleExpiredQuotes } from '@/lib/quote-expiry-settle';
 import { runMfaChallengeCleanupOnce } from '@/lib/security/mfa-cleanup';
+import { dispatchApprovedBusinessLetter } from '@/lib/business-letters';
 
 type SmsPayload = { phone: string; templateCode: string; templateParams: Record<string, string | number> };
 type QuoteNotificationPayload = {
@@ -16,12 +17,18 @@ type QuoteNotificationPayload = {
   headline?: string;
   callout?: string;
 };
-type EmailPayload = MailMessage | QuoteNotificationPayload;
+type EmailPayload = MailMessage | QuoteNotificationPayload | { kind: 'business_letter'; draftId: string };
 type OrderReminderPayload = { receivableId: string; overdueDays: number };
 type QuoteExpirePayload = { quoteId: string };
 
 async function sendEmail(task: BackgroundTask): Promise<unknown> {
   const payload = parseTaskPayload<EmailPayload>(task);
+  if ('kind' in payload && payload.kind === 'business_letter') {
+    // No raw message or claimed approval from the task payload is trusted.
+    const letter = await dispatchApprovedBusinessLetter(payload.draftId);
+    if (letter.status !== 'accepted') throw new Error(`Business letter ${letter.status}; inspect its persistent record before further action`);
+    return { draftId: letter.id, status: letter.status, receipt: letter.result };
+  }
   const result = 'kind' in payload && payload.kind === 'quote'
     ? await sendQuoteNotificationEmailNow(payload)
     : await sendMail(payload as MailMessage);
