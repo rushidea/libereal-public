@@ -35,22 +35,29 @@ async function mockSuccessfulCredentials(page: Page, callbackPath: string) {
 }
 
 async function submitLoginAtTop(page: Page) {
-  await page.waitForFunction(() => {
-    const form = document.querySelector('form');
-    return !!form && Object.getOwnPropertyNames(form).some((key) => key.startsWith('__reactProps'));
-  });
-  await page.locator('input[type="email"]').fill('scroll-test@example.com');
-  await page.locator('input[type="password"]').fill('secret-secret');
-  await page.evaluate(() => {
-    const email = document.querySelector<HTMLInputElement>('input[type="email"]');
-    const password = document.querySelector<HTMLInputElement>('input[type="password"]');
+  // Next may retain an inactive route in a hidden Activity boundary.
+  // Require one visible form; do not arbitrarily choose one of duplicate visible forms.
+  const form = page.locator('form:has(input[type="email"]:visible)');
+  await expect(form).toHaveCount(1);
+  const email = form.locator('input[type="email"]:visible');
+  const password = form.locator('input[type="password"]:visible');
+  await expect(email).toHaveCount(1);
+  await expect(password).toHaveCount(1);
+  await expect.poll(() => form.evaluate(element =>
+    Object.getOwnPropertyNames(element).some(key => key.startsWith('__reactProps')),
+  )).toBe(true);
+  await email.fill('scroll-test@example.com');
+  await password.fill('secret-secret');
+  await form.evaluate((element) => {
+    const email = element.querySelector<HTMLInputElement>('input[type="email"]');
+    const password = element.querySelector<HTMLInputElement>('input[type="password"]');
     if (!email?.value || !password?.value) {
       throw new Error('login fields were cleared before submit');
     }
     document.documentElement.style.scrollBehavior = 'auto';
     window.scrollTo(0, 0);
     document.documentElement.style.scrollBehavior = '';
-    document.querySelector('form')?.requestSubmit();
+    (element as HTMLFormElement).requestSubmit();
   });
 }
 
