@@ -7,10 +7,12 @@ import { sendBusinessMailNow, businessMailAvailable } from '@/lib/mail';
 import { loadSupplierQuoteScope } from '@/lib/supplier-quote-review';
 import { type LetterTemplate } from '@/lib/business-letter-content';
 import { LetterError, boundedText, letterHash, renderBusinessLetter, validateTemplate } from '@/lib/business-letter-render';
+import { letterContactSource } from '@/lib/business-letter-contacts';
 
 type Db = Prisma.TransactionClient | typeof prisma;
 type Actor = { id: string; email: string };
-type Snapshot = ReturnType<typeof renderBusinessLetter>['snapshot'] & { source: Awaited<ReturnType<typeof sourceFor>> };
+type Snapshot = ReturnType<typeof renderBusinessLetter>['snapshot'] & { source: Awaited<ReturnType<typeof sourceFor>>;
+  contact?: Awaited<ReturnType<typeof letterContactSource>> };
 export type LetterDraft = {
   id: string; templateId: string; templateRevision: number; businessReference: string;
   snapshot: string; approvalHash: string; deliveryKey: string; status: string; origin: string; createdBy: string;
@@ -90,6 +92,7 @@ export async function listLetterDrafts() {
 /** Manual and worker preparation share this exact path. Preparation never approves or sends. */
 export async function prepareBusinessLetter(input: {
   templateId: string; templateRevision: number; to: unknown; fields: unknown; businessReference: unknown; reviewId?: string;
+  contactId?: unknown; contactRevision?: unknown;
 }, actor: Actor, origin: 'manual' | 'worker' = 'manual') {
   if (origin === 'worker' && !input.reviewId) throw new LetterError('自动准备信函须关联原业务任务');
   return prisma.$transaction(async db => {
@@ -101,7 +104,8 @@ export async function prepareBusinessLetter(input: {
       products: `${source.scope.brand}\n${source.scope.name}\n货号：${source.scope.catalogNumber}\n${source.scope.specification ? `规格：${source.scope.specification}\n` : ''}数量：${source.scope.quantity}`,
     } } : input;
     const rendered = renderBusinessLetter(template, renderingInput, mailConfig());
-    const snapshot: Snapshot = { ...rendered.snapshot, source };
+    const contact = input.contactId === undefined ? undefined : await letterContactSource(db, input.contactId, input.contactRevision, input.to);
+    const snapshot: Snapshot = { ...rendered.snapshot, source, ...(contact ? { contact } : {}) };
     const approvalHash = letterHash(snapshot);
     const deliveryKey = letterHash(snapshot.message);
     const previousSend = await db.$queryRaw<LetterDraft[]>`SELECT * FROM BusinessLetterDraft WHERE deliveryKey=${deliveryKey} AND status IN ('sending','accepted','rejected','unknown') LIMIT 1`;
@@ -125,8 +129,9 @@ async function validateSnapshot(db: Db, draft: LetterDraft) {
   const template = await templateById(db, draft.templateId);
   if (template.revision !== draft.templateRevision || !template.enabled) throw new LetterError('模板已修改或停用，请重新预览确认', 409);
   const source = await sourceFor(db, snapshot.source?.reviewId);
+  const contact = snapshot.contact ? await letterContactSource(db, snapshot.contact.id, snapshot.contact.revision, snapshot.message.to[0]) : undefined;
   const regenerated = renderBusinessLetter(template, { to: snapshot.message.to[0], fields: snapshot.fields, businessReference: snapshot.businessReference }, mailConfig());
-  if (letterHash({ ...regenerated.snapshot, source }) !== draft.approvalHash) throw new LetterError('业务、发件配置或模板已变化，请重新预览确认', 409);
+  if (letterHash({ ...regenerated.snapshot, source, ...(contact ? { contact } : {}) }) !== draft.approvalHash) throw new LetterError('业务、联系人、发件配置或模板已变化，请重新预览确认', 409);
   return snapshot;
 }
 

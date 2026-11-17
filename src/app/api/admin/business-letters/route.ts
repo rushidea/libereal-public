@@ -20,7 +20,8 @@ export async function POST(req: NextRequest) {
     if (!body || typeof body !== 'object' || Array.isArray(body)) throw new LetterError('请求格式不正确');
     if (body.action === 'preview') {
       const letter = await prepareBusinessLetter({ templateId: body.templateId, templateRevision: body.templateRevision,
-        to: body.to, fields: body.fields, businessReference: body.businessReference, reviewId: body.reviewId }, actor);
+        to: body.to, fields: body.fields, businessReference: body.businessReference, reviewId: body.reviewId,
+        contactId: body.contactId, contactRevision: body.contactRevision }, actor);
       return NextResponse.json({ letter });
     }
     if (body.action === 'send') {

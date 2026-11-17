@@ -1149,6 +1149,25 @@ model ProductVariant {
   @@index([source])
 }
 
+model BusinessLetterContact {
+  id String @id
+  companyName String
+  contactName String
+  salutation String @default("")
+  email String @default("")
+  phone String @default("")
+  qq String @default("")
+  brandIds String @default("[]")
+  notes String @default("")
+  sourceReference String @default("")
+  enabled Int @default(0)
+  revision Int @default(1)
+  updatedAt String
+  updatedBy String
+
+  @@index([companyName, contactName])
+}
+
 model Brand {
   id          String    @id @default(cuid())
   name        String    @unique

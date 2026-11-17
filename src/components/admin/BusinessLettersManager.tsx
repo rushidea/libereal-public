@@ -4,11 +4,14 @@ import { useCallback, useEffect, useState } from 'react';
 import { LETTER_FIELDS, LETTER_STARTERS, LETTER_STATUS_LABELS, type LetterTemplate, type LetterFields } from '@/lib/business-letter-content';
 import type { LetterDraft } from '@/lib/business-letters';
 import { adminSurfaceClasses as styles } from '@/lib/admin-surfaces';
+import BusinessLetterContacts from '@/components/admin/BusinessLetterContacts';
+import type { LetterContact } from '@/lib/business-letter-contacts';
 
 const emptyFields: LetterFields = { salutation: '', business_reference: '', products: '', details: '', signature: '' };
 type EditTemplate = Omit<LetterTemplate, 'id' | 'revision'> & { id?: string; revision?: number };
 type ViewSnapshot = { message: { to: string[]; from: string; replyTo: string; subject: string; html: string; text: string };
-  source: { reviewId: string; scope: { brand: string; catalogNumber: string; quantity: number } } | null };
+  source: { reviewId: string; scope: { brand: string; catalogNumber: string; quantity: number } } | null;
+  contact?: { companyName: string; contactName: string; revision: number } };
 
 export default function BusinessLettersManager({ initialReviewId = '', initialReference = '' }: {
   initialReviewId?: string; initialReference?: string;
@@ -20,6 +23,7 @@ export default function BusinessLettersManager({ initialReviewId = '', initialRe
   const [templatePreview, setTemplatePreview] = useState<{ html: string; text: string } | null>(null);
   const [templateId, setTemplateId] = useState('');
   const [to, setTo] = useState('');
+  const [contact, setContact] = useState<LetterContact | null>(null);
   const [reference, setReference] = useState(initialReference);
   const [reviewId, setReviewId] = useState(initialReviewId);
   const [fields, setFields] = useState<LetterFields>(emptyFields);
@@ -66,6 +70,17 @@ export default function BusinessLettersManager({ initialReviewId = '', initialRe
     {error && <p role="alert" className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800">{error}</p>}
     {notice && <p role="status" className="rounded-lg bg-emerald-50 p-3 text-sm text-emerald-900">{notice}</p>}
     <fieldset disabled={busy} className="space-y-6 disabled:opacity-70">
+      {rights.canReadLetters && <BusinessLetterContacts canSelect={rights.canSend} onChanged={updated => {
+        if (contact?.id === updated.id) {
+          const usable = updated.enabled && Boolean(updated.email);
+          setContact(usable ? updated : null); setTo(usable ? updated.email : '');
+          setFields(current => ({ ...current, salutation: usable ? updated.salutation || `${updated.contactName}：` : '' }));
+        }
+        invalidate();
+      }} onSelect={selectedContact => {
+        setContact(selectedContact); setTo(selectedContact.email); setFields(current => ({ ...current, salutation: selectedContact.salutation || `${selectedContact.contactName}：` })); invalidate();
+        setNotice(`已选用 ${selectedContact.companyName} · ${selectedContact.contactName}，请在下方填写信函并预览。`);
+      }} />}
       <section className={`${styles.panel} space-y-4 p-5`}>
         <div className="flex flex-wrap items-center justify-between gap-3"><h2 className="font-semibold">信函模板</h2>
           {rights.canManage && <div className="flex flex-wrap gap-2">{LETTER_STARTERS.map(starter => <button key={starter.name} type="button" className={buttonClass}
@@ -101,12 +116,13 @@ export default function BusinessLettersManager({ initialReviewId = '', initialRe
           if (!selected) throw new Error('请选择已启用的模板');
           setConfirmed(false);
           const data = await post('/api/admin/business-letters', { action: 'preview', templateId, templateRevision: selected.revision,
-            to, businessReference: reference, fields, ...(reviewId ? { reviewId } : {}) });
+            to, businessReference: reference, fields, ...(reviewId ? { reviewId } : {}), ...(contact ? { contactId: contact.id, contactRevision: contact.revision } : {}) });
           setPreview(data.letter); await load();
         }); }}>
           <label className="text-sm">模板<select className={inputClass} required value={templateId} onChange={e => { setTemplateId(e.target.value); invalidate(); }}>
             <option value="">请选择模板</option>{templates.filter(t => t.enabled).map(t => <option key={t.id} value={t.id}>{t.name} · 第 {t.revision} 版</option>)}</select></label>
-          <label className="text-sm">收件人邮箱<input className={inputClass} required type="email" value={to} onChange={e => { setTo(e.target.value); invalidate(); }} /></label>
+          <label className="text-sm">收件人邮箱<input className={inputClass} required type="email" value={to} onChange={e => { setTo(e.target.value); setContact(null); invalidate(); }} /></label>
+          {contact && <p className="text-sm text-gray-600 sm:col-span-2">已选用：{contact.companyName} · {contact.contactName} · 第 {contact.revision} 版。修改收件地址将改为手工填写。</p>}
           <label className="text-sm">业务编号<input className={inputClass} required maxLength={160} value={reference} onChange={e => { setReference(e.target.value); invalidate(); }} /></label>
           <label className="text-sm">关联供应商询价任务（可选）<input className={inputClass} maxLength={100} value={reviewId} onChange={e => { setReviewId(e.target.value); invalidate(); }} /></label>
           {Object.entries(LETTER_FIELDS).filter(([key]) => key !== 'business_reference').map(([key, label]) => <label key={key} className="text-sm sm:col-span-2">{label}
@@ -121,6 +137,7 @@ export default function BusinessLettersManager({ initialReviewId = '', initialRe
         <div className="flex flex-wrap justify-between gap-2"><h2 className="font-semibold">发送前预览</h2><span className="text-sm">{LETTER_STATUS_LABELS[preview.status] || preview.status}</span></div>
         <dl className="grid gap-2 text-sm"><div>发件人：{snapshot.message.from}</div><div>回复地址：{snapshot.message.replyTo}</div><div>唯一收件人：{snapshot.message.to.join('、')}（无抄送或密送）</div><div>主题：{snapshot.message.subject}</div><div>业务编号：{preview.businessReference} · 模板第 {preview.templateRevision} 版</div></dl>
         {snapshot.source && <p className="text-sm">已关联原询价：{snapshot.source.scope.brand} {snapshot.source.scope.catalogNumber} × {snapshot.source.scope.quantity}。原商品和条件变化后须重新核对。</p>}
+        {snapshot.contact && <p className="text-sm">收件联系人：{snapshot.contact.companyName} · {snapshot.contact.contactName} · 第 {snapshot.contact.revision} 版。资料变更后须重新预览确认。</p>}
         <iframe title="商务信函 HTML 预览" sandbox="" referrerPolicy="no-referrer" srcDoc={snapshot.message.html} className="h-[720px] w-full rounded-lg border bg-white" />
         <details><summary className="cursor-pointer text-sm">纯文本版本</summary><pre className="mt-3 whitespace-pre-wrap text-sm">{snapshot.message.text}</pre></details>
         {rights.canSend && ['draft', 'approved'].includes(preview.status) && <div className="space-y-3">
