@@ -4,7 +4,7 @@ import { requireAdmin } from '@/lib/session';
 import { writeAuditLog } from '@/lib/audit';
 import { prepareSupplierQuoteReview, recordSupplierQuoteReply, supplierQuoteErrorMessage, supplierQuoteReviewView } from '@/lib/supplier-quote-review';
 import type { Prisma } from '@prisma/client';
-import { repriceQuotesAfterCatalogChange } from '@/lib/quote-catalog-repricing';
+import { prepareInitialSupplierQuoteDraft, repriceQuotesAfterCatalogChange } from '@/lib/quote-catalog-repricing';
 import { pricingContentHash } from '@/lib/pricing-adjustment-approval';
 import { jsonObject } from '@/lib/order-catalog-repricing';
 
@@ -13,6 +13,11 @@ async function continueOriginalQuote(tx: Prisma.TransactionClient, inquiryId: st
   const request = jsonObject(task.payload);
   const scope = request.scope as { inquiryItemId: string; quantity: number; productId: string; variantId?: string | null; catalogNumber: string; brand: string };
   const latest = await tx.quote.findFirst({ where: { inquiryId }, orderBy: { version: 'desc' } });
+  if (!latest && task.status === 'succeeded') {
+    const draft = await prepareInitialSupplierQuoteDraft(tx, { inquiryId, supplierReviewId: reviewId,
+      approvalHash: request.requestHash as string, actor });
+    return draft && 'status' in draft ? draft : draft ? [draft] : null;
+  }
   if (!latest || !['draft', 'sent', 'accepted', 'expired'].includes(latest.status)) return null;
   const orders = await tx.order.findMany({ where: { inquiryId, archivedAt: null, status: { in: ['pending', 'unpaid'] } }, select: { id: true } });
   return repriceQuotesAfterCatalogChange(tx, {
@@ -64,7 +69,12 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
         || !/^[a-f0-9]{64}$/.test(body.requestHash)) throw new Error('SUPPLIER_QUOTE_REVIEW_CHANGED');
       const recorded = await recordSupplierQuoteReply(tx, { inquiryId: id, reviewId: body.reviewId,
         requestHash: body.requestHash, reply: body.reply, actor });
-      const continuation = recorded.recorded ? await continueOriginalQuote(tx, id, recorded.reviewId, actor) : null;
+      // Rechecking the same reply may resume after another inquiry line's missing data is fixed.
+      const continuation = await continueOriginalQuote(tx, id, recorded.reviewId, actor);
+      const checkedTask = await tx.backgroundTask.findUniqueOrThrow({ where: { id: recorded.reviewId } });
+      await tx.backgroundTask.update({ where: { id: recorded.reviewId }, data: {
+        result: JSON.stringify({ ...jsonObject(checkedTask.result), continuation }),
+      } });
       if (recorded.recorded) await writeAuditLog({ actorId: actor.id, actorEmail: actor.email,
         action: 'inquiry.supplier_quote_reply_confirmed', resource: 'inquiries', targetType: 'Inquiry', targetId: id,
         after: { reviewId: recorded.reviewId, replyHash: recorded.replyHash, inquiryItemId: recorded.inquiryItemId,

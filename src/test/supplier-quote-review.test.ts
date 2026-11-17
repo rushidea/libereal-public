@@ -2,6 +2,13 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 vi.mock('@/lib/auth', () => ({ auth: vi.fn() }));
 vi.mock('@/lib/product-filter-cache', () => ({ invalidateProductFilters: vi.fn() }));
 vi.mock('@/lib/background-tasks', () => ({ enqueueBackgroundTask: vi.fn() }));
+// These personal-inquiry fixtures have no organization memberships.
+vi.mock('@/lib/organization-record-access', async importOriginal => ({
+  ...await importOriginal<typeof import('@/lib/organization-record-access')>(), getReadableOrganizationIds: vi.fn(async () => []),
+}));
+vi.mock('@/lib/organization-service', async importOriginal => ({
+  ...await importOriginal<typeof import('@/lib/organization-service')>(), listOrganizationIdsForPermission: vi.fn(async () => []),
+}));
 vi.mock('@/lib/admin-mfa-settings', () => ({ isAdminMfaScenarioEnabled: vi.fn(async () => false), requiresAdminMfaForPermission: vi.fn(async () => false) }));
 vi.mock('@/lib/security/mfa-config', async importOriginal => ({ ...await importOriginal<typeof import('@/lib/security/mfa-config')>(),
   isMfaAdminRequired: vi.fn(() => false), isMfaPhase1Enabled: vi.fn(() => false) }));
@@ -12,6 +19,8 @@ import { POST as preview } from '@/app/api/admin/pricing-adjustments/preview/rou
 import { POST as apply } from '@/app/api/admin/pricing-adjustments/apply/route';
 import { GET as view, POST as supplierAction } from '@/app/api/inquiries/[id]/supplier-quote/route';
 import { POST as publish } from '@/app/api/inquiries/[id]/quote/route';
+import { GET as inquiryDetail } from '@/app/api/inquiries/[id]/route';
+import { GET as myOrders } from '@/app/api/my-orders/route';
 import { POST as acceptQuote } from '@/app/api/orders/[id]/confirm-items/route';
 import { PATCH as updateOrder } from '@/app/api/orders/[id]/route';
 import { quoteContentHash } from '@/lib/quote-records';
@@ -36,6 +45,11 @@ async function prepare(quantity = 2) {
 }
 async function record(prepared: { reviewId: string; requestHash: string }, value = reply()) {
   return supplierAction(request({ action: 'record_reply', ...prepared, reply: value }), params);
+}
+async function publishDisplayedDraft() {
+  const draft = await prisma.quote.findFirstOrThrow({ where: { inquiryId: 'inquiry_supplier', status: 'draft' },
+    orderBy: { version: 'desc' }, include: { items: { orderBy: { position: 'asc' } } } });
+  return publish(request({ catalogQuoteId: draft.id, catalogQuoteHash: quoteContentHash(draft) }), params);
 }
 async function activate() {
   const response = await preview(request(policy)); const body = await response.json();
@@ -90,7 +104,14 @@ describe('written supplier quotation in the original inquiry', () => {
     await expect(verifyAndPriceItems([priceInput()], { ...priceContext, allowManualAdjustment: true,
       manualAdjustments: { 'EX-1': { type: 'fixed_price', value: 1, reason: 'Attempted override' } } })).rejects.toThrow('SUPPLIER_WRITTEN_QUOTE_REQUIRED');
     const prepared = await prepare(); expect((await prepare()).reviewId).toBe(prepared.reviewId);
-    const value = reply(); expect((await record(prepared, value)).status).toBe(200);
+    const value = reply(); const recorded = await record(prepared, value);
+    expect(recorded.status).toBe(200);
+    const continuation = (await recorded.json()).result.continuation;
+    const draft = await prisma.quote.findFirstOrThrow({ include: { items: { orderBy: { position: 'asc' } } } });
+    expect(continuation).toMatchObject([{ quoteId: draft.id, version: 1, subtotal: 1280 }]);
+    expect(draft).toMatchObject({ status: 'draft', sentAt: null, version: 1 });
+    expect(draft.items[0]).toMatchObject({ unitPrice: 640, notes: value.customerConditions, leadTime: value.leadTime });
+    expect(JSON.stringify(draft.items)).not.toContain(value.conditions);
     expect((await (await record(prepared, value)).json()).result.recorded).toBe(false);
     expect(await prisma.backgroundTask.count({ where: { type: 'inquiry.supplier_written_quote' } })).toBe(1);
     expect(vi.mocked(enqueueBackgroundTask).mock.calls.filter(call => call[0] === 'email.send')).toHaveLength(0);
@@ -98,10 +119,11 @@ describe('written supplier quotation in the original inquiry', () => {
     expect(priced.verifiedItems[0].unitPrice).toBe(640);
     const changedDisplay = await publish(request({ items: [{ ...priceInput(), price: 700 }] }), params);
     expect(changedDisplay.status).toBe(409);
-    expect(await prisma.quote.count()).toBe(0);
-    const published = await publish(request({}), params); const body = await published.json();
+    expect(await prisma.quote.count()).toBe(1);
+    expect((await publish(request({}), params)).status).toBe(409);
+    const published = await publishDisplayedDraft(); const body = await published.json();
     expect(published.status, JSON.stringify(body)).toBe(200);
-    const quote = await prisma.quote.findFirstOrThrow({ include: { items: true } });
+    const quote = await prisma.quote.findFirstOrThrow({ where: { status: 'sent' }, include: { items: true } });
     expect(quote.items[0]).toMatchObject({ inquiryItemId: 'line_supplier', unitPrice: 640 });
     expect(quote.validUntil?.toISOString()).toBe(value.validUntil);
     expect(await prisma.inquiryItem.count()).toBe(1);
@@ -117,6 +139,52 @@ describe('written supplier quotation in the original inquiry', () => {
     if (change === 'policy') await prisma.brand.update({ where: { id: 'brand_supplier' }, data: { supplierQuoteRequiredAbove: 550 } });
     expect((await record(prepared)).status).toBe(409);
     expect((await prisma.backgroundTask.findUniqueOrThrow({ where: { id: prepared.reviewId } })).status).toBe('awaiting_human');
+  });
+
+  it.each(['catalogue', 'identity', 'unavailable', 'deleted', 'hazardous'] as const)('retains a checked reply while another line needs %s review and resumes without recording twice', async missing => {
+    await prisma.product.create({ data: { id: 'other_product', catalogNumber: 'EX-2', name: 'Other item',
+      brand: 'Example Brand', brandRecordId: 'brand_supplier', price: 80,
+      originalPrice: missing === 'catalogue' ? null : missing === 'deleted' ? 800 : 100,
+      deletedAt: missing === 'deleted' ? new Date() : null, hazardous: missing === 'hazardous' } });
+    await prisma.inquiryItem.create({ data: { id: 'other_line', inquiryId: 'inquiry_supplier', position: 1,
+      productId: missing === 'identity' ? null : 'other_product', catalogNumber: 'EX-2', name: 'Other item',
+      quantity: 1, unitPrice: null, lineTotal: 0, available: missing === 'unavailable' ? false : null,
+      metadata: JSON.stringify({ brand: 'Example Brand' }) } });
+    await activate(); const prepared = await prepare(); const value = reply();
+    const response = await record(prepared, value); const body = await response.json();
+    expect(response.status, JSON.stringify(body)).toBe(200);
+    expect(body.result.continuation).toMatchObject({ status: 'awaiting_pricing_review', inquiryItemId: 'other_line' });
+    const saved = await prisma.backgroundTask.findUniqueOrThrow({ where: { id: prepared.reviewId } });
+    expect(saved.status).toBe('succeeded');
+    expect(JSON.parse(saved.result!).reply).toMatchObject(value);
+    expect(JSON.parse(saved.result!).continuation.status).toBe('awaiting_pricing_review');
+    expect(await prisma.quote.count()).toBe(0);
+    expect((await prisma.inquiry.findUniqueOrThrow({ where: { id: 'inquiry_supplier' } })).hasUnresolvedPricing).toBe(true);
+    await prisma.product.update({ where: { id: 'other_product' }, data: { originalPrice: 100, deletedAt: null, hazardous: false } });
+    await prisma.inquiryItem.update({ where: { id: 'other_line' }, data: { productId: 'other_product', available: true } });
+    const resumed = await record(prepared, value); const result = (await resumed.json()).result;
+    expect(resumed.status).toBe(200); expect(result.recorded).toBe(false);
+    expect(result.continuation).toMatchObject([{ version: 1, subtotal: 1360 }]);
+    expect(await prisma.quote.count()).toBe(1);
+    expect((await (await record(prepared, value)).json()).result.recorded).toBe(false);
+    expect(await prisma.quote.count()).toBe(1);
+    expect(JSON.parse((await prisma.backgroundTask.findUniqueOrThrow({ where: { id: prepared.reviewId } })).result!).reply).toEqual(JSON.parse(saved.result!).reply);
+    expect(vi.mocked(enqueueBackgroundTask).mock.calls.filter(call => call[0] === 'email.send')).toHaveLength(0);
+  });
+
+  it('keeps first drafts internal in both customer reads until the exact displayed quote is published', async () => {
+    await activate(); const prepared = await prepare(); expect((await record(prepared)).status).toBe(200);
+    const adminView = await inquiryDetail(new NextRequest('http://localhost/api/test'), params);
+    expect((await adminView.json()).activeQuote.status).toBe('draft');
+    vi.mocked(auth).mockResolvedValue({ user: { id: 'customer_supplier', email: 'customer@example.test', role: 'customer', sessionId: 'session-customer' } } as never);
+    expect((await (await inquiryDetail(new NextRequest('http://localhost/api/test'), params)).json()).activeQuote).toBeNull();
+    expect((await (await myOrders()).json()).inquiries[0].activeQuote).toBeNull();
+    vi.mocked(auth).mockResolvedValue({ user: { id: 'admin_test_id', email: 'admin@test.com', role: 'admin', sessionId: 'session-1' } } as never);
+    expect((await publishDisplayedDraft()).status).toBe(200);
+    vi.mocked(auth).mockResolvedValue({ user: { id: 'customer_supplier', email: 'customer@example.test', role: 'customer', sessionId: 'session-customer' } } as never);
+    const detail = (await (await inquiryDetail(new NextRequest('http://localhost/api/test'), params)).json()).activeQuote;
+    expect(detail.status).toBe('sent'); expect(detail.sentAt).toBeTruthy();
+    expect((await (await myOrders()).json()).inquiries[0].activeQuote.id).toBe(detail.id);
   });
 
   it('does not reuse a reply for another quantity, customer, or expired supply terms', async () => {
@@ -163,8 +231,8 @@ describe('written supplier quotation in the original inquiry', () => {
 
   it('revalidates supplier evidence when the customer accepts a sent quote', async () => {
     await activate(); const prepared = await prepare(); expect((await record(prepared)).status).toBe(200);
-    expect((await publish(request({}), params)).status).toBe(200);
-    const quote = await prisma.quote.findFirstOrThrow();
+    expect((await publishDisplayedDraft()).status).toBe(200);
+    const quote = await prisma.quote.findFirstOrThrow({ where: { status: 'sent' } });
     await prisma.product.update({ where: { id: 'product_supplier' }, data: { originalPrice: 850 } });
     vi.mocked(auth).mockResolvedValue({ user: { id: 'customer_supplier', email: 'customer@example.test', role: 'customer', sessionId: 'session-customer' } } as never);
     const response = await acceptQuote(request({ quoteId: quote.id, quoteVersion: quote.version, itemIndices: [0] }), params);
@@ -174,8 +242,8 @@ describe('written supplier quotation in the original inquiry', () => {
 
   it('reopens the original pending order review when supplier terms expire, without changing or accepting the order', async () => {
     await activate(); const prepared = await prepare(); expect((await record(prepared)).status).toBe(200);
-    expect((await publish(request({}), params)).status).toBe(200);
-    const quote = await prisma.quote.findFirstOrThrow();
+    expect((await publishDisplayedDraft()).status).toBe(200);
+    const quote = await prisma.quote.findFirstOrThrow({ where: { status: 'sent' } });
     vi.mocked(auth).mockResolvedValue({ user: { id: 'customer_supplier', email: 'customer@example.test', role: 'customer', sessionId: 'session-customer' } } as never);
     const accepted = await acceptQuote(request({ quoteId: quote.id, quoteVersion: quote.version, itemIndices: [0] }), params);
     const response = await accepted.json(); expect(accepted.status, JSON.stringify(response)).toBe(200);
@@ -203,8 +271,8 @@ describe('written supplier quotation in the original inquiry', () => {
 
   async function acceptedPendingOrder() {
     await activate(); const prepared = await prepare(); expect((await record(prepared)).status).toBe(200);
-    expect((await publish(request({}), params)).status).toBe(200);
-    const quote = await prisma.quote.findFirstOrThrow();
+    expect((await publishDisplayedDraft()).status).toBe(200);
+    const quote = await prisma.quote.findFirstOrThrow({ where: { status: 'sent' } });
     vi.mocked(auth).mockResolvedValue({ user: { id: 'customer_supplier', email: 'customer@example.test', role: 'customer', sessionId: 'session-customer' } } as never);
     expect((await acceptQuote(request({ quoteId: quote.id, quoteVersion: quote.version, itemIndices: [0] }), params)).status).toBe(200);
     vi.mocked(auth).mockResolvedValue({ user: { id: 'admin_test_id', email: 'admin@test.com', role: 'admin', sessionId: 'session-1' } } as never);
@@ -276,8 +344,8 @@ describe('written supplier quotation in the original inquiry', () => {
     const secondResponse = await supplierAction(request({ action: 'prepare', inquiryItemId: 'line_supplier_2', quantity: 2 }), params);
     const second = (await secondResponse.json()).result;
     expect(secondResponse.status).toBe(200); expect((await record(second)).status).toBe(200);
-    expect((await publish(request({}), params)).status).toBe(200);
-    const quote = await prisma.quote.findFirstOrThrow();
+    expect((await publishDisplayedDraft()).status).toBe(200);
+    const quote = await prisma.quote.findFirstOrThrow({ where: { status: 'sent' } });
     vi.mocked(auth).mockResolvedValue({ user: { id: 'customer_supplier', email: 'customer@example.test', role: 'customer', sessionId: 'session-customer' } } as never);
     expect((await acceptQuote(request({ quoteId: quote.id, quoteVersion: quote.version, itemIndices: [0, 1] }), params)).status).toBe(200);
     vi.mocked(auth).mockResolvedValue({ user: { id: 'admin_test_id', email: 'admin@test.com', role: 'admin', sessionId: 'session-1' } } as never);

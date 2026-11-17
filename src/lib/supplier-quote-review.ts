@@ -222,6 +222,7 @@ export async function supplierQuoteReviewView(db: Db, inquiryId: string) {
         status: currentRequest ? expired ? 'expired' : task!.status : task ? 'source_changed' : 'not_prepared',
         owner: typeof request.ownerEmail === 'string' ? request.ownerEmail : null,
         reply: currentRequest && task?.status === 'succeeded' ? result.reply as SupplierQuoteReply : null,
+        continuation: currentRequest && task?.status === 'succeeded' ? result.continuation ?? null : null,
       });
     } catch (error) {
       if (error instanceof Error && ['SUPPLIER_QUOTE_NOT_REQUIRED', 'SUPPLIER_QUOTE_INQUIRY_NOT_ACTIVE'].includes(error.message)) continue;

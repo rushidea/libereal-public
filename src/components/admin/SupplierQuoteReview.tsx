@@ -10,6 +10,7 @@ type Entry = {
   quantityChangeSource?: { quoteId: string; quoteHash: string } | null;
   reviewId?: string | null; requestHash?: string | null; status?: string; owner?: string | null;
   reply?: SupplierQuoteReply | null;
+  continuation?: { status: string; reason: string; inquiryItemId: string } | unknown[] | null;
 };
 const statuses: Record<string, string> = {
   not_prepared: '待准备询价', awaiting_human: '等待人工询价回复', succeeded: '回复已核对',
@@ -79,6 +80,11 @@ function SupplierReplyForm({ entry, inquiryId, onSaved }: { entry: Entry; inquir
     <p className="text-sm text-gray-700">客户每包售价 ¥{scope.customerPricing.finalPrice.toFixed(2)} · {scope.customerPricing.steps.at(-1)?.reason}。供应商采购报价单独记录。</p>
     {error && <p role="alert" className="text-sm text-red-700">{error}</p>}
     {entry.reply && <p className="text-sm text-gray-700">已记录 {entry.reply.supplier} 的回复：供应商单价 ¥{entry.reply.supplierUnitPrice.toFixed(2)}，本次客户单价 ¥{entry.reply.customerUnitPrice.toFixed(2)}；有效期至 {new Date(entry.reply.validUntil).toLocaleString('zh-CN')}。货期：{entry.reply.leadTime}；客户供货条件：{entry.reply.customerConditions}。</p>}
+    {entry.reply && entry.continuation && !Array.isArray(entry.continuation) && entry.continuation.status === 'awaiting_pricing_review' && <div role="status" className="space-y-2 text-sm text-amber-900">
+      <p>供应商回复已保存，报价准备仍待补齐商品资料：{entry.continuation.reason}。</p>
+      <button type="button" disabled={busy} className="rounded border px-3 py-2 disabled:opacity-50"
+        onClick={() => send({ action: 'record_reply', reviewId: entry.reviewId, requestHash: entry.requestHash, reply: entry.reply })}>资料已补齐，继续准备报价</button>
+    </div>}
     {entry.status !== 'awaiting_human' && <div className="flex flex-wrap items-end gap-3">
       {entry.status === 'succeeded' && <label className="space-y-1 text-sm">重新询价原因
         <input className={inputClass} value={renewalReason} maxLength={500} disabled={busy} onChange={event => setRenewalReason(event.target.value)} />

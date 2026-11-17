@@ -1,6 +1,6 @@
 import { createHash } from 'crypto';
 import type { Prisma } from '@prisma/client';
-import { verifyAndPriceItems } from '@/lib/pricing';
+import { CustomerUnavailableProductError, discountPricingFailure, verifyAndPriceItems } from '@/lib/pricing';
 import { calculateOrderAmounts } from '@/lib/order-domain';
 import type { PricingQuoteImpact } from '@/lib/pricing-adjustment-impact';
 import { pricingContentHash } from '@/lib/pricing-adjustment-approval';
@@ -59,6 +59,72 @@ async function priceLine(tx: Prisma.TransactionClient, line: Line, inquiry: { id
     leadTime: jsonObject(next.pricingSnapshot).supplierQuoteReviewId ? next.leadTime ?? null : line.leadTime ?? null,
     notes: typeof jsonObject(next.pricingSnapshot).customerSupplyConditions === 'string'
       ? jsonObject(next.pricingSnapshot).customerSupplyConditions as string : line.notes ?? null };
+}
+
+/** Prepare the first quote after a checked supplier reply, using the same draft and publish guards. */
+export async function prepareInitialSupplierQuoteDraft(tx: Prisma.TransactionClient, input: {
+  inquiryId: string; supplierReviewId: string; approvalHash: string; actor: { id: string; email: string };
+}) {
+  const inquiry = await tx.inquiry.findUniqueOrThrow({ where: { id: input.inquiryId }, include: {
+    inquiryItems: { orderBy: { position: 'asc' } },
+  } });
+  if (inquiry.archivedAt || ['closed', 'declined'].includes(inquiry.status)
+    || await tx.order.count({ where: { inquiryId: inquiry.id } })
+    || await tx.quote.count({ where: { inquiryId: inquiry.id } })) return null;
+  const items: Prisma.QuoteItemCreateWithoutQuoteInput[] = [];
+  const waitForLine = async (inquiryItemId: string, reason: string) => {
+    await tx.inquiry.update({ where: { id: inquiry.id }, data: { hasUnresolvedPricing: true, status: '待人工审核' } });
+    return { status: 'awaiting_pricing_review' as const, inquiryId: inquiry.id, inquiryItemId, reason };
+  };
+  for (const line of inquiry.inquiryItems) {
+    // Unknown or unavailable lines must remain visible for review, never silently disappear.
+    if (line.available === false || !line.productId || !line.catalogNumber) {
+      return waitForLine(line.id, '请先核对该商品的对应关系及供货状态，已核实的供应商回复保留');
+    }
+    const metadata = jsonObject(line.metadata);
+    let next: Awaited<ReturnType<typeof priceLine>>;
+    try {
+      next = await priceLine(tx, { ...line, inquiryItemId: line.id, unitPrice: line.unitPrice ?? 0, pricingSnapshot: null }, inquiry,
+      [{ productId: line.productId, catalogNumber: line.catalogNumber,
+        ...(typeof metadata.brand === 'string' ? { brand: metadata.brand } : {}) }]);
+    } catch (error) {
+      const reason = discountPricingFailure(error) ?? (error instanceof CustomerUnavailableProductError
+        ? '该商品暂不能向客户提供，请先核对商品及供货资料' : null) ?? (error instanceof Error && [
+        'AMBIGUOUS_PRODUCT_CATALOG_NUMBER', 'PRODUCT_VARIANT_NOT_FOUND', 'PRODUCT_VARIANT_MISMATCH',
+        'PRODUCT_CATALOG_MISMATCH', 'PRODUCT_BRAND_MISMATCH', 'INVALID_QUANTITY', 'CLIENT_FALLBACK_FORBIDDEN',
+        'SUPPLIER_QUOTE_PRODUCT_REVIEW_REQUIRED',
+      ].includes(error.message) ? '请核对该商品、包装、数量和价格来源' : null);
+      if (!reason) throw error;
+      return waitForLine(line.id, reason);
+    }
+    const nextSnapshot = jsonObject(next.pricingSnapshot);
+    if (supplierPending(next.pricingSnapshot) && !(typeof nextSnapshot.cataloguePrice === 'number'
+      && Number.isFinite(nextSnapshot.cataloguePrice) && nextSnapshot.cataloguePrice > 0)) {
+      return waitForLine(line.id, '商品或规格缺少有效目录价，请先核对目录价');
+    }
+    const variantId = nextSnapshot.variantId;
+    items.push({ position: items.length, inquiryItem: { connect: { id: line.id } },
+      catalogNumber: line.catalogNumber, name: line.name, quantity: line.quantity, orderedQty: 0,
+      ...next, lineTotal: Math.round(next.unitPrice * line.quantity * 100) / 100,
+      available: !supplierPending(next.pricingSnapshot),
+      metadata: JSON.stringify({ ...metadata, ...(typeof variantId === 'string' ? { variantId } : {}),
+        supplierQuotePending: supplierPending(next.pricingSnapshot), catalogRepricingApprovalHash: input.approvalHash }),
+    });
+  }
+  if (!items.length) return null;
+  const quoteId = `catalog_quote_${createHash('sha256').update(`initial:${inquiry.id}:${input.supplierReviewId}`).digest('hex').slice(0, 32)}`;
+  const subtotal = Math.round(items.reduce((sum, item) => sum + item.lineTotal, 0) * 100) / 100;
+  const created = await tx.quote.create({ data: { id: quoteId, inquiryId: inquiry.id, version: 1,
+    status: 'draft', currency: 'CNY', subtotal, createdBy: input.actor.id, items: { create: items } } });
+  for (const item of items) if (supplierPending(item.pricingSnapshot)) {
+    await prepareSupplierQuoteReview(tx, { inquiryId: inquiry.id, inquiryItemId: item.inquiryItem!.connect!.id!,
+      quantity: item.quantity, actor: input.actor });
+  }
+  await tx.inquiry.update({ where: { id: inquiry.id }, data: { subtotal, hasUnresolvedPricing: true, status: '待人工审核' } });
+  await tx.quoteConfirmation.create({ data: { quoteId, userId: input.actor.id, email: input.actor.email,
+    action: 'catalog_repricing_prepared', details: JSON.stringify({ kind: 'supplier_quote_review',
+      initialQuote: true, approvalHash: input.approvalHash, supplierReviewId: input.supplierReviewId, pendingOrderIds: [] }) } });
+  return { quoteId, inquiryId: inquiry.id, version: created.version, subtotal, pendingOrderIds: [] };
 }
 
 /** One current successor per inquiry. Merchant-accepted orders are never recalculated. */
