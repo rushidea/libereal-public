@@ -492,6 +492,8 @@ export function getTestDb(): Database.Database {
       logoUrl TEXT,
       isActive INTEGER NOT NULL DEFAULT 1,
       sortOrder INTEGER NOT NULL DEFAULT 0,
+      defaultDiscountRate REAL,
+      supplierQuoteRequiredAbove REAL,
       createdAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
       updatedAt DATETIME NOT NULL
     );

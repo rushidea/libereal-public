@@ -1,4 +1,4 @@
-import { TIER_DISCOUNT_RATES } from '@/lib/discount';
+import { CONFIRMED_TIER_DISCOUNT_RATES, TIER_DISCOUNT_RATES } from '@/lib/discount';
 
 export type PriceAdjustment =
   | { type: 'fixed_price'; value: number; reason?: string }
@@ -13,7 +13,7 @@ export type PromotionCandidate = PriceAdjustment & {
 };
 
 export interface PriceStep {
-  stage: 'base' | 'variant' | 'tier_discount' | 'brand_discount' | 'promotion' | 'manual_adjustment' | 'minimum_price';
+  stage: 'base' | 'variant' | 'tier_discount' | 'brand_discount' | 'brand_default_discount' | 'promotion' | 'manual_adjustment' | 'minimum_price';
   source: string;
   before: number;
   after: number;
@@ -27,6 +27,9 @@ export interface PriceCalculationInput {
   tier?: string | null;
   personalDiscountRate?: number | null;
   brandDiscountRate?: number | null;
+  /** Activated from a human-confirmed brand policy, never from a client claim. */
+  discountPolicy?: 'brand_priority';
+  brandDefaultDiscountRate?: number | null;
   promotions?: PromotionCandidate[];
   manualAdjustment?: PriceAdjustment | null;
   minimumSalePrice?: number | null;
@@ -78,6 +81,27 @@ export function calculatePrice(input: PriceCalculationInput): PriceCalculationRe
   }
 
   const undiscounted = price;
+  if (input.discountPolicy === 'brand_priority') {
+    // A customer-level scalar has no brand identity. Preserve it for review; it
+    // cannot silently become a customer contract or a shop-wide brand default.
+    if (input.personalDiscountRate != null && input.brandDiscountRate == null) throw new Error('LEGACY_CUSTOMER_DISCOUNT_REVIEW_REQUIRED');
+    const tierRate = input.tier ? CONFIRMED_TIER_DISCOUNT_RATES[input.tier] : undefined;
+    const options = [
+      { rate: input.brandDiscountRate, stage: 'brand_discount' as const, source: 'customer_brand_discount', reason: '客户对该品牌的专属折扣优先' },
+      { rate: tierRate, stage: 'tier_discount' as const, source: `tier:${input.tier || 'none'}`, reason: '没有客户专属折扣，采用客户等级折扣' },
+      { rate: input.brandDefaultDiscountRate, stage: 'brand_default_discount' as const, source: 'brand_default_discount', reason: '没有客户专属或等级折扣，采用该品牌全店默认折扣' },
+    ];
+    const selected = options.find((entry) => entry.rate != null);
+    if (!selected) throw new Error('BRAND_DEFAULT_DISCOUNT_REQUIRED');
+    if (!validRate(selected.rate)) throw new Error('INVALID_DISCOUNT_RATE');
+    price = money(undiscounted * selected.rate);
+    steps.push({ stage: selected.stage, source: selected.source, before: undiscounted, after: price, applied: true, reason: selected.reason });
+    // An existing catalogue-draft publish submits its already reviewed price.
+    // It may confirm that exact price, but cannot override the priority policy.
+    if (input.manualAdjustment && (input.manualAdjustment.type !== 'fixed_price'
+      || money(input.manualAdjustment.value) !== price)) throw new Error('MANUAL_ADJUSTMENT_REQUIRES_QUOTE_REVIEW');
+    return { finalPrice: price, currency: input.currency || 'CNY', appliedSource: selected.source, minimumPriceApplied: false, steps };
+  }
   const tierRate = validRate(input.personalDiscountRate)
     ? input.personalDiscountRate
     : TIER_DISCOUNT_RATES[input.tier || ''] ?? 1;

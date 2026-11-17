@@ -43,4 +43,20 @@ describe('admin task routes', () => {
     expect(requireAdmin).toHaveBeenCalledWith('tasks.manage');
     expect(getTestDb().prepare('SELECT action, resource FROM AuditLog WHERE targetId = ?').get(task.id)).toEqual({ action: 'task.retried', resource: 'tasks' });
   });
+
+  it('lists a human supplier wait without exposing reply amounts and refuses a generic retry', async () => {
+    const task = await prisma.backgroundTask.create({ data: { type: 'inquiry.supplier_written_quote', status: 'awaiting_human',
+      payload: JSON.stringify({ scope: { inquiryId: 'synthetic_inquiry' }, supplier: 'Private supplier' }),
+      result: JSON.stringify({ reply: { supplierUnitPrice: 450 } }) } });
+    const response = await GET(new NextRequest('http://localhost:3000/api/admin/tasks?status=awaiting_human'));
+    expect(response.status).toBe(200); const data = await response.json();
+    expect(data.counts.awaiting_human).toBe(1);
+    expect(data.tasks[0]).toMatchObject({ id: task.id, status: 'awaiting_human', inquiryId: 'synthetic_inquiry', payload: null, result: null });
+    await prisma.backgroundTask.update({ where: { id: task.id }, data: { status: 'failed' } });
+    const retried = await PATCH(new NextRequest('http://localhost:3000/api/admin/tasks', {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: task.id, action: 'retry' }),
+    }));
+    expect(retried.status).toBe(409);
+    expect((await prisma.backgroundTask.findUniqueOrThrow({ where: { id: task.id } })).status).toBe('failed');
+  });
 });

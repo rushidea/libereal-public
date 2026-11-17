@@ -4,8 +4,9 @@ import { requireAdmin } from '@/lib/session';
 import { retryBackgroundTask } from '@/lib/background-tasks';
 import { projectAiOpsTask } from '@/lib/ai-ops/tasks';
 import { writeAuditLog } from '@/lib/audit';
+import { jsonObject } from '@/lib/order-catalog-repricing';
 
-const STATUSES = new Set(['pending', 'running', 'succeeded', 'failed']);
+const STATUSES = new Set(['pending', 'running', 'succeeded', 'failed', 'awaiting_human']);
 
 export async function GET(req: NextRequest) {
   const admin = await requireAdmin('tasks.read');
@@ -31,7 +32,14 @@ export async function GET(req: NextRequest) {
     prisma.backgroundTask.findMany({ where: { type: { not: { startsWith: 'aiops.control.' } } }, select: { type: true }, distinct: ['type'], orderBy: { type: 'asc' } }),
   ]);
   return NextResponse.json({
-    tasks: tasks.map((task) => task.type.startsWith('aiops.') ? projectAiOpsTask(task) : task),
+    tasks: tasks.map((task) => {
+      if (task.type.startsWith('aiops.')) return projectAiOpsTask(task);
+      if (task.type === 'inquiry.supplier_written_quote') {
+        const scope = jsonObject(task.payload).scope as { inquiryId?: string } | undefined;
+        return { ...task, payload: null, result: null, inquiryId: typeof scope?.inquiryId === 'string' ? scope.inquiryId : null };
+      }
+      return task;
+    }),
     total,
     page,
     pageCount: Math.max(1, Math.ceil(total / limit)),
@@ -51,6 +59,7 @@ export async function PATCH(req: NextRequest) {
   const previous = await prisma.backgroundTask.findUnique({ where: { id: body.id } });
   if (!previous) return NextResponse.json({ error: 'Task not found' }, { status: 404 });
   if (previous.type.startsWith('aiops.')) return NextResponse.json({ error: 'AI tasks cannot be retried automatically' }, { status: 409 });
+  if (previous.type === 'inquiry.supplier_written_quote') return NextResponse.json({ error: '请在原询价中核对供应商回复或重新准备询价' }, { status: 409 });
   const task = await retryBackgroundTask(body.id);
   if (!task) return NextResponse.json({ error: 'Only failed tasks can be retried' }, { status: 409 });
   await writeAuditLog({

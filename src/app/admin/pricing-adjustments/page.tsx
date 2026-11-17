@@ -1,6 +1,8 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { PricingAdjustmentDetails } from '@/components/admin/PricingAdjustmentDetails';
+import { BrandDefaultDiscountForm } from '@/components/admin/BrandDefaultDiscountForm';
 import {
   AlertCircle,
   ArrowDown,
@@ -44,6 +46,7 @@ import {
 } from '@/lib/pricing-adjustment-import';
 import { buildPreviewChunkBody, splitPreviewUpload } from '@/lib/pricing-adjustment-preview-chunks';
 import type { CatalogMatchResult, CatalogNameReviewItem } from '@/lib/pricing-adjustment-rules';
+import { resumeConfirmedPricingApplication } from '@/lib/pricing-confirmation-refresh';
 
 type ScopeMode = 'category' | 'catalog';
 type PriceField = 'price' | 'promotionalPrice' | 'originalPrice';
@@ -63,6 +66,9 @@ type PreviewSample = {
 };
 
 type PreviewResult = {
+  approvalHash?: string;
+  quoteImpact?: { quoteCount: number; pendingOrderCount: number };
+  repricedQuotes?: Array<{ quoteId: string; inquiryId: string; version: number; subtotal: number }>;
   matchedCount: number;
   changeCount: number;
   skippedInquiryCount: number;
@@ -74,6 +80,7 @@ type PreviewResult = {
   reviewItems?: CatalogNameReviewItem[];
   samples: PreviewSample[];
   updatedCount?: number;
+  recovered?: boolean;
 };
 
 const REVIEW_LIST_LIMIT = 200;
@@ -298,6 +305,16 @@ export default function PricingAdjustmentsPage() {
   const [sheetProgress, setSheetProgress] = useState<SheetProgress | null>(null);
   const previewPayloadRef = useRef<Record<string, unknown> | null>(null);
   const previewGenerationRef = useRef(0);
+  const mounted = useRef(true);
+
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      previewPayloadRef.current = null;
+      previewGenerationRef.current++;
+    };
+  }, []);
 
   function invalidatePreview() {
     previewGenerationRef.current += 1;
@@ -653,8 +670,9 @@ export default function PricingAdjustmentsPage() {
         ));
         return;
       }
-      const { stepUpToken: _stepUpToken, ...frozen } = payload;
-      previewPayloadRef.current = frozen;
+      const frozen = { ...payload };
+      delete frozen.stepUpToken;
+      previewPayloadRef.current = { ...frozen, approvalHash: data.preview.approvalHash };
       setPreviewResult(data.preview);
       setPreviewVisible(true);
     } catch {
@@ -670,27 +688,38 @@ export default function PricingAdjustmentsPage() {
     }
   }
 
-  async function applyAdjustment(token?: string, allowMfaStepUp = true) {
+  async function applyAdjustment(token?: string, allowMfaStepUp = true, expectedApprovalHash?: unknown) {
     const frozen = previewPayloadRef.current;
     if (!previewResult || !frozen || previewLoading || (applyLoading && allowMfaStepUp)) return;
+    if (expectedApprovalHash && frozen.approvalHash !== expectedApprovalHash) {
+      setPreviewError('验证期间预览已变化，请核对当前预览后重新确认');
+      return;
+    }
+    const stillCurrent = () => mounted.current && previewPayloadRef.current === frozen;
     setApplyLoading(true);
     setApplyMessage('');
     setPreviewError('');
     try {
-      const response = await fetch('/api/admin/pricing-adjustments/apply', {
+      const response = token ? await resumeConfirmedPricingApplication(frozen, token, stillCurrent) : await fetch('/api/admin/pricing-adjustments/apply', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ...frozen, ...(token ? { stepUpToken: token } : {}) }),
       });
+      if (!response) return;
       const data = await response.json().catch(() => ({})) as { error?: string; result?: PreviewResult & { updatedCount: number } };
+      if (!stillCurrent()) return;
       if (allowMfaStepUp && isAdminMfaStepUpResponse(response.status, data.error)) {
         await beginMfaStepUp(async (grantToken) => {
-          await applyAdjustment(grantToken, false);
+          await applyAdjustment(grantToken, false, frozen.approvalHash);
         });
         return;
       }
       if (!response.ok) {
         setPreviewError(pricingActionError(data.error, '执行调价失败'));
+        return;
+      }
+      if (!data.result || data.result.approvalHash !== frozen.approvalHash || typeof data.result.updatedCount !== 'number') {
+        setPreviewError('未取得本次预览的执行结果，请核对后再操作');
         return;
       }
       const updatedCount = data.result?.updatedCount ?? 0;
@@ -704,13 +733,13 @@ export default function PricingAdjustmentsPage() {
         setAppliedCatalogKeys((current) => [...new Set([...current, ...writtenKeys])]);
       }
       setPreviewResult(data.result ?? previewResult);
-      setApplyMessage(updatedCount > 0
+      setApplyMessage(data.result.recovered ? '已核实此前调价成功，本次没有重复改写价格。' : updatedCount > 0
         ? `已更新 ${updatedCount.toLocaleString('zh-CN')} 条价格${skippedUnchanged > 0 ? `，另有 ${skippedUnchanged.toLocaleString('zh-CN')} 条匹配后价格未变` : ''}`
         : '价格已与本次预览一致，没有需要改写的条目。');
-    } catch {
-      setPreviewError('执行调价失败，请稍后重试');
+    } catch (cause) {
+      if (stillCurrent()) setPreviewError(cause instanceof Error ? cause.message : '执行调价失败，请稍后重试');
     } finally {
-      setApplyLoading(false);
+      if (mounted.current) setApplyLoading(false);
     }
   }
 
@@ -1184,6 +1213,7 @@ export default function PricingAdjustmentsPage() {
         </div>
       </section>
 
+      <BrandDefaultDiscountForm key={selectedBrand} brand={selectedBrand} />
       <section className={`rounded-xl ${uiSurfaces.panel}`}>
         <div className="border-b border-gray-100 px-4 py-4 sm:px-5">
           <div className="flex items-center gap-3">
@@ -1414,7 +1444,13 @@ export default function PricingAdjustmentsPage() {
                     {reviewRows.length > 0 ? '下方待审核货号确认后，再生成预览并执行，即可完成整批调价。' : '调整范围或规则后请重新预览。'}
                   </p>
                 ) : (previewResult.changeCount ?? 0) > 0 ? (
-                  <p className="text-xs text-gray-500">将写入 {previewResult.changeCount.toLocaleString('zh-CN')} 条价格。</p>
+                  <div className="space-y-1 text-xs text-gray-500">
+                    <p>将写入 {previewResult.changeCount.toLocaleString('zh-CN')} 条价格。</p>
+                    {previewResult.approvalHash && <PricingAdjustmentDetails key={previewResult.approvalHash} approvalHash={previewResult.approvalHash} />}
+                    {previewResult.quoteImpact && (
+                      <p>将核对 {previewResult.quoteImpact.quoteCount} 份报价、{previewResult.quoteImpact.pendingOrderCount} 笔待接受订单；价格变化的报价会重新核算并进入报价审核。Libereal 已接受订单保留原价。</p>
+                    )}
+                  </div>
                 ) : previewResult.skippedUnchangedCount > 0 && previewResult.matchedCount > 0 ? (
                   <p className="text-xs text-gray-500">库中价格已与本次规则一致。确认执行后价格保持当前值。</p>
                 ) : (
@@ -1423,6 +1459,12 @@ export default function PricingAdjustmentsPage() {
                       ? `当前范围 ${previewResult.skippedInquiryCount.toLocaleString('zh-CN')} 条都是询价商品，没有公开售价，不能按比例或金额调整。如需写入公开售价，请把调价方式改为「设置统一价格」。`
                       : `当前范围内没有可更新的价格，已跳过询价 ${previewResult.skippedInquiryCount.toLocaleString('zh-CN')} 条、未变化 ${previewResult.skippedUnchangedCount.toLocaleString('zh-CN')} 条。`}
                   </p>
+                )}
+                {previewResult.repricedQuotes && previewResult.repricedQuotes.length > 0 && (
+                  <div className="space-y-1 text-sm">
+                    <p>已重新核算 {previewResult.repricedQuotes.length} 份报价，待审核后发送。</p>
+                    <a className="underline" href="/admin/inquiries">查看待审核报价</a>
+                  </div>
                 )}
                 <button
                   type="button"

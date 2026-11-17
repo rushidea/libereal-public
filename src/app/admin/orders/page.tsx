@@ -8,6 +8,7 @@ import {
   Plus, Check, Clock, ClipboardList, Wallet,
 } from 'lucide-react';
 import ProductSearchOverlayForOrder from '@/components/admin/ProductSearchOverlayForOrder';
+import { CatalogRepricingFinance } from '@/components/admin/CatalogRepricingFinance';
 import { adminPermissionErrorMessage } from '@/data/admin-permission-message';
 import { isPostDeliveryPaymentMethod, normalizeOrderPaymentMethod, ORDER_PAYMENT_METHODS } from '@/data/payment-methods';
 import { orderStatusRequiresFinanceWrite } from '@/lib/order-finance-access';
@@ -48,9 +49,11 @@ interface Order {
   pointsRefundedPersonal?: number;
   pointsRefundedGroup?: number;
   detailLoaded?: boolean;
+  pendingCatalogRepricing?: { inquiryId: string; quoteId: string; orderId: string; proposalHash: string } | null;
 }
 
 interface OrderItem {
+  customerSupplyConditions?: string | null;
   id?: string;
   productId?: string;
   isQuickOrder?: boolean;
@@ -159,6 +162,7 @@ function withdrawOrderErrorMessage(error: unknown, orderId: unknown): string {
 }
 
 function withOrderDetail(summary: Order, detail: {
+  pendingCatalogRepricing?: Order['pendingCatalogRepricing'];
   items?: OrderItem[];
   events?: Order['events'];
   shipments?: Order['shipments'];
@@ -197,6 +201,7 @@ function withOrderDetail(summary: Order, detail: {
     events: detail.events ?? [],
     shipments: detail.shipments ?? [],
     payment: detail.payment === undefined ? summary.payment : detail.payment,
+    pendingCatalogRepricing: detail.pendingCatalogRepricing ?? null,
     name: detail.addressSnapshot?.name || summary.name,
     phone: detail.addressSnapshot?.phone || summary.phone,
     institution: detail.addressSnapshot?.institution || summary.institution,
@@ -1042,6 +1047,13 @@ function OrderDetailPanel({
         )}
       </div>
       {order.payment && <AlipayPaymentStatusView payment={order.payment} showReferences />}
+      {order.pendingCatalogRepricing && <section className="space-y-2 rounded-lg border border-amber-200 bg-amber-50 p-3">
+        <h3 className="font-medium">目录调价后的订单复核</h3>
+        <p className="text-sm">本订单尚未由 Libereal 接受，价格复核仍在处理中。客户回复由询价工作人员登记。</p>
+        {permissions?.includes('finance.write')
+          ? <CatalogRepricingFinance key={order.pendingCatalogRepricing.proposalHash} {...order.pendingCatalogRepricing} onRecorded={fetchData} />
+          : <p className="text-sm">需要财务核对的订单，由财务人员在此接续。</p>}
+      </section>}
       {((order.pointsPersonal || 0) > 0 || (order.pointsGroup || 0) > 0) && (
         <div className="rounded-lg border border-gray-200 bg-white p-3 space-y-2">
           <p className="text-xs text-gray-600">积分抵扣</p>
@@ -1205,6 +1217,7 @@ function OrderDetailPanel({
                           className="text-sm px-2 py-1 border border-gray-200 rounded w-full text-gray-900" />
                       </div>
                     </div>
+                    {item.customerSupplyConditions && <p className="mt-2 text-sm text-gray-700">供货条件：{item.customerSupplyConditions}</p>}
                     <div className="mt-2 text-right"><p className="text-xs text-gray-600">小计 {formatPrice((item.price || 0) * (item.quantity || 1))}</p></div>
                   </div>
                 );

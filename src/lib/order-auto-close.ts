@@ -8,6 +8,7 @@
 
 import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
+import { closeOrderRepricing } from '@/lib/order-catalog-repricing';
 import { releaseOrderReceivableOnCancellation } from '@/lib/customer-credit';
 import { restoreRedeemedOrderCoupons } from '@/lib/coupon-service';
 import { releaseOrderInventory } from '@/lib/inventory';
@@ -236,6 +237,7 @@ export async function closeStalePendingOrders(now = new Date(), batchLimit = 100
           },
         });
 
+        await closeOrderRepricing(tx, order.id, { id: null, email: 'system' });
         if (isPostDeliveryPaymentMethod(order.paymentMethod)) await releaseOrderReceivableOnCancellation(tx, order.id, null);
         await releaseOrderInventory(tx, order.id, null, '超时未付款自动关闭释放库存');
         await restoreRedeemedOrderCoupons(tx, order.id);

@@ -16,6 +16,7 @@ type OrderItem = {
   quantity?: number;
   shippedQty?: number;
   leadTime?: string;
+  customerSupplyConditions?: string | null;
   status?: string;
 };
 
@@ -248,6 +249,7 @@ export default function OrdersPanel() {
                                       <div>
                                         <p className={`mb-1 text-xs ${uiSurfaces.textQuaternary}`}>货期</p>
                                         <p className={`text-xs font-medium ${uiSurfaces.textSecondary}`}>{item.leadTime || '-'}</p>
+                                        {item.customerSupplyConditions && <p className="text-xs text-gray-600">{item.customerSupplyConditions}</p>}
                                       </div>
                                     </div>
                                     <div className="mt-2 text-right">

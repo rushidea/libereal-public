@@ -1149,6 +1149,25 @@ model ProductVariant {
   @@index([source])
 }
 
+model BusinessLetterContact {
+  id String @id
+  companyName String
+  contactName String
+  salutation String @default("")
+  email String @default("")
+  phone String @default("")
+  qq String @default("")
+  brandIds String @default("[]")
+  notes String @default("")
+  sourceReference String @default("")
+  enabled Int @default(0)
+  revision Int @default(1)
+  updatedAt String
+  updatedBy String
+
+  @@index([companyName, contactName])
+}
+
 model Brand {
   id          String    @id @default(cuid())
   name        String    @unique
@@ -1158,6 +1177,8 @@ model Brand {
   logoUrl     String?
   isActive    Boolean   @default(true)
   sortOrder   Int       @default(0)
+  defaultDiscountRate Float? // 本品牌全店默认折扣；null 表示尚未确认，不从客户历史单值推断
+  supplierQuoteRequiredAbove Float? // 单个销售包装目录价超过此金额时，先核验供应商书面询价回复
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
   products    Product[]
@@ -1564,6 +1585,39 @@ model SystemSettings {
   organizationCreationEnabled Boolean @default(false) // 是否开放用户创建组织
   createdAt           DateTime @default(now())
   updatedAt           DateTime @updatedAt
+}
+
+model BusinessLetterTemplate {
+  id String @id
+  name String
+  subject String
+  body String
+  enabled Int @default(0)
+  revision Int @default(1)
+  updatedAt String
+  drafts BusinessLetterDraft[]
+}
+
+model BusinessLetterDraft {
+  id String @id
+  templateId String
+  templateRevision Int
+  businessReference String
+  snapshot String
+  approvalHash String @unique
+  // Partial unique sending/terminal index is maintained in the SQL migration.
+  deliveryKey String
+  status String @default("draft")
+  origin String
+  createdBy String
+  approvedBy String?
+  approvedAt String?
+  result String?
+  createdAt String
+  updatedAt String
+  template BusinessLetterTemplate @relation(fields: [templateId], references: [id], onDelete: Restrict)
+
+  @@index([createdAt])
 }
 
 model OrganizationCreationGrant {

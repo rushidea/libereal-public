@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { Mail, MessageSquare, ShieldCheck, X } from 'lucide-react';
 import { uiSurfaces } from '@/lib/ui-surfaces';
 
-type StepUpMethod = 'totp' | 'sms' | 'email';
+type StepUpMethod = 'totp' | 'sms' | 'email' | 'staging_test';
 type StepUpAction = 'password_change' | 'password_setup' | 'passkey_add' | 'passkey_delete' | 'mfa_disable' | 'recovery_codes' | 'security_session_revoke' | 'security_device_remove' | 'admin_mfa_policy' | 'admin_sensitive' | 'organization_permissions';
 
 type Props = {
@@ -32,7 +32,7 @@ export default function SecurityStepUpDialog({ open, action, title, description,
     setCode('');
     setError('');
     setAvailability(null);
-    void fetch('/api/auth/security/step-up', { cache: 'no-store' })
+    void fetch(`/api/auth/security/step-up?action=${encodeURIComponent(action)}`, { cache: 'no-store' })
       .then(async (response) => {
         const data = await response.json().catch(() => null) as Availability & { error?: string } | null;
         if (!response.ok) throw new Error(data?.error || '可用的验证方式暂时无法读取');
@@ -42,11 +42,11 @@ export default function SecurityStepUpDialog({ open, action, title, description,
         if (preferredMethod) setMethod(preferredMethod);
       })
       .catch((reason: unknown) => setError(reason instanceof Error ? reason.message : '可用的验证方式暂时无法读取'));
-  }, [open]);
+  }, [open, action]);
 
   if (!open) return null;
 
-  const methodLabel = method === 'totp' ? '验证器应用中的验证码' : method === 'sms' ? '短信验证码' : '邮箱验证码';
+  const methodLabel = method === 'staging_test' ? '固定测试口令' : method === 'totp' ? '验证器应用中的验证码' : method === 'sms' ? '短信验证码' : '邮箱验证码';
   const safeMethods = availability?.methods ?? [];
   const begin = async () => {
     setWorking(true);
@@ -81,7 +81,10 @@ export default function SecurityStepUpDialog({ open, action, title, description,
         body: JSON.stringify({ action, method, challengeId, code }),
       });
       const data = await response.json().catch(() => null) as { grantToken?: string; error?: string } | null;
-      if (!response.ok || !data?.grantToken) throw new Error(data?.error || '身份验证失败');
+      if (!response.ok || !data?.grantToken) {
+        if (response.status === 410 || response.status === 429) { setChallengeId(''); setCode(''); }
+        throw new Error(data?.error || '身份验证失败');
+      }
       onVerified(data.grantToken);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : '身份验证失败');
@@ -109,13 +112,14 @@ export default function SecurityStepUpDialog({ open, action, title, description,
               <div className="mt-2 grid grid-cols-3 gap-2">
                 {safeMethods.map((item) => (
                   <button key={item} type="button" onClick={() => { setMethod(item); setChallengeId(''); setCode(''); setError(''); }} className={`inline-flex min-h-11 items-center justify-center gap-1 rounded-xl border px-2 py-2 text-xs font-medium ${method === item ? 'border-brand-500 bg-brand-50 text-brand-700' : 'border-[var(--brand-color-border)] bg-transparent text-[var(--brand-color-text-secondary)]'}`}>
-                    {item === 'totp' ? <ShieldCheck size={15} /> : item === 'sms' ? <MessageSquare size={15} /> : <Mail size={15} />}{item === 'totp' ? '验证器应用' : item === 'sms' ? '手机短信' : '邮箱验证码'}
+                    {item === 'totp' || item === 'staging_test' ? <ShieldCheck size={15} /> : item === 'sms' ? <MessageSquare size={15} /> : <Mail size={15} />}{item === 'staging_test' ? '测试口令' : item === 'totp' ? '验证器应用' : item === 'sms' ? '手机短信' : '邮箱验证码'}
                   </button>
                 ))}
               </div>
               {method === 'totp' && <p className={`mt-2 text-xs ${uiSurfaces.textSecondary}`}>建议优先使用验证器应用。</p>}
+              {method === 'staging_test' && <p className={`mt-2 text-xs ${uiSurfaces.textSecondary}`}>当前为测试环境，使用固定测试口令，不发送短信或邮件。业务审批要求不变。</p>}
               {!challengeId ? (
-                <button type="button" onClick={() => void begin()} disabled={working} className={`mt-5 w-full ${uiSurfaces.primaryButton} disabled:opacity-60`}>{working ? '准备中…' : method === 'totp' ? '开始验证' : `发送${methodLabel}`}</button>
+                <button type="button" onClick={() => void begin()} disabled={working} className={`mt-5 w-full ${uiSurfaces.primaryButton} disabled:opacity-60`}>{working ? '准备中…' : method === 'totp' || method === 'staging_test' ? '开始验证' : `发送${methodLabel}`}</button>
               ) : (
                 <>
                   <label htmlFor="security-step-up-code" className={`mt-5 block text-sm font-semibold ${uiSurfaces.titleText}`}>{methodLabel}</label>

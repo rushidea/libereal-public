@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import { assertOrderPricingResolved, closeOrderRepricing } from '@/lib/order-catalog-repricing';
 import { requireActiveSession, requireAdmin } from '@/lib/session';
 import type { Prisma } from '@prisma/client';
 import { orderItemView, toOrderItemCreates } from '@/lib/commerce-records';
@@ -171,6 +172,7 @@ export async function PATCH(
     }
 
     let confirmedLineWarnings: CommerceLineFinding[] = [];
+    let prospectiveItems: Prisma.OrderItemCreateWithoutOrderInput[] | undefined;
     const normalizedEffectivePaymentMethod = normalizeOrderPaymentMethod(effectivePaymentMethod);
     if (body.status === 'confirmed' && normalizedEffectivePaymentMethod === 'alipay' && !order.paidAt) {
       return NextResponse.json({ error: 'ALIPAY_PAYMENT_REQUIRED' }, { status: 409 });
@@ -207,9 +209,10 @@ export async function PATCH(
         const quantity = typeof item.quantity === 'number' ? item.quantity : Number(item.quantity);
         return { ...item, price, quantity };
       });
+      prospectiveItems = toOrderItemCreates(pricedItems);
       updateData.orderItems = {
         deleteMany: {},
-        create: toOrderItemCreates(pricedItems),
+        create: prospectiveItems,
       };
       try {
         const amounts = calculateOrderAmounts(
@@ -227,6 +230,7 @@ export async function PATCH(
 
     if (Object.keys(updateData).length > 0) {
       await prisma.$transaction(async (tx) => {
+        if (body.status === 'confirmed' || body.items !== undefined) await assertOrderPricingResolved(tx, id, prospectiveItems);
         if (body.status === 'cancelled') {
           // Claim cancellation before any history or resource releases. The payment
           // callback competes on the same row, so a stale unpaid snapshot cannot win.
@@ -284,6 +288,7 @@ export async function PATCH(
           await reserveOrderInventory(tx, id, user.id);
         }
         if (isInactiveOrderStatus(body.status) && !isInactiveOrderStatus(order.status)) {
+          await closeOrderRepricing(tx, id, { id: user.id, email: user.email });
           if (isPostDeliveryPaymentMethod(effectivePaymentMethod)) await releaseOrderReceivableOnCancellation(tx, id, user.id);
           await releaseOrderInventory(tx, id, user.id);
           await restoreRedeemedOrderCoupons(tx, id);
@@ -339,6 +344,7 @@ export async function PATCH(
   } catch (err) {
     console.error('[order PATCH] error:', err);
     const message = err instanceof Error ? err.message : '';
+    if (message === 'QUOTE_REPRICE_REQUIRED') return NextResponse.json({ error: '商品价格已变化，请先完成原订单价格复核', code: message }, { status: 409 });
     if (message === POINTS_REFUND_FAILED) {
       return NextResponse.json({ error: POINTS_REFUND_FAILED }, { status: 409 });
     }

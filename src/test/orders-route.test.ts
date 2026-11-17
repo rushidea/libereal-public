@@ -4,6 +4,7 @@ const mocks = vi.hoisted(() => ({
   auth: vi.fn(),
   verifyAndPriceItems: vi.fn(),
   revalidateReferencePriceEvidence: vi.fn(),
+  assertBrandDiscountPricesCurrent: vi.fn(),
   capturePromoLines: vi.fn(),
   userFindUnique: vi.fn(),
   orderFindFirst: vi.fn(),
@@ -39,6 +40,7 @@ vi.mock('@/lib/pricing', async (importOriginal) => {
     ...actual,
     verifyAndPriceItems: mocks.verifyAndPriceItems,
     revalidateReferencePriceEvidence: mocks.revalidateReferencePriceEvidence,
+    assertBrandDiscountPricesCurrent: mocks.assertBrandDiscountPricesCurrent,
   };
 });
 vi.mock('@/lib/prisma', () => ({
@@ -156,6 +158,15 @@ describe('POST /api/orders', () => {
     expect(mocks.revalidateReferencePriceEvidence).toHaveBeenCalledWith(
       expect.anything(), [priced.verifiedItems[0].promotionPricingEvidence], expect.any(Date),
     );
+  });
+  it('rejects a changed brand/customer policy before creating the order', async () => {
+    mocks.assertBrandDiscountPricesCurrent.mockRejectedValueOnce(new Error('BRAND_DISCOUNT_PRICE_DRIFT'));
+    const response = await POST(request({
+      items: [{ productId: 'product-1', name: '测试产品', price: 100, quantity: 1 }],
+      paymentMethod: 'bank_transfer', acceptedLegalIds: ['checkout-terms'],
+    }) as never);
+    expect(response.status).toBe(409);
+    expect(mocks.orderCreate).not.toHaveBeenCalled();
   });
   it('rejects a no-coupon order when reference-price evidence drifts in the transaction', async () => {
     const priced = {
@@ -285,6 +296,7 @@ describe('POST /api/orders', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.revalidateReferencePriceEvidence.mockResolvedValue(true);
+    mocks.assertBrandDiscountPricesCurrent.mockResolvedValue(undefined);
     mocks.auth.mockResolvedValue({ user: { id: 'user-1', email: 'buyer@example.com', role: 'customer', sessionId: 'session-1' } });
     mocks.requireActiveSession.mockResolvedValue({ id: 'user-1', email: 'buyer@example.com', role: 'customer', sessionId: 'session-1' });
     mocks.userFindUnique.mockResolvedValue({

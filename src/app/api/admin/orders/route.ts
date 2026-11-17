@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import type { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { AMBIGUOUS_PRODUCT_CATALOG_NUMBER, CustomerUnavailableProductError, verifyAndPriceItems, type PriceLookupItem } from '@/lib/pricing';
+import { assertBrandDiscountPricesCurrent, discountPricingFailure } from '@/lib/pricing';
 import { toOrderItemCreates } from '@/lib/commerce-records';
 import {
   assertVariantCheckoutStock,
@@ -319,6 +320,9 @@ export async function POST(req: NextRequest) {
 
     const orderStatus = initialOrderStatus(normalizedPaymentMethod);
     const order = await withAllocatedOrderNumber(prisma, async (tx, orderId) => {
+      await assertBrandDiscountPricesCurrent(tx, verifiedItems, {
+        customerEmail: customer?.email ?? normalizedCustomerEmail, manualAdjustments, allowManualAdjustment: true, allowHazardousProducts: true,
+      });
       await assertVariantCheckoutStock(tx, orderItems.map((item) => ({
         productId: item.productId,
         quantity: item.quantity,
@@ -394,6 +398,8 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ order, orderId: order.id, warnings });
   } catch (err) {
+    const discountError = discountPricingFailure(err);
+    if (discountError) return NextResponse.json({ error: discountError }, { status: 409 });
     if (err instanceof Error && (err.message === 'INVALID_FALLBACK_PRICE' || err.message === 'INVALID_PRICE_ADJUSTMENT')) {
       return NextResponse.json({ error: '单价必须是有限、非负、最多两位小数的数字' }, { status: 400 });
     }

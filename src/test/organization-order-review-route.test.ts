@@ -7,6 +7,8 @@ const mocks = vi.hoisted(() => ({
   requireOrganizationPermission: vi.fn(),
   orderFindUnique: vi.fn(),
   orderUpdate: vi.fn(),
+  orderEventFindMany: vi.fn(),
+  backgroundTaskFindUnique: vi.fn(),
   notificationCreate: vi.fn(),
   userUpdate: vi.fn(),
   assertOrderTransition: vi.fn(),
@@ -32,7 +34,11 @@ vi.mock('@/lib/prisma', () => ({
     order: { findUnique: mocks.orderFindUnique },
     notification: { create: mocks.notificationCreate },
     user: { update: mocks.userUpdate },
-    $transaction: async (callback: (tx: unknown) => Promise<unknown>) => callback({ order: { update: mocks.orderUpdate } }),
+    $transaction: async (callback: (tx: unknown) => Promise<unknown>) => callback({
+      order: { findUnique: mocks.orderFindUnique, update: mocks.orderUpdate },
+      orderEvent: { findMany: mocks.orderEventFindMany },
+      backgroundTask: { findUnique: mocks.backgroundTaskFindUnique },
+    }),
   },
 }));
 vi.mock('@/lib/order-domain', async (importOriginal) => ({
@@ -89,9 +95,12 @@ describe('organization order review permission', () => {
       pointsDiscount: 0,
       inquiryId: null,
       adjustments: [],
+      orderItems: [],
       paymentAttempts: [],
     });
     mocks.orderUpdate.mockResolvedValue({ id: 'org-order-1', status: 'confirmed' });
+    mocks.orderEventFindMany.mockResolvedValue([]);
+    mocks.backgroundTaskFindUnique.mockResolvedValue(null);
     mocks.notificationCreate.mockResolvedValue({});
   });
 
@@ -109,6 +118,14 @@ describe('organization order review permission', () => {
     const response = await PATCH(request({ status: 'confirmed' }), { params: Promise.resolve({ id: 'org-order-1' }) });
 
     expect(response.status).toBe(403);
+    expect(mocks.orderUpdate).not.toHaveBeenCalled();
+  });
+
+  it('keeps an unresolved price change from being confirmed even by an authorized reviewer', async () => {
+    mocks.orderEventFindMany.mockResolvedValue([{ metadata: JSON.stringify({ quoteId: 'quote-new', quoteVersion: 2 }) }]);
+    const response = await PATCH(request({ status: 'confirmed' }), { params: Promise.resolve({ id: 'org-order-1' }) });
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual(expect.objectContaining({ code: 'QUOTE_REPRICE_REQUIRED' }));
     expect(mocks.orderUpdate).not.toHaveBeenCalled();
   });
 });

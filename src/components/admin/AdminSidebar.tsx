@@ -20,6 +20,7 @@ interface NavItem {
   icon: React.ComponentType<{ className?: string }>;
   exact?: boolean;
   permission: AdminPermissionKey;
+  alternativePermission?: AdminPermissionKey;
 }
 
 interface NavSection {
@@ -76,6 +77,7 @@ const NAV_SECTIONS: NavSection[] = [
     title: '内容与合规',
     items: [
       { href: '/admin/notifications', label: '消息管理', icon: Megaphone, permission: 'content.read' },
+      { href: '/admin/business-letters', label: '商务信函', icon: Receipt, permission: 'inquiries.read', alternativePermission: 'content.read' },
       { href: '/admin/wechat-articles', label: '服务号文章', icon: Newspaper, permission: 'content.read' },
       { href: '/admin/legal', label: '文书管理', icon: Scale, permission: 'content.read' },
     ],
@@ -133,7 +135,7 @@ export default function AdminSidebar({ collapsed = false }: AdminSidebarProps) {
   const [todoCounts, setTodoCounts] = useState<TodoCounts>({ orders: 0, inquiries: 0, users: 0, community: 0, organizations: 0 });
   const visibleSections = NAV_SECTIONS.map((section) => ({
     ...section,
-    items: section.items.filter((item) => (permissions ? permissions.includes(item.permission) : item.permission === 'admin.access')),
+    items: section.items.filter((item) => (permissions ? permissions.includes(item.permission) || Boolean(item.alternativePermission && permissions.includes(item.alternativePermission)) : item.permission === 'admin.access')),
   })).filter((section) => section.items.length > 0);
   const mobileItems = visibleSections.flatMap(section => section.items);
   const preferredMobileHrefs = ['/admin', '/admin/orders', '/admin/inquiries', '/admin/users'];

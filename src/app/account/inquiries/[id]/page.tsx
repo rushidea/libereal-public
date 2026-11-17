@@ -285,7 +285,7 @@ export default function InquiryDetailPage({ params }: { params: Promise<{ id: st
                   <div className="flex justify-between items-start border-b border-gray-50 dark:border-slate-400 pb-2">
                     <span className="text-gray-500 dark:text-gray-400">报价发送</span>
                     <span className="text-brand-600 dark:text-brand-500 text-right font-medium">
-                      {inquiry.activeQuote.sentAt ? new Date(inquiry.activeQuote.sentAt).toLocaleString('zh-CN') : '是'}
+                      {inquiry.activeQuote.sentAt ? new Date(inquiry.activeQuote.sentAt).toLocaleString('zh-CN') : '未记录发送时间'}
                     </span>
                   </div>
                 )}

@@ -56,7 +56,9 @@ export async function GET() {
         take: 100,
         include: {
           inquiryItems: { orderBy: { position: 'asc' } },
-          quotes: { orderBy: { version: 'desc' }, take: 1, include: { items: { orderBy: { position: 'asc' } } } },
+          quotes: { where: { OR: [
+            { sentAt: { not: null } }, { status: { in: ['sent', 'accepted', 'expired', 'declined'] } },
+          ] }, orderBy: { version: 'desc' }, take: 1, include: { items: { orderBy: { position: 'asc' } } } },
         },
       }),
       prisma.order.findMany({

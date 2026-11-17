@@ -26,6 +26,8 @@ import {
 import { acceptanceQuantityError, lineTotalForAcceptedQuantity, quoteLineFulfillment, requestedQuantityFromBody, validateAcceptedQuantity } from '@/lib/quote-acceptance';
 import { quoteIsExpired, quoteValidUntilPassed } from '@/lib/quote-expiry';
 import { settleExpiredQuotes } from '@/lib/quote-expiry-settle';
+import { assertBrandDiscountPricesCurrent, discountPricingFailure } from '@/lib/pricing';
+import { jsonObject } from '@/lib/order-catalog-repricing';
 
 class InquiryAcceptRejected extends Error {
   code: 'INQUIRY_DECLINED' | 'INQUIRY_CLOSED' | 'INQUIRY_ARCHIVED' | 'INQUIRY_NOT_ACCEPTABLE';
@@ -144,6 +146,9 @@ export async function POST(
     }
 
     const quote = inquiry.quotes[0];
+    if (inquiry.hasUnresolvedPricing) {
+      return NextResponse.json({ error: '商品价格已变化，报价正在重新核算，请等待更新后的报价', code: 'QUOTE_REPRICE_REQUIRED' }, { status: 409 });
+    }
     if (!quote) {
       return NextResponse.json({ error: 'Quote not sent yet' }, { status: 400 });
     }
@@ -255,6 +260,14 @@ export async function POST(
           ? inquiryQuoteAcceptBlock(currentInquiry)
           : { code: 'INQUIRY_NOT_ACCEPTABLE' as const, error: '当前询价不能确认报价' };
         if (blocked) throw new InquiryAcceptRejected(blocked.code, blocked.error);
+        await assertBrandDiscountPricesCurrent(tx, accepted.map(acceptedLine => {
+          const line = current.items.find(item => item.id === acceptedLine.quoteItemId)!;
+          const snapshot = jsonObject(line.pricingSnapshot);
+          return { productId: line.productId, catalogNumber: line.catalogNumber, name: line.name,
+            unitPrice: line.unitPrice, quantity: acceptedLine.quantity, lineTotal: line.unitPrice * acceptedLine.quantity,
+            pricingSnapshot: line.pricingSnapshot ?? '{}', source: 'db' as const, priceMismatch: false, leadTime: line.leadTime,
+            variantId: typeof snapshot.variantId === 'string' ? snapshot.variantId : null };
+        }), { inquiryId: id, userId: inquiry.userId, customerEmail: inquiry.email });
         if (settled?.pointsBreakdown && pointsUserId) {
           await assertCheckoutPointsAvailable(tx, pointsUserId, settled.amountsBeforePoints.total, settled.intent);
         }
@@ -375,6 +388,8 @@ export async function POST(
         allOrdered,
       });
     } catch (e) {
+      const discountError = discountPricingFailure(e);
+      if (discountError) return NextResponse.json({ error: discountError, code: 'QUOTE_VERSION_CONFLICT' }, { status: 409 });
       if (isVariantStockInsufficientError(e)) {
         return NextResponse.json({ error: VARIANT_STOCK_INSUFFICIENT_MESSAGE, code: VARIANT_STOCK_INSUFFICIENT }, { status: 400 });
       }

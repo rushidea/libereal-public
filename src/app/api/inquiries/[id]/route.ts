@@ -41,7 +41,9 @@ export async function GET(
     where: { id },
     include: {
       inquiryItems: { orderBy: { position: 'asc' } },
-      quotes: { orderBy: { version: 'desc' }, take: 1, include: { items: { orderBy: { position: 'asc' } } } },
+      quotes: { ...(user.role === 'admin' ? {} : { where: { OR: [
+        { sentAt: { not: null } }, { status: { in: ['sent', 'accepted', 'expired', 'declined'] } },
+      ] } }), orderBy: { version: 'desc' }, take: 1, include: { items: { orderBy: { position: 'asc' } } } },
     },
   });
   if (!inquiry) return NextResponse.json({ error: 'Inquiry not found' }, { status: 404 });

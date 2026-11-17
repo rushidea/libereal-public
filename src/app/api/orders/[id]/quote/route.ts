@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import { assertOrderPricingResolved } from '@/lib/order-catalog-repricing';
 import { requireAdmin } from '@/lib/session';
 import { enqueueBackgroundTask } from '@/lib/background-tasks';
 import { reserveOrderCredit } from '@/lib/customer-credit';
@@ -13,6 +14,7 @@ import {
 } from '@/lib/order-domain';
 
 const CONFIRMATION_CONFLICTS = [
+  'QUOTE_REPRICE_REQUIRED',
   'CREDIT_LIMIT_EXCEEDED',
   'CREDIT_ACCOUNT_SUSPENDED',
   'CREDIT_USER_NOT_FOUND',
@@ -54,6 +56,7 @@ export async function POST(
     }
 
     await prisma.$transaction(async (tx) => {
+      await assertOrderPricingResolved(tx, id);
       const claimed = await tx.order.updateMany({
         where: { id, status: order.status },
         data: {
