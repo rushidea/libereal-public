@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { ListTodo, RefreshCw, RotateCcw } from 'lucide-react';
 import AiOpsPanel from './AiOpsPanel';
+import { getCloudMailUrl } from '@/lib/cloud-mail';
 
 type Task = {
   id: string;
@@ -16,6 +17,9 @@ type Task = {
   completedAt?: string | null;
   createdAt: string;
   inquiryId?: string | null;
+  mailEmailId?: number | null;
+  mailConflict?: boolean;
+  mailReviewVersion?: string | null;
 };
 
 type TaskResponse = {
@@ -41,6 +45,10 @@ const STATUS_CLASSES: Record<string, string> = {
   running: 'bg-blue-50 text-blue-700',
   succeeded: 'bg-emerald-50 text-emerald-700',
   failed: 'bg-red-50 text-red-700',
+};
+const TASK_LABELS: Record<string, string> = {
+  'inquiry.supplier_written_quote': '供应商书面询价',
+  'inquiry.supplier_mail_headers': '邮件待核对',
 };
 
 export default function AdminTasksPage() {
@@ -71,18 +79,24 @@ export default function AdminTasksPage() {
 
   useEffect(() => { const timer = setTimeout(() => { void load(); }, 0); return () => clearTimeout(timer); }, [load]);
 
-  const retry = async (id: string) => {
+  const updateTask = async (id: string, action: 'retry' | 'acknowledge_supplier_mail', mailReviewVersion?: string) => {
     setRetrying(id);
     try {
       const response = await fetch('/api/admin/tasks', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id, action: 'retry' }),
+        body: JSON.stringify({ id, action, mailReviewVersion }),
       });
-      if (!response.ok) throw new Error();
+      if (!response.ok) {
+        if (action === 'acknowledge_supplier_mail' && response.status === 409) {
+          setError('收件待办已变化，请刷新后重新核对。');
+          return;
+        }
+        throw new Error();
+      }
       await load();
     } catch {
-      setError('重新执行失败，请刷新核对任务状态。');
+      setError(action === 'retry' ? '重新执行失败，请刷新核对任务状态。' : '收件核对未关闭，请刷新或检查操作权限。');
     } finally {
       setRetrying('');
     }
@@ -106,7 +120,7 @@ export default function AdminTasksPage() {
       <div className="flex flex-wrap gap-3">
         <select value={type} onChange={(event) => { setType(event.target.value); setPage(1); }} className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700">
           <option value="">全部任务类型</option>
-          {data.types.map((item) => <option key={item} value={item}>{item === 'inquiry.supplier_written_quote' ? '供应商书面询价' : item}</option>)}
+          {data.types.map((item) => <option key={item} value={item}>{TASK_LABELS[item] || item}</option>)}
         </select>
       </div>
 
@@ -115,7 +129,21 @@ export default function AdminTasksPage() {
           <thead className="bg-gray-50 text-xs text-gray-500"><tr><th className="px-4 py-3">状态</th><th className="px-4 py-3">任务类型</th><th className="px-4 py-3">执行时间</th><th className="px-4 py-3">尝试次数</th><th className="px-4 py-3">最近错误</th><th className="px-4 py-3 text-right">操作</th></tr></thead>
           <tbody className="divide-y divide-gray-100">
             {!loading && data.tasks.length === 0 && <tr><td colSpan={6} className="px-4 py-12 text-center text-gray-500">暂无任务</td></tr>}
-            {data.tasks.filter((task) => task.type !== 'aiops.run' && !task.type.startsWith('aiops.control.')).map((task) => <tr key={task.id} className="align-top"><td className="px-4 py-3"><span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium ${STATUS_CLASSES[task.status] || 'bg-gray-100 text-gray-600'}`}>{STATUS_LABELS[task.status] || task.status}</span></td><td className="px-4 py-3 font-medium text-gray-900">{task.type === 'inquiry.supplier_written_quote' ? '供应商书面询价' : task.type}<span className="mt-1 block font-mono text-xs font-normal text-gray-400">{task.id}</span></td><td className="px-4 py-3 text-gray-600">{new Date(task.runAt).toLocaleString('zh-CN')}</td><td className="px-4 py-3 text-gray-600">{task.attempts} / {task.maxAttempts}</td><td className="max-w-md px-4 py-3 text-xs leading-5 text-red-600">{task.lastError || '—'}</td><td className="px-4 py-3 text-right">{task.inquiryId && <a href={`/admin/inquiries?inquiryId=${encodeURIComponent(task.inquiryId)}`} className="text-sm text-brand-700 underline">核对原询价</a>}{task.status === 'failed' && task.type !== 'inquiry.supplier_written_quote' && <button type="button" onClick={() => void retry(task.id)} disabled={retrying === task.id} className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 px-3 py-2 text-xs font-medium text-gray-700 hover:border-brand-300 hover:text-brand-700 disabled:opacity-50"><RotateCcw className="h-3.5 w-3.5" />重新执行</button>}</td></tr>)}
+            {data.tasks.filter((task) => task.type !== 'aiops.run' && !task.type.startsWith('aiops.control.')).map((task) => <tr key={task.id} className="align-top">
+              <td className="px-4 py-3"><span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium ${STATUS_CLASSES[task.status] || 'bg-gray-100 text-gray-600'}`}>{task.type === 'inquiry.supplier_mail_headers' && task.status === 'succeeded' ? '收件待办已关闭' : STATUS_LABELS[task.status] || task.status}</span></td>
+              <td className="px-4 py-3 font-medium text-gray-900">{TASK_LABELS[task.type] || task.type}<span className="mt-1 block break-all font-mono text-xs font-normal text-gray-500">{task.mailEmailId ? `邮件 #${task.mailEmailId}` : task.id}</span></td>
+              <td className="px-4 py-3 text-gray-600">{new Date(task.runAt).toLocaleString('zh-CN')}</td>
+              <td className="px-4 py-3 text-gray-600">{task.attempts} / {task.maxAttempts}</td>
+              <td className="max-w-md px-4 py-3 text-xs leading-5 text-red-600">{task.mailConflict ? '同一邮件编号的邮件头不同，须人工核对' : task.lastError || '—'}</td>
+              <td className="space-x-3 px-4 py-3 text-right">
+                {task.inquiryId && <a href={`/admin/inquiries?inquiryId=${encodeURIComponent(task.inquiryId)}`} className="text-sm text-brand-700 underline">核对原询价</a>}
+                {task.type === 'inquiry.supplier_mail_headers' && !task.inquiryId && <a href={getCloudMailUrl()} className="text-sm text-brand-700 underline">到邮箱人工核对</a>}
+                {task.type === 'inquiry.supplier_mail_headers' && task.mailReviewVersion && <button type="button"
+                  disabled={retrying === task.id} className="rounded border border-gray-300 px-2 py-1 text-xs text-gray-700 disabled:opacity-50"
+                  onClick={() => { if (confirm('确认已处理这条收件待办？此操作不会确认供应商回复或生成报价。')) void updateTask(task.id, 'acknowledge_supplier_mail', task.mailReviewVersion ?? undefined); }}>结束邮件核对</button>}
+                {task.status === 'failed' && !TASK_LABELS[task.type] && <button type="button" onClick={() => void updateTask(task.id, 'retry')} disabled={retrying === task.id} className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 px-3 py-2 text-xs font-medium text-gray-700 hover:border-brand-300 hover:text-brand-700 disabled:opacity-50"><RotateCcw className="h-3.5 w-3.5" />重新执行</button>}
+              </td>
+            </tr>)}
           </tbody>
         </table>
       </div>

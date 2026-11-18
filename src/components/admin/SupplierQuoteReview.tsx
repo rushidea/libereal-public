@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import type { SupplierQuoteReply } from '@/lib/supplier-quote-review';
+import { getCloudMailUrl } from '@/lib/cloud-mail';
 
 type Entry = {
   inquiryItemId: string; name: string; error?: string;
@@ -10,6 +11,8 @@ type Entry = {
   quantityChangeSource?: { quoteId: string; quoteHash: string } | null;
   reviewId?: string | null; requestHash?: string | null; status?: string; owner?: string | null;
   reply?: SupplierQuoteReply | null;
+  mailReceipts?: { receiptId: string; emailId: number; sender: string }[];
+  hasMoreMailReceipts?: boolean;
   continuation?: { status: string; reason: string; inquiryItemId: string } | unknown[] | null;
 };
 const statuses: Record<string, string> = {
@@ -115,6 +118,17 @@ function SupplierReplyForm({ entry, inquiryId, onSaved }: { entry: Entry; inquir
       </div>
     </details>}
     {entry.status === 'awaiting_human' && <>
+      {Boolean(entry.mailReceipts?.length) && <div className="space-y-2 border-t border-amber-200 pt-3 text-sm text-gray-800">
+        <p>已关联邮件头。请到邮箱核对原信；关联不代表供应商回复已确认。</p>
+        <ul className="space-y-2">
+          {entry.mailReceipts?.map(mail => <li key={mail.receiptId} className="flex flex-wrap items-center gap-x-3 gap-y-1">
+            <a className="break-all text-brand-700 underline" href={getCloudMailUrl()}>邮件 #{mail.emailId} · {mail.sender}</a>
+            <button type="button" className="rounded border border-gray-400 px-2 py-1 disabled:opacity-50" disabled={busy}
+              onClick={() => setForm(current => ({ ...current, channel: '邮件', reference: `Cloud Mail #${mail.emailId}` }))}>引用邮件编号</button>
+          </li>)}
+        </ul>
+        {entry.hasMoreMailReceipts && <Link className="text-brand-700 underline" href="/admin/tasks">还有收件，可在任务与通知中核对</Link>}
+      </div>}
       <details className="text-sm"><summary className="cursor-pointer font-medium">发函内容参考</summary>
         <p className="mt-2 whitespace-pre-wrap">请就 {scope.brand} {scope.catalogNumber}，数量 {scope.quantity} 包，提供书面报价和供货确认。请注明每包人民币金额、含税口径、运费及其他费用、有效期、实际货期和付款条件。本函仅为询价，不构成采购或付款承诺。</p>
       </details>

@@ -7,6 +7,13 @@ import type { Prisma } from '@prisma/client';
 import { prepareInitialSupplierQuoteDraft, repriceQuotesAfterCatalogChange } from '@/lib/quote-catalog-repricing';
 import { pricingContentHash } from '@/lib/pricing-adjustment-approval';
 import { jsonObject } from '@/lib/order-catalog-repricing';
+import { supplierMailHeadersForReview } from '@/lib/supplier-mail-headers';
+
+async function entriesForInquiry(inquiryId: string) {
+  const entries = await supplierQuoteReviewView(prisma, inquiryId);
+  return Promise.all(entries.map(async entry => entry.status === 'awaiting_human' && entry.reviewId && entry.requestHash
+    ? { ...entry, ...await supplierMailHeadersForReview(inquiryId, entry.reviewId, entry.requestHash) } : entry));
+}
 
 async function continueOriginalQuote(tx: Prisma.TransactionClient, inquiryId: string, reviewId: string, actor: { id: string; email: string }) {
   const task = await tx.backgroundTask.findUniqueOrThrow({ where: { id: reviewId } });
@@ -34,7 +41,7 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
   const actor = await requireAdmin('inquiries.write');
   if (actor instanceof NextResponse) return actor;
   const { id } = await params;
-  try { return NextResponse.json({ entries: await supplierQuoteReviewView(prisma, id) }); }
+  try { return NextResponse.json({ entries: await entriesForInquiry(id) }); }
   catch (error) { return NextResponse.json({ error: supplierQuoteErrorMessage(error) }, { status: 409 }); }
 }
 
@@ -82,7 +89,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
         reason: '人工核对供应商书面回复和本次客户报价，回填原询价并接续报价准备' }, tx);
       return { ...recorded, continuation };
     }, { timeout: 60_000 });
-    return NextResponse.json({ result, entries: await supplierQuoteReviewView(prisma, id) });
+    return NextResponse.json({ result, entries: await entriesForInquiry(id) });
   } catch (error) {
     return NextResponse.json({ error: supplierQuoteErrorMessage(error) }, { status: 409 });
   }
