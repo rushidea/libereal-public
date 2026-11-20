@@ -12,6 +12,7 @@ import { QuoteQuantityNudgeNotice } from '@/components/account/QuoteQuantityNudg
 import { findQuoteQuantityNudges } from '@/lib/quote-quantity-nudge';
 import { customerCanAcceptQuote, effectiveInquiryStatus, quoteIsExpired } from '@/lib/quote-expiry';
 import DeclineQuoteDialog from '@/components/account/DeclineQuoteDialog';
+import InquiryFeedbackSection from '@/components/account/InquiryFeedbackSection';
 import { CheckoutPaymentFields, useCheckoutPointsBalance } from '@/components/checkout/CheckoutPaymentFields';
 import { InquiryIdDisplay } from '@/components/InquiryIdDisplay';
 import { quoteConfirmSettlementFields } from '@/lib/admin-acting-points';
@@ -73,8 +74,22 @@ interface Inquiry {
   createdAt: string;
   organizationId?: string | null;
   ownerScope?: 'personal' | 'organization';
-  activeQuote?: { id: string; version: number; status: string; subtotal: number; validUntil?: string | null; sentAt?: string; acceptedAt?: string; items: InquiryItem[] } | null;
+  activeQuote?: {
+    id: string;
+    version: number;
+    status: string;
+    subtotal: number;
+    validUntil?: string | null;
+    sentAt?: string;
+    acceptedAt?: string;
+    declineReasonCode?: string | null;
+    declineNote?: string | null;
+    declinedAt?: string | null;
+    declinedByEmail?: string | null;
+    items: InquiryItem[];
+  } | null;
   orderCount?: number;
+  feedbackSummary?: { totalCount: number; pendingCount: number };
 }
 
 const STATUS_CONFIG: Record<string, { label: string; color: string; icon: React.ComponentType<{ className?: string }> }> = {
@@ -146,8 +161,8 @@ export default function InquiriesPanel() {
   const [inquiryOrders, setInquiryOrders] = useState<Record<string, LinkedOrder[]>>({});
   const actorScope = useCallback((inq: Inquiry) => `${session?.user?.id || session?.user?.email || 'unknown'}:${inq.ownerScope || 'personal'}:${inq.organizationId || ''}`, [session?.user?.id, session?.user?.email]);
 
-  const fetchInquiries = useCallback(async (preserveSelection = true) => {
-    setLoading(true);
+  const fetchInquiries = useCallback(async (preserveSelection = true, options?: { silent?: boolean }) => {
+    if (!options?.silent) setLoading(true);
     try {
       const res = await fetch('/api/my-orders');
       const data = await res.json();
@@ -197,7 +212,7 @@ export default function InquiriesPanel() {
     } catch (e) {
       console.error(e);
     } finally {
-      setLoading(false);
+      if (!options?.silent) setLoading(false);
     }
   }, [actorScope]);
 
@@ -674,6 +689,12 @@ export default function InquiriesPanel() {
                         })()}
                       </div>
                     )}
+                    <InquiryFeedbackSection
+                      inquiryId={inquiry.id}
+                      inquiryStatus={inquiry.status}
+                      activeQuote={inquiry.activeQuote}
+                      onSubmitted={() => { void fetchInquiries(true, { silent: true }); }}
+                    />
                   </div>
                 )}
               </div>

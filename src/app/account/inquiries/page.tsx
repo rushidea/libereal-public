@@ -15,6 +15,7 @@ import { QuoteQuantityNudgeNotice } from '@/components/account/QuoteQuantityNudg
 import { findQuoteQuantityNudges } from '@/lib/quote-quantity-nudge';
 import { customerCanAcceptQuote, effectiveInquiryStatus, quoteIsExpired } from '@/lib/quote-expiry';
 import DeclineQuoteDialog from '@/components/account/DeclineQuoteDialog';
+import InquiryFeedbackSection from '@/components/account/InquiryFeedbackSection';
 import { CheckoutPaymentFields, useCheckoutPointsBalance } from '@/components/checkout/CheckoutPaymentFields';
 import { InquiryIdDisplay } from '@/components/InquiryIdDisplay';
 import { quoteConfirmSettlementFields } from '@/lib/admin-acting-points';
@@ -78,9 +79,23 @@ interface Inquiry {
   createdAt: string;
   organizationId?: string | null;
   ownerScope?: 'personal' | 'organization';
-  activeQuote?: { id: string; version: number; status: string; subtotal: number; validUntil?: string | null; sentAt?: string; acceptedAt?: string; items: InquiryItem[] } | null;
+  activeQuote?: {
+    id: string;
+    version: number;
+    status: string;
+    subtotal: number;
+    validUntil?: string | null;
+    sentAt?: string;
+    acceptedAt?: string;
+    declineReasonCode?: string | null;
+    declineNote?: string | null;
+    declinedAt?: string | null;
+    declinedByEmail?: string | null;
+    items: InquiryItem[];
+  } | null;
   orderCount?: number;
   orders?: Order[];
+  feedbackSummary?: { totalCount: number; pendingCount: number };
 }
 
 const STATUS_CONFIG: Record<string, { label: string; color: string; icon: React.ComponentType<{ className?: string }> }> = {
@@ -145,8 +160,8 @@ export default function MyInquiriesPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [status]);
 
-  async function fetchInquiries() {
-    setLoading(true);
+  async function fetchInquiries(options?: { silent?: boolean }) {
+    if (!options?.silent) setLoading(true);
     try {
       const res = await fetch('/api/my-orders');
       const data = await res.json();
@@ -192,7 +207,7 @@ export default function MyInquiriesPage() {
     } catch (e) {
       console.error(e);
     } finally {
-      setLoading(false);
+      if (!options?.silent) setLoading(false);
     }
   }
 
@@ -698,6 +713,14 @@ export default function MyInquiriesPage() {
                           })()}
                         </div>
                       )}
+                      <div className="mt-4">
+                        <InquiryFeedbackSection
+                          inquiryId={inquiry.id}
+                          inquiryStatus={inquiry.status}
+                          activeQuote={inquiry.activeQuote}
+                          onSubmitted={() => { void fetchInquiries({ silent: true }); }}
+                        />
+                      </div>
                     </div>
                   )}
                 </div>

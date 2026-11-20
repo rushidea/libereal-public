@@ -5,6 +5,7 @@ import { quoteView } from '@/lib/quote-records';
 import { applySettledQuoteExpiry, settleExpiredQuotes } from '@/lib/quote-expiry-settle';
 import { loadQuoteProductTaxonomy } from '@/lib/quote-item-taxonomy';
 import { viewInquiryItemGroups } from '@/lib/inquiry-item-brands';
+import { buildFeedbackSummaryMap, emptyFeedbackSummary } from '@/lib/inquiry-feedback';
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 export async function GET(_req: NextRequest) {
@@ -41,10 +42,20 @@ export async function GET(_req: NextRequest) {
     });
     const settled = await settleExpiredQuotes(prisma, inquiries.map((inquiry) => inquiry.id));
     const visible = inquiries.map((inquiry) => applySettledQuoteExpiry(inquiry, settled));
-    const itemViews = await viewInquiryItemGroups(visible.map((inquiry) => inquiry.inquiryItems));
-    const quoteTaxonomy = await loadQuoteProductTaxonomy(visible.flatMap((inquiry) => (
-      inquiry.quotes.flatMap((quote) => quote.items.map((item) => item.productId))
-    )));
+    const inquiryIds = visible.map((inquiry) => inquiry.id);
+    const [itemViews, quoteTaxonomy, feedbackRows] = await Promise.all([
+      viewInquiryItemGroups(visible.map((inquiry) => inquiry.inquiryItems)),
+      loadQuoteProductTaxonomy(visible.flatMap((inquiry) => (
+        inquiry.quotes.flatMap((quote) => quote.items.map((item) => item.productId))
+      ))),
+      inquiryIds.length
+        ? prisma.inquiryFeedback.findMany({
+            where: { inquiryId: { in: inquiryIds } },
+            orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+          })
+        : Promise.resolve([]),
+    ]);
+    const feedbackSummaryMap = buildFeedbackSummaryMap(feedbackRows, 'admin');
     return NextResponse.json(visible.map((row, index) => {
       const { inquiryItems, quotes, ...inquiry } = row;
       void inquiryItems;
@@ -53,6 +64,7 @@ export async function GET(_req: NextRequest) {
         items: itemViews[index],
         activeQuote: quotes[0] ? quoteView(quotes[0], quoteTaxonomy) : null,
         quoteVersions: quotes.map((quote) => quoteView(quote, quoteTaxonomy)),
+        feedbackSummary: feedbackSummaryMap.get(inquiry.id) ?? emptyFeedbackSummary(),
       };
     }));
   } catch (err) {

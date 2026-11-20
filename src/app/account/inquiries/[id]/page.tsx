@@ -16,6 +16,7 @@ import { InquiryIdDisplay } from '@/components/InquiryIdDisplay';
 import SiteFooter from '@/components/SiteFooter';
 import MobileBottomNav from '@/components/mobile/MobileBottomNav';
 import { effectiveInquiryStatus, quoteIsExpired } from '@/lib/quote-expiry';
+import InquiryFeedbackSection from '@/components/account/InquiryFeedbackSection';
 
 function translatePaymentMethod(method: string): string {
   const map: Record<string, string> = {
@@ -74,7 +75,20 @@ type Inquiry = {
   advisorName?: string;
   advisorPhone?: string;
   createdAt: string;
-  activeQuote?: { id: string; version: number; status: string; subtotal: number; validUntil?: string | null; sentAt?: string; acceptedAt?: string; items: InquiryItem[] } | null;
+  activeQuote?: {
+    id: string;
+    version: number;
+    status: string;
+    subtotal: number;
+    validUntil?: string | null;
+    sentAt?: string;
+    acceptedAt?: string;
+    declineReasonCode?: string | null;
+    declineNote?: string | null;
+    declinedAt?: string | null;
+    declinedByEmail?: string | null;
+    items: InquiryItem[];
+  } | null;
   currentQuote?: { id: string; version: number; status: string; subtotal: number; validUntil?: string | null; sentAt?: string; acceptedAt?: string; items: InquiryItem[] } | null;
   quoteIsHistorical?: boolean;
   operationLogs?: string;
@@ -421,6 +435,15 @@ export default function InquiryDetailPage({ params }: { params: Promise<{ id: st
                   </div>
                 </div>
               </div>
+            </div>
+
+            <div className="mt-5">
+              <InquiryFeedbackSection
+                inquiryId={inquiry.id}
+                inquiryStatus={inquiry.status}
+                activeQuote={inquiry.activeQuote}
+                quoteIsHistorical={Boolean(inquiry.quoteIsHistorical)}
+              />
             </div>
           </div>
         </div>

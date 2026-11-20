@@ -11,6 +11,7 @@ import type { Prisma } from '@prisma/client';
 import { getReadableOrganizationIds } from '@/lib/organization-record-access';
 import { listOrganizationIdsForPermission } from '@/lib/organization-service';
 import { verifiedStoredEmail } from '@/lib/verified-email-access';
+import { buildFeedbackSummaryMap, emptyFeedbackSummary } from '@/lib/inquiry-feedback';
 
 export async function GET() {
   const session = await auth();
@@ -73,14 +74,21 @@ export async function GET() {
     ]);
 
     const inquiryIds = inquiries.map((i) => i.id);
-    const orderCounts = inquiryIds.length
-      ? await prisma.order.groupBy({
-          by: ['inquiryId'],
-          where: { inquiryId: { in: inquiryIds } },
-          _count: { _all: true },
-        })
-      : [];
+    const [orderCounts, feedbackRows] = inquiryIds.length
+      ? await Promise.all([
+          prisma.order.groupBy({
+            by: ['inquiryId'],
+            where: { inquiryId: { in: inquiryIds } },
+            _count: { _all: true },
+          }),
+          prisma.inquiryFeedback.findMany({
+            where: { inquiryId: { in: inquiryIds } },
+            orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+          }),
+        ])
+      : [[], []];
     const countMap = new Map(orderCounts.map((c) => [c.inquiryId, c._count._all]));
+    const feedbackSummaryMap = buildFeedbackSummaryMap(feedbackRows, 'customer');
 
     const settled = await settleExpiredQuotes(prisma, inquiries.map((inquiry) => inquiry.id));
     const visibleInquiries = inquiries.map((inquiry) => applySettledQuoteExpiry(inquiry, settled));
@@ -99,6 +107,7 @@ export async function GET() {
         activeQuote: quotes[0] ? quoteView(quotes[0], quoteTaxonomy) : null,
         quotes: undefined,
         orderCount: countMap.get(inq.id) || 0,
+        feedbackSummary: feedbackSummaryMap.get(inq.id) ?? emptyFeedbackSummary(),
       };
     });
 

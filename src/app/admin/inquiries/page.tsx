@@ -10,6 +10,8 @@ import {
 import { ADMIN_INQUIRY_TODO_STATUSES, notifyAdminInquiryTodoChanged } from '@/lib/admin-inquiry-todo';
 import { InquiryIdDisplay } from '@/components/InquiryIdDisplay';
 import { CatalogRepricingReview } from '@/components/admin/CatalogRepricingReview';
+import { AdminInquiryFeedbackPanel } from '@/components/admin/AdminInquiryFeedbackPanel';
+import { QuoteDeclineDetails } from '@/components/account/DeclineQuoteDialog';
 import { effectiveInquiryStatus, presentedQuoteStatus } from '@/lib/quote-expiry';
 import { commerceLineWarningList, commerceLineWarningPrompt } from '@/lib/commerce-line-review';
 
@@ -29,8 +31,23 @@ interface Inquiry {
   paymentMethod?: string;
   notes?: string;
   userId?: string;
-  activeQuote?: { id: string; status: string; catalogRepricing?: boolean; contentHash?: string; validUntil?: string | null; sentAt?: string; acceptedAt?: string; version: number; items: InquiryItem[] } | null;
+  activeQuote?: {
+    id: string;
+    status: string;
+    catalogRepricing?: boolean;
+    contentHash?: string;
+    validUntil?: string | null;
+    sentAt?: string;
+    acceptedAt?: string;
+    declineReasonCode?: string | null;
+    declineNote?: string | null;
+    declinedAt?: string | null;
+    declinedByEmail?: string | null;
+    version: number;
+    items: InquiryItem[];
+  } | null;
   quoteVersions?: QuoteVersion[];
+  feedbackSummary?: { totalCount: number; pendingCount: number };
   operationLogs?: string;
 }
 
@@ -52,6 +69,7 @@ interface InquiryItem {
   metadata?: string | null;
   available?: boolean | null;
   id?: string;
+  inquiryItemId?: string | null;
   name?: string;
   brand?: string;
   catalogNumber?: string;
@@ -59,6 +77,7 @@ interface InquiryItem {
   spec?: string | null;
   unit?: string | null;
   quantity?: number;
+  orderedQty?: number;
   price?: number;
   leadTime?: string;
   customerLeadTime?: string | null;
@@ -92,8 +111,8 @@ function InquiriesPanel() {
   const [inquiryLogsExpanded, setInquiryLogsExpanded] = useState(false);
   const [selectedInquiries, setSelectedInquiries] = useState<Set<string>>(new Set());
 
-  const fetchData = async () => {
-    setLoading(true);
+  const fetchData = async (options?: { silent?: boolean }) => {
+    if (!options?.silent) setLoading(true);
     try {
       const res = await fetch('/api/inquiries');
       const data = await res.json();
@@ -104,7 +123,7 @@ function InquiriesPanel() {
     } catch (e) {
       console.error(e);
     } finally {
-      setLoading(false);
+      if (!options?.silent) setLoading(false);
     }
   };
 
@@ -112,7 +131,31 @@ function InquiriesPanel() {
 
   useEffect(() => {
     if (selectedInquiry) {
-      setInquiryItems(selectedInquiry.items);
+      const activeQuote = selectedInquiry.activeQuote;
+      const isCatalogDraft = activeQuote?.status === 'draft' && Boolean(activeQuote.catalogRepricing);
+      const hasUnorderedActiveQuote = !isCatalogDraft
+        && Boolean(activeQuote)
+        && activeQuote?.status !== 'accepted'
+        && !activeQuote?.items?.every((item) => (item.orderedQty ?? 0) >= (item.quantity ?? 1));
+
+      if (hasUnorderedActiveQuote && activeQuote?.items?.length) {
+        const quoteByInquiryItemId = new Map<string, InquiryItem>();
+        for (const qItem of activeQuote.items) {
+          if (qItem.inquiryItemId) quoteByInquiryItemId.set(qItem.inquiryItemId, qItem);
+        }
+        setInquiryItems(selectedInquiry.items.map((item, idx) => {
+          const matched = (item.id ? quoteByInquiryItemId.get(item.id) : undefined) ?? activeQuote.items[idx];
+          if (!matched) return item;
+          return {
+            ...item,
+            price: matched.price ?? item.price,
+            quantity: matched.quantity ?? item.quantity,
+            leadTime: matched.leadTime ?? item.leadTime,
+          };
+        }));
+      } else {
+        setInquiryItems(selectedInquiry.items);
+      }
     } else {
       setInquiryItems([]);
     }
@@ -258,7 +301,7 @@ function InquiryRow({
   inquiryLogsExpanded: boolean;
   setInquiryLogsExpanded: (b: boolean) => void;
   inquiryTotal: number;
-  fetchData: () => Promise<void>;
+  fetchData: (options?: { silent?: boolean }) => Promise<void>;
   archiveInquiries: (ids: string[]) => Promise<void>;
 }) {
   const isExpanded = selectedInquiry?.id === inquiry.id;
@@ -288,7 +331,9 @@ function InquiryRow({
         <td className="px-4 py-3">
           {(() => {
             const shownStatus = effectiveInquiryStatus(inquiry.status, inquiry.activeQuote);
+            const pendingFeedbackCount = inquiry.feedbackSummary?.pendingCount ?? 0;
             return (
+          <div className="flex flex-wrap items-center gap-1.5">
           <span className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium ${
             shownStatus === 'closed' ? 'bg-gray-100 text-gray-600' :
             shownStatus === 'pending_quote' ? 'bg-yellow-100 text-yellow-700' :
@@ -306,6 +351,15 @@ function InquiryRow({
              shownStatus === 'quote_expired' ? '已过期' :
              shownStatus === 'quote_sent' ? '已发报价' : shownStatus}
           </span>
+          {pendingFeedbackCount > 0 && (
+            <span
+              data-testid={`pending-feedback-badge-${inquiry.id}`}
+              className="inline-flex items-center rounded-full bg-orange-100 px-2 py-0.5 text-xs font-medium text-orange-800"
+            >
+              待处理反馈 {pendingFeedbackCount}
+            </span>
+          )}
+          </div>
             );
           })()}
         </td>
@@ -348,7 +402,7 @@ function InquiryDetailPanel({
   inquiryLogsExpanded: boolean;
   setInquiryLogsExpanded: (b: boolean) => void;
   inquiryTotal: number;
-  fetchData: () => Promise<void>;
+  fetchData: (options?: { silent?: boolean }) => Promise<void>;
 }) {
   const catalogDraft = inquiry.activeQuote?.status === 'draft' && inquiry.activeQuote.catalogRepricing ? inquiry.activeQuote : null;
   const isOrderRevision = (item: InquiryItem) => {
@@ -356,8 +410,24 @@ function InquiryDetailPanel({
   };
   const remaining = catalogDraft?.items.filter((item) => !isOrderRevision(item) && item.available !== false) ?? [];
   const pendingOrderReview = catalogDraft?.items.some((item) => isOrderRevision(item) && item.available !== false);
+  const hasOrderedLine = Boolean(
+    inquiry.activeQuote?.status === 'accepted'
+    || inquiry.activeQuote?.items?.some((item) => (item.orderedQty ?? 0) > 0),
+  );
+  const canEditQuantity = !catalogDraft
+    && inquiry.status !== 'declined'
+    && inquiry.status !== 'closed'
+    && !hasOrderedLine;
   return (
     <div className="bg-white rounded-lg border border-brand-300 shadow-sm p-4 space-y-4">
+      {(inquiry.activeQuote?.declineReasonCode || inquiry.activeQuote?.declineNote) && (
+        <QuoteDeclineDetails
+          reasonCode={inquiry.activeQuote.declineReasonCode}
+          note={inquiry.activeQuote.declineNote}
+          declinedAt={inquiry.activeQuote.declinedAt}
+          declinedByEmail={inquiry.activeQuote.declinedByEmail}
+        />
+      )}
       <SupplierQuoteReview key={inquiry.id} inquiryId={inquiry.id} onRecorded={fetchData} />
       {catalogDraft && <div className="flex flex-wrap items-center gap-3 text-sm">
         <span>目录价、折扣或客户条件变化后，可在本询价重新核算并查看新版草稿。</span>
@@ -454,7 +524,7 @@ function InquiryDetailPanel({
       </div>
       {!catalogDraft && <>
       <div>
-        <p className="text-xs text-gray-600 mb-2">询价产品（可直接编辑价格和货期）</p>
+        <p className="text-xs text-gray-600 mb-2">询价产品（可直接编辑价格{canEditQuantity ? '、数量' : ''}和货期）</p>
         <div className="border border-gray-200 rounded-lg overflow-hidden">
           {inquiryItems.map((item, i) => {
             const name = item.name || item.product?.name || '未知产品';
@@ -485,7 +555,18 @@ function InquiryDetailPanel({
                   </div>
                   <div>
                     <label className="text-xs text-gray-600 mb-1 block">数量</label>
-                    <p className="text-sm px-2 py-1 text-gray-700">{qty}</p>
+                    {canEditQuantity ? (
+                      <input type="number" min={1} step={1} value={qty}
+                        onChange={e => {
+                          const parsed = parseInt(e.target.value, 10);
+                          const updated = [...inquiryItems];
+                          updated[i] = { ...updated[i], quantity: Number.isInteger(parsed) && parsed > 0 ? parsed : 1 };
+                          setInquiryItems(updated);
+                        }}
+                        className="text-sm px-2 py-1 border border-gray-200 rounded w-full text-gray-900" />
+                    ) : (
+                      <p className="text-sm px-2 py-1 text-gray-700">{qty}</p>
+                    )}
                   </div>
                   <div>
                     <label className="text-xs text-gray-600 mb-1 block">客户期望</label>
@@ -549,12 +630,19 @@ function InquiryDetailPanel({
             <table className="min-w-[620px] w-full text-left text-xs">
               <thead className="bg-gray-50 text-gray-500"><tr><th className="px-3 py-2">版本</th><th className="px-3 py-2">状态</th><th className="px-3 py-2">金额</th><th className="px-3 py-2">发出时间</th><th className="px-3 py-2">有效期</th></tr></thead>
               <tbody className="divide-y divide-gray-100">
-                {inquiry.quoteVersions?.map((quote) => <tr key={quote.id}><td className="px-3 py-2 font-medium text-gray-900">第 {quote.version} 版</td><td className="px-3 py-2 text-gray-600">{{ draft: '草稿', sent: '已发送', accepted: '已接受', superseded: '已替代', expired: '已过期' }[presentedQuoteStatus(quote)] || presentedQuoteStatus(quote)}</td><td className="px-3 py-2 font-medium text-gray-900">¥{quote.subtotal.toLocaleString('zh-CN', { minimumFractionDigits: 2 })}</td><td className="px-3 py-2 text-gray-600">{quote.sentAt ? new Date(quote.sentAt).toLocaleString('zh-CN') : '—'}</td><td className="px-3 py-2 text-gray-600">{quote.validUntil ? new Date(quote.validUntil).toLocaleString('zh-CN') : '—'}</td></tr>)}
+                {inquiry.quoteVersions?.map((quote) => <tr key={quote.id}><td className="px-3 py-2 font-medium text-gray-900">第 {quote.version} 版</td><td className="px-3 py-2 text-gray-600">{{ draft: '草稿', sent: '已发送', accepted: '已接受', superseded: '已替代', expired: '已过期', declined: '已放弃' }[presentedQuoteStatus(quote)] || presentedQuoteStatus(quote)}</td><td className="px-3 py-2 font-medium text-gray-900">¥{quote.subtotal.toLocaleString('zh-CN', { minimumFractionDigits: 2 })}</td><td className="px-3 py-2 text-gray-600">{quote.sentAt ? new Date(quote.sentAt).toLocaleString('zh-CN') : '—'}</td><td className="px-3 py-2 text-gray-600">{quote.validUntil ? new Date(quote.validUntil).toLocaleString('zh-CN') : '—'}</td></tr>)}
               </tbody>
             </table>
           </div>
         </div>
       )}
+      <AdminInquiryFeedbackPanel
+        inquiryId={inquiry.id}
+        inquiryStatus={inquiry.status}
+        activeQuote={inquiry.activeQuote}
+        quoteVersions={inquiry.quoteVersions}
+        onUpdated={() => { void fetchData({ silent: true }); }}
+      />
       <InquiryOperationLogs
         operationLogs={inquiry.operationLogs}
         expanded={inquiryLogsExpanded}

@@ -632,6 +632,37 @@ export function getTestDb(): Database.Database {
       action TEXT NOT NULL, details TEXT, ip TEXT, userAgent TEXT,
       createdAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
+    CREATE TABLE IF NOT EXISTS InquiryFeedback (
+      id TEXT PRIMARY KEY,
+      inquiryId TEXT NOT NULL,
+      quoteId TEXT,
+      quoteVersion INTEGER,
+      actorType TEXT NOT NULL,
+      actorUserId TEXT,
+      actorEmail TEXT NOT NULL,
+      actorName TEXT,
+      channel TEXT NOT NULL,
+      channelReference TEXT,
+      feedbackType TEXT NOT NULL,
+      content TEXT NOT NULL,
+      handlingStatus TEXT NOT NULL DEFAULT 'pending',
+      handledByAdminId TEXT,
+      handledByAdminEmail TEXT,
+      handledAt DATETIME,
+      resolutionNote TEXT,
+      resolvedByQuoteId TEXT,
+      clientRequestId TEXT,
+      ip TEXT,
+      userAgent TEXT,
+      createdAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updatedAt DATETIME NOT NULL,
+      FOREIGN KEY (inquiryId) REFERENCES Inquiry(id) ON DELETE CASCADE,
+      FOREIGN KEY (quoteId) REFERENCES Quote(id) ON DELETE SET NULL
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS InquiryFeedback_inquiryId_clientRequestId_key ON InquiryFeedback(inquiryId, clientRequestId);
+    CREATE INDEX IF NOT EXISTS InquiryFeedback_inquiryId_createdAt_idx ON InquiryFeedback(inquiryId, createdAt);
+    CREATE INDEX IF NOT EXISTS InquiryFeedback_inquiryId_handlingStatus_idx ON InquiryFeedback(inquiryId, handlingStatus);
+    CREATE INDEX IF NOT EXISTS InquiryFeedback_quoteId_idx ON InquiryFeedback(quoteId);
     CREATE TABLE IF NOT EXISTS OrderItem (
       id TEXT PRIMARY KEY,
       orderId TEXT NOT NULL,
@@ -994,6 +1025,7 @@ export function clearAllTables(db: Database.Database) {
     DELETE FROM AccountReceivable;
     DELETE FROM UserTierHistory;
     DELETE FROM CreditAccount;
+    DELETE FROM InquiryFeedback;
     DELETE FROM QuoteConfirmation;
     DELETE FROM QuoteItem;
     DELETE FROM Quote;

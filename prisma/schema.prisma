@@ -517,6 +517,7 @@ model Inquiry {
   orders       Order[]
   inquiryItems InquiryItem[]
   quotes       Quote[]
+  feedbacks    InquiryFeedback[]
 
   @@index([email])
   @@index([createdAt])
@@ -843,6 +844,7 @@ model Quote {
   inquiry       Inquiry   @relation(fields: [inquiryId], references: [id], onDelete: Cascade)
   items         QuoteItem[]
   confirmations QuoteConfirmation[]
+  feedbacks     InquiryFeedback[]
 
   @@unique([inquiryId, version])
   @@index([inquiryId, status, version])
@@ -891,6 +893,39 @@ model QuoteConfirmation {
 
   @@index([quoteId, createdAt])
   @@index([email])
+}
+
+model InquiryFeedback {
+  id                  String    @id @default(cuid())
+  inquiryId           String
+  quoteId             String?
+  quoteVersion        Int?
+  actorType           String    // customer | admin_proxy
+  actorUserId         String?
+  actorEmail          String
+  actorName           String?
+  channel             String    // website | wechat | email | phone | offline | other
+  channelReference    String?
+  feedbackType        String    // price_negotiation | terms_change | consultation | intent_confirm
+  content             String
+  handlingStatus      String    @default("pending") // pending | resolved | ignored
+  handledByAdminId    String?
+  handledByAdminEmail String?
+  handledAt           DateTime?
+  resolutionNote      String?
+  resolvedByQuoteId   String?
+  clientRequestId     String?
+  ip                  String?
+  userAgent           String?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+  inquiry             Inquiry   @relation(fields: [inquiryId], references: [id], onDelete: Cascade)
+  quote               Quote?    @relation(fields: [quoteId], references: [id], onDelete: SetNull)
+
+  @@unique([inquiryId, clientRequestId])
+  @@index([inquiryId, createdAt])
+  @@index([inquiryId, handlingStatus])
+  @@index([quoteId])
 }
 
 model OrderItem {
