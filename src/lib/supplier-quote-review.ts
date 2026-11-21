@@ -221,6 +221,8 @@ export async function supplierQuoteReviewView(db: Db, inquiryId: string) {
         reviewId: task?.id ?? null, requestHash: currentRequest ? request.requestHash as string : null,
         status: currentRequest ? expired ? 'expired' : task!.status : task ? 'source_changed' : 'not_prepared',
         owner: typeof request.ownerEmail === 'string' ? request.ownerEmail : null,
+        requestedAt: task ? (typeof request.requestedAt === 'string' ? request.requestedAt : (task.createdAt ? task.createdAt.toISOString() : null)) : null,
+        confirmedAt: currentRequest && task?.status === 'succeeded' ? (typeof result.confirmedAt === 'string' ? result.confirmedAt : (task.completedAt ? task.completedAt.toISOString() : null)) : null,
         reply: currentRequest && task?.status === 'succeeded' ? result.reply as SupplierQuoteReply : null,
         continuation: currentRequest && task?.status === 'succeeded' ? result.continuation ?? null : null,
       });

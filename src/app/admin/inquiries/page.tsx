@@ -1,89 +1,17 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { SupplierQuoteReview } from '@/components/admin/SupplierQuoteReview';
+import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-
 import {
-  Search, Package, Archive, Check, Clock, XCircle, ChevronRight, MessageSquare,
+  Search, Package, Archive, Check, Clock, XCircle, MessageSquare,
 } from 'lucide-react';
-import { ADMIN_INQUIRY_TODO_STATUSES, notifyAdminInquiryTodoChanged } from '@/lib/admin-inquiry-todo';
 import { InquiryIdDisplay } from '@/components/InquiryIdDisplay';
-import { CatalogRepricingReview } from '@/components/admin/CatalogRepricingReview';
-import { AdminInquiryFeedbackPanel } from '@/components/admin/AdminInquiryFeedbackPanel';
-import { QuoteDeclineDetails } from '@/components/account/DeclineQuoteDialog';
-import { effectiveInquiryStatus, presentedQuoteStatus } from '@/lib/quote-expiry';
-import { commerceLineWarningList, commerceLineWarningPrompt } from '@/lib/commerce-line-review';
+import { AdminInquiryTimelineWorkspace } from '@/components/admin/AdminInquiryTimelineWorkspace';
+import type { AdminInquiryRecord } from '@/lib/admin-inquiry-timeline';
+import { effectiveInquiryStatus } from '@/lib/quote-expiry';
 
-interface Inquiry {
-  id: string;
-  name: string;
-  email: string;
-  phone: string;
-  institution: string;
-  department?: string;
-  address?: string;
-  items: InquiryItem[];
-  subtotal: number;
-  hasUnresolvedPricing?: boolean;
-  status: string;
-  createdAt: string;
-  paymentMethod?: string;
-  notes?: string;
-  userId?: string;
-  activeQuote?: {
-    id: string;
-    status: string;
-    catalogRepricing?: boolean;
-    contentHash?: string;
-    validUntil?: string | null;
-    sentAt?: string;
-    acceptedAt?: string;
-    declineReasonCode?: string | null;
-    declineNote?: string | null;
-    declinedAt?: string | null;
-    declinedByEmail?: string | null;
-    version: number;
-    items: InquiryItem[];
-  } | null;
-  quoteVersions?: QuoteVersion[];
-  feedbackSummary?: { totalCount: number; pendingCount: number };
-  operationLogs?: string;
-}
-
-interface QuoteVersion {
-  id: string;
-  version: number;
-  status: string;
-  subtotal: number;
-  currency: string;
-  validUntil?: string | null;
-  sentAt?: string | null;
-  acceptedAt?: string | null;
-  createdAt: string;
-  items: InquiryItem[];
-}
-
-interface InquiryItem {
-  notes?: string | null;
-  metadata?: string | null;
-  available?: boolean | null;
-  id?: string;
-  inquiryItemId?: string | null;
-  name?: string;
-  brand?: string;
-  catalogNumber?: string;
-  variantId?: string | null;
-  spec?: string | null;
-  unit?: string | null;
-  quantity?: number;
-  orderedQty?: number;
-  price?: number;
-  leadTime?: string;
-  customerLeadTime?: string | null;
-  actualLeadTime?: string | null;
-  product?: { name?: string; brand?: string; catalogNumber?: string; promotionalPrice?: number; price?: number };
-}
+const GRID_COLUMNS_CLASS =
+  'xl:grid xl:grid-cols-[1.75rem_minmax(0,1.55fr)_minmax(0,1.35fr)_minmax(0,1fr)_5.25rem_6.5rem_4.25rem_2.75rem] xl:items-center xl:gap-2.5';
 
 export default function AdminInquiriesPage() {
   return (
@@ -101,25 +29,31 @@ export default function AdminInquiriesPage() {
 
 function InquiriesPanel() {
   const router = useRouter();
-  const [inquiries, setInquiries] = useState<Inquiry[]>([]);
+  const [inquiries, setInquiries] = useState<AdminInquiryRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [inquiryDateFrom, setInquiryDateFrom] = useState('');
   const [inquiryDateTo, setInquiryDateTo] = useState('');
-  const [selectedInquiry, setSelectedInquiry] = useState<Inquiry | null>(null);
-  const [inquiryItems, setInquiryItems] = useState<InquiryItem[]>([]);
-  const [inquiryLogsExpanded, setInquiryLogsExpanded] = useState(false);
+  const [selectedInquiry, setSelectedInquiry] = useState<AdminInquiryRecord | null>(null);
   const [selectedInquiries, setSelectedInquiries] = useState<Set<string>>(new Set());
+  const initialQueryAppliedRef = useRef(false);
 
   const fetchData = async (options?: { silent?: boolean }) => {
     if (!options?.silent) setLoading(true);
     try {
       const res = await fetch('/api/inquiries');
       const data = await res.json();
-      const rows: Inquiry[] = Array.isArray(data) ? data : [];
+      const rows: AdminInquiryRecord[] = Array.isArray(data) ? data : [];
       setInquiries(rows);
-      const requestedId = new URLSearchParams(window.location.search).get('inquiryId');
-      setSelectedInquiry((current) => rows.find((row) => row.id === (current?.id ?? requestedId)) ?? null);
+      let initialTargetId: string | null = null;
+      if (!initialQueryAppliedRef.current) {
+        initialQueryAppliedRef.current = true;
+        initialTargetId = new URLSearchParams(window.location.search).get('inquiryId');
+      }
+      setSelectedInquiry((current) => {
+        const targetId = current?.id ?? initialTargetId;
+        return targetId ? (rows.find((row) => row.id === targetId) ?? null) : null;
+      });
     } catch (e) {
       console.error(e);
     } finally {
@@ -129,50 +63,12 @@ function InquiriesPanel() {
 
   useEffect(() => { fetchData(); }, []);
 
-  useEffect(() => {
-    if (selectedInquiry) {
-      const activeQuote = selectedInquiry.activeQuote;
-      const isCatalogDraft = activeQuote?.status === 'draft' && Boolean(activeQuote.catalogRepricing);
-      const hasUnorderedActiveQuote = !isCatalogDraft
-        && Boolean(activeQuote)
-        && activeQuote?.status !== 'accepted'
-        && !activeQuote?.items?.every((item) => (item.orderedQty ?? 0) >= (item.quantity ?? 1));
-
-      if (hasUnorderedActiveQuote && activeQuote?.items?.length) {
-        const quoteByInquiryItemId = new Map<string, InquiryItem>();
-        for (const qItem of activeQuote.items) {
-          if (qItem.inquiryItemId) quoteByInquiryItemId.set(qItem.inquiryItemId, qItem);
-        }
-        setInquiryItems(selectedInquiry.items.map((item, idx) => {
-          const matched = (item.id ? quoteByInquiryItemId.get(item.id) : undefined) ?? activeQuote.items[idx];
-          if (!matched) return item;
-          return {
-            ...item,
-            price: matched.price ?? item.price,
-            quantity: matched.quantity ?? item.quantity,
-            leadTime: matched.leadTime ?? item.leadTime,
-          };
-        }));
-      } else {
-        setInquiryItems(selectedInquiry.items);
-      }
-    } else {
-      setInquiryItems([]);
-    }
-    setInquiryLogsExpanded(false);
-  }, [selectedInquiry]);
-
-  const inquiryTotal = inquiryItems.reduce((sum, item) => {
-    const price = item.price || 0;
-    const qty = item.quantity || 1;
-    return sum + price * qty;
-  }, 0);
-
   async function archiveInquiries(inquiryIds: string[]) {
     if (!confirm(`确定要归档 ${inquiryIds.length} 个询价单吗？`)) return;
     try {
       const res = await fetch('/api/admin/inquiries/archive', {
-        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ inquiryIds, action: 'archive' }),
       });
       if (res.ok) {
@@ -184,17 +80,23 @@ function InquiriesPanel() {
         fetchData();
         setSelectedInquiry(null);
       }
-    } catch (e) { console.error(e); }
+    } catch (e) {
+      console.error(e);
+    }
   }
 
-  const filteredInquiries = inquiries.filter(i => {
-    const matchSearch = !search || i.name.includes(search) || i.email.includes(search) || (i.institution && i.institution.includes(search)) || i.id.includes(search);
+  const filteredInquiries = inquiries.filter((i) => {
+    const matchSearch = !search
+      || i.name.includes(search)
+      || i.email.includes(search)
+      || (i.institution && i.institution.includes(search))
+      || i.id.includes(search);
     const inquiryDate = new Date(i.createdAt);
     const matchDateFrom = !inquiryDateFrom || inquiryDate >= new Date(inquiryDateFrom);
     const matchDateTo = !inquiryDateTo || inquiryDate <= new Date(inquiryDateTo + 'T23:59:59');
     return matchSearch && matchDateFrom && matchDateTo;
   });
-  const visibleSelectedIds = filteredInquiries.map(i => i.id).filter(id => selectedInquiries.has(id));
+  const visibleSelectedIds = filteredInquiries.map((i) => i.id).filter((id) => selectedInquiries.has(id));
 
   if (loading) {
     return (
@@ -205,81 +107,104 @@ function InquiriesPanel() {
   }
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 min-w-0">
       <div className="flex items-center gap-2 flex-wrap">
-        <div className="relative">
+        <div className="relative w-full sm:w-auto">
           <Search className="w-4 h-4 text-gray-600 absolute left-3 top-1/2 -translate-y-1/2" />
-          <input type="text" placeholder="搜索询价单..."
-            value={search} onChange={e => setSearch(e.target.value)}
-            className="pl-9 pr-4 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 w-64 text-gray-900" />
+          <input
+            type="text"
+            placeholder="搜索询价单..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="pl-9 pr-4 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 w-full sm:w-64 text-gray-900"
+          />
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <span className="text-sm text-gray-500">从</span>
-          <input type="date" value={inquiryDateFrom} onChange={e => setInquiryDateFrom(e.target.value)}
-            className="px-2 py-2 border border-gray-200 rounded-lg text-sm text-gray-900" />
+          <input
+            type="date"
+            value={inquiryDateFrom}
+            onChange={(e) => setInquiryDateFrom(e.target.value)}
+            className="px-2 py-2 border border-gray-200 rounded-lg text-sm text-gray-900"
+          />
           <span className="text-sm text-gray-500">至</span>
-          <input type="date" value={inquiryDateTo} onChange={e => setInquiryDateTo(e.target.value)}
-            className="px-2 py-2 border border-gray-200 rounded-lg text-sm text-gray-900" />
+          <input
+            type="date"
+            value={inquiryDateTo}
+            onChange={(e) => setInquiryDateTo(e.target.value)}
+            className="px-2 py-2 border border-gray-200 rounded-lg text-sm text-gray-900"
+          />
           {(inquiryDateFrom || inquiryDateTo) && (
-            <button onClick={() => { setInquiryDateFrom(''); setInquiryDateTo(''); }}
-              className="px-2 py-1.5 text-xs text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded">清除</button>
+            <button
+              type="button"
+              onClick={() => { setInquiryDateFrom(''); setInquiryDateTo(''); }}
+              className="px-2 py-1.5 text-xs text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded"
+            >
+              清除
+            </button>
           )}
         </div>
-        <button onClick={() => router.push('/admin/inquiries/archived')}
-          className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg text-sm font-medium flex items-center gap-1.5">
+        <button
+          type="button"
+          onClick={() => router.push('/admin/inquiries/archived')}
+          className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg text-sm font-medium flex items-center gap-1.5"
+        >
           <Package className="w-4 h-4" /> 已归档
         </button>
         {visibleSelectedIds.length > 0 && (
-          <button onClick={() => archiveInquiries(visibleSelectedIds)}
-            className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg text-sm font-medium flex items-center gap-1.5">
+          <button
+            type="button"
+            onClick={() => archiveInquiries(visibleSelectedIds)}
+            className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg text-sm font-medium flex items-center gap-1.5"
+          >
             <Archive className="w-4 h-4" /> 批量归档 ({visibleSelectedIds.length})
           </button>
         )}
       </div>
 
-      <div className="bg-white/70 backdrop-blur-md rounded-2xl border border-white/70 overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[1040px] text-sm">
-            <thead>
-              <tr className="bg-gray-50/80 border-b border-gray-200">
-                <th className="text-left px-4 py-3 font-semibold text-gray-700">
-                  <input type="checkbox"
-                    aria-label="全选当前筛选结果"
-                    checked={filteredInquiries.length > 0 && visibleSelectedIds.length === filteredInquiries.length}
-                    onChange={e => { setSelectedInquiries(e.target.checked ? new Set(filteredInquiries.map(i => i.id)) : new Set()); }}
-                    className="w-4 h-4 text-brand-600 rounded border-gray-300" />
-                </th>
-                <th className="text-left px-4 py-3 font-semibold text-gray-700">编号</th>
-                <th className="text-left px-4 py-3 font-semibold text-gray-700">客户</th>
-                <th className="text-left px-4 py-3 font-semibold text-gray-700">机构</th>
-                <th className="text-left px-4 py-3 font-semibold text-gray-700">金额</th>
-                <th className="text-left px-4 py-3 font-semibold text-gray-700">状态</th>
-                <th className="text-left px-4 py-3 font-semibold text-gray-700">时间</th>
-                <th className="text-left px-4 py-3 font-semibold text-gray-700">操作</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredInquiries.length === 0 ? (
-                <tr><td colSpan={8} className="px-4 py-12 text-center text-gray-600">暂无询价单</td></tr>
-              ) : filteredInquiries.map(inquiry => (
-                <InquiryRow
-                  key={inquiry.id}
-                  inquiry={inquiry}
-                  selectedInquiry={selectedInquiry}
-                  setSelectedInquiry={setSelectedInquiry}
-                  selectedInquiries={selectedInquiries}
-                  setSelectedInquiries={setSelectedInquiries}
-                  inquiryItems={inquiryItems}
-                  setInquiryItems={setInquiryItems}
-                  inquiryLogsExpanded={inquiryLogsExpanded}
-                  setInquiryLogsExpanded={setInquiryLogsExpanded}
-                  inquiryTotal={inquiryTotal}
-                  fetchData={fetchData}
-                  archiveInquiries={archiveInquiries}
-                />
-              ))}
-            </tbody>
-          </table>
+      <div className="bg-white/70 backdrop-blur-md rounded-2xl border border-white/70 overflow-hidden min-w-0">
+        <div className={`bg-gray-50/80 border-b border-gray-200 px-4 py-3 text-sm font-semibold text-gray-700 flex items-center gap-3 min-w-0 ${GRID_COLUMNS_CLASS}`}>
+          <div className="flex items-center gap-2 min-w-0">
+            <input
+              type="checkbox"
+              aria-label="全选当前筛选结果"
+              checked={filteredInquiries.length > 0 && visibleSelectedIds.length === filteredInquiries.length}
+              onChange={(e) => {
+                setSelectedInquiries(e.target.checked ? new Set(filteredInquiries.map((i) => i.id)) : new Set());
+              }}
+              className="w-4 h-4 text-brand-600 rounded border-gray-300"
+            />
+            <span className="xl:hidden text-xs font-medium text-gray-600">全选当前筛选结果</span>
+          </div>
+          <span className="hidden xl:block min-w-0">编号</span>
+          <span className="hidden xl:block min-w-0">客户</span>
+          <span className="hidden xl:block min-w-0">机构</span>
+          <span className="hidden xl:block min-w-0">金额</span>
+          <span className="hidden xl:block min-w-0">状态</span>
+          <span className="hidden xl:block min-w-0">时间</span>
+          <span className="hidden xl:block min-w-0">操作</span>
+        </div>
+
+        <div>
+          {filteredInquiries.length === 0 ? (
+            <div className="px-4 py-12 text-center text-sm text-gray-600">暂无询价单</div>
+          ) : filteredInquiries.map((inquiry) => (
+            <InquiryRow
+              key={inquiry.id}
+              inquiry={inquiry}
+              isExpanded={selectedInquiry?.id === inquiry.id}
+              onToggleExpand={() => setSelectedInquiry(selectedInquiry?.id === inquiry.id ? null : inquiry)}
+              isSelected={selectedInquiries.has(inquiry.id)}
+              onToggleSelect={(checked) => {
+                const next = new Set(selectedInquiries);
+                if (checked) next.add(inquiry.id);
+                else next.delete(inquiry.id);
+                setSelectedInquiries(next);
+              }}
+              fetchData={fetchData}
+              onArchive={() => archiveInquiries([inquiry.id])}
+            />
+          ))}
         </div>
       </div>
     </div>
@@ -287,413 +212,137 @@ function InquiriesPanel() {
 }
 
 function InquiryRow({
-  inquiry, selectedInquiry, setSelectedInquiry, selectedInquiries, setSelectedInquiries,
-  inquiryItems, setInquiryItems, inquiryLogsExpanded, setInquiryLogsExpanded,
-  inquiryTotal, fetchData, archiveInquiries,
+  inquiry,
+  isExpanded,
+  onToggleExpand,
+  isSelected,
+  onToggleSelect,
+  fetchData,
+  onArchive,
 }: {
-  inquiry: Inquiry;
-  selectedInquiry: Inquiry | null;
-  setSelectedInquiry: (i: Inquiry | null) => void;
-  selectedInquiries: Set<string>;
-  setSelectedInquiries: (s: Set<string>) => void;
-  inquiryItems: InquiryItem[];
-  setInquiryItems: (i: InquiryItem[]) => void;
-  inquiryLogsExpanded: boolean;
-  setInquiryLogsExpanded: (b: boolean) => void;
-  inquiryTotal: number;
+  inquiry: AdminInquiryRecord;
+  isExpanded: boolean;
+  onToggleExpand: () => void;
+  isSelected: boolean;
+  onToggleSelect: (checked: boolean) => void;
   fetchData: (options?: { silent?: boolean }) => Promise<void>;
-  archiveInquiries: (ids: string[]) => Promise<void>;
+  onArchive: () => Promise<void>;
 }) {
-  const isExpanded = selectedInquiry?.id === inquiry.id;
+  const shownStatus = effectiveInquiryStatus(inquiry.status, inquiry.activeQuote);
+  const pendingFeedbackCount = inquiry.feedbackSummary?.pendingCount ?? 0;
+  const createdAtDate = new Date(inquiry.createdAt);
+  const createdAtLabel = Number.isNaN(createdAtDate.getTime())
+    ? '—'
+    : createdAtDate.toLocaleDateString('zh-CN');
 
   return (
-    <>
-      <tr className={`border-b border-gray-100 cursor-pointer ${isExpanded ? 'bg-brand-50/50' : 'hover:bg-gray-50/50'}`}
-        onClick={() => setSelectedInquiry(isExpanded ? null : inquiry)}>
-        <td className="px-4 py-3" onClick={e => e.stopPropagation()}>
-          <input type="checkbox" checked={selectedInquiries.has(inquiry.id)}
-            onChange={e => {
-              const newSelected = new Set(selectedInquiries);
-              if (e.target.checked) newSelected.add(inquiry.id);
-              else newSelected.delete(inquiry.id);
-              setSelectedInquiries(newSelected);
-            }}
-            className="w-4 h-4 text-brand-600 rounded border-gray-300" />
-        </td>
-        <td className="w-[34%] min-w-[11rem] px-4 py-3 align-top lg:min-w-[22rem]">
-          <InquiryIdDisplay id={inquiry.id} size="compact" className="text-gray-700" />
-        </td>
-        <td className="px-4 py-3">
-          <div className="font-medium text-gray-900">{inquiry.name}（{inquiry.email}）</div>
-        </td>
-        <td className="px-4 py-3 text-gray-700">{inquiry.institution}</td>
-        <td className="px-4 py-3 font-semibold text-gray-900">{inquiry.hasUnresolvedPricing ? '待报价确认' : `¥${inquiry.subtotal.toLocaleString('zh-CN', { minimumFractionDigits: 2 })}`}</td>
-        <td className="px-4 py-3">
-          {(() => {
-            const shownStatus = effectiveInquiryStatus(inquiry.status, inquiry.activeQuote);
-            const pendingFeedbackCount = inquiry.feedbackSummary?.pendingCount ?? 0;
-            return (
-          <div className="flex flex-wrap items-center gap-1.5">
-          <span className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium ${
-            shownStatus === 'closed' ? 'bg-gray-100 text-gray-600' :
-            shownStatus === 'pending_quote' ? 'bg-yellow-100 text-yellow-700' :
-            shownStatus === 'quote_expired' ? 'bg-amber-100 text-amber-800' :
-            shownStatus === 'quote_sent' ? 'bg-blue-100 text-blue-700' :
-            shownStatus === 'declined' ? 'bg-gray-100 text-gray-600' :
-            'bg-green-100 text-green-700'
-          }`}>
-            {shownStatus === 'closed' || shownStatus === 'declined' ? <XCircle className="w-3 h-3" /> :
-             shownStatus === 'pending_quote' || shownStatus === 'quote_expired' ? <Clock className="w-3 h-3" /> :
-             <Check className="w-3 h-3" />}
-            {shownStatus === 'closed' ? '已关闭' :
-             shownStatus === 'declined' ? '已放弃' :
-             shownStatus === 'pending_quote' ? '待报价' :
-             shownStatus === 'quote_expired' ? '已过期' :
-             shownStatus === 'quote_sent' ? '已发报价' : shownStatus}
-          </span>
-          {pendingFeedbackCount > 0 && (
-            <span
-              data-testid={`pending-feedback-badge-${inquiry.id}`}
-              className="inline-flex items-center rounded-full bg-orange-100 px-2 py-0.5 text-xs font-medium text-orange-800"
-            >
-              待处理反馈 {pendingFeedbackCount}
-            </span>
-          )}
-          </div>
-            );
-          })()}
-        </td>
-        <td className="px-4 py-3 text-gray-600 text-xs">{new Date(inquiry.createdAt).toLocaleDateString('zh-CN')}</td>
-        <td className="px-4 py-3" onClick={e => e.stopPropagation()}>
-          <div className="flex items-center gap-2">
-            <button onClick={() => archiveInquiries([inquiry.id])}
-              className="text-purple-600 hover:text-purple-700 text-xs flex items-center gap-1" title="归档">
-              <Archive className="w-3.5 h-3.5" />
-            </button>
-          </div>
-        </td>
-      </tr>
-      {isExpanded && (
-        <tr>
-          <td colSpan={8} className="bg-brand-50/70 p-4 border-b border-brand-200">
-            <InquiryDetailPanel
-              inquiry={inquiry}
-              inquiryItems={inquiryItems}
-              setInquiryItems={setInquiryItems}
-              inquiryLogsExpanded={inquiryLogsExpanded}
-              setInquiryLogsExpanded={setInquiryLogsExpanded}
-              inquiryTotal={inquiryTotal}
-              fetchData={fetchData}
+    <div className="min-w-0">
+      <div
+        data-testid={`inquiry-row-${inquiry.id}`}
+        role="button"
+        tabIndex={0}
+        aria-expanded={isExpanded}
+        onClick={onToggleExpand}
+        onKeyDown={(e) => {
+          if (
+            (e.key === 'Enter' || e.key === ' ')
+            && !(e.target instanceof HTMLElement && e.target !== e.currentTarget && e.target.closest('button, a, input, select, textarea'))
+          ) {
+            e.preventDefault();
+            onToggleExpand();
+          }
+        }}
+        className={`border-b border-gray-100 px-4 py-3 cursor-pointer text-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 ${isExpanded ? 'bg-brand-50/50' : 'hover:bg-gray-50/50'}`}
+      >
+        <div className={`grid grid-cols-[auto_1fr_auto] items-start gap-x-3 gap-y-1.5 min-w-0 ${GRID_COLUMNS_CLASS}`}>
+          <div className="col-start-1 row-start-1 min-w-0 pt-0.5 xl:pt-0" onClick={(e) => e.stopPropagation()}>
+            <input
+              type="checkbox"
+              aria-label={`选择询价单 ${inquiry.id}`}
+              checked={isSelected}
+              onChange={(e) => onToggleSelect(e.target.checked)}
+              className="w-4 h-4 text-brand-600 rounded border-gray-300"
             />
-          </td>
-        </tr>
-      )}
-    </>
-  );
-}
-
-function InquiryDetailPanel({
-  inquiry, inquiryItems, setInquiryItems, inquiryLogsExpanded, setInquiryLogsExpanded,
-  inquiryTotal, fetchData,
-}: {
-  inquiry: Inquiry;
-  inquiryItems: InquiryItem[];
-  setInquiryItems: (i: InquiryItem[]) => void;
-  inquiryLogsExpanded: boolean;
-  setInquiryLogsExpanded: (b: boolean) => void;
-  inquiryTotal: number;
-  fetchData: (options?: { silent?: boolean }) => Promise<void>;
-}) {
-  const catalogDraft = inquiry.activeQuote?.status === 'draft' && inquiry.activeQuote.catalogRepricing ? inquiry.activeQuote : null;
-  const isOrderRevision = (item: InquiryItem) => {
-    try { return typeof JSON.parse(item.metadata || '{}').repricingOrderId === 'string'; } catch { return false; }
-  };
-  const remaining = catalogDraft?.items.filter((item) => !isOrderRevision(item) && item.available !== false) ?? [];
-  const pendingOrderReview = catalogDraft?.items.some((item) => isOrderRevision(item) && item.available !== false);
-  const hasOrderedLine = Boolean(
-    inquiry.activeQuote?.status === 'accepted'
-    || inquiry.activeQuote?.items?.some((item) => (item.orderedQty ?? 0) > 0),
-  );
-  const canEditQuantity = !catalogDraft
-    && inquiry.status !== 'declined'
-    && inquiry.status !== 'closed'
-    && !hasOrderedLine;
-  return (
-    <div className="bg-white rounded-lg border border-brand-300 shadow-sm p-4 space-y-4">
-      {(inquiry.activeQuote?.declineReasonCode || inquiry.activeQuote?.declineNote) && (
-        <QuoteDeclineDetails
-          reasonCode={inquiry.activeQuote.declineReasonCode}
-          note={inquiry.activeQuote.declineNote}
-          declinedAt={inquiry.activeQuote.declinedAt}
-          declinedByEmail={inquiry.activeQuote.declinedByEmail}
-        />
-      )}
-      <SupplierQuoteReview key={inquiry.id} inquiryId={inquiry.id} onRecorded={fetchData} />
-      {catalogDraft && <div className="flex flex-wrap items-center gap-3 text-sm">
-        <span>目录价、折扣或客户条件变化后，可在本询价重新核算并查看新版草稿。</span>
-        <button type="button" className="rounded border px-3 py-2" onClick={async () => {
-          const response = await fetch(`/api/inquiries/${inquiry.id}/quote`, { method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ refreshCatalogQuote: true, catalogQuoteId: catalogDraft.id, catalogQuoteHash: catalogDraft.contentHash }) });
-          const data = await response.json().catch(() => ({}));
-          if (!response.ok || data.result?.status !== 'draft') { alert(data.error || '未取得新版草稿，请核对后重试'); return; }
-          await fetchData();
-        }}>重新核算并预览</button>
-      </div>}
-      {inquiry.activeQuote?.status === 'draft' && <CatalogRepricingReview inquiryId={inquiry.id} quote={inquiry.activeQuote} onRecorded={fetchData} />}
-      {catalogDraft && remaining.length > 0 && <section className="space-y-2 rounded border border-blue-200 bg-blue-50 p-4">
-        <h3 className="font-semibold">重新核算后的待报价明细 · 第 {catalogDraft.version} 版</h3>
-        {remaining.map((line, index) => <div key={index} className="text-sm">
-          <p>{line.name} × {line.quantity} · 单价 ¥{Number(line.price).toFixed(2)} · 金额 ¥{(Number(line.price) * Number(line.quantity)).toFixed(2)}</p>
-          <p>货期：{line.leadTime || '未记录'}；供货条件：{line.notes || '未记录'}</p>
-        </div>)}
-        <button disabled={pendingOrderReview} className="rounded bg-brand-600 px-3 py-2 text-sm text-white disabled:opacity-50" onClick={async () => {
-          if (!confirm(`确认将当前显示的第 ${catalogDraft.version} 版重算报价发送给客户？`)) return;
-          const send = (confirmWarnings = false) => fetch(`/api/inquiries/${inquiry.id}/quote`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ catalogQuoteId: catalogDraft.id, catalogQuoteHash: catalogDraft.contentHash, confirmWarnings }) });
-          let response = await send();
-          let data = await response.json().catch(() => ({}));
-          const warnings = commerceLineWarningList(data);
-          if (response.status === 409 && warnings?.length) {
-            if (!confirm(commerceLineWarningPrompt(warnings, '发送当前这版报价'))) return;
-            response = await send(true);
-            data = await response.json().catch(() => ({}));
-          }
-          if (!response.ok) { alert(data.error || '发送失败'); return; }
-          await fetchData(); alert('重算报价已提交发送');
-        }}>{pendingOrderReview ? '请先完成原订单价格复核' : '确认并发送这版重算报价'}</button>
-      </section>}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-        <div className="sm:col-span-2">
-          <p className="text-xs text-gray-600 mb-1">询价编号</p>
-          <InquiryIdDisplay id={inquiry.id} className="text-gray-800" />
-        </div>
-        <div><p className="text-xs text-gray-600 mb-1">客户姓名</p><p className="font-medium text-gray-800">{inquiry.name}</p></div>
-        <div><p className="text-xs text-gray-600 mb-1">邮箱</p><p className="text-sm text-gray-700">{inquiry.email}</p></div>
-        <div><p className="text-xs text-gray-600 mb-1">电话</p><p className="text-sm text-gray-700">{inquiry.phone}</p></div>
-        <div><p className="text-xs text-gray-600 mb-1">机构</p><p className="text-sm text-gray-700">{inquiry.institution}</p></div>
-        {inquiry.department && (
-          <div><p className="text-xs text-gray-600 mb-1">部门</p><p className="text-sm text-gray-700">{inquiry.department}</p></div>
-        )}
-        {inquiry.paymentMethod !== undefined && (
-          <div>
-            <p className="text-xs text-gray-600 mb-1">付款方式</p>
-            <select value={inquiry.paymentMethod || ''}
-              onChange={async e => {
-                const newMethod = e.target.value;
-                const res = await fetch(`/api/inquiries/${inquiry.id}`, {
-                  method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ paymentMethod: newMethod }),
-                });
-                if (res.ok) fetchData();
-              }}
-              className="text-sm px-2 py-1 border border-gray-200 rounded w-full text-gray-900">
-              <option value="">未选择</option>
-              <option value="对公转账">对公转账</option>
-              <option value="锐竞平台">锐竞平台</option>
-              <option value="喀斯玛平台">喀斯玛平台</option>
-              <option value="支付宝">支付宝</option>
-            </select>
           </div>
-        )}
-        <div className="sm:col-span-2">
-          <label className="text-xs text-gray-600 mb-1 block">通讯地址</label>
-          <input type="text" value={inquiry.address || ''}
-            onChange={async e => {
-              const newAddress = e.target.value;
-              const res = await fetch(`/api/inquiries/${inquiry.id}`, {
-                method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ address: newAddress }),
-              });
-              if (res.ok) fetchData();
-            }}
-            className="text-sm px-2 py-1 border border-gray-200 rounded w-full text-gray-900" />
-        </div>
-        <div className="sm:col-span-2">
-          <label className="text-xs text-gray-600 mb-1 block">备注</label>
-          <textarea value={inquiry.notes || ''}
-            onChange={async e => {
-              const newNotes = e.target.value;
-              const res = await fetch(`/api/inquiries/${inquiry.id}`, {
-                method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ notes: newNotes }),
-              });
-              if (res.ok) fetchData();
-            }}
-            rows={2}
-            className="text-sm px-2 py-1 border border-gray-200 rounded w-full text-gray-900" />
-        </div>
-      </div>
-      {!catalogDraft && <>
-      <div>
-        <p className="text-xs text-gray-600 mb-2">询价产品（可直接编辑价格{canEditQuantity ? '、数量' : ''}和货期）</p>
-        <div className="border border-gray-200 rounded-lg overflow-hidden">
-          {inquiryItems.map((item, i) => {
-            const name = item.name || item.product?.name || '未知产品';
-            const brand = item.brand || item.product?.brand || '';
-            const catalogNumber = item.catalogNumber || item.product?.catalogNumber || '';
-            const qty = item.quantity || 1;
-            return (
-              <div key={i} className="px-4 py-3 border-b border-gray-100 last:border-0">
-                <div className="flex items-start gap-3">
-                  <div className="w-8 h-8 rounded flex items-center justify-center flex-shrink-0 bg-blue-50 text-blue-600">
-                    <Package className="w-4 h-4" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-gray-900 truncate">{name}</p>
-                    <p className="text-xs text-gray-600">{brand} · {catalogNumber}</p>
-                  </div>
-                </div>
-                <div className="mt-2 grid grid-cols-3 gap-3">
-                  <div>
-                    <label className="text-xs text-gray-600 mb-1 block">单价</label>
-                    <input type="number" step="0.01" value={item.price || ''}
-                      onChange={e => {
-                        const updated = [...inquiryItems];
-                        updated[i] = { ...updated[i], price: parseFloat(e.target.value) || 0 };
-                        setInquiryItems(updated);
-                      }}
-                      className="text-sm px-2 py-1 border border-gray-200 rounded w-full text-gray-900" />
-                  </div>
-                  <div>
-                    <label className="text-xs text-gray-600 mb-1 block">数量</label>
-                    {canEditQuantity ? (
-                      <input type="number" min={1} step={1} value={qty}
-                        onChange={e => {
-                          const parsed = parseInt(e.target.value, 10);
-                          const updated = [...inquiryItems];
-                          updated[i] = { ...updated[i], quantity: Number.isInteger(parsed) && parsed > 0 ? parsed : 1 };
-                          setInquiryItems(updated);
-                        }}
-                        className="text-sm px-2 py-1 border border-gray-200 rounded w-full text-gray-900" />
-                    ) : (
-                      <p className="text-sm px-2 py-1 text-gray-700">{qty}</p>
-                    )}
-                  </div>
-                  <div>
-                    <label className="text-xs text-gray-600 mb-1 block">客户期望</label>
-                    <p className="text-sm px-2 py-1 text-gray-700">
-                      {item.customerLeadTime || '不限'}
-                    </p>
-                  </div>
-                  <div className="col-span-3">
-                    <label className="text-xs text-gray-600 mb-1 block">实际货期</label>
-                    <input type="text" value={item.actualLeadTime || item.leadTime || ''}
-                      onChange={e => {
-                        const updated = [...inquiryItems];
-                        updated[i] = { ...updated[i], actualLeadTime: e.target.value, leadTime: e.target.value };
-                        setInquiryItems(updated);
-                      }}
-                      placeholder="如：28天"
-                      className="text-sm px-2 py-1 border border-gray-200 rounded w-full text-gray-900" />
-                  </div>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-      <div className="flex justify-between items-center pt-4 border-t border-gray-200">
-        <span className="text-gray-700 font-medium">询价总计</span>
-        <span className="text-xl font-bold text-brand-600">¥{inquiryTotal.toLocaleString('zh-CN', { minimumFractionDigits: 2 })}</span>
-      </div>
-      <div className="pt-4 border-t border-gray-200">
-        <button onClick={async () => {
-          if (!confirm('确定提交报价单给客户吗？')) return;
-          const alreadyRecorded = inquiry.hasUnresolvedPricing !== true
-            && Boolean(inquiry.operationLogs)
-            && inquiry.operationLogs !== '[]'
-            && inquiry.operationLogs !== '';
-          const wasAwaitingQuote = (ADMIN_INQUIRY_TODO_STATUSES as readonly string[]).includes(inquiry.status)
-            && inquiry.activeQuote?.status !== 'sent'
-            && inquiry.activeQuote?.status !== 'accepted'
-            && !alreadyRecorded;
-          const quoteRes = await fetch(`/api/inquiries/${inquiry.id}/quote`, {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ items: inquiryItems }),
-          });
-          if (!quoteRes.ok) {
-            const err = await quoteRes.json().catch(() => ({}));
-            alert('提交失败：' + (err.error || '未知错误'));
-            return;
-          }
-          notifyAdminInquiryTodoChanged(wasAwaitingQuote ? -1 : undefined);
-          fetchData();
-          alert('报价已提交');
-        }} className="w-full py-3 bg-brand-600 text-white rounded-lg font-medium hover:bg-brand-700">
-          提交报价
-        </button>
-      </div>
-      </>}
-      {(inquiry.quoteVersions?.length || 0) > 0 && (
-        <div className="border-t border-gray-200 pt-4">
-          <p className="mb-2 text-xs font-medium text-gray-600">报价版本</p>
-          <div className="overflow-x-auto rounded-lg border border-gray-200">
-            <table className="min-w-[620px] w-full text-left text-xs">
-              <thead className="bg-gray-50 text-gray-500"><tr><th className="px-3 py-2">版本</th><th className="px-3 py-2">状态</th><th className="px-3 py-2">金额</th><th className="px-3 py-2">发出时间</th><th className="px-3 py-2">有效期</th></tr></thead>
-              <tbody className="divide-y divide-gray-100">
-                {inquiry.quoteVersions?.map((quote) => <tr key={quote.id}><td className="px-3 py-2 font-medium text-gray-900">第 {quote.version} 版</td><td className="px-3 py-2 text-gray-600">{{ draft: '草稿', sent: '已发送', accepted: '已接受', superseded: '已替代', expired: '已过期', declined: '已放弃' }[presentedQuoteStatus(quote)] || presentedQuoteStatus(quote)}</td><td className="px-3 py-2 font-medium text-gray-900">¥{quote.subtotal.toLocaleString('zh-CN', { minimumFractionDigits: 2 })}</td><td className="px-3 py-2 text-gray-600">{quote.sentAt ? new Date(quote.sentAt).toLocaleString('zh-CN') : '—'}</td><td className="px-3 py-2 text-gray-600">{quote.validUntil ? new Date(quote.validUntil).toLocaleString('zh-CN') : '—'}</td></tr>)}
-              </tbody>
-            </table>
+
+          <div className="col-start-2 row-start-1 min-w-0 xl:col-start-2 xl:row-start-1">
+            <InquiryIdDisplay id={inquiry.id} size="compact" className="text-gray-700" />
           </div>
-        </div>
-      )}
-      <AdminInquiryFeedbackPanel
-        inquiryId={inquiry.id}
-        inquiryStatus={inquiry.status}
-        activeQuote={inquiry.activeQuote}
-        quoteVersions={inquiry.quoteVersions}
-        onUpdated={() => { void fetchData({ silent: true }); }}
-      />
-      <InquiryOperationLogs
-        operationLogs={inquiry.operationLogs}
-        expanded={inquiryLogsExpanded}
-        onToggle={() => setInquiryLogsExpanded(!inquiryLogsExpanded)}
-      />
-      {inquiry.notes && <div><p className="text-xs text-gray-600 mb-1">备注</p><p className="text-sm text-gray-700 bg-gray-50 p-3 rounded-lg">{inquiry.notes}</p></div>}
-      <div><p className="text-xs text-gray-600 mb-1">提交时间</p><p className="text-sm text-gray-700">{new Date(inquiry.createdAt).toLocaleString('zh-CN')}</p></div>
-    </div>
-  );
-}
 
-function InquiryOperationLogs({ operationLogs, expanded, onToggle }: { operationLogs?: string; expanded: boolean; onToggle: () => void }) {
-  let logs: { adminEmail?: string; adminId?: string; time: string; items?: { name: string; price: number | null; quantity: number; leadTime?: string }[] }[] = [];
-  try { logs = JSON.parse(operationLogs || '[]'); } catch {}
-  if (logs.length === 0) return null;
-  const latest = logs[logs.length - 1];
+          <div className="col-start-2 col-span-2 row-start-2 min-w-0 xl:col-span-1 xl:col-start-3 xl:row-start-1">
+            <div className="font-medium text-gray-900 break-words break-all">{inquiry.name}（{inquiry.email}）</div>
+          </div>
 
-  return (
-    <div className="mt-4 pt-4 border-t border-gray-200">
-      <button onClick={onToggle}
-        className="text-xs text-blue-600 hover:text-blue-700 font-medium flex items-center gap-1">
-        {expanded ? '收起' : '查看'}报价记录（共 {logs.length} 条）
-        <ChevronRight className={`w-3 h-3 transition-transform ${expanded ? 'rotate-90' : ''}`} />
-      </button>
-      {expanded ? (
-        <div className="mt-2 space-y-2">
-          {logs.map((log, idx) => (
-            <div key={idx} className="bg-blue-50 border border-blue-100 rounded-lg p-3 text-xs">
-              <div className="flex justify-between text-blue-700 mb-1">
-                <span className="font-medium">{log.adminEmail || log.adminId}</span>
-                <span>{new Date(log.time).toLocaleString('zh-CN')}</span>
-              </div>
-              <div className="space-y-1">
-                {log.items?.map((it, i) => (
-                  <div key={i} className="text-gray-700">· {it.name} | 单价: ¥{it.price} | 数量: {it.quantity} | 货期: {it.leadTime || '-'}</div>
-                ))}
-              </div>
+          <div className="col-start-2 col-span-2 row-start-3 min-w-0 text-gray-700 break-words xl:col-span-1 xl:col-start-4 xl:row-start-1">
+            {inquiry.institution}
+          </div>
+
+          <div className="col-start-2 row-start-4 min-w-0 font-semibold text-gray-900 xl:col-start-5 xl:row-start-1">
+            {inquiry.hasUnresolvedPricing
+              ? '待报价确认'
+              : `¥${inquiry.subtotal.toLocaleString('zh-CN', { minimumFractionDigits: 2 })}`}
+          </div>
+
+          <div className="col-start-2 col-span-2 row-start-5 min-w-0 xl:col-span-1 xl:col-start-6 xl:row-start-1">
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium ${
+                shownStatus === 'closed' ? 'bg-gray-100 text-gray-600' :
+                shownStatus === 'pending_quote' ? 'bg-yellow-100 text-yellow-700' :
+                shownStatus === 'quote_expired' ? 'bg-amber-100 text-amber-800' :
+                shownStatus === 'quote_sent' ? 'bg-blue-100 text-blue-700' :
+                shownStatus === 'declined' ? 'bg-gray-100 text-gray-600' :
+                'bg-green-100 text-green-700'
+              }`}>
+                {shownStatus === 'closed' || shownStatus === 'declined' ? <XCircle className="w-3 h-3" /> :
+                 shownStatus === 'pending_quote' || shownStatus === 'quote_expired' ? <Clock className="w-3 h-3" /> :
+                 <Check className="w-3 h-3" />}
+                {shownStatus === 'closed' ? '已关闭' :
+                 shownStatus === 'declined' ? '已放弃' :
+                 shownStatus === 'pending_quote' ? '待报价' :
+                 shownStatus === 'quote_expired' ? '已过期' :
+                 shownStatus === 'quote_sent' ? '已发报价' : shownStatus}
+              </span>
+              {pendingFeedbackCount > 0 && (
+                <span
+                  data-testid={`pending-feedback-badge-${inquiry.id}`}
+                  className="inline-flex items-center rounded-full bg-orange-100 px-2 py-0.5 text-xs font-medium text-orange-800"
+                >
+                  待处理反馈 {pendingFeedbackCount}
+                </span>
+              )}
             </div>
-          ))}
+          </div>
+
+          <div className="col-start-3 row-start-4 min-w-0 justify-self-end text-gray-600 text-xs xl:col-start-7 xl:row-start-1 xl:justify-self-start">
+            {createdAtLabel}
+          </div>
+
+          <div
+            className="col-start-3 row-start-1 min-w-0 justify-self-end xl:col-start-8 xl:row-start-1 xl:justify-self-start"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => { void onArchive(); }}
+                className="inline-flex min-h-9 min-w-9 items-center justify-center rounded-lg text-purple-600 hover:bg-purple-50 hover:text-purple-700"
+                title="归档"
+                aria-label="归档"
+              >
+                <Archive className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          </div>
         </div>
-      ) : (
-        <div className="mt-2 bg-blue-50 border border-blue-100 rounded-lg p-3 text-xs">
-          <div className="flex justify-between text-blue-700 mb-1">
-            <span className="font-medium">{latest.adminEmail || latest.adminId}</span>
-            <span>{new Date(latest.time).toLocaleString('zh-CN')}</span>
-          </div>
-          <div className="space-y-1">
-            {latest.items?.map((it, i) => (
-              <div key={i} className="text-gray-700">· {it.name} | 单价: ¥{it.price} | 数量: {it.quantity} | 货期: {it.leadTime || '-'}</div>
-            ))}
-          </div>
+      </div>
+
+      {isExpanded && (
+        <div className="bg-brand-50/70 p-3 sm:p-4 border-b border-brand-200 min-w-0">
+          <AdminInquiryTimelineWorkspace
+            key={inquiry.id}
+            inquiry={inquiry}
+            fetchData={fetchData}
+          />
         </div>
       )}
     </div>

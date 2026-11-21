@@ -263,10 +263,19 @@ describe('written supplier quotation in the original inquiry', () => {
   });
 
   it('shows the responsible person and current source scope through the existing admin permission', async () => {
-    await activate(); await prepare();
+    await activate(); const prepared = await prepare();
     const response = await view(new NextRequest('http://localhost/api/test'), params);
     const body = await response.json(); expect(response.status).toBe(200);
-    expect(body.entries[0]).toMatchObject({ owner: 'admin@test.com', status: 'awaiting_human', scope: { quantity: 2, cataloguePrice: 800 } });
+    expect(body.entries[0]).toMatchObject({ owner: 'admin@test.com', status: 'awaiting_human', confirmedAt: null, scope: { quantity: 2, cataloguePrice: 800 } });
+    expect(typeof body.entries[0].requestedAt).toBe('string');
+    expect(Number.isFinite(Date.parse(body.entries[0].requestedAt))).toBe(true);
+    expect((await record(prepared)).status).toBe(200);
+    const afterResponse = await view(new NextRequest('http://localhost/api/test'), params);
+    const afterBody = await afterResponse.json(); expect(afterResponse.status).toBe(200);
+    expect(afterBody.entries[0]).toMatchObject({ owner: 'admin@test.com', status: 'succeeded' });
+    expect(typeof afterBody.entries[0].requestedAt).toBe('string');
+    expect(typeof afterBody.entries[0].confirmedAt).toBe('string');
+    expect(Number.isFinite(Date.parse(afterBody.entries[0].confirmedAt))).toBe(true);
   });
 
   async function acceptedPendingOrder() {
