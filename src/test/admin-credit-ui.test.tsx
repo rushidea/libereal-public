@@ -14,6 +14,7 @@ import CustomerCreditEditor from '@/components/admin/CustomerCreditEditor';
 import UserRow from '@/components/admin/UserRow';
 import AdminUsersPage from '@/app/admin/users/page';
 import AdminOrdersPage from '@/app/admin/orders/page';
+import AccountOrdersPage from '@/app/account/orders/page';
 
 const navigationState = vi.hoisted(() => ({ search: '' }));
 const stableAdminSession = vi.hoisted(() => ({
@@ -39,6 +40,13 @@ vi.mock('next/link', () => ({
       {children}
     </a>
   ),
+}));
+
+vi.mock('@/components/AdaptiveHeader', () => ({ default: () => null }));
+vi.mock('@/components/SiteFooter', () => ({ default: () => null }));
+vi.mock('@/components/mobile/MobileBottomNav', () => ({ default: () => null }));
+vi.mock('@/context/CustomerNotificationsContext', () => ({
+  useMarkNotificationModuleRead: () => {},
 }));
 
 const baseSummary: CustomerCreditSummary = {
@@ -611,5 +619,55 @@ describe('credit summary helpers and admin credit UI', () => {
       expect(screen.queryAllByText(/客户可用授信额度不足，无法确认接单/).length).toBeGreaterThanOrEqual(1);
     });
     expect(alertSpy).not.toHaveBeenCalledWith('CREDIT_LIMIT_EXCEEDED');
+  });
+
+  it('shows 待授信审核 on /account/orders for pending credit review orders and clears it on cancel', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url === '/api/orders' && !init?.method) {
+          return makeJsonResponse([
+            {
+              id: 'ORD-CUST-1',
+              inquiryId: 'INQ-1',
+              email: 'buyer@test.com',
+              userName: '张工',
+              userInstitution: '测试高校',
+              userPhone: '13800138000',
+              userDepartment: '生科院',
+              items: [{ name: '测试试剂', price: 13230, quantity: 1 }],
+              subtotal: 13230,
+              adjustmentTotal: 0,
+              total: 13230,
+              status: 'pending',
+              creditReviewPending: true,
+              paymentMethod: 'rjmart',
+              adjustments: [],
+              shipments: [],
+              createdAt: '2026-11-22T01:00:00.000Z',
+              updatedAt: '2026-11-22T01:00:00.000Z',
+            },
+          ]);
+        }
+        if (url === '/api/orders/ORD-CUST-1' && init?.method === 'PATCH') {
+          return makeJsonResponse({ success: true });
+        }
+        return makeJsonResponse({});
+      }),
+    );
+
+    render(<AccountOrdersPage />);
+
+    expect((await screen.findAllByText('待授信审核')).length).toBeGreaterThanOrEqual(1);
+    fireEvent.click(screen.getAllByRole('button', { name: /详情/ })[0]!);
+    expect((await screen.findAllByText(/订单已提交，待人工授信审核/)).length).toBeGreaterThanOrEqual(1);
+
+    fireEvent.click(screen.getAllByRole('button', { name: /取消订单/ })[0]!);
+    await waitFor(() => {
+      expect(screen.queryByText('待授信审核')).toBeNull();
+    });
+    expect(screen.queryByText(/订单已提交，待人工授信审核/)).toBeNull();
   });
 });
