@@ -218,18 +218,19 @@ export async function reserveOrderCredit(tx: Tx, orderId: string, actorId?: stri
   if (!user) throw new Error('CREDIT_USER_NOT_FOUND');
   const account = await ensureCreditAccount(tx, user.id, user.tier);
   if (!['active', 'credit_limited'].includes(account.status)) throw new Error('CREDIT_ACCOUNT_SUSPENDED');
-  const limit = creditLimitForAccount(account);
-  if (account.usedAmount + order.total > limit) throw new Error('CREDIT_LIMIT_EXCEEDED');
+  const limit = roundCents(creditLimitForAccount(account));
+  const orderAmount = roundCents(order.total);
+  const usedAmount = roundCents(account.usedAmount + orderAmount);
+  if (usedAmount > limit) throw new Error('CREDIT_LIMIT_EXCEEDED');
   const confirmedAt = new Date();
-  const usedAmount = account.usedAmount + order.total;
   await tx.creditAccount.update({ where: { id: account.id }, data: { usedAmount } });
-  await tx.creditTransaction.create({ data: { userId: user.id, orderId, type: 'reserve', amount: order.total, balanceAfter: usedAmount, actorId } });
+  await tx.creditTransaction.create({ data: { userId: user.id, orderId, type: 'reserve', amount: orderAmount, balanceAfter: usedAmount, actorId } });
   await tx.order.update({ where: { id: orderId }, data: { customerId: user.id } });
   return tx.accountReceivable.create({
     data: {
       orderId,
       userId: user.id,
-      amount: order.total,
+      amount: orderAmount,
       confirmedAt,
       paymentTermDaysSnapshot: account.paymentTermDays,
     },

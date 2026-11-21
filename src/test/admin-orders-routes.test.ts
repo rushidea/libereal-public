@@ -530,6 +530,7 @@ describe('finance.write MFA scenario gating', () => {
 
   it('does not apply finance step-up to a confirming transition even when enabled', async () => {
     vi.mocked(requiresAdminMfaForPermission).mockImplementation(async (permission) => permission === 'finance.write');
+    getTestDb().prepare(`UPDATE "Order" SET paymentMethod = 'alipay', paidAt = datetime('now') WHERE id = 'o1'`).run();
 
     const res = await orderPATCH(makePatch('o1', { status: 'confirmed' }) as NextRequest, {
       params: Promise.resolve({ id: 'o1' }),

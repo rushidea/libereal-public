@@ -167,11 +167,12 @@ interface UserRowProps {
   canWriteTier?: boolean;
   canWriteCredit?: boolean;
   autoOpenCredit?: boolean;
+  onCreditEditorHandled?: () => void;
 }
 
 const CUSTOMER_TIERS = [{ value: 'standard', label: 'standard' }];
 
-export default function UserRow({ user, onUpdate, selected, onSelectChange, showEditButton, templates = [], layout = 'table', canWriteCustomers = false, canWriteTier = false, canWriteCredit = false, autoOpenCredit = false }: UserRowProps) {
+export default function UserRow({ user, onUpdate, selected, onSelectChange, showEditButton, templates = [], layout = 'table', canWriteCustomers = false, canWriteTier = false, canWriteCredit = false, autoOpenCredit = false, onCreditEditorHandled }: UserRowProps) {
   const creditSummary = creditSummaryFromUser(user);
   const [editing, setEditing] = useState(Boolean(autoOpenCredit && showEditButton && user.role !== 'admin'));
   const [editMode, setEditMode] = useState<'full' | 'credit'>(autoOpenCredit ? 'credit' : 'full');
@@ -428,6 +429,8 @@ export default function UserRow({ user, onUpdate, selected, onSelectChange, show
 
       if (result.status === 'credit_failed') {
         if (creditMfaRequired && validatedCredit && validatedCredit.ok) {
+          setFeedback({ type: 'error', text: '资料已保存，授信调整尚未生效（需完成管理员身份确认）。' });
+          onUpdate();
           await beginMfaStepUp(async (token) => {
             await retryCreditAfterMfa(validatedCredit.payload, token);
           });
@@ -514,14 +517,19 @@ export default function UserRow({ user, onUpdate, selected, onSelectChange, show
     setCreditStatus(creditSummary.status || 'active');
     setPaymentTermDays(creditSummary.paymentTermDays.toString());
     setFeedback(null);
+    if (editMode === 'credit') onCreditEditorHandled?.();
     setEditing(false);
   };
 
   const toggleMode = (mode: 'full' | 'credit') => {
     setFeedback(null);
     if (editing && editMode === mode) {
+      if (mode === 'credit') onCreditEditorHandled?.();
       setEditing(false);
       return;
+    }
+    if (editing && editMode === 'credit' && mode !== 'credit') {
+      onCreditEditorHandled?.();
     }
     setEditMode(mode);
     setEditing(true);
@@ -593,10 +601,15 @@ export default function UserRow({ user, onUpdate, selected, onSelectChange, show
         onSaved={() => {
           setEditing(false);
           setFeedback({ type: 'success', text: '授信已更新' });
+          onCreditEditorHandled?.();
           onUpdate();
         }}
         onCancel={handleCancel}
-        onSwitchToFull={() => { setEditMode('full'); setFeedback(null); }}
+        onSwitchToFull={() => {
+          setEditMode('full');
+          setFeedback(null);
+          onCreditEditorHandled?.();
+        }}
       />
     ) : (
         <div className="min-w-0 rounded-brand border border-brand-100 bg-brand-50/50 p-3 sm:p-4">

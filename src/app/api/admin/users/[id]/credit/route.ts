@@ -48,7 +48,10 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       action: 'admin_sensitive',
     }),
   );
-  if (creditScenarioEnabled && !hasValidStepUpGrant) {
+  if (stepUpToken && !hasValidStepUpGrant) {
+    return NextResponse.json({ error: 'Admin MFA required' }, { status: 403 });
+  }
+  if (creditScenarioEnabled && !stepUpToken) {
     const creditAdmin = await requireAdminStepUp(admin);
     if (creditAdmin instanceof NextResponse) return creditAdmin;
   }
@@ -71,18 +74,33 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   if (parsedTemporaryUntil && !parsedTemporaryUntil.ok) {
     return NextResponse.json({ error: parsedTemporaryUntil.error }, { status: 400 });
   }
+  const existingAccountSnapshot = await prisma.creditAccount.findUnique({
+    where: { userId: id },
+    select: { temporaryLimit: true, temporaryUntil: true },
+  });
+  const prospectiveTemporaryLimit = temporaryLimit !== undefined
+    ? temporaryLimit
+    : (existingAccountSnapshot?.temporaryLimit ?? 0);
+  const prospectiveTemporaryUntil = prospectiveTemporaryLimit === 0
+    ? null
+    : (parsedTemporaryUntil ? parsedTemporaryUntil.value : (existingAccountSnapshot?.temporaryUntil ?? null));
+  if (prospectiveTemporaryLimit > 0 && !prospectiveTemporaryUntil) {
+    return NextResponse.json({ error: '设置临时额度时必须填写到期日' }, { status: 400 });
+  }
   const reason = typeof body.reason === 'string' ? body.reason.trim().slice(0, 500) : '';
   const effectiveReason = reason || '管理员调整授信';
 
-  if (stepUpToken && admin.sessionId && hasValidStepUpGrant) {
-    const consumed = await consumeSecurityStepUpGrant(stepUpToken, {
-      userId: admin.id,
-      sessionId: admin.sessionId,
-      action: 'admin_sensitive',
-    });
+  if (stepUpToken) {
+    const consumed = Boolean(
+      admin.sessionId
+      && await consumeSecurityStepUpGrant(stepUpToken, {
+        userId: admin.id,
+        sessionId: admin.sessionId,
+        action: 'admin_sensitive',
+      }),
+    );
     if (!consumed) {
-      const creditAdmin = await requireAdminStepUp(admin);
-      if (creditAdmin instanceof NextResponse) return creditAdmin;
+      return NextResponse.json({ error: 'Admin MFA required' }, { status: 403 });
     }
   }
 
@@ -90,9 +108,9 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     const account = await prisma.$transaction(async (tx) => {
       const previous = await ensureCreditAccount(tx, user.id, user.tier);
       const nextTemporaryLimit = temporaryLimit !== undefined ? temporaryLimit : previous.temporaryLimit;
-      const nextTemporaryUntil = parsedTemporaryUntil
-        ? parsedTemporaryUntil.value
-        : (temporaryLimit === 0 ? null : previous.temporaryUntil);
+      const nextTemporaryUntil = nextTemporaryLimit === 0
+        ? null
+        : (parsedTemporaryUntil ? parsedTemporaryUntil.value : previous.temporaryUntil);
       if (nextTemporaryLimit > 0 && !nextTemporaryUntil) {
         throw new Error('TEMPORARY_UNTIL_REQUIRED');
       }
@@ -102,7 +120,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
         data: {
           ...(overrideLimit !== undefined ? { overrideLimit } : {}),
           ...(temporaryLimit !== undefined ? { temporaryLimit } : {}),
-          ...(parsedTemporaryUntil || temporaryLimit === 0 ? { temporaryUntil: nextTemporaryUntil } : {}),
+          ...(parsedTemporaryUntil || nextTemporaryLimit === 0 ? { temporaryUntil: nextTemporaryUntil } : {}),
           ...(paymentTermDays !== undefined ? { paymentTermDays } : {}),
           ...(nextStatus !== undefined ? {
             status: nextStatus,

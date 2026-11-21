@@ -392,5 +392,101 @@ describe('B2 Direction 2 over-credit manual review & credit entry flow', () => {
     );
     expect(replayRes.status).toBe(403);
     expect((await replayRes.json() as { error: string }).error).toBe('Admin MFA required');
+
+    // Validation error must NOT burn a fresh stepUpToken
+    const reusableToken = 'reusable-before-validation-pass-token';
+    const reusableKey = `security-step-up:grant:${createHmac('sha256', secret).update(reusableToken).digest('hex')}`;
+    await getEphemeralStore().set(
+      reusableKey,
+      JSON.stringify({ userId: adminUser.id, sessionId: 'sess-admin-mfa', action: 'admin_sensitive' }),
+      60_000,
+    );
+    const badTempRes = await creditPATCH(
+      new NextRequest(`http://localhost:3000/api/admin/users/${buyerUser.id}/credit`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ temporaryLimit: 5000, temporaryUntil: null, stepUpToken: reusableToken }),
+      }),
+      { params: Promise.resolve({ id: buyerUser.id }) },
+    );
+    expect(badTempRes.status).toBe(400);
+
+    // Same token remains valid for the corrected request (and temp=0 clears incoming temporaryUntil)
+    const validAfter400Res = await creditPATCH(
+      new NextRequest(`http://localhost:3000/api/admin/users/${buyerUser.id}/credit`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ temporaryLimit: 0, temporaryUntil: '2099-12-30', stepUpToken: reusableToken }),
+      }),
+      { params: Promise.resolve({ id: buyerUser.id }) },
+    );
+    expect(validAfter400Res.status).toBe(200);
+    expect((await validAfter400Res.json() as { account: { temporaryUntil: string | null } }).account.temporaryUntil).toBeNull();
+  });
+
+  it('blocks clearing/confirming empty paymentMethod and handles cent rounding at limit boundary', async () => {
+    const db = getTestDb();
+    asUser(adminUser);
+
+    // Order with null paymentMethod cannot be confirmed
+    db.prepare(`
+      INSERT INTO "Order" (id, email, customerId, subtotal, total, status, paymentMethod, shippingMethod, operationLogs, createdAt, updatedAt)
+      VALUES ('ORD-NULL-PM', ?, ?, 100, 100, 'pending', NULL, 'logistics', '[]', datetime('now'), datetime('now'))
+    `).run(buyerUser.email, buyerUser.id);
+    const nullConfirmAdmin = await adminOrderPATCH(
+      new NextRequest('http://localhost:3000/api/admin/orders/ORD-NULL-PM', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'confirmed' }),
+      }),
+      { params: Promise.resolve({ id: 'ORD-NULL-PM' }) },
+    );
+    expect(nullConfirmAdmin.status).toBe(409);
+    expect(await nullConfirmAdmin.json()).toEqual({ error: 'PAYMENT_METHOD_REQUIRED' });
+
+    const nullConfirmOrder = await customerOrAdminOrderPATCH(
+      new NextRequest('http://localhost:3000/api/orders/ORD-NULL-PM', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'confirmed' }),
+      }),
+      { params: Promise.resolve({ id: 'ORD-NULL-PM' }) },
+    );
+    expect(nullConfirmOrder.status).toBe(409);
+    expect(await nullConfirmOrder.json()).toEqual({ error: 'PAYMENT_METHOD_REQUIRED' });
+
+    // Existing post-delivery paymentMethod cannot be cleared back to empty string
+    db.prepare(`UPDATE "Order" SET paymentMethod = 'bank_transfer' WHERE id = 'ORD-NULL-PM'`).run();
+    const clearPmRes = await customerOrAdminOrderPATCH(
+      new NextRequest('http://localhost:3000/api/orders/ORD-NULL-PM', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ paymentMethod: '' }),
+      }),
+      { params: Promise.resolve({ id: 'ORD-NULL-PM' }) },
+    );
+    expect(clearPmRes.status).toBe(400);
+    expect(await clearPmRes.json()).toEqual({ error: 'PAYMENT_METHOD_REQUIRED' });
+
+    // Binary float 100.1 + 200.2 = 300.30000000000007 vs limit 300.3 must confirm cleanly without false overflow
+    db.prepare(`
+      INSERT INTO CreditAccount (id, userId, baseLimit, overrideLimit, usedAmount, status, statusSource, updatedAt)
+      VALUES ('cred-cents', ?, 5000, 300.3, 100.1, 'active', 'manual', datetime('now'))
+    `).run(buyerUser.id);
+    db.prepare(`
+      INSERT INTO "Order" (id, email, customerId, subtotal, total, status, paymentMethod, shippingMethod, operationLogs, createdAt, updatedAt)
+      VALUES ('ORD-CENTS', ?, ?, 200.2, 200.2, 'pending', 'rjmart', 'logistics', '[]', datetime('now'), datetime('now'))
+    `).run(buyerUser.email, buyerUser.id);
+
+    const centConfirmRes = await adminOrderPATCH(
+      new NextRequest('http://localhost:3000/api/admin/orders/ORD-CENTS', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'confirmed' }),
+      }),
+      { params: Promise.resolve({ id: 'ORD-CENTS' }) },
+    );
+    expect(centConfirmRes.status).toBe(200);
+    expect(db.prepare('SELECT usedAmount FROM CreditAccount WHERE userId = ?').get(buyerUser.id)).toEqual({ usedAmount: 300.3 });
   });
 });

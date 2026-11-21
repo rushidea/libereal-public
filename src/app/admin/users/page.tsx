@@ -86,11 +86,12 @@ export default function AdminUsersPage() {
     return () => media.removeEventListener('change', apply);
   }, []);
 
+  const sessionRole = (session?.user as User | undefined)?.role;
+
   useEffect(() => {
-    if (status !== 'authenticated' || (session?.user as User)?.role !== 'admin') return;
+    if (status !== 'authenticated' || sessionRole !== 'admin') return;
     fetchData();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [status, session]);
+  }, [status, sessionRole]);
 
   useEffect(() => {
     let active = true;
@@ -103,8 +104,8 @@ export default function AdminUsersPage() {
     return () => { active = false; };
   }, []);
 
-  async function fetchData() {
-    setLoading(true);
+  async function fetchData(silent = false) {
+    if (!silent) setLoading(true);
     setLoadError('');
     try {
       const [usersRes, templatesRes] = await Promise.all([
@@ -342,7 +343,7 @@ export default function AdminUsersPage() {
             key={user.id}
             layout="compact"
             user={user}
-            onUpdate={fetchData}
+            onUpdate={() => void fetchData(true)}
             selected={selectedUserIds.has(user.id)}
             onSelectChange={selected => {
               const next = new Set(selectedUserIds);
@@ -356,6 +357,7 @@ export default function AdminUsersPage() {
             canWriteTier={Boolean(permissions?.includes('pricing.write'))}
             canWriteCredit={Boolean(permissions?.includes('finance.write'))}
             autoOpenCredit={Boolean(deepLinkCreditUserId && deepLinkCreditUserId === user.id)}
+            onCreditEditorHandled={() => setDeepLinkCreditUserId(null)}
           />
         ))}
         {filteredUsers.length === 0 && (
@@ -397,7 +399,7 @@ export default function AdminUsersPage() {
                   key={user.id}
                   layout="table"
                   user={user}
-                  onUpdate={fetchData}
+                  onUpdate={() => void fetchData(true)}
                   selected={selectedUserIds.has(user.id)}
                   onSelectChange={selected => {
                     const next = new Set(selectedUserIds);
@@ -411,6 +413,7 @@ export default function AdminUsersPage() {
                   canWriteTier={Boolean(permissions?.includes('pricing.write'))}
                   canWriteCredit={Boolean(permissions?.includes('finance.write'))}
                   autoOpenCredit={Boolean(deepLinkCreditUserId && deepLinkCreditUserId === user.id)}
+                  onCreditEditorHandled={() => setDeepLinkCreditUserId(null)}
                 />
               ))}
               {filteredUsers.length === 0 && (

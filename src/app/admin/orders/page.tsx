@@ -143,6 +143,7 @@ function orderActionErrorMessage(data: { error?: string; requiredPermission?: st
     ORDER_ITEMS_LOCKED: '支付宝订单已经发起付款，不能再改商品。',
     INVALID_ORDER_AMOUNT: '订单金额无效，请检查商品价格和数量。',
     PAYMENT_METHOD_LOCKED: '该订单已经产生支付记录，付款方式不能修改。',
+    PAYMENT_METHOD_REQUIRED: '请先选择有效的付款方式（对公转账、锐竞、喀斯玛或支付宝）后再确认订单，已有付款方式不能清空。',
     INVALID_ORDER_TRANSITION: '当前订单状态不允许执行该操作。',
     INVALID_STATUS_TRANSITION: '当前订单状态不允许执行该操作。',
     POINTS_REFUND_FAILED: '积分没有退回，订单状态未更改。请稍后重试。',
@@ -1078,7 +1079,9 @@ function OrderDetailPanel({
                 }
               }}
               className="text-sm px-2 py-1 border border-gray-200 rounded w-full text-gray-900 disabled:cursor-not-allowed disabled:bg-gray-100 disabled:text-gray-500">
-              <option value="">未选择</option>
+              {!normalizeOrderPaymentMethod(order.paymentMethod) && (
+                <option value="">未选择</option>
+              )}
               {ORDER_PAYMENT_METHODS.map(method => (
                 <option key={method.value} value={method.value}>{method.label}</option>
               ))}

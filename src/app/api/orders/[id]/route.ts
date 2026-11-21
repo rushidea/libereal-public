@@ -168,6 +168,9 @@ export async function PATCH(
         return NextResponse.json({ error: '付款方式无效' }, { status: 400 });
       }
       const currentPaymentMethod = normalizeOrderPaymentMethod(order.paymentMethod);
+      if (currentPaymentMethod !== null && normalizedPaymentMethod === null) {
+        return NextResponse.json({ error: 'PAYMENT_METHOD_REQUIRED' }, { status: 400 });
+      }
       if (normalizedPaymentMethod !== currentPaymentMethod && (order.paidAt || order.paymentAttempts.length > 0)) {
         return NextResponse.json({ error: 'PAYMENT_METHOD_LOCKED' }, { status: 409 });
       }
@@ -180,6 +183,13 @@ export async function PATCH(
     const normalizedEffectivePaymentMethod = normalizeOrderPaymentMethod(effectivePaymentMethod);
     if (body.status === 'confirmed' && normalizedEffectivePaymentMethod === 'alipay' && !order.paidAt) {
       return NextResponse.json({ error: 'ALIPAY_PAYMENT_REQUIRED' }, { status: 409 });
+    }
+    if (
+      body.status === 'confirmed'
+      && normalizedEffectivePaymentMethod !== 'alipay'
+      && !isPostDeliveryPaymentMethod(effectivePaymentMethod)
+    ) {
+      return NextResponse.json({ error: 'PAYMENT_METHOD_REQUIRED' }, { status: 409 });
     }
     if (requiresPaidAlipayRefund(body.status, normalizedEffectivePaymentMethod, order.paidAt)) {
       return NextResponse.json({ error: 'PAID_ORDER_REFUND_REQUIRED' }, { status: 409 });
@@ -352,7 +362,7 @@ export async function PATCH(
     if (message === POINTS_REFUND_FAILED) {
       return NextResponse.json({ error: POINTS_REFUND_FAILED }, { status: 409 });
     }
-    if (['CREDIT_LIMIT_EXCEEDED', 'CREDIT_ACCOUNT_SUSPENDED', 'RECEIVABLE_NOT_FOUND', 'INVALID_ORDER_TRANSITION', 'INSUFFICIENT_AVAILABLE_INVENTORY', 'ALIPAY_PAYMENT_REQUIRED', 'PAID_ORDER_REFUND_REQUIRED', 'ORDER_CANCELLATION_CONFLICT'].includes(message)) {
+    if (['CREDIT_LIMIT_EXCEEDED', 'CREDIT_ACCOUNT_SUSPENDED', 'CREDIT_USER_NOT_FOUND', 'RECEIVABLE_NOT_FOUND', 'INVALID_ORDER_TRANSITION', 'INSUFFICIENT_AVAILABLE_INVENTORY', 'ALIPAY_PAYMENT_REQUIRED', 'PAID_ORDER_REFUND_REQUIRED', 'ORDER_CANCELLATION_CONFLICT'].includes(message)) {
       return NextResponse.json({ error: message }, { status: 409 });
     }
     if (['INVALID_ORDER_STATUS', 'INVALID_ORDER_AMOUNT'].includes(message)) return NextResponse.json({ error: message }, { status: 400 });

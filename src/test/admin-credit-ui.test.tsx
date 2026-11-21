@@ -5,21 +5,24 @@ import {
   addDaysToShanghaiDate,
   formatCreditDateForInput,
   formatQuoteConfirmError,
+  previewEffectiveCreditLimit,
   validateCreditDraftInput,
   type CustomerCreditSummary,
 } from '@/lib/credit-summary';
+import { adminPermissionErrorMessage } from '@/data/admin-permission-message';
 import CustomerCreditEditor from '@/components/admin/CustomerCreditEditor';
 import UserRow from '@/components/admin/UserRow';
 import AdminUsersPage from '@/app/admin/users/page';
 import AdminOrdersPage from '@/app/admin/orders/page';
 
 const navigationState = vi.hoisted(() => ({ search: '' }));
+const stableAdminSession = vi.hoisted(() => ({
+  data: { user: { role: 'admin', id: 'admin_1', email: 'admin@test.com' } },
+  status: 'authenticated' as const,
+}));
 
 vi.mock('next-auth/react', () => ({
-  useSession: () => ({
-    data: { user: { role: 'admin', id: 'admin_1', email: 'admin@test.com' } },
-    status: 'authenticated',
-  }),
+  useSession: () => stableAdminSession,
 }));
 
 vi.mock('next/navigation', () => ({
@@ -158,6 +161,34 @@ describe('credit summary helpers and admin credit UI', () => {
         paymentTermDays: 45,
       },
     });
+
+    // Expired temporary dates must not inflate previewEffectiveCreditLimit
+    expect(
+      previewEffectiveCreditLimit(
+        5000,
+        {
+          creditOverride: '',
+          temporaryLimit: '8000',
+          temporaryUntil: '2026-11-30',
+          creditStatus: 'active',
+        },
+        new Date('2026-11-30T15:59:00.000Z'),
+      ),
+    ).toBe(13000);
+    expect(
+      previewEffectiveCreditLimit(
+        5000,
+        {
+          creditOverride: '',
+          temporaryLimit: '8000',
+          temporaryUntil: '2026-11-30',
+          creditStatus: 'active',
+        },
+        new Date('2026-11-30T16:00:00.000Z'),
+      ),
+    ).toBe(5000);
+
+    expect(adminPermissionErrorMessage('Admin MFA required')).toContain('身份确认');
   });
 
   it('validates temp-limit expiry and retries save after MFA step-up dialog in CustomerCreditEditor', async () => {
@@ -365,18 +396,46 @@ describe('credit summary helpers and admin credit UI', () => {
       creditSummary: baseSummary,
     };
 
+    let savedOverride = false;
     vi.stubGlobal(
       'fetch',
-      vi.fn(async (input: RequestInfo | URL) => {
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
         const url = String(input);
-        if (url.startsWith('/api/admin/permissions/me')) {
+        if (url.startsWith('/api/admin/access')) {
           return makeJsonResponse({
             permissions: ['customers.write', 'pricing.write', 'finance.write'],
           });
         }
+        if (url === '/api/admin/users/usr_target/credit' && init?.method === 'PATCH') {
+          savedOverride = true;
+          return makeJsonResponse({
+            account: {
+              ...baseSummary,
+              overrideLimit: 16000,
+              permanentLimit: 16000,
+              effectiveLimit: 16000,
+              availableAmount: 16000,
+              hasAccount: true,
+            },
+          });
+        }
         if (url.startsWith('/api/users')) {
           return makeJsonResponse({
-            users: [targetUser],
+            users: [
+              savedOverride
+                ? {
+                    ...targetUser,
+                    creditSummary: {
+                      ...baseSummary,
+                      overrideLimit: 16000,
+                      permanentLimit: 16000,
+                      effectiveLimit: 16000,
+                      availableAmount: 16000,
+                      hasAccount: true,
+                    },
+                  }
+                : targetUser,
+            ],
             total: 1,
             page: 1,
             limit: 20,
@@ -384,7 +443,7 @@ describe('credit summary helpers and admin credit UI', () => {
           });
         }
         if (url.startsWith('/api/admin/discount-templates')) {
-          return makeJsonResponse({ templates: [] });
+          return makeJsonResponse([]);
         }
         return makeJsonResponse({});
       }),
@@ -401,6 +460,20 @@ describe('credit summary helpers and admin credit UI', () => {
     expect(table?.className).not.toContain('min-w-[1240px]');
     expect(screen.getByText('授信额度')).toBeInTheDocument();
     expect(screen.getByText('操作')).toBeInTheDocument();
+
+    // Wait for /api/admin/access permissions so finance.write inputs/save button become enabled
+    const saveCreditBtn = screen.getByRole('button', { name: '保存授信' });
+    await waitFor(() => {
+      expect(saveCreditBtn).toBeEnabled();
+    });
+
+    fireEvent.change(screen.getByLabelText('永久额度（覆盖等级默认）'), { target: { value: '16000' } });
+    fireEvent.click(saveCreditBtn);
+
+    // After save + silent refresh, feedback renders, editor closes cleanly and stays closed, and table cell shows ¥16,000
+    expect(await screen.findByText('授信已更新')).toBeInTheDocument();
+    expect(screen.queryByText(/授信额度与账期调整/)).toBeNull();
+    expect(await screen.findByText('¥16,000')).toBeInTheDocument();
   });
 
   it('shows 超授信待审 badge, credit review panel, and Chinese limit error on both confirm buttons in /admin/orders', async () => {

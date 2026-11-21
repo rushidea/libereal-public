@@ -126,6 +126,13 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     if (status === 'confirmed' && normalizedPaymentMethod === 'alipay' && !existing.paidAt) {
       return NextResponse.json({ error: 'ALIPAY_PAYMENT_REQUIRED' }, { status: 409 });
     }
+    if (
+      status === 'confirmed'
+      && normalizedPaymentMethod !== 'alipay'
+      && !isPostDeliveryPaymentMethod(existing.paymentMethod)
+    ) {
+      return NextResponse.json({ error: 'PAYMENT_METHOD_REQUIRED' }, { status: 409 });
+    }
     if (requiresPaidAlipayRefund(status, existing.paymentMethod, existing.paidAt)) {
       return NextResponse.json({ error: 'PAID_ORDER_REFUND_REQUIRED' }, { status: 409 });
     }
@@ -198,7 +205,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     if (message === POINTS_REFUND_FAILED) {
       return NextResponse.json({ error: POINTS_REFUND_FAILED }, { status: 409 });
     }
-    if (['QUOTE_REPRICE_REQUIRED', 'CREDIT_LIMIT_EXCEEDED', 'CREDIT_ACCOUNT_SUSPENDED', 'RECEIVABLE_NOT_FOUND', 'INVALID_ORDER_TRANSITION', 'INSUFFICIENT_AVAILABLE_INVENTORY', 'ALIPAY_PAYMENT_REQUIRED', 'PAID_ORDER_REFUND_REQUIRED', 'ORDER_CANCELLATION_CONFLICT'].includes(message)) {
+    if (['QUOTE_REPRICE_REQUIRED', 'CREDIT_LIMIT_EXCEEDED', 'CREDIT_ACCOUNT_SUSPENDED', 'CREDIT_USER_NOT_FOUND', 'RECEIVABLE_NOT_FOUND', 'INVALID_ORDER_TRANSITION', 'INSUFFICIENT_AVAILABLE_INVENTORY', 'ALIPAY_PAYMENT_REQUIRED', 'PAID_ORDER_REFUND_REQUIRED', 'ORDER_CANCELLATION_CONFLICT'].includes(message)) {
       return NextResponse.json({ error: message }, { status: 409 });
     }
     if (message === 'INVALID_ORDER_STATUS') return NextResponse.json({ error: message }, { status: 400 });

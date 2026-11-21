@@ -146,6 +146,18 @@ export function validateCreditDraftInput(input: {
   };
 }
 
+function parsePreviewTemporaryUntil(raw: string): Date | null {
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+    const endOfShanghaiDay = new Date(`${trimmed}T23:59:59.999+08:00`);
+    if (Number.isNaN(endOfShanghaiDay.getTime())) return null;
+    return formatCreditDateForInput(endOfShanghaiDay) === trimmed ? endOfShanghaiDay : null;
+  }
+  const parsed = new Date(trimmed);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
 export function previewEffectiveCreditLimit(
   tierOrBaseLimit: number,
   draft: {
@@ -154,6 +166,7 @@ export function previewEffectiveCreditLimit(
     temporaryUntil: string;
     creditStatus: string;
   },
+  now = new Date(),
 ): number {
   const overrideRaw = draft.creditOverride.trim();
   const parsedOverride = overrideRaw === '' ? null : Number(overrideRaw);
@@ -161,7 +174,8 @@ export function previewEffectiveCreditLimit(
     ? parsedOverride
     : tierOrBaseLimit;
   const parsedTemp = Number(draft.temporaryLimit.trim() || '0');
-  const activeTemp = Number.isFinite(parsedTemp) && parsedTemp > 0 && draft.temporaryUntil.trim()
+  const parsedUntil = parsePreviewTemporaryUntil(draft.temporaryUntil);
+  const activeTemp = Number.isFinite(parsedTemp) && parsedTemp > 0 && parsedUntil !== null && parsedUntil >= now
     ? parsedTemp
     : 0;
   const raw = Math.round((permanent + activeTemp + Number.EPSILON) * 100) / 100;

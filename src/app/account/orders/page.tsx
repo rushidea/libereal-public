@@ -57,6 +57,7 @@ type Order = {
   adjustmentTotal: number;
   total: number;
   status: string;
+  creditReviewPending?: boolean;
   paymentMethod?: string;
   paidAt?: string | null;
   payment?: AlipayPaymentSummary | null;
@@ -353,6 +354,11 @@ function OrdersContent() {
                             <span className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium ${STATUS_COLORS[displayedOrderStatus(order)] || 'bg-gray-100 text-gray-600'}`}>
                               {STATUS_LABELS[displayedOrderStatus(order)] || order.status}
                             </span>
+                            {order.creditReviewPending && (
+                              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-800 dark:bg-amber-900/50 dark:text-amber-300">
+                                待授信审核
+                              </span>
+                            )}
                             {order.payment && <AlipayPaymentStatusView payment={order.payment} compact />}
                           </div>
                         </td>
@@ -456,6 +462,12 @@ function OrdersContent() {
                                   付款方式：<span className="font-bold text-orange-600">{translatePaymentMethod(selectedOrder.paymentMethod)}</span>
                                 </div>
                               )}
+                              {selectedOrder.creditReviewPending && (
+                                <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs leading-5 text-amber-900 dark:border-amber-700/60 dark:bg-amber-900/20 dark:text-amber-200">
+                                  <strong>订单已提交，待人工授信审核：</strong>
+                                  当前订单金额超出可用授信额度，暂未占用额度或锁价，待财务审核并确认接单后生效。
+                                </div>
+                              )}
                               {selectedOrder.ownerPrepaySettlement?.eligible && (
                                 <OrderPrepaySettlement
                                   orderId={selectedOrder.id}
@@ -492,6 +504,11 @@ function OrdersContent() {
                       <span className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium ${STATUS_COLORS[displayedOrderStatus(order)] || 'bg-gray-100 text-gray-600'}`}>
                         {STATUS_LABELS[displayedOrderStatus(order)] || order.status}
                       </span>
+                      {order.creditReviewPending && (
+                        <span className="ml-1.5 inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-800 dark:bg-amber-900/50 dark:text-amber-300">
+                          待授信审核
+                        </span>
+                      )}
                       {order.payment && <div className="mt-1.5"><AlipayPaymentStatusView payment={order.payment} compact /></div>}
                     </div>
                     <div className="text-right">
@@ -535,6 +552,12 @@ function OrdersContent() {
                         <div>
                           <p className="text-xs text-gray-500 dark:text-gray-500 mb-1">付款方式</p>
                           <p className="text-orange-600 font-medium">{translatePaymentMethod(selectedOrder.paymentMethod)}</p>
+                        </div>
+                      )}
+                      {selectedOrder.creditReviewPending && (
+                        <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs leading-5 text-amber-900 dark:border-amber-700/60 dark:bg-amber-900/20 dark:text-amber-200">
+                          <strong>订单已提交，待人工授信审核：</strong>
+                          当前订单金额超出可用授信额度，暂未占用额度或锁价，待财务审核并确认接单后生效。
                         </div>
                       )}
                       {selectedOrder.ownerPrepaySettlement?.eligible && (
