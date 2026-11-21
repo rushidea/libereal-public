@@ -13,7 +13,7 @@ import {
 import { orderItemView, toOrderItemCreates } from '@/lib/commerce-records';
 import { isOrderIdUniqueConflict, ORDER_NUMBER_BUSY_ERROR, withAllocatedOrderNumber } from '@/data/order-number';
 import { calculateCheckoutFeeAdjustments } from '@/lib/checkout-fees';
-import { isThirdPartyPaymentMethod, normalizeOrderPaymentMethod } from '@/data/payment-methods';
+import { isPostDeliveryPaymentMethod, isThirdPartyPaymentMethod, normalizeOrderPaymentMethod } from '@/data/payment-methods';
 import { getAlipayPaymentSummary } from '@/data/alipay-payment';
 import { calculateOrderAmounts, initialOrderStatus } from '@/lib/order-domain';
 import { orderAutoCloseAt } from '@/lib/order-auto-close';
@@ -81,6 +81,7 @@ export async function GET(_req: NextRequest) {
         addressSnapshot: true,
         adjustments: { orderBy: { createdAt: 'asc' } },
         shipments: { orderBy: { createdAt: 'desc' }, include: { items: true } },
+        events: { where: { type: 'credit_review_required' }, take: 1, select: { id: true } },
         paymentAttempts: { where: { provider: 'alipay' }, orderBy: { createdAt: 'desc' }, take: 1 },
       },
     });
@@ -88,7 +89,7 @@ export async function GET(_req: NextRequest) {
     const settlementViews = await ownerPrepaySettlementViews(prisma, orders);
     const enriched = await Promise.all(
       orders.map(async (o) => {
-        const { paymentAttempts, ...order } = o;
+        const { paymentAttempts, events, ...order } = o;
         const canViewPhone = isAdmin
           || o.customerId === session.user.id
           || (o.ownerScope === 'personal' && personalEmail !== null && normalizedEmailEquals(o.email, personalEmail));
@@ -117,6 +118,10 @@ export async function GET(_req: NextRequest) {
           userDepartment: userRow?.department || '',
           payment: getAlipayPaymentSummary(order, paymentAttempts[0]),
           ownerPrepaySettlement: settlementViews.get(o.id) ?? null,
+          creditReviewPending: order.status === 'pending'
+            && isPostDeliveryPaymentMethod(order.paymentMethod)
+            && Array.isArray(events)
+            && events.length > 0,
         };
       })
     );

@@ -76,12 +76,16 @@ export async function GET(
 
     const { orderItems, paymentAttempts, ...rest } = order;
     const settlementViews = await ownerPrepaySettlementViews(prisma, [order]);
+    const creditReviewPending = order.status === 'pending'
+      && isPostDeliveryPaymentMethod(order.paymentMethod)
+      && order.events.some((event) => event.type === 'credit_review_required');
     return NextResponse.json({
       ...rest,
       items: orderItems.map(orderItemView),
       inquiry,
       payment: getAlipayPaymentSummary(order, paymentAttempts[0]),
       ownerPrepaySettlement: settlementViews.get(order.id) ?? null,
+      creditReviewPending,
     });
   } catch (err) {
     console.error('[order GET] error:', err);

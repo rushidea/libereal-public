@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useSession } from 'next-auth/react';
 import { notFound } from 'next/navigation';
 import { Search, Shield, Check, UserX, AlertTriangle, Plus, LockKeyhole } from 'lucide-react';
@@ -9,6 +9,7 @@ import CreateUserModal from '@/components/admin/CreateUserModal';
 import UserDiscountTemplateSection from '@/components/admin/UserDiscountTemplateSection';
 import { parseAdminUsersResponse } from '@/data/admin-users-response';
 import { filterAdminUsersBySearch, retainVisibleSelection, visibleSelectedUserIds } from '@/data/admin-user-list';
+import type { CustomerCreditSummary } from '@/lib/credit-summary';
 
 interface User {
   id: string;
@@ -43,6 +44,7 @@ interface User {
     baseLimit: number; overrideLimit?: number | null; temporaryLimit: number; temporaryUntil?: string | null;
     usedAmount: number; status: string; paymentTermDays: number;
   } | null;
+  creditSummary?: CustomerCreditSummary | null;
 }
 
 export default function AdminUsersPage() {
@@ -52,6 +54,8 @@ export default function AdminUsersPage() {
   const [loadError, setLoadError] = useState('');
   const [missing, setMissing] = useState(false);
   const [search, setSearch] = useState('');
+  const [deepLinkCreditUserId, setDeepLinkCreditUserId] = useState<string | null>(null);
+  const deepLinkAppliedRef = useRef(false);
   const [selectedUserIds, setSelectedUserIds] = useState<Set<string>>(new Set());
   const [templates, setTemplates] = useState<{ id: string; name: string }[]>([]);
   const [createOpen, setCreateOpen] = useState(false);
@@ -62,6 +66,16 @@ export default function AdminUsersPage() {
   const visibleSelectedUsers = filteredUsers.filter((user) => selectedUserIds.has(user.id));
   const allVisibleSelected = filteredUsers.length > 0 && visibleSelectedIds.length === filteredUsers.length;
   const [useCompactList, setUseCompactList] = useState(false);
+
+  useEffect(() => {
+    if (deepLinkAppliedRef.current || typeof window === 'undefined') return;
+    deepLinkAppliedRef.current = true;
+    const params = new URLSearchParams(window.location.search);
+    const initialSearch = params.get('q')?.trim();
+    const initialCreditUserId = params.get('creditUserId')?.trim();
+    if (initialSearch) setSearch(initialSearch);
+    if (initialCreditUserId) setDeepLinkCreditUserId(initialCreditUserId);
+  }, []);
 
   useEffect(() => {
     if (typeof window.matchMedia !== 'function') return;
@@ -341,6 +355,7 @@ export default function AdminUsersPage() {
             canWriteCustomers={Boolean(permissions?.includes('customers.write'))}
             canWriteTier={Boolean(permissions?.includes('pricing.write'))}
             canWriteCredit={Boolean(permissions?.includes('finance.write'))}
+            autoOpenCredit={Boolean(deepLinkCreditUserId && deepLinkCreditUserId === user.id)}
           />
         ))}
         {filteredUsers.length === 0 && (
@@ -353,7 +368,7 @@ export default function AdminUsersPage() {
       ) : (
       <div className="min-w-0 overflow-hidden rounded-2xl border border-white/70 bg-white">
         <div className="min-w-0 overflow-x-auto">
-          <table className="w-full table-fixed border-separate border-spacing-0 text-sm xl:min-w-[1240px]">
+          <table className="w-full table-fixed border-separate border-spacing-0 text-sm">
             <thead>
               <tr>
                 <th className="sticky left-0 z-20 w-10 border-b border-gray-200 bg-gray-50 px-3 py-3 text-left font-semibold text-gray-700">
@@ -365,14 +380,15 @@ export default function AdminUsersPage() {
                     aria-label="全选当前结果"
                   />
                 </th>
-                <th className="sticky left-10 z-20 w-36 border-b border-gray-200 bg-gray-50 px-3 py-3 text-left font-semibold text-gray-700 shadow-[4px_0_6px_-4px_rgba(15,23,42,0.25)]">姓名</th>
-                <th className="border-b border-gray-200 bg-gray-50 px-3 py-3 text-left font-semibold text-gray-700 xl:w-64">邮箱</th>
-                <th className={`border-b border-gray-200 bg-gray-50 px-3 py-3 text-left font-semibold text-gray-700 xl:w-36 ${userTableColumn.phone}`}>电话</th>
-                <th className="border-b border-gray-200 bg-gray-50 px-3 py-3 text-left font-semibold text-gray-700 xl:w-52">机构</th>
-                <th className={`border-b border-gray-200 bg-gray-50 px-3 py-3 text-left font-semibold text-gray-700 xl:w-28 ${userTableColumn.role}`}>角色</th>
-                <th className="w-24 border-b border-gray-200 bg-gray-50 px-3 py-3 text-left font-semibold text-gray-700">状态</th>
-                <th className={`border-b border-gray-200 bg-gray-50 px-3 py-3 text-left font-semibold text-gray-700 xl:w-40 ${userTableColumn.dates}`}>注册 / 最近登录</th>
-                <th className="w-16 border-b border-gray-200 bg-gray-50 px-3 py-3 text-left font-semibold text-gray-700">操作</th>
+                <th className="sticky left-10 z-20 w-28 border-b border-gray-200 bg-gray-50 px-3 py-3 text-left font-semibold text-gray-700 shadow-[4px_0_6px_-4px_rgba(15,23,42,0.25)]">姓名</th>
+                <th className="border-b border-gray-200 bg-gray-50 px-3 py-3 text-left font-semibold text-gray-700">邮箱</th>
+                <th className={`border-b border-gray-200 bg-gray-50 px-3 py-3 text-left font-semibold text-gray-700 2xl:w-28 ${userTableColumn.phone}`}>电话</th>
+                <th className="border-b border-gray-200 bg-gray-50 px-3 py-3 text-left font-semibold text-gray-700">机构</th>
+                <th className={`border-b border-gray-200 bg-gray-50 px-3 py-3 text-left font-semibold text-gray-700 2xl:w-24 ${userTableColumn.role}`}>角色</th>
+                <th className="w-36 border-b border-gray-200 bg-gray-50 px-3 py-3 text-left font-semibold text-gray-700">授信额度</th>
+                <th className="w-20 border-b border-gray-200 bg-gray-50 px-3 py-3 text-left font-semibold text-gray-700">状态</th>
+                <th className={`border-b border-gray-200 bg-gray-50 px-3 py-3 text-left font-semibold text-gray-700 2xl:w-36 ${userTableColumn.dates}`}>注册 / 最近登录</th>
+                <th className="w-40 border-b border-gray-200 bg-gray-50 px-3 py-3 text-left font-semibold text-gray-700">操作</th>
               </tr>
             </thead>
             <tbody>
@@ -394,11 +410,12 @@ export default function AdminUsersPage() {
                   canWriteCustomers={Boolean(permissions?.includes('customers.write'))}
                   canWriteTier={Boolean(permissions?.includes('pricing.write'))}
                   canWriteCredit={Boolean(permissions?.includes('finance.write'))}
+                  autoOpenCredit={Boolean(deepLinkCreditUserId && deepLinkCreditUserId === user.id)}
                 />
               ))}
               {filteredUsers.length === 0 && (
                 <tr>
-                  <td colSpan={9} className="px-4 py-12 text-center text-gray-600">
+                  <td colSpan={10} className="px-4 py-12 text-center text-gray-600">
                     {users.length === 0 ? '暂无用户' : '没有匹配的用户'}
                   </td>
                 </tr>

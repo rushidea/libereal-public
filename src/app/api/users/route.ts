@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { requireAdmin } from '@/lib/session';
+import { summarizeCustomerCredit } from '@/lib/customer-credit';
 
 export async function GET() {
   const admin = await requireAdmin('customers.read');
@@ -29,10 +30,12 @@ export async function GET() {
         where: { userId: { in: users.map(user => user.id) } },
         _max: { lastSeenAt: true },
       });
+    const now = new Date();
     const lastLoginAtByUserId = new Map(lastSeen.map(row => [row.userId, row._max.lastSeenAt]));
     return NextResponse.json(users.map(user => ({
       ...user,
       lastLoginAt: lastLoginAtByUserId.get(user.id) ?? null,
+      creditSummary: summarizeCustomerCredit(user, user.creditAccount, now),
     })));
   } catch (err) {
     console.error('[users GET] error:', err);

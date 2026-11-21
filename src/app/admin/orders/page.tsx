@@ -1,14 +1,16 @@
 'use client';
 
 import { useState, useEffect, useRef, useCallback, Suspense } from 'react';
+import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 
 import {
   Search, Package, Archive, Ban, ChevronLeft, ChevronRight,
-  Plus, Check, Clock, ClipboardList, Wallet,
+  Plus, Check, Clock, ClipboardList, Wallet, ShieldAlert, ExternalLink,
 } from 'lucide-react';
 import ProductSearchOverlayForOrder from '@/components/admin/ProductSearchOverlayForOrder';
 import { CatalogRepricingFinance } from '@/components/admin/CatalogRepricingFinance';
+import CustomerCreditEditor from '@/components/admin/CustomerCreditEditor';
 import { adminPermissionErrorMessage } from '@/data/admin-permission-message';
 import { isPostDeliveryPaymentMethod, normalizeOrderPaymentMethod, ORDER_PAYMENT_METHODS } from '@/data/payment-methods';
 import { orderStatusRequiresFinanceWrite } from '@/lib/order-finance-access';
@@ -17,6 +19,12 @@ import type { AlipayPaymentSummary } from '@/data/alipay-payment';
 import { canTransitionOrder, displayedOrderStatus, isOrderStatus } from '@/lib/order-domain';
 import { ADMIN_ORDER_LIST_PAGE_SIZE, toAdminOrderListSearchParams } from '@/data/admin-order-list-query';
 import { commerceLineWarningList, commerceLineWarningPrompt } from '@/lib/commerce-line-review';
+import {
+  CREDIT_STATUS_LABELS,
+  isOrderCreditReviewSummary,
+  type OrderCreditReviewBadge,
+  type OrderCreditReviewSummary,
+} from '@/lib/credit-summary';
 
 interface Order {
   id: string;
@@ -50,6 +58,7 @@ interface Order {
   pointsRefundedGroup?: number;
   detailLoaded?: boolean;
   pendingCatalogRepricing?: { inquiryId: string; quoteId: string; orderId: string; proposalHash: string } | null;
+  creditReview?: OrderCreditReviewBadge | OrderCreditReviewSummary | null;
 }
 
 interface OrderItem {
@@ -91,7 +100,7 @@ async function patchOrderItems(orderId: string, items: OrderItem[], confirmed = 
     if (!window.confirm(commerceLineWarningPrompt(warnings, '保存订单商品'))) return { ok: false, cancelled: true };
     return patchOrderItems(orderId, items, true);
   }
-  if (!response.ok) return { ok: false, message: typeof data.error === 'string' ? data.error : '保存失败' };
+  if (!response.ok) return { ok: false, message: data.error || data.requiredPermission ? orderActionErrorMessage(data as { error?: string; requiredPermission?: string }) : '保存失败' };
   return { ok: true };
 }
 
@@ -137,6 +146,14 @@ function orderActionErrorMessage(data: { error?: string; requiredPermission?: st
     INVALID_ORDER_TRANSITION: '当前订单状态不允许执行该操作。',
     INVALID_STATUS_TRANSITION: '当前订单状态不允许执行该操作。',
     POINTS_REFUND_FAILED: '积分没有退回，订单状态未更改。请稍后重试。',
+    CREDIT_LIMIT_EXCEEDED: '客户可用授信额度不足，无法确认接单；请先由财务调高永久/临时额度，或改选支付宝付款。',
+    CREDIT_ACCOUNT_SUSPENDED: '客户授信账户当前已暂停或处于逾期限制状态，无法按账期确认接单。',
+    CREDIT_USER_NOT_FOUND: '未找到订单对应的客户授信账户，请核对客户信息后再确认。',
+    QUOTE_REPRICE_REQUIRED: '商品价格已变化，请先完成原订单价格复核后再确认。',
+    INSUFFICIENT_AVAILABLE_INVENTORY: '可用库存不足，暂时无法确认订单。',
+    'Admin MFA required': '请先完成管理员身份确认后再执行订单确认。',
+    'Admin authenticator policy required': '请先完成验证器身份策略校验后再执行订单确认。',
+    'Admin MFA state unavailable': '暂时无法确认身份验证状态，请稍后重试。',
   };
   return messages[data.error || ''] || data.error || '操作失败';
 }
@@ -163,6 +180,7 @@ function withdrawOrderErrorMessage(error: unknown, orderId: unknown): string {
 
 function withOrderDetail(summary: Order, detail: {
   pendingCatalogRepricing?: Order['pendingCatalogRepricing'];
+  creditReview?: Order['creditReview'];
   items?: OrderItem[];
   events?: Order['events'];
   shipments?: Order['shipments'];
@@ -202,6 +220,7 @@ function withOrderDetail(summary: Order, detail: {
     shipments: detail.shipments ?? [],
     payment: detail.payment === undefined ? summary.payment : detail.payment,
     pendingCatalogRepricing: detail.pendingCatalogRepricing ?? null,
+    creditReview: detail.creditReview === undefined ? summary.creditReview ?? null : detail.creditReview,
     name: detail.addressSnapshot?.name || summary.name,
     phone: detail.addressSnapshot?.phone || summary.phone,
     institution: detail.addressSnapshot?.institution || summary.institution,
@@ -743,6 +762,14 @@ function OrdersRow({
               {(() => { const Ic = ORDER_STATUS_CONFIG[displayedOrderStatus(order)]?.icon; return Ic ? <Ic className="w-3 h-3" /> : null; })()}
               {ORDER_STATUS_CONFIG[displayedOrderStatus(order)]?.label || order.status}
             </span>
+            {order.status === 'pending' && order.creditReview?.needsReview && (
+              <span className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-medium ${
+                order.creditReview.suspended ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-800'
+              }`}>
+                <ShieldAlert className="h-3 w-3" />
+                {order.creditReview.suspended ? '授信暂停待审' : '超授信待审'}
+              </span>
+            )}
             {order.payment && <AlipayPaymentStatusView payment={order.payment} compact />}
           </div>
         </td>
@@ -829,10 +856,20 @@ function MobileOrderCard({
             <div className="mt-1 font-semibold text-gray-900 truncate max-w-[220px]">{order.name || order.email}</div>
             <div className="mt-0.5 text-xs text-gray-600 truncate max-w-[240px]">{order.email}</div>
           </div>
-          <span className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium flex-shrink-0 ${status?.color || 'bg-gray-100 text-gray-700'}`}>
-            {StatusIcon && <StatusIcon className="w-3 h-3" />}
-            {status?.label || order.status}
-          </span>
+          <div className="flex flex-col items-end gap-1 flex-shrink-0">
+            <span className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium ${status?.color || 'bg-gray-100 text-gray-700'}`}>
+              {StatusIcon && <StatusIcon className="w-3 h-3" />}
+              {status?.label || order.status}
+            </span>
+            {order.status === 'pending' && order.creditReview?.needsReview && (
+              <span className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-medium ${
+                order.creditReview.suspended ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-800'
+              }`}>
+                <ShieldAlert className="h-3 w-3" />
+                {order.creditReview.suspended ? '授信暂停待审' : '超授信待审'}
+              </span>
+            )}
+          </div>
         </div>
         {order.payment && <div className="mt-2"><AlipayPaymentStatusView payment={order.payment} compact /></div>}
 
@@ -967,10 +1004,17 @@ function OrderDetailPanel({
   }
   const canWriteFinance = !permissions || permissions.includes('finance.write');
   const [actionError, setActionError] = useState('');
+  const [creditEditorOpen, setCreditEditorOpen] = useState(false);
   const [pointsRefundYuan, setPointsRefundYuan] = useState('');
   const [pointsRefundMsg, setPointsRefundMsg] = useState('');
   const [pointsRefundLoading, setPointsRefundLoading] = useState(false);
   const paymentMethodLocked = Boolean(order.paidAt || order.payment?.outTradeNo);
+  const detailCreditReview = order.status === 'pending' && isOrderCreditReviewSummary(order.creditReview)
+    ? order.creditReview
+    : null;
+  const showCreditReviewPanel = Boolean(
+    detailCreditReview && (detailCreditReview.needsReview || detailCreditReview.flaggedAtSubmission),
+  );
 
   async function refundPoints() {
     setPointsRefundMsg('');
@@ -1047,6 +1091,116 @@ function OrderDetailPanel({
         )}
       </div>
       {order.payment && <AlipayPaymentStatusView payment={order.payment} showReferences />}
+      {showCreditReviewPanel && detailCreditReview && (
+        <section
+          aria-label="订单授信人工审批"
+          className={`space-y-3 rounded-lg border p-3 sm:p-4 ${
+            detailCreditReview.needsReview
+              ? detailCreditReview.suspended
+                ? 'border-red-200 bg-red-50/80'
+                : 'border-amber-200 bg-amber-50'
+              : 'border-emerald-200 bg-emerald-50/80'
+          }`}
+        >
+          <div className="flex flex-wrap items-start justify-between gap-2">
+            <div className="min-w-0 space-y-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <ShieldAlert className={`h-4 w-4 shrink-0 ${
+                  detailCreditReview.needsReview
+                    ? detailCreditReview.suspended ? 'text-red-700' : 'text-amber-700'
+                    : 'text-emerald-700'
+                }`} />
+                <h3 className="text-sm font-semibold text-gray-900">
+                  {detailCreditReview.needsReview
+                    ? detailCreditReview.suspended
+                      ? '授信账户不可用，暂不能按账期接单'
+                      : '超授信待人工审批'
+                    : '授信额度核对已达标，可人工确认接单'}
+                </h3>
+                <span className="rounded bg-white/90 px-2 py-0.5 text-xs text-gray-700 border border-gray-200">
+                  授信状态：{CREDIT_STATUS_LABELS[detailCreditReview.summary.status] || detailCreditReview.summary.status}
+                </span>
+              </div>
+              <p className="text-xs leading-5 text-gray-700">
+                客户提交不等于 Libereal 接受订单；只有在额度核对通过并点击「已确认」或「确认订单」后，系统才会占用授信、生成应收并锁价。
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <Link
+                href={`/admin/users?q=${encodeURIComponent(order.email)}&creditUserId=${encodeURIComponent(detailCreditReview.userId)}`}
+                className="inline-flex items-center gap-1 rounded-lg border border-gray-300 bg-white px-2.5 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50"
+              >
+                <ExternalLink className="h-3.5 w-3.5" />
+                去用户管理查看
+              </Link>
+              {canWriteFinance && (
+                <button
+                  type="button"
+                  onClick={() => setCreditEditorOpen((open) => !open)}
+                  className="inline-flex items-center gap-1 rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-brand-700"
+                >
+                  {creditEditorOpen ? '收起调额面板' : '调整永久 / 临时额度'}
+                </button>
+              )}
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-2 rounded-lg border border-white/80 bg-white/80 p-2.5 text-xs sm:grid-cols-3 lg:grid-cols-6">
+            <div>
+              <div className="text-gray-500">客户等级 / 默认</div>
+              <div className="mt-0.5 font-semibold text-gray-900">
+                {detailCreditReview.tier || '—'} · {formatPrice(detailCreditReview.summary.tierDefaultLimit)}
+              </div>
+            </div>
+            <div>
+              <div className="text-gray-500">当前生效总额度</div>
+              <div className="mt-0.5 font-semibold text-gray-900">{formatPrice(detailCreditReview.summary.effectiveLimit)}</div>
+            </div>
+            <div>
+              <div className="text-gray-500">已用额度</div>
+              <div className="mt-0.5 font-semibold text-gray-800">{formatPrice(detailCreditReview.summary.usedAmount)}</div>
+            </div>
+            <div>
+              <div className="text-gray-500">当前可用额度</div>
+              <div className="mt-0.5 font-semibold text-gray-900">{formatPrice(detailCreditReview.summary.availableAmount)}</div>
+            </div>
+            <div>
+              <div className="text-gray-500">本单金额</div>
+              <div className="mt-0.5 font-semibold text-gray-900">{formatPrice(detailCreditReview.orderTotal)}</div>
+            </div>
+            <div>
+              <div className="text-gray-500">{detailCreditReview.shortfall > 0 ? '授信缺口' : '审核结果'}</div>
+              <div className={`mt-0.5 font-semibold ${detailCreditReview.shortfall > 0 ? 'text-amber-700' : 'text-emerald-700'}`}>
+                {detailCreditReview.shortfall > 0 ? `超额 ${formatPrice(detailCreditReview.shortfall)}` : '额度充足'}
+              </div>
+            </div>
+          </div>
+
+          {!canWriteFinance && (
+            <p className="text-xs text-amber-800">
+              调整客户永久/临时授信额度需要财务权限（finance.write），也可在征得客户同意后将上方付款方式改选为支付宝。
+            </p>
+          )}
+
+          {creditEditorOpen && canWriteFinance && (
+            <CustomerCreditEditor
+              userId={detailCreditReview.userId}
+              userName={order.name || order.email}
+              tier={detailCreditReview.tier}
+              summary={detailCreditReview.summary}
+              canWriteCredit={canWriteFinance}
+              defaultReason={`审单调额（订单 ${order.id}）`}
+              suggestedMinTotal={Math.round((detailCreditReview.summary.usedAmount + detailCreditReview.orderTotal + Number.EPSILON) * 100) / 100}
+              onSaved={async () => {
+                await fetchData();
+                setActionError('');
+                setCreditEditorOpen(false);
+              }}
+              onCancel={() => setCreditEditorOpen(false)}
+            />
+          )}
+        </section>
+      )}
       {order.pendingCatalogRepricing && <section className="space-y-2 rounded-lg border border-amber-200 bg-amber-50 p-3">
         <h3 className="font-medium">目录调价后的订单复核</h3>
         <p className="text-sm">本订单尚未由 Libereal 接受，价格复核仍在处理中。客户回复由询价工作人员登记。</p>
@@ -1231,7 +1385,8 @@ function OrderDetailPanel({
         <span className="text-gray-700 font-medium">订单总计</span>
         <span className="text-xl font-bold text-brand-600">¥{orderItems.reduce((s, it) => s + (it.price||0)*(it.quantity||1), 0).toLocaleString('zh-CN', { minimumFractionDigits: 2 })}</span>
       </div>
-      <div className="pt-4 border-t border-gray-200">
+      <div className="pt-4 border-t border-gray-200 space-y-2">
+        {actionError && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{actionError}</p>}
         {order.quoteSent ? (
           <div className="flex items-center gap-2 text-green-600 bg-green-50 p-3 rounded-lg">
             <Check className="w-5 h-5" />
@@ -1240,11 +1395,17 @@ function OrderDetailPanel({
         ) : canWriteOrders ? (
           <button onClick={async () => {
             if (!confirm('确定确认订单并通知客户吗？')) return;
+            setActionError('');
             const saved = await persistItems(orderItems);
             if (!saved) return;
             const res = await fetch(`/api/orders/${order.id}/quote`, { method: 'POST' });
-            if (res.ok) fetchData();
-            else alert('操作失败');
+            if (res.ok) {
+              setActionError('');
+              fetchData();
+            } else {
+              const data = await res.json().catch(() => ({})) as { error?: string; requiredPermission?: string };
+              setActionError(orderActionErrorMessage(data));
+            }
           }} className="w-full py-3 bg-brand-600 text-white rounded-lg font-medium hover:bg-brand-700">
             确认订单
           </button>

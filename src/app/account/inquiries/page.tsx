@@ -21,6 +21,7 @@ import { InquiryIdDisplay } from '@/components/InquiryIdDisplay';
 import { quoteConfirmSettlementFields } from '@/lib/admin-acting-points';
 import { describeCheckoutPayable } from '@/lib/checkout-payment';
 import { startAlipayCheckout } from '@/lib/alipay-checkout-client';
+import { formatQuoteConfirmError } from '@/lib/credit-summary';
 
 import Breadcrumb from '@/components/Breadcrumb';
 import { ORDER_STATUS_LABELS } from '@/lib/order-domain';
@@ -342,7 +343,7 @@ export default function MyInquiriesPage() {
         if (code === 'QUOTE_STALE' || code === 'QUOTE_EXPIRED' || code === 'QUOTE_NOT_ACTIONABLE' || code === 'QUOTE_VERSION_CONFLICT' || res.status === 400 || res.status === 409) {
           await fetchInquiries();
         }
-        alert(code ? `${err.error || '报价状态已变化'} 请刷新后重新核对。` : (res.status === 400 || res.status === 409 ? `${err.detail || err.error || '报价状态已变化'} 请刷新后重新核对。` : (err.detail || err.error || '提交失败')));
+        alert(formatQuoteConfirmError(err, res.status));
       }
     } catch (e) {
       console.error(e);

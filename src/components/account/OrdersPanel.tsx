@@ -53,6 +53,7 @@ type Order = {
     groupPoints: number;
     groupId: string | null;
   } | null;
+  creditReviewPending?: boolean;
 };
 
 const STATUS_OPTIONS = [...ORDER_STATUSES];
@@ -190,9 +191,16 @@ export default function OrdersPanel() {
                     <td className={`max-w-[120px] truncate px-4 py-3 ${uiSurfaces.textSecondary}`}>{order.userInstitution || '-'}</td>
                     <td className={`px-4 py-3 font-semibold ${uiSurfaces.titleText}`}>{formatPrice(order.total)}</td>
                     <td className="px-4 py-3">
-                      <span className={`${STATUS_COLORS[displayedOrderStatus(order)] || uiSurfaces.badge} min-h-0 px-2 py-1 text-xs font-medium`}>
-                        {STATUS_LABELS[displayedOrderStatus(order)] || order.status}
-                      </span>
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <span className={`${STATUS_COLORS[displayedOrderStatus(order)] || uiSurfaces.badge} min-h-0 px-2 py-1 text-xs font-medium`}>
+                          {STATUS_LABELS[displayedOrderStatus(order)] || order.status}
+                        </span>
+                        {order.status === 'pending' && order.creditReviewPending && (
+                          <span className="rounded bg-amber-100 px-2 py-0.5 text-[11px] font-medium text-amber-800">
+                            待授信审核
+                          </span>
+                        )}
+                      </div>
                     </td>
                     <td className={`px-4 py-3 text-xs ${uiSurfaces.textSecondary}`}>{new Date(order.createdAt).toLocaleDateString('zh-CN')}</td>
                     <td className="px-4 py-3">
@@ -271,6 +279,11 @@ export default function OrdersPanel() {
                           {order.paymentMethod && (
                             <div className={`text-right text-sm ${uiSurfaces.textSecondary}`}>
                               付款方式：<span className="font-bold text-[var(--brand-color-warning-text)]">{translatePaymentMethod(order.paymentMethod)}</span>
+                            </div>
+                          )}
+                          {order.status === 'pending' && order.creditReviewPending && (
+                            <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
+                              订单已提交，待人工授信审核：当前金额超出可用授信额度，暂未占用授信，需等待 Libereal 核对后再确认接单。
                             </div>
                           )}
                           {order.ownerPrepaySettlement?.eligible && (

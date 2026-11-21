@@ -84,6 +84,7 @@ type Order = {
     groupPoints: number;
     groupId: string | null;
   } | null;
+  creditReviewPending?: boolean;
 };
 
 const STATUS_CONFIG: Record<string, { label: string; color: string; bg: string; icon: React.ComponentType<{ size?: number; className?: string }> }> = {
@@ -234,6 +235,15 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
               </div>
             </div>
           </div>
+
+          {order.status === 'pending' && order.creditReviewPending && (
+            <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900 dark:border-amber-500/40 dark:bg-amber-900/20 dark:text-amber-100">
+              <p className="font-semibold">订单已提交，待人工授信审核</p>
+              <p className="mt-1 text-xs leading-5 text-amber-800 dark:text-amber-200">
+                本单金额超出您当前的可用授信额度，暂未占用授信额度也尚未正式接单。请等待 Libereal 工作人员人工核对授信后再确认接单；如需尽快安排采购，也可以联系客服沟通调额或改用支付宝付款。
+              </p>
+            </div>
+          )}
 
           <div className="border-t border-gray-100 dark:border-slate-400 pt-4 space-y-3">
             <p className="text-xs text-gray-500 dark:text-gray-500">发货记录</p>

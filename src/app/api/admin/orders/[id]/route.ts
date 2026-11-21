@@ -4,7 +4,13 @@ import { assertOrderPricingResolved, closeOrderRepricing, pendingOrderRepricing 
 import type { Prisma } from '@prisma/client';
 import { orderItemView } from '@/lib/commerce-records';
 import { getAlipayPaymentSummary } from '@/data/alipay-payment';
-import { releaseOrderReceivableOnCancellation, reserveOrderCredit, settleOrderReceivable } from '@/lib/customer-credit';
+import {
+  evaluatePostDeliveryCredit,
+  releaseOrderReceivableOnCancellation,
+  reserveOrderCredit,
+  settleOrderReceivable,
+} from '@/lib/customer-credit';
+import type { OrderCreditReviewSummary } from '@/lib/credit-summary';
 import { assertOrderTransition, isAutoCloseableOrderStatus, isInactiveOrderStatus, requiresPaidAlipayRefund } from '@/lib/order-domain';
 import { restoreRedeemedOrderCoupons } from '@/lib/coupon-service';
 import { releaseOrderInventory, reserveOrderInventory } from '@/lib/inventory';
@@ -38,6 +44,30 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     const { orderItems, paymentAttempts, ...rest } = order;
     const pendingPricing = order.inquiryId && isAutoCloseableOrderStatus(order.status)
       ? await pendingOrderRepricing(prisma, order.id) : null;
+    let creditReview: OrderCreditReviewSummary | null = null;
+    if (order.status === 'pending' && isPostDeliveryPaymentMethod(order.paymentMethod)) {
+      const creditEval = await evaluatePostDeliveryCredit(prisma, {
+        userId: order.customerId,
+        email: order.email,
+        paymentMethod: order.paymentMethod ?? null,
+        total: order.total,
+      });
+      if (creditEval.applicable) {
+        const flaggedAtSubmission = order.events.some((event) => event.type === 'credit_review_required');
+        creditReview = {
+          userId: creditEval.userId,
+          tier: creditEval.tier,
+          orderTotal: order.total,
+          paymentMethod: order.paymentMethod ?? null,
+          flaggedAtSubmission,
+          needsReview: creditEval.suspended || creditEval.exceedsLimit,
+          suspended: creditEval.suspended,
+          exceedsLimit: creditEval.exceedsLimit,
+          shortfall: creditEval.shortfall,
+          summary: creditEval.summary,
+        };
+      }
+    }
     return NextResponse.json({
       order: {
         ...rest,
@@ -45,6 +75,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
         payment: getAlipayPaymentSummary(rest, paymentAttempts[0]),
         pendingCatalogRepricing: pendingPricing && typeof pendingPricing.quoteId === 'string' && typeof pendingPricing.proposalHash === 'string'
           ? { inquiryId: order.inquiryId, quoteId: pendingPricing.quoteId, orderId: order.id, proposalHash: pendingPricing.proposalHash } : null,
+        creditReview,
       },
     });
   } catch (err) {

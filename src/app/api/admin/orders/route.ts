@@ -15,7 +15,9 @@ import { requireAdmin } from '@/lib/session';
 import { writeAuditLog } from '@/lib/audit';
 import { adminOrderResolvedLineError, parseAdminOrderCreateCharges } from '@/lib/admin-order-create';
 import { reviewCommerceLinesWithCatalog } from '@/lib/commerce-line-catalog';
-import { normalizeOrderPaymentMethod } from '@/data/payment-methods';
+import { isPostDeliveryPaymentMethod, normalizeOrderPaymentMethod } from '@/data/payment-methods';
+import { summarizeCustomerCredit } from '@/lib/customer-credit';
+import type { OrderCreditReviewBadge } from '@/lib/credit-summary';
 import { orderAutoCloseAt } from '@/lib/order-auto-close';
 import { initialOrderStatus } from '@/lib/order-domain';
 import { isOrderIdUniqueConflict, ORDER_NUMBER_BUSY_ERROR, withAllocatedOrderNumber } from '@/data/order-number';
@@ -31,6 +33,7 @@ import {
 const orderListSelect = {
   id: true,
   email: true,
+  customerId: true,
   subtotal: true,
   adjustmentTotal: true,
   total: true,
@@ -150,11 +153,70 @@ export async function GET(req: NextRequest) {
         : Promise.resolve(null),
     ]);
 
+    const pendingPostDelivery = orders.filter(
+      (order) => order.status === 'pending' && isPostDeliveryPaymentMethod(order.paymentMethod),
+    );
+    const pendingIds = pendingPostDelivery.map((order) => order.id);
+    const customerIds = [...new Set(pendingPostDelivery.map((order) => order.customerId).filter((cid): cid is string => Boolean(cid)))];
+    const pendingEmails = [...new Set(pendingPostDelivery.map((order) => order.email).filter(Boolean))];
+    const now = new Date();
+    const [flaggedEvents, creditUsers] = pendingIds.length
+      ? await Promise.all([
+          prisma.orderEvent.findMany({
+            where: { orderId: { in: pendingIds }, type: 'credit_review_required' },
+            select: { orderId: true },
+          }),
+          customerIds.length || pendingEmails.length
+            ? prisma.user.findMany({
+                where: {
+                  OR: [
+                    ...(customerIds.length ? [{ id: { in: customerIds } }] : []),
+                    ...(pendingEmails.length ? [{ email: { in: pendingEmails } }] : []),
+                  ],
+                },
+                select: { id: true, email: true, tier: true, creditAccount: true },
+              })
+            : Promise.resolve([]),
+        ])
+      : [[], []];
+    const flaggedOrderIds = new Set(flaggedEvents.map((event) => event.orderId));
+    const creditUserById = new Map(creditUsers.map((u) => [u.id, u]));
+    const creditUserByEmail = new Map(creditUsers.map((u) => [u.email.toLowerCase(), u]));
+
     const enriched = orders.map((order) => {
-      const { paymentAttempts, addressSnapshot, ...rest } = order;
+      const { paymentAttempts, addressSnapshot, customerId, ...rest } = order;
       const receivable = 'receivable' in rest ? rest.receivable ?? null : null;
       const summary = { ...rest };
       if ('receivable' in summary) delete summary.receivable;
+
+      let creditReview: OrderCreditReviewBadge | null = null;
+      if (order.status === 'pending' && isPostDeliveryPaymentMethod(order.paymentMethod)) {
+        const creditUser = (customerId ? creditUserById.get(customerId) : undefined)
+          ?? creditUserByEmail.get(order.email.toLowerCase());
+        const flaggedAtSubmission = flaggedOrderIds.has(order.id);
+        if (creditUser) {
+          const creditSummary = summarizeCustomerCredit(creditUser, creditUser.creditAccount, now);
+          const suspended = !['active', 'credit_limited'].includes(creditSummary.status);
+          const projectedUsed = Math.round((creditSummary.usedAmount + order.total + Number.EPSILON) * 100) / 100;
+          const exceedsLimit = projectedUsed > creditSummary.effectiveLimit;
+          const shortfall = exceedsLimit
+            ? Math.round((projectedUsed - creditSummary.effectiveLimit + Number.EPSILON) * 100) / 100
+            : 0;
+          const needsReview = suspended || exceedsLimit;
+          if (needsReview || flaggedAtSubmission) {
+            creditReview = {
+              needsReview,
+              flaggedAtSubmission,
+              suspended,
+              exceedsLimit,
+              shortfall,
+              availableAmount: creditSummary.availableAmount,
+              effectiveLimit: creditSummary.effectiveLimit,
+            };
+          }
+        }
+      }
+
       return {
         ...summary,
         receivable,
@@ -163,6 +225,7 @@ export async function GET(req: NextRequest) {
         department: null,
         phone: addressSnapshot?.phone || null,
         payment: getAlipayPaymentSummary(order, paymentAttempts[0]),
+        creditReview,
       };
     });
 

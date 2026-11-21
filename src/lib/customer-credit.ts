@@ -2,8 +2,11 @@ import type { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { calculateOrderPoints } from '@/lib/points';
 import { getTierByRollingSpend, DEFAULT_TIER, TIERS } from '@/lib/discount';
+import { isPostDeliveryPaymentMethod } from '@/data/payment-methods';
+import { formatCreditDateForInput, type CustomerCreditSummary } from '@/lib/credit-summary';
 
 type Tx = Prisma.TransactionClient;
+type CreditReader = Tx | typeof prisma;
 
 export const CREDIT_REVIEW_POLICY = {
   reminderAfterDays: 30,
@@ -81,6 +84,118 @@ export function effectiveCreditLimit(account: {
   const permanent = account.overrideLimit ?? account.baseLimit;
   const temporary = account.temporaryUntil && account.temporaryUntil >= now ? account.temporaryLimit : 0;
   return permanent + temporary;
+}
+
+export function defaultCreditLimitForTier(tierName: string | null | undefined): number {
+  return (TIERS.find((item) => item.name === tierName) ?? DEFAULT_TIER).creditLimit;
+}
+
+export type CreditAccountSnapshot = {
+  baseLimit: number;
+  overrideLimit: number | null;
+  temporaryLimit: number;
+  temporaryUntil: Date | string | null;
+  usedAmount: number;
+  status: string;
+  paymentTermDays: number;
+};
+
+export function summarizeCustomerCredit(
+  user: { tier?: string | null },
+  account: CreditAccountSnapshot | null | undefined,
+  now = new Date(),
+): CustomerCreditSummary {
+  const tierDefaultLimit = defaultCreditLimitForTier(user.tier);
+  const baseLimit = account ? account.baseLimit : tierDefaultLimit;
+  const overrideLimit = account?.overrideLimit ?? null;
+  const permanentLimit = overrideLimit ?? baseLimit;
+  const temporaryLimit = account?.temporaryLimit ?? 0;
+  const rawTemporaryUntil = account?.temporaryUntil ? new Date(account.temporaryUntil) : null;
+  const temporaryUntilDate = rawTemporaryUntil && !Number.isNaN(rawTemporaryUntil.getTime()) ? rawTemporaryUntil : null;
+  const activeTemporaryLimit = temporaryUntilDate && temporaryUntilDate >= now ? temporaryLimit : 0;
+  const status = account?.status ?? 'active';
+  const effectiveLimit = creditLimitForAccount({
+    baseLimit,
+    overrideLimit,
+    temporaryLimit,
+    temporaryUntil: temporaryUntilDate,
+    status,
+  }, now);
+  const usedAmount = roundCents(account?.usedAmount ?? 0);
+  const availableAmount = roundCents(effectiveLimit - usedAmount);
+  return {
+    tierDefaultLimit,
+    baseLimit,
+    overrideLimit,
+    permanentLimit,
+    temporaryLimit,
+    temporaryUntil: temporaryUntilDate ? temporaryUntilDate.toISOString() : null,
+    activeTemporaryLimit,
+    effectiveLimit,
+    usedAmount,
+    availableAmount,
+    status,
+    paymentTermDays: account?.paymentTermDays ?? 30,
+    hasAccount: Boolean(account),
+  };
+}
+
+export function parseTemporaryUntilInput(
+  value: unknown,
+): { ok: true; value: Date | null } | { ok: false; error: string } {
+  if (value === null || value === undefined || value === '') {
+    return { ok: true, value: null };
+  }
+  if (typeof value !== 'string') {
+    return { ok: false, error: '临时额度到期日格式无效' };
+  }
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return { ok: true, value: null };
+  }
+  if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+    const parsed = new Date(`${trimmed}T23:59:59.999+08:00`);
+    if (Number.isNaN(parsed.getTime()) || formatCreditDateForInput(parsed) !== trimmed) {
+      return { ok: false, error: '临时额度到期日无效' };
+    }
+    return { ok: true, value: parsed };
+  }
+  const parsed = new Date(trimmed);
+  if (Number.isNaN(parsed.getTime())) {
+    return { ok: false, error: '临时额度到期日格式无效' };
+  }
+  return { ok: true, value: parsed };
+}
+
+export async function evaluatePostDeliveryCredit(
+  db: CreditReader,
+  input: { userId: string | null; email: string; paymentMethod: string | null; total: number },
+  now = new Date(),
+) {
+  if (!isPostDeliveryPaymentMethod(input.paymentMethod)) {
+    return { applicable: false as const };
+  }
+  const user = input.userId
+    ? await db.user.findUnique({ where: { id: input.userId }, select: { id: true, tier: true } })
+    : await db.user.findUnique({ where: { email: input.email }, select: { id: true, tier: true } });
+  if (!user) {
+    return { applicable: false as const };
+  }
+  const account = await db.creditAccount.findUnique({ where: { userId: user.id } });
+  const summary = summarizeCustomerCredit(user, account, now);
+  const suspended = !['active', 'credit_limited'].includes(summary.status);
+  const projectedUsed = roundCents(summary.usedAmount + input.total);
+  const exceedsLimit = projectedUsed > summary.effectiveLimit;
+  const shortfall = exceedsLimit ? roundCents(projectedUsed - summary.effectiveLimit) : 0;
+  return {
+    applicable: true as const,
+    userId: user.id,
+    tier: user.tier,
+    summary,
+    suspended,
+    exceedsLimit,
+    shortfall,
+  };
 }
 
 export async function ensureCreditAccount(tx: Tx, userId: string, tierName: string) {

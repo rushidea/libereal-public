@@ -16,7 +16,8 @@ import { adminActingPointsError } from '@/lib/admin-acting-points';
 import { normalizePointsIntent } from '@/lib/points-checkout';
 import { assertCheckoutPointsAvailable, settleCheckoutPayment } from '@/lib/checkout-payment-settlement';
 import { applyOrderPointsDeduction } from '@/lib/points-checkout-service';
-import { assertQuoteAcceptanceCredit, assertQuoteAcceptanceStock, quoteAcceptancePointsAudit } from '@/lib/quote-acceptance-guards';
+import { evaluatePostDeliveryCredit } from '@/lib/customer-credit';
+import { assertQuoteAcceptanceStock, quoteAcceptancePointsAudit } from '@/lib/quote-acceptance-guards';
 import {
   isVariantStockInsufficientError,
   reserveOrderInventory,
@@ -243,7 +244,7 @@ export async function POST(
         ...quoteAcceptancePointsAudit(orderTotal),
         pointsRedeemed: (settled?.pointsBreakdown?.personalPoints ?? 0) + (settled?.pointsBreakdown?.groupPoints ?? 0),
       };
-      const { orderId, allOrdered } = await withAllocatedInquiryOrderNumber(prisma, id, async (tx, orderId, inquiryOrderSeq) => {
+      const { orderId, allOrdered, creditReviewRequired, creditReviewSummary } = await withAllocatedInquiryOrderNumber(prisma, id, async (tx, orderId, inquiryOrderSeq) => {
         let allOrdered = false;
         const current = await tx.quote.findFirst({ where: { inquiryId: id }, orderBy: { version: 'desc' }, include: { items: true } });
         if (current && (current.status === 'expired' || quoteValidUntilPassed(current.validUntil))) {
@@ -276,12 +277,27 @@ export async function POST(
           quantity: item.quantity,
           metadata: item.metadata ?? null,
         })));
-        await assertQuoteAcceptanceCredit(tx, {
+        const creditEval = await evaluatePostDeliveryCredit(tx, {
           userId: inquiry.userId,
           email: inquiry.email,
           paymentMethod: orderPaymentMethod,
           total: orderTotal,
         });
+        if (creditEval.applicable && creditEval.suspended) {
+          throw new Error('CREDIT_ACCOUNT_SUSPENDED');
+        }
+        const creditReviewRequired = Boolean(creditEval.applicable && creditEval.exceedsLimit);
+        const creditReviewSummary = creditReviewRequired && creditEval.applicable
+          ? {
+              tier: creditEval.tier,
+              tierDefaultLimit: creditEval.summary.tierDefaultLimit,
+              effectiveLimit: creditEval.summary.effectiveLimit,
+              usedAmount: creditEval.summary.usedAmount,
+              availableAmount: creditEval.summary.availableAmount,
+              orderTotal,
+              shortfall: creditEval.shortfall,
+            }
+          : null;
         for (const item of accepted) {
           const claimed = await tx.quoteItem.updateMany({
             where: { id: item.quoteItemId, quoteId: quote.id, available: true, orderedQty: item.previousOrderedQty, quantity: { gte: item.nextOrderedQty } },
@@ -331,21 +347,39 @@ export async function POST(
               reason: 'inquiry_items_confirmed',
             },
           },
-          events: { create: {
-            type: 'order_created',
-            actorId: session.user.id as string,
-            actorEmail: user.email,
-            message: '客户确认报价商品并生成订单',
-            metadata: JSON.stringify({
-              ...pointsAudit,
-              items: accepted.map((item) => ({
-                quoteItemId: item.quoteItemId,
-                quotedQuantity: item.quotedQuantity,
-                orderedQuantity: item.quantity,
-                quantity: item.quantity,
-              })),
-            }),
-          } },
+          events: {
+            create: [
+              {
+                type: 'order_created',
+                actorId: session.user.id as string,
+                actorEmail: user.email,
+                message: creditReviewRequired
+                  ? '客户确认报价商品并生成超授信待审订单'
+                  : '客户确认报价商品并生成订单',
+                metadata: JSON.stringify({
+                  ...pointsAudit,
+                  creditReviewRequired,
+                  items: accepted.map((item) => ({
+                    quoteItemId: item.quoteItemId,
+                    quotedQuantity: item.quotedQuantity,
+                    orderedQuantity: item.quantity,
+                    quantity: item.quantity,
+                  })),
+                }),
+              },
+              ...(creditReviewRequired && creditEval.applicable && creditReviewSummary ? [{
+                type: 'credit_review_required',
+                actorId: session.user.id as string,
+                actorEmail: user.email,
+                message: `订单金额 ¥${orderTotal.toLocaleString()} 超出当前可用授信 ¥${creditReviewSummary.availableAmount.toLocaleString()}（缺口 ¥${creditReviewSummary.shortfall.toLocaleString()}），等待人工授信审核与接单。`,
+                metadata: JSON.stringify({
+                  paymentMethod: orderPaymentMethod,
+                  ...creditReviewSummary,
+                  accountStatus: creditEval.summary.status,
+                }),
+              }] : []),
+            ],
+          },
         } });
         await reserveOrderInventory(tx, created.id, session.user.id as string, '询价转订单预占规格库存', { variantLinesOnly: true });
         if (settled?.pointsBreakdown) {
@@ -375,8 +409,26 @@ export async function POST(
           await tx.quote.update({ where: { id: quote.id }, data: { status: 'accepted', acceptedAt: new Date() } });
           await tx.inquiry.update({ where: { id }, data: { status: 'closed' } });
         }
-        return { orderId, allOrdered };
+        return { orderId, allOrdered, creditReviewRequired, creditReviewSummary };
       });
+
+      try {
+        await prisma.notification.create({
+          data: {
+            email: 'admin',
+            role: 'admin',
+            type: creditReviewRequired ? 'order_credit_review_required' : 'order_created',
+            title: creditReviewRequired ? '超授信待审订单' : '新询价订单',
+            content: creditReviewRequired && creditReviewSummary
+              ? `订单 ${orderId}（¥${orderTotal.toLocaleString()}）超出当前可用授信 ¥${creditReviewSummary.availableAmount.toLocaleString()}，需人工核对授信后再确认接单。`
+              : `询价订单 ${orderId} 已提交，金额 ¥${orderTotal.toLocaleString()}，等待人工确认接单。`,
+            linkUrl: '/admin/orders',
+            metadata: JSON.stringify({ orderId, inquiryId: id, creditReviewRequired }),
+          },
+        });
+      } catch (notifyErr) {
+        console.error('[confirm-items notification error]', notifyErr);
+      }
 
       const order = await prisma.order.findUnique({
         where: { id: orderId },
@@ -386,6 +438,8 @@ export async function POST(
         order: order ? { ...order, items: order.orderItems.map(orderItemView), orderItems: undefined } : null,
         orderId,
         allOrdered,
+        creditReviewRequired,
+        creditReview: creditReviewSummary,
       });
     } catch (e) {
       const discountError = discountPricingFailure(e);
@@ -400,8 +454,14 @@ export async function POST(
       if (e instanceof Error && e.message === 'INSUFFICIENT_STOCK') {
         return NextResponse.json({ error: '库存不足', code: 'INSUFFICIENT_STOCK' }, { status: 409 });
       }
-      if (e instanceof Error && (e.message === 'CREDIT_LIMIT_EXCEEDED' || e.message === 'CREDIT_ACCOUNT_SUSPENDED')) {
-        return NextResponse.json({ error: '授信额度不足或账户不可用', code: e.message }, { status: 403 });
+      if (e instanceof Error && e.message === 'CREDIT_ACCOUNT_SUSPENDED') {
+        return NextResponse.json({
+          error: '您的授信账户当前已暂停或处于逾期限制状态，暂不能使用账期方式提交订单。可改选支付宝先付，或联系客服处理。',
+          code: 'CREDIT_ACCOUNT_SUSPENDED',
+        }, { status: 403 });
+      }
+      if (e instanceof Error && e.message === 'CREDIT_LIMIT_EXCEEDED') {
+        return NextResponse.json({ error: '当前可用授信额度不足，请刷新或联系客服核对额度。', code: 'CREDIT_LIMIT_EXCEEDED' }, { status: 403 });
       }
       if (e instanceof InquiryAcceptRejected) {
         return NextResponse.json({ error: e.message, code: e.code }, { status: 409 });
