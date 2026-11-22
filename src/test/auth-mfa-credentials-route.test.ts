@@ -2,9 +2,9 @@
 
 import Database from 'better-sqlite3';
 import bcrypt from 'bcryptjs';
-import { randomUUID } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
 import { NextRequest } from 'next/server';
+import { testDatabasePath } from './test-database-path';
 
 const cookieJar = vi.hoisted(() => new Map<string, string>());
 
@@ -65,7 +65,7 @@ function createAuthGateSchema(db: Database.Database): void {
 describe('real Auth.js credentials MFA gate', () => {
   it('redirects to MFA and sets only the challenge cookie', async () => {
     vi.resetModules();
-    const dbPath = `/tmp/libereal-auth-mfa-${process.pid}-${randomUUID()}.db`;
+    const dbPath = testDatabasePath('libereal-auth-mfa');
     const db = new Database(dbPath);
     createAuthGateSchema(db);
     const password = await bcrypt.hash('password-123', 4);

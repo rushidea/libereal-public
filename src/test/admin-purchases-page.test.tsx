@@ -27,6 +27,7 @@ const source: Line['source'] = {
   written: {
     reviewId: 'test-supplier-review', replyHash: 'test-written-reply-hash',
     supplier: terms.supplier, unitPriceCents: terms.unitPriceCents, currency: 'CNY', taxBasis: 'included',
+    brand: '合成品牌', specification: '合成规格',
     leadTime: terms.leadTime, conditions: '供方书面原条件，采购需要核实付款和收款方',
     validUntil: terms.validUntil, channel: '合成书面回执', reference: terms.sourceReference, confirmedBy: 'test-operator',
   },

@@ -10,6 +10,7 @@ import {
   type CustomerCreditSummary,
 } from '@/lib/credit-summary';
 import { adminPermissionErrorMessage } from '@/data/admin-permission-message';
+import type { MerchantOrderApprovalPreview } from '@/lib/order-approval';
 import CustomerCreditEditor from '@/components/admin/CustomerCreditEditor';
 import UserRow from '@/components/admin/UserRow';
 import AdminUsersPage from '@/app/admin/users/page';
@@ -506,12 +507,32 @@ describe('credit summary helpers and admin credit UI', () => {
     expect(await screen.findByText('¥16,000')).toBeInTheDocument();
   });
 
-  it('shows 超授信待审 badge, credit review panel, and Chinese limit error on both confirm buttons in /admin/orders', async () => {
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
+  it('shows 超授信待审 and the Chinese credit error after reviewing either acceptance preview', async () => {
+    const customerEmail = '61216888@qq.com';
+    const acceptance: MerchantOrderApprovalPreview = {
+      version: 'a'.repeat(64),
+      action: 'accept_order',
+      snapshot: {
+        orderId: 'ORD-OVER-001', inquiryId: null, organizationId: null, ownerScope: 'personal',
+        customerId: 'usr_target', customerEmail, payee: 'Libereal', paymentMethod: 'rjmart',
+        subtotal: 13230, total: 13230, adjustmentTotal: 0, pointsDiscount: 0, status: 'pending',
+        recipient: null, paidAt: null, alipay: null, adjustments: [],
+        credit: {
+          debtorId: 'usr_target', paymentTermDays: 30, effectiveLimit: 5000, availableAmount: 5000,
+          status: 'active', receivable: null,
+        },
+        lines: [{
+          id: 'order-line-1', productId: null, variantId: null, name: '测试抗体',
+          brand: null, catalogNumber: null, spec: null, unit: null, quantity: 1, unitPrice: 13230,
+          leadTime: null, conditions: null,
+        }],
+      },
+    };
     const alertSpy = vi.spyOn(window, 'alert').mockImplementation(() => {});
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       if (url === '/api/orders/ORD-OVER-001/quote' && init?.method === 'POST') {
+        expect(JSON.parse(String(init.body))).toMatchObject({ action: 'accept_order', approvalVersion: acceptance.version });
         return makeJsonResponse({ error: 'CREDIT_LIMIT_EXCEEDED' }, 409);
       }
       if (
@@ -520,6 +541,7 @@ describe('credit summary helpers and admin credit UI', () => {
       ) {
         const body = JSON.parse(String(init.body || '{}')) as { status?: string };
         if (body.status === 'confirmed') {
+          expect(body).toMatchObject({ action: 'accept_order', approvalVersion: acceptance.version });
           return makeJsonResponse({ error: 'CREDIT_LIMIT_EXCEEDED' }, 409);
         }
         return makeJsonResponse({ ok: true });
@@ -529,7 +551,7 @@ describe('credit summary helpers and admin credit UI', () => {
           order: {
             id: 'ORD-OVER-001',
             name: '张工',
-            email: '61216888@qq.com',
+            email: customerEmail,
             phone: '13800138000',
             institution: '测试高校',
             status: 'pending',
@@ -537,7 +559,8 @@ describe('credit summary helpers and admin credit UI', () => {
             total: 13230,
             paymentMethod: 'rjmart',
             createdAt: '2026-11-22T01:00:00.000Z',
-            items: [],
+            items: acceptance.snapshot.lines.map(({ unitPrice, ...line }) => ({ ...line, price: unitPrice })),
+            approvalPreview: acceptance,
             events: [],
             creditReview: {
               userId: 'usr_target',
@@ -560,7 +583,7 @@ describe('credit summary helpers and admin credit UI', () => {
             {
               id: 'ORD-OVER-001',
               name: '张工',
-              email: '61216888@qq.com',
+              email: customerEmail,
               phone: '13800138000',
               institution: '测试高校',
               status: 'pending',
@@ -611,10 +634,15 @@ describe('credit summary helpers and admin credit UI', () => {
     fireEvent.click(within(reviewSection).getByRole('button', { name: '调整永久 / 临时额度' }));
     expect(within(reviewSection).getByText(/授信额度与账期调整/)).toBeInTheDocument();
 
-    // Click status action button "已确认" (not the top filter tab) -> displays translated Chinese error
-    const confirmedButtons = screen.getAllByRole('button', { name: '已确认' });
-    expect(confirmedButtons.length).toBeGreaterThan(1);
-    fireEvent.click(confirmedButtons[confirmedButtons.length - 1]!);
+    fireEvent.click(within(reviewSection).getByRole('button', { name: '收起调额面板' }));
+    expect(within(reviewSection).queryByText(/授信额度与账期调整/)).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getAllByRole('button', { name: '核对接单明细' })[0]!);
+    const acceptancePanel = within((await screen.findAllByRole('region', { name: '订单确认明细' }))[0]!);
+    expect(acceptancePanel.getByText(/测试抗体.*× 1/)).toBeInTheDocument();
+    expect(acceptancePanel.getByText(/账期 30 天/)).toBeInTheDocument();
+    expect(fetchMock.mock.calls.some(([, opts]) => opts?.method === 'PATCH')).toBe(false);
+    fireEvent.click(acceptancePanel.getByRole('button', { name: '确认 Libereal 接单' }));
     await waitFor(() => {
       const patches = fetchMock.mock.calls.filter(
         ([u, opts]) =>
@@ -628,9 +656,11 @@ describe('credit summary helpers and admin credit UI', () => {
     });
     expect(alertSpy).not.toHaveBeenCalledWith('CREDIT_LIMIT_EXCEEDED');
 
-    // Click bottom "确认订单" button -> persists items (200), hits POST /quote (409), and displays translated Chinese error in DOM
-    const bottomConfirmButtons = screen.getAllByRole('button', { name: '确认订单' });
-    fireEvent.click(bottomConfirmButtons[bottomConfirmButtons.length - 1]!);
+    fireEvent.click(screen.getAllByRole('button', { name: '核对接单并通知客户' })[0]!);
+    const notifyPanel = within((await screen.findAllByRole('region', { name: '订单确认明细' }))[0]!);
+    expect(notifyPanel.getByText(/订单合计.*13,230/)).toBeInTheDocument();
+    expect(fetchMock.mock.calls.some(([, opts]) => opts?.method === 'POST')).toBe(false);
+    fireEvent.click(notifyPanel.getByRole('button', { name: '确认接单并通知客户' }));
     await waitFor(() => {
       const quoteCalls = fetchMock.mock.calls.filter(
         ([u, opts]) => String(u) === '/api/orders/ORD-OVER-001/quote' && opts?.method === 'POST',

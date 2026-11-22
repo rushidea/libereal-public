@@ -36,9 +36,10 @@ function seedPointsOrder(points: { personal?: number; group?: number; applied?: 
   `).run(points.personal ?? 10, points.group ?? 0, points.applied ?? 1);
 }
 
+beforeAll(() => { getTestDb(); });
+afterAll(() => { closeTestDb(); });
+
 describe('order points refunds', () => {
-  beforeAll(() => { getTestDb(); });
-  afterAll(() => { closeTestDb(); });
   beforeEach(() => {
     const db = getTestDb();
     clearAllTables(db);
@@ -111,8 +112,6 @@ describe('order points refunds', () => {
 });
 
 describe('points redemption cancellation', () => {
-  beforeAll(() => { getTestDb(); });
-  afterAll(() => { closeTestDb(); });
   beforeEach(() => {
     const db = getTestDb();
     clearAllTables(db);

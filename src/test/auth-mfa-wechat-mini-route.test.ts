@@ -1,9 +1,9 @@
 // @vitest-environment node
 
 import Database from 'better-sqlite3';
-import { randomUUID } from 'node:crypto';
 import { NextRequest } from 'next/server';
 import { describe, expect, it, vi } from 'vitest';
+import { testDatabasePath } from './test-database-path';
 
 const cookieJar = vi.hoisted(() => new Map<string, string>());
 
@@ -73,7 +73,7 @@ describe('real Auth.js wechat-mini MFA gate', () => {
       )),
     }));
 
-    const dbPath = `/tmp/libereal-auth-mfa-mini-${process.pid}-${randomUUID()}.db`;
+    const dbPath = testDatabasePath('libereal-auth-mfa-mini');
     const db = new Database(dbPath);
     createAuthGateSchema(db);
     const now = new Date().toISOString();

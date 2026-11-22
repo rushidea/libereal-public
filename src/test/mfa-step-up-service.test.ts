@@ -1,12 +1,13 @@
 // @vitest-environment node
 
 import Database from 'better-sqlite3';
-import { randomBytes, randomUUID } from 'node:crypto';
+import { randomBytes } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { encryptMfaSecret, createMfaKeyRing } from '@/lib/security/mfa-crypto';
 import { createMfaStepUpChallenge, setMfaRateLimitStoreForTests, verifyMfaStepUpChallenge } from '@/lib/security/mfa-service';
 import { createMemoryMfaRateLimitStore } from '@/lib/security/mfa-rate-limit';
 import { generateTotpSecret, totpCodeAt } from '@/lib/security/mfa-totp';
+import { testDatabasePath } from './test-database-path';
 
 function createSchema(db: Database.Database): void {
   db.exec(`
@@ -49,7 +50,7 @@ function createSchema(db: Database.Database): void {
 
 describe('MFA step-up service', () => {
   it('verifies TOTP and consumes the sensitive-action challenge once', async () => {
-    const dbPath = `/tmp/libereal-mfa-step-up-${process.pid}-${randomUUID()}.db`;
+    const dbPath = testDatabasePath('libereal-mfa-step-up');
     const db = new Database(dbPath);
     createSchema(db);
     const secret = generateTotpSecret();

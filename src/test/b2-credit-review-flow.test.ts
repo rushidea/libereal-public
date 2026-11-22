@@ -3,6 +3,8 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import { NextRequest } from 'next/server';
 import { clearAllTables, closeTestDb, getTestDb, seedAdmin, seedUser } from './db-helpers';
 import { getEphemeralStore } from '@/lib/ephemeral-store';
+import type { OrderCreditReviewSummary } from '@/lib/credit-summary';
+import type { MerchantOrderApprovalPreview } from '@/lib/order-approval';
 
 const authMock = vi.hoisted(() => vi.fn());
 const tierFixture = vi.hoisted(() => [
@@ -119,6 +121,24 @@ async function publishQuoteAndAccept(inquiryId: string, attemptId: string, price
   );
 }
 
+type AdminOrderCreditDetail = {
+  creditReview: OrderCreditReviewSummary | null;
+  approvalPreview: MerchantOrderApprovalPreview | null;
+};
+
+async function readAdminOrderDetail(orderId: string) {
+  const response = await adminOrderDetailGET(new NextRequest(`http://localhost:3000/api/admin/orders/${orderId}`), {
+    params: Promise.resolve({ id: orderId }),
+  });
+  expect(response.status).toBe(200);
+  return (await response.json() as { order: AdminOrderCreditDetail }).order;
+}
+
+function acceptanceVersion(detail: AdminOrderCreditDetail) {
+  expect(detail.approvalPreview).toMatchObject({ action: 'accept_order', version: expect.stringMatching(/^[a-f0-9]{64}$/) });
+  return detail.approvalPreview!.version;
+}
+
 describe('B2 Direction 2 over-credit manual review & credit entry flow', () => {
   const previousMfaAdminRequired = process.env.MFA_ADMIN_REQUIRED;
 
@@ -201,7 +221,9 @@ describe('B2 Direction 2 over-credit manual review & credit entry flow', () => {
       params: Promise.resolve({ id: orderId }),
     });
     expect(myDetailRes.status).toBe(200);
-    expect((await myDetailRes.json() as { creditReviewPending?: boolean }).creditReviewPending).toBe(true);
+    const customerDetail = await myDetailRes.json();
+    expect(customerDetail.creditReviewPending).toBe(true);
+    expect(customerDetail.approvalPreview).toBeUndefined();
 
     // 4. Admin list & detail APIs report live shortfall
     asUser(adminUser);
@@ -213,11 +235,7 @@ describe('B2 Direction 2 over-credit manual review & credit entry flow', () => {
       shortfall: 8230,
     });
 
-    const adminDetailBeforeRes = await adminOrderDetailGET(new NextRequest(`http://localhost:3000/api/admin/orders/${orderId}`), {
-      params: Promise.resolve({ id: orderId }),
-    });
-    expect(adminDetailBeforeRes.status).toBe(200);
-    const adminDetailBefore = (await adminDetailBeforeRes.json() as { order: { creditReview: { needsReview: boolean; flaggedAtSubmission: boolean; shortfall: number; summary: { tierDefaultLimit: number; effectiveLimit: number } } } }).order;
+    const adminDetailBefore = await readAdminOrderDetail(orderId);
     expect(adminDetailBefore.creditReview).toMatchObject({
       needsReview: true,
       flaggedAtSubmission: true,
@@ -225,12 +243,19 @@ describe('B2 Direction 2 over-credit manual review & credit entry flow', () => {
       summary: { tierDefaultLimit: 5000, effectiveLimit: 5000 },
     });
 
-    // 5. All three admin confirm endpoints hard-reject over-credit order with CREDIT_LIMIT_EXCEEDED
+    const overCreditVersion = acceptanceVersion(adminDetailBefore);
+    expect(adminDetailBefore.approvalPreview?.snapshot).toMatchObject({
+      orderId, total: 13230, paymentMethod: 'rjmart',
+      credit: { debtorId: buyerUser.id, availableAmount: 5000 },
+      lines: [{ name: '测试抗体', quantity: 1, unitPrice: 13230 }],
+    });
+
+    // 5. A current preview cannot override the credit limit on any acceptance endpoint.
     const patchAdminRes = await adminOrderPATCH(
       new NextRequest(`http://localhost:3000/api/admin/orders/${orderId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: 'confirmed' }),
+        body: JSON.stringify({ status: 'confirmed', action: 'accept_order', approvalVersion: overCreditVersion }),
       }),
       { params: Promise.resolve({ id: orderId }) },
     );
@@ -241,7 +266,7 @@ describe('B2 Direction 2 over-credit manual review & credit entry flow', () => {
       new NextRequest(`http://localhost:3000/api/orders/${orderId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: 'confirmed' }),
+        body: JSON.stringify({ status: 'confirmed', action: 'accept_order', approvalVersion: overCreditVersion }),
       }),
       { params: Promise.resolve({ id: orderId }) },
     );
@@ -249,7 +274,11 @@ describe('B2 Direction 2 over-credit manual review & credit entry flow', () => {
     expect(await patchOrderRes.json()).toEqual({ error: 'CREDIT_LIMIT_EXCEEDED' });
 
     const quoteConfirmRes = await orderQuotePOST(
-      new NextRequest(`http://localhost:3000/api/orders/${orderId}/quote`, { method: 'POST' }),
+      new NextRequest(`http://localhost:3000/api/orders/${orderId}/quote`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'accept_order', approvalVersion: overCreditVersion }),
+      }),
       { params: Promise.resolve({ id: orderId }) },
     );
     expect(quoteConfirmRes.status).toBe(409);
@@ -307,11 +336,7 @@ describe('B2 Direction 2 over-credit manual review & credit entry flow', () => {
     expect(clearedAccount.temporaryUntil).toBeNull();
 
     // 7. Admin order detail now flips needsReview=false while retaining flaggedAtSubmission=true
-    const adminDetailAfterRaiseRes = await adminOrderDetailGET(new NextRequest(`http://localhost:3000/api/admin/orders/${orderId}`), {
-      params: Promise.resolve({ id: orderId }),
-    });
-    expect(adminDetailAfterRaiseRes.status).toBe(200);
-    const adminDetailAfterRaise = (await adminDetailAfterRaiseRes.json() as { order: { creditReview: { needsReview: boolean; flaggedAtSubmission: boolean; shortfall: number; summary: { effectiveLimit: number; availableAmount: number } } } }).order;
+    const adminDetailAfterRaise = await readAdminOrderDetail(orderId);
     expect(adminDetailAfterRaise.creditReview).toMatchObject({
       needsReview: false,
       flaggedAtSubmission: true,
@@ -320,11 +345,13 @@ describe('B2 Direction 2 over-credit manual review & credit entry flow', () => {
     });
 
     // 8. Admin confirms the order -> reserves ¥13,230 credit and creates open AccountReceivable
+    const raisedCreditVersion = acceptanceVersion(adminDetailAfterRaise);
+    expect(raisedCreditVersion).not.toBe(overCreditVersion);
     const confirmNowRes = await adminOrderPATCH(
       new NextRequest(`http://localhost:3000/api/admin/orders/${orderId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: 'confirmed' }),
+        body: JSON.stringify({ status: 'confirmed', action: 'accept_order', approvalVersion: raisedCreditVersion }),
       }),
       { params: Promise.resolve({ id: orderId }) },
     );
@@ -333,10 +360,7 @@ describe('B2 Direction 2 over-credit manual review & credit entry flow', () => {
     expect(db.prepare('SELECT usedAmount FROM CreditAccount WHERE userId = ?').get(buyerUser.id)).toEqual({ usedAmount: 13230 });
     expect(db.prepare('SELECT amount, status FROM AccountReceivable WHERE orderId = ?').get(orderId)).toEqual({ amount: 13230, status: 'open' });
 
-    const adminDetailFinalRes = await adminOrderDetailGET(new NextRequest(`http://localhost:3000/api/admin/orders/${orderId}`), {
-      params: Promise.resolve({ id: orderId }),
-    });
-    expect((await adminDetailFinalRes.json() as { order: { creditReview: unknown } }).order.creditReview).toBeNull();
+    expect((await readAdminOrderDetail(orderId)).creditReview).toBeNull();
   });
 
   it('hard-blocks paused or overdue_hold accounts at quote confirmation without creating an order', async () => {
@@ -489,11 +513,12 @@ describe('B2 Direction 2 over-credit manual review & credit entry flow', () => {
       VALUES ('ORD-CENTS', ?, ?, 200.2, 200.2, 'pending', 'rjmart', 'logistics', '[]', datetime('now'), datetime('now'))
     `).run(buyerUser.email, buyerUser.id);
 
+    const centVersion = acceptanceVersion(await readAdminOrderDetail('ORD-CENTS'));
     const centConfirmRes = await adminOrderPATCH(
       new NextRequest('http://localhost:3000/api/admin/orders/ORD-CENTS', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: 'confirmed' }),
+        body: JSON.stringify({ status: 'confirmed', action: 'accept_order', approvalVersion: centVersion }),
       }),
       { params: Promise.resolve({ id: 'ORD-CENTS' }) },
     );
@@ -573,12 +598,13 @@ describe('B2 Direction 2 over-credit manual review & credit entry flow', () => {
       );
       expect(adjustRes.status).toBe(200);
 
+      const firstVersion = acceptanceVersion(await readAdminOrderDetail(orderRow.id));
       // Replaying the consumed single-use token must still fail closed even inside the staging test window
       const replayQuoteRes = await orderQuotePOST(
         new NextRequest(`http://localhost:3000/api/orders/${orderRow.id}/quote`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ stepUpToken: grantToken }),
+          body: JSON.stringify({ action: 'accept_order', approvalVersion: firstVersion, stepUpToken: grantToken }),
         }),
         { params: Promise.resolve({ id: orderRow.id }) },
       );
@@ -587,7 +613,11 @@ describe('B2 Direction 2 over-credit manual review & credit entry flow', () => {
 
       // Confirming immediately without a token in the same staging-verified session succeeds via scoped window
       const windowQuoteRes = await orderQuotePOST(
-        new NextRequest(`http://localhost:3000/api/orders/${orderRow.id}/quote`, { method: 'POST' }),
+        new NextRequest(`http://localhost:3000/api/orders/${orderRow.id}/quote`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'accept_order', approvalVersion: firstVersion }),
+        }),
         { params: Promise.resolve({ id: orderRow.id }) },
       );
       expect(windowQuoteRes.status).toBe(200);
@@ -596,36 +626,43 @@ describe('B2 Direction 2 over-credit manual review & credit entry flow', () => {
       const secondOrder = db.prepare('SELECT id FROM "Order" WHERE inquiryId = ?').get('INQ-CREDIT-2') as { id: string };
 
       asUser(adminUser, 'sess-order-mfa');
+      const secondVersion = acceptanceVersion(await readAdminOrderDetail(secondOrder.id));
       const unauthPatch = await customerOrAdminOrderPATCH(
         new NextRequest(`http://localhost:3000/api/orders/${secondOrder.id}`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ status: 'confirmed' }),
+          body: JSON.stringify({ status: 'confirmed', action: 'accept_order', approvalVersion: secondVersion }),
         }),
         { params: Promise.resolve({ id: secondOrder.id }) },
       );
       expect(unauthPatch.status).toBe(403);
       expect((await unauthPatch.json() as { error: string }).error).toBe('Admin MFA required');
 
-      // 409 validation error must NOT consume a valid stepUpToken
+      // The unpaid Alipay precheck must not consume a valid step-up token.
       db.prepare(`UPDATE "Order" SET paymentMethod = 'alipay', paidAt = NULL WHERE id = ?`).run(secondOrder.id);
       await issueToken('tok-order-1');
       const conflictPatch = await customerOrAdminOrderPATCH(
         new NextRequest(`http://localhost:3000/api/orders/${secondOrder.id}`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ status: 'confirmed', stepUpToken: 'tok-order-1' }),
+          body: JSON.stringify({
+            status: 'confirmed', action: 'accept_order', approvalVersion: secondVersion, stepUpToken: 'tok-order-1',
+          }),
         }),
         { params: Promise.resolve({ id: secondOrder.id }) },
       );
       expect(conflictPatch.status).toBe(409);
+      expect(await conflictPatch.json()).toEqual({ error: 'ALIPAY_PAYMENT_REQUIRED' });
 
       db.prepare(`UPDATE "Order" SET paymentMethod = 'rjmart' WHERE id = ?`).run(secondOrder.id);
+      const restoredVersion = acceptanceVersion(await readAdminOrderDetail(secondOrder.id));
       const okPatch = await customerOrAdminOrderPATCH(
         new NextRequest(`http://localhost:3000/api/orders/${secondOrder.id}`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ status: 'confirmed', stepUpToken: 'tok-order-1' }),
+          body: JSON.stringify({
+            status: 'confirmed', action: 'accept_order', approvalVersion: restoredVersion, stepUpToken: 'tok-order-1',
+          }),
         }),
         { params: Promise.resolve({ id: secondOrder.id }) },
       );

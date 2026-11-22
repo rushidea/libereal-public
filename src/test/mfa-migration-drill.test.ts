@@ -3,9 +3,9 @@
 import Database from 'better-sqlite3';
 import fs from 'node:fs';
 import path from 'node:path';
-import { randomUUID } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { backfillAuthenticators, hasUnifiedTables } from '@/lib/security/unified-authenticator-store';
+import { testDatabasePath } from './test-database-path';
 
 const MIGRATION_SQL = fs.readFileSync(
   path.join(process.cwd(), 'prisma/migrations/20260807100000_add_unified_authenticator_tables/migration.sql'),
@@ -61,7 +61,7 @@ function createLegacyBaseline(db: Database.Database): void {
 
 describe('Phase 1.5 isolated migration drill', () => {
   it('applies the append-only migration, backfills idempotently, and keeps legacy data intact for rollback', () => {
-    const dbPath = `/tmp/libereal-mfa-migration-drill-${process.pid}-${randomUUID()}.db`;
+    const dbPath = testDatabasePath('libereal-mfa-migration-drill');
     const db = new Database(dbPath);
     createLegacyBaseline(db);
     db.prepare('INSERT INTO User (id, email, name) VALUES (?, ?, ?)').run('user-1', 'test@example.com', 'User One');

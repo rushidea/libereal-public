@@ -33,9 +33,10 @@ function seedOrder(db: ReturnType<typeof getTestDb>, order: {
   `).run(order.id, order.email, order.status ?? 'pending', order.archivedAt ?? null);
 }
 
+beforeAll(() => { getTestDb(); });
+afterAll(() => { closeTestDb(); });
+
 describe('GET /api/admin/orders (list)', () => {
-  beforeAll(() => { getTestDb(); });
-  afterAll(() => { closeTestDb(); });
   beforeEach(() => {
     const db = getTestDb();
     clearAllTables(db);
@@ -196,8 +197,6 @@ describe('GET /api/admin/orders (list)', () => {
 });
 
 describe('POST /api/admin/orders (admin create order)', () => {
-  beforeAll(() => { getTestDb(); });
-  afterAll(() => { closeTestDb(); });
   beforeEach(() => {
     const db = getTestDb();
     clearAllTables(db);
@@ -448,8 +447,6 @@ describe('POST /api/admin/orders (admin create order)', () => {
 });
 
 describe('GET /api/admin/customers', () => {
-  beforeAll(() => { getTestDb(); });
-  afterAll(() => { closeTestDb(); });
   beforeEach(() => {
     const db = getTestDb();
     clearAllTables(db);
@@ -491,8 +488,6 @@ describe('GET /api/admin/customers', () => {
 });
 
 describe('PUT /api/admin/users/update', () => {
-  beforeAll(() => { getTestDb(); });
-  afterAll(() => { closeTestDb(); });
   beforeEach(() => {
     const db = getTestDb();
     clearAllTables(db);

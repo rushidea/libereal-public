@@ -1,6 +1,5 @@
-// 测试辅助：建 SQLite DB（in-memory 共享）+ 真实 schema + seed 数据
-// 关键：route handler 内部 `new Database(process.env.DATABASE_PATH)` 也要指向同一文件
-// vitest `env` 在 worker 启动时设 DATABASE_PATH；这个 module 只需读它
+// The setup file assigns DATABASE_PATH before routes or fixtures import Prisma.
+// Keep the fixture connection open until the test file's final afterAll.
 
 import Database from 'better-sqlite3';
 import { readFileSync } from 'node:fs';
@@ -894,8 +893,6 @@ export function closeTestDb(): void {
     _db.close();
     _db = null;
   }
-  // 不删 file —— 下次 getTestDb() 会重新打开同一 file + 用 IF NOT EXISTS 幂等创建 schema
-  // file 由 vitest env 指定的 /tmp/... 路径，进程退出后 OS 自动清理
 }
 
 export function seedUserWithPassword(db: Database.Database, user: {
