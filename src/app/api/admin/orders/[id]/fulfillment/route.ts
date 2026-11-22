@@ -34,8 +34,13 @@ export async function GET(req: NextRequest, { params }: Context) {
     const actual = req.nextUrl.searchParams.get('dispatchAt');
     const dispatchedAt = actual===null ? undefined : Date.parse(purchaseTimestamp(actual,'实际发运时间'));
     if (dispatchedAt!==undefined && dispatchedAt>Date.now()) throw new PurchaseError('实际发运时间不能晚于今天的登记时间',400);
-    const workspace = await prisma.$transaction(tx => fulfillmentWorkspace(tx,id,dispatchedAt));
     const permissions = await getAdminPermissions(user);
+    const reviewHold = req.nextUrl.searchParams.get('reviewHold')==='1';
+    if (reviewHold && (!permissions.includes('orders.write') || !permissions.includes('purchases.approve'))) {
+      throw new PurchaseError('发运偏差须由有采购审批权限的订单经办人核对',403);
+    }
+    if (reviewHold && dispatchedAt===undefined) throw new PurchaseError('请填写原运单的实际发运时间',400);
+    const workspace = await prisma.$transaction(tx=>fulfillmentWorkspace(tx,id,dispatchedAt,reviewHold));
     return NextResponse.json({ workspace, capabilities: { warehouse: permissions.includes('inventory.write'),
       shortfall: permissions.includes('purchases.approve') } }, { headers: { 'Cache-Control': 'private, no-store' } });
   } catch (error) { return failure(error); }
@@ -54,6 +59,9 @@ export async function POST(req: NextRequest, { params }: Context) {
     const actor = { id: user.id, email: user.email };
     if (!['dispatch','record_event','link_legacy','match_notice','reconcile_legacy_inventory'].includes(action)) throw new PurchaseError('无法识别物流操作',400);
     if (action === 'reconcile_legacy_inventory' && !permissions.includes('inventory.write')) throw new PurchaseError('历史库存须由有库存权限的经办人核对',403);
+    if (action==='dispatch' && input.holdReview!==undefined && !permissions.includes('purchases.approve')) {
+      throw new PurchaseError('发运偏差须由有采购审批权限的订单经办人核对',403);
+    }
     if (action === 'record_event') {
       const shortfall = input.kind === 'confirm_shortfall';
       const stock = input.kind === 'warehouse_receipt' || input.kind === 'dispose_receipt'

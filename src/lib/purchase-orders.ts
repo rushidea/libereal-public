@@ -7,7 +7,7 @@ import {
 } from '@/lib/purchase-contract';
 import { previewShipmentAttribution, purchaseFulfillmentReview, type ShipmentAttributionInput } from '@/lib/purchase-fulfillment';
 import { agreedDocumentTerms, assertSupplierDocumentScopes, missingDocumentScopes, restoreDocumentScopes } from '@/lib/purchase-document-scope';
-import { decisionDocumentRow, decisionMaterialTerms, decisionTermsChanged, previewDecisionDocuments, type DecisionDocumentInput, type DecisionEffect } from '@/lib/purchase-decision-documents';
+import { decisionDocumentRow, decisionMaterialTerms, decisionTermsChanged, previewDecisionDocuments, type CustomerDecisionDocument, type DecisionDocumentInput, type DecisionEffect } from '@/lib/purchase-decision-documents';
 import { pricingContentHash } from '@/lib/pricing-adjustment-approval';
 import { loadPurchaseOrderSource, loadPurchaseLines, type PurchaseSource, type SourceOrder } from '@/lib/purchase-source';
 import { creditExceptionMatches, paymentPlanAt, paymentPlanContent, paymentPlanFromReview, purchaseCreditVersion, purchaseStartReview, type PaymentPlan } from '@/lib/purchase-start';
@@ -40,7 +40,7 @@ export type PurchaseActionInput = {
   changeKind?: 'delay' | 'price' | 'unavailable' | 'other';
   outcome?: 'original_terms' | 'revised_terms' | 'declined' | 'replacement' | 'shortfall';
   supplierReference?: string; supplierSha256?: string; customerReference?: string; customerSha256?: string;
-  revisedTerms?: LineEdit[]; retainedDraftTerms?: Array<LineEdit & DecisionDocumentInput>; dispositions?: DispositionInput[]; refundFollowup?: string;
+  revisedTerms?: LineEdit[]; retainedDraftTerms?: Array<LineEdit & DecisionDocumentInput & { customerDecision?: CustomerDecisionDocument }>; dispositions?: DispositionInput[]; refundFollowup?: string;
   decisionDocumentLines?: Array<DecisionDocumentInput & { orderItemId: string }>;
   incidentId?: string;
   reviewResult?: IncidentReviewResult;
@@ -423,15 +423,38 @@ function splitDraftAllocations(po: PO, affected: IncidentQuantity[], edits: Line
     if (!prior.replacementId || !prior.authorizationId || !prior.fromPurchaseOrderId) {
       throw new PurchaseError('拆分份额须对应尚未承诺、带原授权的替代采购行');
     }
-    const keep = normalizePurchaseTerms(retained.find(line=>line.orderItemId===row.orderItemId)?.terms);
+    const retainedEntry = retained.find(line=>line.orderItemId===row.orderItemId)!;
+    const keep = normalizePurchaseTerms(retainedEntry.terms);
+    const customerDecision = retainedEntry.customerDecision===undefined ? undefined : {
+      reference:requiredText(retainedEntry.customerDecision?.reference,'客户同意留存份额的书证出处'),
+      sha256:documentSha256(retainedEntry.customerDecision?.sha256,'客户同意留存份额的书证摘要'),
+    };
     if (group(keep)!==group(prior.terms)) throw new PurchaseError('留存份额应使用原供货及付款组的书面新报价');
     const change = edits?.find(line=>line.orderItemId===row.orderItemId);
     return {orderItemId:row.orderItemId,replacementId:prior.replacementId,authorizationId:prior.authorizationId,
       fromPurchaseOrderId:prior.fromPurchaseOrderId,revision:prior.revision,originalQuantity:prior.source.quantity,
       originalQuotedCents:prior.terms.linePayableCents,quantity:row.quantity,
-      retained:draftQuote(prior,prior.source.quantity-row.quantity,keep),
+      retained:draftQuote(prior,prior.source.quantity-row.quantity,keep),customerDecision,
       moved:change ? draftQuote(prior,row.quantity,change.terms) : undefined};
   });
+}
+
+function ensureDraftSharesAreSeparate(
+  po: PO, incidentId: string, actual: IncidentQuantity[], removed: IncidentQuantity[], ownOutstanding: IncidentQuantity[],
+) {
+  if (!removed.length) return;
+  const other = po.incidents.filter(row=>row.id!==incidentId);
+  const message = '所选草稿份额另有待核事项，请先确认实际影响范围和留存数量';
+  if (other.some(row=>!row.outstanding)) throw new PurchaseError(message);
+  for (const movement of incidentLineTotals(removed)) {
+    const lineId = movement.orderItemId;
+    const stillDisputed = other.flatMap(row=>row.outstanding ?? []).filter(row=>row.orderItemId===lineId);
+    if (stillDisputed.length && (stillDisputed.some(row=>row.source?.kind!=='unshipped')
+      || actual.some(row=>row.orderItemId===lineId && row.source?.kind!=='unshipped'))) throw new PurchaseError(message);
+    const reserved = [...stillDisputed,...ownOutstanding.filter(row=>row.orderItemId===lineId)].reduce((total,row)=>total+row.quantity,0);
+    const available = po.remaining.find(row=>row.orderItemId===lineId)?.quantity ?? 0;
+    if (movement.quantity+reserved>available) throw new PurchaseError(message);
+  }
 }
 
 function supplyFacts(view: Workspace, purchaseOrderId: string, quantities: IncidentQuantity[]) {
@@ -939,11 +962,9 @@ function actionDetails(
       return {...row,replacementId:line.replacementId,revision:line.revision,quotedCents:line.terms.linePayableCents ?? null};
     }) : undefined;
     const draftGroups = revisedTerms ? regroupDraftLines(po,revisedTerms) : undefined;
-    const removed = [...(withdrawnDraftLines ?? []),...(draftGroups?.moves ?? [])];
-    if (removed.length && po.incidents.some(row=>row.id!==incident.id
-      && (!row.outstanding || row.outstanding.some(item=>removed.some(line=>line.orderItemId===item.orderItemId))))) {
-      throw new PurchaseError('所选草稿行另有待办，请先核清该行的其它事项');
-    }
+    const removed = [...(withdrawnDraftLines ?? []),...(draftAllocations ?? []),...(draftGroups?.moves ?? []).map(move=>
+      po.remaining.find(line=>line.orderItemId===move.orderItemId)!)];
+    ensureDraftSharesAreSeparate(po,incident.id,incidentProgress.handled,removed,incidentProgress.outstanding);
     return { action, outcome: input.outcome, incidentId: incident.id, previousStatus, incidentProgress, supplyFacts: supplyFacts(view,po.id,handled),
       responsibility: input.responsibility ? requiredText(input.responsibility,'需要核对的供方或环节') : incident.responsibility ?? undefined,
       supplierReference: requiredText(input.supplierReference, '人工协调供应商的书面依据'),
@@ -998,9 +1019,9 @@ async function prepareCoordinationEvidence(
   for (const split of details.draftAllocations ?? []) {
     const prior = po.lines.find(row=>row.orderItemId===split.orderItemId)!;
     const originalTerms = decisionMaterialTerms({source:prior.source,terms:prior.terms});
-    if (pricingContentHash(originalTerms)===pricingContentHash(decisionMaterialTerms(split.retained))) continue;
+    if (!split.customerDecision && pricingContentHash(originalTerms)===pricingContentHash(decisionMaterialTerms(split.retained))) continue;
     effects.push({orderItemId:split.orderItemId,quantity:split.retained.source.quantity,outcome:'reconfirm_terms',replacement:split.retained,
-      document:input.retainedDraftTerms?.find(row=>row.orderItemId===split.orderItemId)});
+      customerDecision:split.customerDecision,document:input.retainedDraftTerms?.find(row=>row.orderItemId===split.orderItemId)});
   }
   if (effects.length && (details.draftAllocations || details.outcome==='revised_terms')) {
     customerSha256 = documentSha256(input.customerSha256,'替代条件变更后客户同意的书证摘要');

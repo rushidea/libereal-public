@@ -23,6 +23,7 @@ export type SupplyIncident = {
   previousStatus: string;
   responsibility: string | null;
   scope: IncidentQuantity[] | null;
+  originalScope?: IncidentQuantity[] | null;
   outstanding: IncidentQuantity[] | null;
   lastReviewedBy: string | null;
   factReview: { reference: string; description: string; actorId: string } | null;
@@ -39,7 +40,7 @@ export function supplyIncidentHistory(ledger: PurchaseActivity[]) {
       const version = purchaseObject(row.detail.snapshot).version;
       history.set(row.id,{ id:row.id,reportedBy:row.actorId,reportVersion:typeof version==='string'?version:null,
         status:'open',linkedTo:null,reference:String(op.reference),description:String(op.description),
-        changeKind:String(op.changeKind),previousStatus:String(op.previousStatus),responsibility,scope,outstanding:scope,
+        changeKind:String(op.changeKind),previousStatus:String(op.previousStatus),responsibility,scope,originalScope:scope,outstanding:scope,
         lastReviewedBy:null,factReview:null });
       continue;
     }
@@ -55,11 +56,11 @@ export function supplyIncidentHistory(ledger: PurchaseActivity[]) {
           if (entry.linkedTo === incident.id) history.set(id,{...entry,linkedTo});
         }
       } else {
-        history.set(incident.id,{...reviewed,scope:op.scope as IncidentQuantity[],outstanding:op.outstanding as IncidentQuantity[],factReview});
+        history.set(incident.id,{...reviewed,scope:op.scope as IncidentQuantity[],originalScope:incident.originalScope ?? op.scope as IncidentQuantity[],outstanding:op.outstanding as IncidentQuantity[],factReview});
       }
     } else {
       const progress = purchaseObject(op.incidentProgress) as Partial<IncidentProgress>;
-      history.set(incident.id,{...reviewed,scope:progress.scope ?? incident.scope,
+      history.set(incident.id,{...reviewed,scope:progress.scope ?? incident.scope,originalScope:incident.originalScope ?? progress.scope,
         status:progress.outstanding?.length ? 'open' : 'settled',outstanding:progress.outstanding ?? []});
     }
   }
@@ -71,17 +72,64 @@ export function supplyIncidents(ledger: PurchaseActivity[]) {
 }
 
 export function supplyIncidentsForDispatchAt(ledger: PurchaseActivity[], at: number) {
-  const existing = supplyIncidents(ledger.filter(row=>Date.parse(row.createdAt)<=at));
-  if (!existing.length) return existing;
-  const laterReviews = ledger.filter(row=>row.action==='review_change_scope' && Date.parse(row.createdAt)>at)
-    .map(row=>purchaseOperation(row.detail));
-  return existing.flatMap(issue=>{
-    const facts = laterReviews.filter(row=>row.incidentId===issue.id);
-    if (facts.some(row=>row.reviewResult==='duplicate' || row.reviewResult==='no_impact')) return [];
-    // A later verification can identify what an old notice affected. A later commercial decision supplies no earlier authority.
-    const clarified = !issue.outstanding && facts.find(row=>row.previousOutstanding===null && Array.isArray(row.outstanding));
-    return [clarified ? {...issue,outstanding:clarified.outstanding as IncidentQuantity[]} : issue];
-  });
+  const then = new Map(supplyIncidentHistory(ledger.filter(row=>Date.parse(row.createdAt)<=at)).map(row=>[row.id,row]));
+  if (![...then.values()].some(row=>row.status==='open')) return [];
+  const evidence = new Map(supplyIncidentHistory(ledger).map(row=>[row.id,row]));
+  const links = new Map(ledger.flatMap(activity=>{
+    if (activity.action!=='review_change_scope') return [];
+    const op = purchaseOperation(activity.detail);
+    return op.reviewResult==='duplicate' && typeof op.incidentId==='string' && Array.isArray(op.previousOutstanding)
+      ? [[op.incidentId,op.previousOutstanding as IncidentQuantity[]] as const] : [];
+  }));
+  const grouped = new Map<string,SupplyIncident>();
+  function add(key: string, incident: SupplyIncident, outstanding: IncidentQuantity[] | null) {
+    if (outstanding && !outstanding.length) return;
+    const previous = grouped.get(key);
+    if (!previous || !outstanding) {
+      grouped.set(key,{...incident,outstanding});
+    } else if (previous.outstanding) {
+      const covered = new Map(previous.outstanding.map(row=>[incidentQuantityKey(row),row]));
+      for (const row of outstanding) {
+        const source = incidentQuantityKey(row);
+        if (row.quantity>(covered.get(source)?.quantity ?? 0)) covered.set(source,row);
+      }
+      grouped.set(key,{...previous,outstanding:[...covered.values()]});
+    }
+  }
+  for (const issue of then.values()) {
+    if (issue.status!=='open') continue;
+    const verified = evidence.get(issue.id);
+    const own = issue.outstanding ?? verified?.originalScope ?? null;
+    if (verified?.status!=='duplicate' || !verified.linkedTo) {
+      // Zero new impact cannot erase a known restriction while it was in effect.
+      add(issue.id,issue,own ?? (verified?.status==='no_impact' ? [] : null));
+      continue;
+    }
+    const root = verified.linkedTo;
+    const historicalRoot = then.get(root);
+    const remaining = historicalRoot && historicalRoot.status!=='open' ? []
+      : historicalRoot?.outstanding ?? evidence.get(root)?.originalScope ?? null;
+    if (!own) {
+      add(root,issue,remaining);
+      continue;
+    }
+    // The link proves only the part still outstanding when the notices were matched.
+    // A separate decision on the earlier part keeps its own effective time.
+    const common = new Map((links.get(issue.id) ?? []).map(row=>[incidentQuantityKey(row),row.quantity]));
+    const remainingBySource = new Map(remaining?.map(row=>[incidentQuantityKey(row),row.quantity]));
+    const identical: IncidentQuantity[] = [];
+    const independent: IncidentQuantity[] = [];
+    for (const row of own) {
+      const key = incidentQuantityKey(row);
+      const matched = Math.min(row.quantity,common.get(key) ?? 0);
+      const outstanding = remaining ? Math.min(matched,remainingBySource.get(key) ?? 0) : matched;
+      if (outstanding>0) identical.push({...row,quantity:outstanding});
+      if (row.quantity>matched) independent.push({...row,quantity:row.quantity-matched});
+    }
+    add(root,issue,identical);
+    add(issue.id,issue,independent);
+  }
+  return [...grouped.values()];
 }
 
 export function incidentLink(incident: SupplyIncident, history: SupplyIncident[], relatedId: string | undefined) {

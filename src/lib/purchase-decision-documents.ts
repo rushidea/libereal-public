@@ -16,10 +16,12 @@ export type DecisionDocumentInput = {
   supplierRestoreScope?: boolean; customerRestoreScope?: boolean;
   supplierLegacyLocations?: LegacyDecisionLocation[]; customerLegacyLocations?: LegacyDecisionLocation[];
 };
+export type CustomerDecisionDocument = { reference: string; sha256: string };
+
 type Purpose = 'free_resend' | 'supplier_facts' | 'new_purchase' | 'amend_contract' | 'amend_and_replace' | 'cancel_unshipped' | 'replace_unshipped'
   | 'reduce_contract' | 'continue_contract' | 'decline_preparation' | 'reconfirm_terms';
 export type DecisionEffect = {
-  orderItemId: string; quantity: number; shortfallId?: string; shortfallDecision?: string; forwardingLossId?: string; outcome: string; document?: DecisionDocumentInput;
+  orderItemId: string; quantity: number; shortfallId?: string; shortfallDecision?: string; forwardingLossId?: string; outcome: string; document?: DecisionDocumentInput; customerDecision?: CustomerDecisionDocument;
   replacement?: { terms: PurchaseTerms; source: { brand?: string | null; catalogNumber?: string | null; spec?: string | null; unit?: string | null; quantity: number } } | null;
 };
 
@@ -59,7 +61,7 @@ function commercialAuthority(role: Party, line: DecisionEffect): Authority {
   const authority = role === 'customer' && line.replacement ? { purpose, alternate: decisionMaterialTerms(line.replacement) } : { purpose };
   return authorityForParty(role,authority)!;
 }
-type DocumentUse = { role: Party; sha256: string; row?: number; coverage: DecisionCoverage[]; allocations: DecisionCoverage[];
+type DocumentUse = { role: Party; sha256: string; reference?: string; row?: number; coverage: DecisionCoverage[]; allocations: DecisionCoverage[];
   scopeConfirmed: boolean; authority: Authority; legacyLocations?: LegacyDecisionLocation[] };
 type PriorUse = {
   role: Party; sha256: string; row?: number; coverage?: DecisionCoverage[];
@@ -144,7 +146,9 @@ async function priorUses(tx: Db, digests: string[]) {
   const rows = await tx.$queryRaw<Array<{ id: string; orderId: string; purchaseOrderId: string; detail: string }>>`
     SELECT id,orderId,purchaseOrderId,detail FROM PurchaseActivity WHERE action='resolve_change'
       AND (json_extract(detail,'$.snapshot.operation.supplierSha256') IN (${Prisma.join(digests)})
-        OR json_extract(detail,'$.snapshot.operation.customerSha256') IN (${Prisma.join(digests)})) ORDER BY rowid`;
+        OR json_extract(detail,'$.snapshot.operation.customerSha256') IN (${Prisma.join(digests)})
+        OR EXISTS (SELECT 1 FROM json_each(detail,'$.snapshot.operation.decisionDocuments') d
+          WHERE json_extract(d.value,'$.sha256') IN (${Prisma.join(digests)}))) ORDER BY rowid`;
   return rows.flatMap(record => {
     const detail = purchaseObject(JSON.parse(record.detail));
     const operation = purchaseOperation(detail);
@@ -256,7 +260,8 @@ export async function previewDecisionDocuments(tx: Db, input: {
     const {orderId,purchaseOrderId} = input;
     const allocation = { orderId, purchaseOrderId, orderItemId: use.orderItemId, ...(use.shortfallId ? { shortfallId: use.shortfallId } : {}), quantity: use.quantity };
     for (const role of parties) {
-      const sha256 = input[digestField(role)];
+      const separate = role==='customer' ? use.customerDecision : undefined;
+      const sha256 = separate?.sha256 ?? input[digestField(role)];
       if (!sha256) continue;
       const row = decisionDocumentRow(selected?.[rowField(role)]);
       const coverage = normalizeCoverage(selected?.[scopeField(role)]);
@@ -265,7 +270,7 @@ export async function previewDecisionDocuments(tx: Db, input: {
       if (((coverage || legacyLocations.length) && !row) || (restore && !coverage)) {
         throw new PurchaseError('分次使用或补录范围时，须核对原件行号与明确的覆盖数量',400);
       }
-      const current = { role, sha256, row, coverage, restore, legacyLocations,
+      const current = { role, sha256, reference:separate?.reference, row, coverage, restore, legacyLocations,
         authority: commercialAuthority(role,use), allocations: [allocation] };
       const key = documentKey(current);
       const previous = requested.get(key);
@@ -275,6 +280,10 @@ export async function previewDecisionDocuments(tx: Db, input: {
         if (previous.coverage && coverage && !sameVersion(previous.coverage,coverage)) {
           throw new PurchaseError('同一原件行须使用同一份经核对的覆盖范围');
         }
+        if (previous.reference && separate?.reference && previous.reference!==separate.reference) {
+          throw new PurchaseError(label(role)+'的同一原件行须使用同一个可查的档案出处');
+        }
+        previous.reference ??= separate?.reference;
         previous.coverage ??= coverage;
         previous.restore ||= restore;
         previous.legacyLocations.push(...legacyLocations);
@@ -324,7 +333,7 @@ export async function previewDecisionDocuments(tx: Db, input: {
       if (remaining < 0) throw new PurchaseError(label(current.role)+'已用或本次处理数量超过原件核准范围，请核对尚未使用的独立行或数量');
       return { ...scope, usedBefore, using, remaining };
     });
-    result.push({ role: current.role, sha256: current.sha256, row: current.row, coverage, allocations: current.allocations, balances,
+    result.push({ role: current.role, sha256: current.sha256, reference:current.reference, row: current.row, coverage, allocations: current.allocations, balances,
       scopeConfirmed: Boolean(verified || current.coverage), authority: current.authority,
       ...(current.legacyLocations.length ? { legacyLocations: current.legacyLocations } : {}),
       ...(restoring ? { restoredActivityIds: [...new Set(matched.map(row => row.activityId))] } : {}) });

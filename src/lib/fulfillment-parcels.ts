@@ -4,7 +4,7 @@ import { fulfillmentStatus, isInactiveOrderStatus, validateShipmentItems } from 
 import { releaseProcurementInventoryHold, shipProcurementBatch } from '@/lib/inventory';
 import { purchaseWorkspace } from '@/lib/purchase-orders';
 import { heldIncidentQuantity, supplyIncidentsForDispatchAt } from '@/lib/purchase-incidents';
-import { PurchaseError, requiredText } from '@/lib/purchase-terms';
+import { documentSha256, PurchaseError, requiredText } from '@/lib/purchase-terms';
 import { availableReceipt, confirmPreview, inputObject, optionalText, parcelInclude, parcelKeys, parcelLineBalance, positiveQuantity,
   shipmentEvidence, verifyRepeat, type FulfillmentActor, type FulfillmentDb as Db } from '@/lib/fulfillment-records';
 import { receiptInventoryOptions } from '@/lib/fulfillment-stock';
@@ -17,6 +17,16 @@ const routes = ['supplier_to_customer', 'supplier_to_libereal', 'libereal_to_cus
 type Route = typeof routes[number];
 type Goods = { purchaseOrderId: string; orderItemId: string; quantity: number; sourceReceiptId: string | null; resendApprovalId?: string };
 const lineKey = (row: Pick<Goods, 'purchaseOrderId' | 'orderItemId'>) => JSON.stringify([row.purchaseOrderId, row.orderItemId]);
+
+function reviewLateDispatch(raw: unknown) {
+  if (raw===undefined) return undefined;
+  const data = inputObject(raw);
+  return {supplierReference:requiredText(data.supplierReference,'供方对实际发运的书面确认'),
+    customerReference:requiredText(data.customerReference,'客户对接续履约的书面回复'),
+    responsibility:requiredText(data.responsibility,'发运偏差的责任人'),
+    description:requiredText(data.description,'已核实的发运偏差与后续处理结果'),
+    sha256:documentSha256(data.sha256,'双方核对结论的书证摘要')};
+}
 
 function dispatchInput(raw: unknown) {
   const input = inputObject(raw);
@@ -43,10 +53,11 @@ function dispatchInput(raw: unknown) {
   if (feedSource && (!trackingNumber || feedSource !== configuredCarrier()?.source)) {
     throw new PurchaseError('该物流信息来源尚未配置或缺少运单号', 400);
   }
-  return { requestId: requiredText(input.requestId, '操作编号'), route, lines, carrier, trackingNumber, feedSource, ...shipmentEvidence(input) };
+  return { requestId: requiredText(input.requestId, '操作编号'), route, lines, carrier, trackingNumber, feedSource,
+    holdReview:reviewLateDispatch(input.holdReview), ...shipmentEvidence(input) };
 }
 
-export async function fulfillmentWorkspace(tx: Db, orderId: string, dispatchedAt?: number) {
+export async function fulfillmentWorkspace(tx: Db, orderId: string, dispatchedAt?: number, reviewHold = false) {
   const order = await tx.order.findUnique({ where: { id: orderId }, select: { id: true, status: true, email: true,
     addressSnapshot: { select: { name: true, address: true, phone: true, institution: true } },
     orderItems: { select: { id: true, name: true, quantity: true, shippedQty: true }, orderBy: { position: 'asc' } } } });
@@ -58,13 +69,16 @@ export async function fulfillmentWorkspace(tx: Db, orderId: string, dispatchedAt
     const key = lineKey(row); dispatched.set(key, (dispatched.get(key) ?? 0) + row.quantity);
   };
   for (const row of purchasing.fulfillment.supplierDispatched) add(row);
-  const forwardLimits = new Map<string,number>();
-  const freeResends: typeof purchasing.fulfillment.freeResends = [];
+  type HoldAllowance = { ordinarilyAvailable: number; historicalHoldIds: string[] };
+  type Allowance = { available: number; holdAllowance?: HoldAllowance };
+  const forwardLimits = new Map<string,Allowance>();
+  const freeResends: Array<(typeof purchasing.fulfillment.freeResends)[number] & { holdAllowance?: HoldAllowance }> = [];
   const purchases = purchasing.orders.flatMap(po => {
     const receipt = po.orderReceipt;
     const incidents = dispatchedAt === undefined ? po.incidents : supplyIncidentsForDispatchAt(po.ledger,dispatchedAt);
+    const unknownHold = incidents.some(row=>!row.outstanding);
     if (!receipt?.occurredAt || (dispatchedAt!==undefined && Date.parse(receipt.occurredAt)>dispatchedAt) || po.commitmentState === 'supplier_cancelled' || po.commitmentState === 'pending'
-      || incidents.some(row=>!row.outstanding)
+      || (!reviewHold && unknownHold)
       || ((po.status === 'on_hold' || po.incidents.length) && po.needsLegacyReview)
       || (po.status === 'on_hold' && !po.incidents.length && !po.needsRemainingReview)) return [];
     return receipt.lines.flatMap(ordered => {
@@ -74,19 +88,24 @@ export async function fulfillmentWorkspace(tx: Db, orderId: string, dispatchedAt
       const supplied = dispatched.get(lineKey({ purchaseOrderId: po.id, orderItemId: line.orderItemId })) ?? 0;
       const purchaseOrderId = po.id;
       const orderItemId = line.orderItemId;
-      const held = heldIncidentQuantity(incidents,orderItemId,{kind:'unshipped'});
+      const allowance = (quantity: number, source: Parameters<typeof heldIncidentQuantity>[2], parcelLineId?: string): Allowance => {
+        const relevant = incidents.filter(issue=>!issue.outstanding || heldIncidentQuantity([issue],orderItemId,source)>0
+          || (parcelLineId && issue.outstanding.some(row=>row.source?.kind==='parcel' && row.source.id===parcelLineId)));
+        const parcelHeld = Boolean(parcelLineId && relevant.some(issue=>issue.outstanding?.some(row=>
+          row.source?.kind==='parcel' && row.source.id===parcelLineId)));
+        const ordinary = unknownHold || parcelHeld ? 0 : Math.max(0,quantity-heldIncidentQuantity(relevant,orderItemId,source));
+        return reviewHold ? {available:quantity,holdAllowance:{ordinarilyAvailable:ordinary,historicalHoldIds:relevant.map(row=>row.id)}}
+          : {available:ordinary};
+      };
       const payableNotProved = po.payableReviewWindows.some(row=>row.orderItemId===orderItemId
         && (dispatchedAt===undefined ? !row.reviewedAt
           : Date.parse(row.changedAt)<=dispatchedAt && (!row.reviewedAt || Date.parse(row.reviewedAt)>dispatchedAt)));
-      const available = payableNotProved ? 0 : Math.max(0,Math.min(ordered.quantity,remaining)-supplied-held);
+      const ordinary = allowance(payableNotProved?0:Math.max(0,Math.min(ordered.quantity,remaining)-supplied),{kind:'unshipped'});
       let canForward = false;
       if (remaining > 0) for (const source of po.incidentSources) {
         if (source.orderItemId !== orderItemId || source.source.kind !== 'receipt') continue;
-        // A received lot still belongs to the specific parcel whose commercial terms are under review.
-        if (source.parcelLineId && incidents.some(issue=>issue.outstanding?.some(row=>
-          row.source?.kind==='parcel' && row.source.id===source.parcelLineId))) continue;
-        const permitted = source.quantity-heldIncidentQuantity(incidents,orderItemId,source.source);
-        if (permitted <= 0) continue;
+        const permitted = allowance(source.quantity,source.source,source.parcelLineId);
+        if (permitted.available<=0) continue;
         forwardLimits.set(source.source.id,permitted);
         canForward = true;
       }
@@ -94,15 +113,15 @@ export async function fulfillmentWorkspace(tx: Db, orderId: string, dispatchedAt
       for (const resend of purchasing.fulfillment.freeResends) {
         if (resend.purchaseOrderId !== purchaseOrderId || resend.orderItemId !== orderItemId) continue;
         if (dispatchedAt!==undefined && Date.parse(resend.authorizedAt)>dispatchedAt) continue;
-        const permitted = resend.available-heldIncidentQuantity(incidents,orderItemId,{kind:'resend',id:resend.approvalId});
-        if (permitted <= 0) continue;
-        freeResends.push({...resend,available:permitted});
+        const permitted = allowance(resend.available,{kind:'resend',id:resend.approvalId});
+        if (permitted.available<=0) continue;
+        freeResends.push({...resend,...permitted});
         canResend = true;
       }
-      if (dispatchedAt===undefined && po.needsRemainingReview && !canForward && !canResend && available<=0) return [];
+      if (dispatchedAt===undefined && po.needsRemainingReview && !canForward && !canResend && ordinary.available<=0) return [];
       return [{ purchaseOrderId, orderItemId, name: line.source.name, supplier: line.terms.supplier ?? '',
         catalogNumber: line.source.catalogNumber, productId: line.source.productId, variantId: line.source.variantId,
-        orderedAt: receipt.occurredAt!, available, contractVersion: po.version,
+        orderedAt: receipt.occurredAt!, ...ordinary, contractVersion: po.version,
         originalHoldAlreadyMoved: purchasing.fulfillment.replacementsWithPriorHoldTransfer.some(row =>
           row.purchaseOrderId === po.id && row.orderItemId === line.orderItemId),
         stockSourceUnverified: purchasing.fulfillment.replacementsWithUnverifiedStockSource.some(row =>
@@ -112,11 +131,11 @@ export async function fulfillmentWorkspace(tx: Db, orderId: string, dispatchedAt
   const receipts = isInactiveOrderStatus(order.status) ? [] : parcels.flatMap(parcel =>
     parcel.route !== 'supplier_to_libereal' || parcel.status === 'exception' ? [] : parcel.lines.flatMap(line =>
       line.receipts.flatMap(row => {
-        const available = forwardLimits.get(row.id);
+        const allowance = forwardLimits.get(row.id);
         const receivedAt = parcel.events.find(event=>event.id===row.eventId)?.occurredAt.toISOString() ?? null;
-        if (!available || (dispatchedAt!==undefined && (!receivedAt || Date.parse(receivedAt)>dispatchedAt))) return [];
+        if (!allowance || (dispatchedAt!==undefined && (!receivedAt || Date.parse(receivedAt)>dispatchedAt))) return [];
         return [{id:row.id,purchaseOrderId:line.purchaseOrderId,orderItemId:line.orderItemId,batchNumber:row.inventoryBatch.batchNumber,
-          available,inventoryAccountId:row.inventoryBatch.inventoryAccountId,...row.inventoryBatch.account,receivedAt}];
+          ...allowance,inventoryAccountId:row.inventoryBatch.inventoryAccountId,...row.inventoryBatch.account,receivedAt}];
       })));
   const inventoryChoices = [];
   for (const parcel of parcels) {
@@ -162,7 +181,7 @@ async function dispatchPlan(tx: Db, orderId: string, raw: unknown, actor: Fulfil
   if (input.trackingNumber && await tx.fulfillmentParcel.count({ where: { orderId, route: input.route, carrier: input.carrier, trackingNumber: input.trackingNumber } })) {
     throw new PurchaseError('本单同一运输路线已经登记该运单，请核对原包裹');
   }
-  const view = await fulfillmentWorkspace(tx, orderId, Date.parse(input.occurredAt));
+  const view = await fulfillmentWorkspace(tx,orderId,Date.parse(input.occurredAt),Boolean(input.holdReview));
   if (!['confirmed','partially_shipped'].includes(view.order.status)) throw new PurchaseError('当前订单不能登记新的发货，请核对原接单和履约状态');
   const lines = input.lines.map(row => {
     const purchased = view.purchases.find(line => line.purchaseOrderId === row.purchaseOrderId && line.orderItemId === row.orderItemId);
@@ -175,14 +194,19 @@ async function dispatchPlan(tx: Db, orderId: string, raw: unknown, actor: Fulfil
     if (resend?.originalHoldAlreadyMoved === null || (!resend && !receipt && purchased.stockSourceUnverified)) {
       throw new PurchaseError('该补货行的原库存归属待核，请由采购审批人员核对原行及书证');
     }
-    if (row.quantity > (receipt?.available ?? resend?.available ?? purchased.available)) {
-      throw new PurchaseError(resend ? '发货数量超过本行免费重发核准数量' : '发货数量超过该采购行或实收批次可用数量');
+    const capacity = receipt ?? resend ?? purchased;
+    if (row.quantity>capacity.available) {
+      throw new PurchaseError(resend ? '发货数量超过本行免费重发核准数量' : '发货数量超过该采购行或实收批次可用数量。若原运单证明确已发出，请核对实际发运偏差');
     }
-    return { ...row, catalogNumber: purchased.catalogNumber, productId: receipt ? receipt.productId : purchased.productId,
+    const priorHold = capacity.holdAllowance;
+    const unreleased = priorHold && row.quantity>priorHold.ordinarilyAvailable && priorHold.historicalHoldIds.length
+      ? {quantity:row.quantity-priorHold.ordinarilyAvailable,incidentIds:priorHold.historicalHoldIds} : undefined;
+    return { ...row,unreleased, catalogNumber: purchased.catalogNumber, productId: receipt ? receipt.productId : purchased.productId,
       variantId: receipt ? receipt.variantId : purchased.variantId, inventoryAccountId: receipt?.inventoryAccountId, resend: resend ?? undefined,
       originalHoldAlreadyMoved: resend?.originalHoldAlreadyMoved ?? purchased.originalHoldAlreadyMoved,
       supplier: purchased.supplier, name: purchased.name, contractVersion: purchased.contractVersion, batchNumber: receipt?.batchNumber ?? null };
   });
+  if (input.holdReview && lines.every(line=>!line.unreleased)) throw new PurchaseError('该批货在实际发运时有放行依据，请使用普通补录');
   if (input.route !== 'libereal_to_customer' && new Set(lines.map(line => line.supplier)).size !== 1) {
     throw new PurchaseError('不同供应商实际发出的货物须分别登记包裹');
   }
