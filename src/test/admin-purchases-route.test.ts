@@ -135,26 +135,26 @@ function seedStaff(id: keyof typeof staffRole) {
   );
 }
 
-async function seedAcceptedOrder() {
+async function seedAcceptedOrder(id = orderId, itemId = orderItemId) {
   await prisma.$transaction(async tx => {
     const order = await tx.order.create({
       data: {
-        id: orderId, customerId: buyer, email: email(buyer), subtotal: 250, total: 250, status: 'pending',
+        id, customerId: buyer, email: email(buyer), subtotal: 250, total: 250, status: 'pending',
         paymentMethod: 'bank_transfer',
-        orderItems: { create: { id: orderItemId, position: 0, name: '合成商品', quantity: 2, unitPrice: 125 } },
+        orderItems: { create: { id: itemId, position: 0, name: '合成商品', quantity: 2, unitPrice: 125 } },
       },
       include: ORDER_APPROVAL_INCLUDE,
     });
     const preview = await merchantOrderApprovalPreview(tx, order);
     if (!preview || preview.action !== 'accept_order') throw new Error('Missing synthetic acceptance preview');
     await tx.order.update({
-      where: { id: orderId },
+      where: { id },
       data: { status: 'confirmed', statusHistory: { create: {
         fromStatus: 'pending', toStatus: 'confirmed', actorId: staff.merchant, actorEmail: email(staff.merchant),
         metadata: merchantAcceptanceMetadata(preview),
       } } },
     });
-    await reserveOrderCredit(tx, orderId, staff.merchant);
+    await reserveOrderCredit(tx, id, staff.merchant);
   });
 }
 
@@ -205,6 +205,59 @@ afterEach(() => {
 });
 
 describe('admin purchase endpoint', () => {
+  it('lists and prepares historical partially shipped orders with outstanding lines only', async () => {
+    const partial = 'TEST-PARTIALLY-SHIPPED';
+    const complete = 'TEST-SHIPPED-COMPLETELY';
+    await seedAcceptedOrder(partial, `${partial}-line`);
+    await seedAcceptedOrder(complete, `${complete}-line`);
+    await prisma.$transaction([
+      prisma.order.updateMany({ where: { id: { in: [partial, complete] } }, data: { status: 'partially_shipped' } }),
+      prisma.orderItem.update({ where: { id: `${partial}-line` }, data: { shippedQty: 1 } }),
+      prisma.orderItem.update({ where: { id: `${complete}-line` }, data: { shippedQty: 2 } }),
+    ]);
+    signIn(staff.operator);
+    const { orders } = await expectJson(await readPurchases(), 200);
+    expect(orders).toEqual(expect.arrayContaining([expect.objectContaining({ id: partial, prepared: 0 })]));
+    expect(orders).not.toEqual(expect.arrayContaining([expect.objectContaining({ id: complete })]));
+    const result = await expectJson(await post({ action: 'prepare', orderId: partial }), 200);
+    expect(result.workspace).toMatchObject({ canPrepare: false, lines: [{ orderItemId: `${partial}-line`, source: { quantity: 1 } }] });
+    const fulfilled = await expectJson(await post({ action: 'prepare', orderId: complete }), 200);
+    expect(fulfilled.workspace).toMatchObject({ canPrepare: false, lines: [] });
+  });
+
+  it('requires a separate purchase approver and a fresh MFA grant for the exact remaining payable and deposit allocation', async () => {
+    signIn(staff.approver);
+    const initial = await previewAction({ action: 'approve', requestId: 'approve-before-deposit' });
+    await expectJson(await confirm(initial, await grant(staff.approver)), 200);
+    signIn(staff.finance);
+    const deposit = await previewAction({ action: 'record_payment', requestId: 'deposit-before-hold', amountCents: 900,
+      reference: 'TEST-DATED-DEPOSIT', conditionReference: 'TEST-DEPOSIT-DUE' });
+    await expectJson(await confirm(deposit, await grant(staff.finance)), 200);
+    signIn(staff.operator);
+    const held = await previewAction({ action: 'report_change', requestId: 'hold-one-line', changeKind: 'unavailable', reference: 'TEST-SHORTAGE', description: '原采购中一件暂时无法供货。' });
+    await expectJson(await confirm(held, await grant(staff.operator)), 200);
+    signIn(staff.approver);
+    const resolution = await previewAction({ action: 'resolve_change', requestId: 'cancel-one-unit', outcome: 'declined',
+      supplierReference: 'TEST-SUPPLIER-CANCEL-ONE', supplierSha256: 'c'.repeat(64), customerReference: 'TEST-CUSTOMER-CANCEL-ONE', customerSha256: 'd'.repeat(64),
+      description: '合成双方书面同意取消一件。', refundFollowup: '财务单独核对未抵扣的定金。', dispositions: [{ orderItemId, quantity: 1, outcome: 'cancel' }] });
+    await expectJson(await confirm(resolution, await grant(staff.approver)), 200);
+    const po = await currentPurchase();
+    const remainder: ActionRequest = { action: 'approve_remaining', requestId: 'approve-only-one-unit', reference: 'TEST-REMAINING-AP', referenceSha256: 'e'.repeat(64),
+      description: '复核不受影响的一件及定金归属。', remainingLines: [{ orderItemId, payableCents: 3673 }], appliedPaidCents: 500 };
+    signIn(staff.operator);
+    await expectJson(await post({ ...remainder, stage: 'preview', orderId, purchaseOrderId: po.id, version: po.version }), 403);
+    signIn(staff.approver);
+    const previewed = await previewAction(remainder);
+    await expectJson(await confirm(previewed), 403);
+    await expectJson(await confirm({ ...previewed, appliedPaidCents: 501 }, await grant(staff.approver)), 409);
+    const { workspace } = await expectJson(await confirm(previewed, await grant(staff.approver)), 200);
+    expect(workspace.orders[0]).toMatchObject({ id: po.id, totalCents: 7346, paidCents: 900, dueCents: 3173, needsRemainingReview: false,
+      ledger: expect.arrayContaining([expect.objectContaining({ action: 'approve_remaining', detail: expect.objectContaining({
+        authorization: expect.objectContaining({ permission: 'purchases.approve' }),
+      }) })]),
+    });
+    expect(activity('record_payment')).toHaveLength(1);
+  });
   it('keeps cost and purchase details behind purchases.read and ignores body role claims', async () => {
     auth.mockResolvedValue(null);
     await expectJson(await readPurchases(orderId), 401);
@@ -287,7 +340,7 @@ describe('admin purchase endpoint', () => {
     const old = await previewAction({ action: 'approve', requestId: 'test-old-approval' });
 
     signIn(staff.operator);
-    await updateTerms({ unitPriceCents: 4000, linePayableCents: 8000, sourceReference: 'TEST-NEW-WRITTEN-QUOTE' });
+    await updateTerms({ unitPriceCents: 4000, linePayableCents: 8000, sourceReference: 'TEST-NEW-WRITTEN-QUOTE', sourceSha256: 'f'.repeat(64) });
 
     signIn(staff.approver);
     const freshGrant = await grant(staff.approver);

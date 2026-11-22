@@ -5,6 +5,7 @@ import { POST as quotePOST } from '@/app/api/orders/[id]/quote/route';
 import { PATCH as legacyOrderPATCH } from '@/app/api/orders/[id]/route';
 import { reserveOrderCredit } from '@/lib/customer-credit';
 import { prisma } from '@/lib/prisma';
+import { pricingContentHash } from '@/lib/pricing-adjustment-approval';
 import { verifyAndPriceItems } from '@/lib/pricing';
 import { prepareSupplierQuoteReview, recordSupplierQuoteReply } from '@/lib/supplier-quote-review';
 import { applyPurchaseAction, prepareOrderPurchases, previewPurchaseAction, purchaseWorkspace, savePurchaseLine } from '@/lib/purchase-orders';
@@ -155,6 +156,259 @@ beforeEach(async () => {
   await prisma.creditAccount.create({ data: { userId: buyer.id, baseLimit: 10000, paymentTermDays: 30 } });
   await prisma.product.create({
     data: { id: 'test-product', name: '合成商品', catalogNumber: 'TEST-SKU', brand: '合成品牌', price: 100, costPrice: 30, stockQuantity: 100 },
+  });
+});
+
+describe('supplier commitments and customer fulfilment stay bound to actual evidence', () => {
+  const written = {
+    supplierReference: 'TEST-SUPPLIER-WRITTEN-CHANGE', supplierSha256: 'd'.repeat(64),
+    customerReference: 'TEST-CUSTOMER-WRITTEN-CHANGE', customerSha256: 'e'.repeat(64),
+    description: '按合成书面回复处理受影响商品。',
+  };
+  const hold = (orderId: string, po: Workspace['orders'][number], requestId: string) => submit(orderId, po, {
+    action: 'report_change', requestId, changeKind: 'unavailable', reference: `TEST-SUPPLY-${requestId}`, description: '合成供货变化。',
+  });
+  const register = (orderId: string, po: Workspace['orders'][number], requestId: string) => submit(orderId, po, {
+    action: 'register_order', requestId, reference: `TEST-ORDER-${requestId}`, ...registrationEvidence(),
+  });
+  const payment = (requestId: string, amountCents: number) => ({
+    action: 'record_payment', requestId, reference: `TEST-PAYMENT-${requestId}`, amountCents, conditionReference: 'TEST-SUPPLIER-INVOICE-DUE',
+  } as const);
+
+  it('does not allocate native Alipay funds to another order and excludes an older allocation if its native alias arrives later', async () => {
+    const paidAt = new Date();
+    const nativeOrder = await seedOrder('test-native-alipay', { paymentMethod: 'alipay', paidAt });
+    const recipient = await seedOrder('test-manual-alipay-recipient');
+    const attempt = await prisma.paymentAttempt.create({ data: { orderId: nativeOrder.id, provider: 'alipay',
+      status: 'paid', paidAt, amount: nativeOrder.total, outTradeNo: 'TEST-NATIVE-ORDER-TRACE' } });
+    await acceptAsMerchant(nativeOrder.id);
+    await acceptAsMerchant(recipient.id);
+    await applyStart((await startReview(recipient.id, { ...reviewEvidence, action: 'review_customer_terms', requestId: 'part-prepay',
+      paymentMode: 'partial_prepay', requiredPrepayCents: 5000, balanceTerms: '合成约定余额走账期。' })).input);
+    const request = { ...reviewEvidence, action: 'record_customer_receipt', requestId: 'native-receipt', receiptKind: 'bank_receipt',
+      transactionReference: attempt.outTradeNo, allocationReference: 'TEST-OTHER-ORDER-ALLOCATION', occurredAt: paidAt.toISOString(),
+      receiptTotalCents: 20000, amountCents: 5000 } as const;
+    await expect(startReview(recipient.id, request)).rejects.toThrow(/原生流水.*归属原订单/);
+
+    const tradeNo = 'TEST-LATER-ALIPAY-ALIAS';
+    await applyStart((await startReview(recipient.id, { ...request, transactionReference: tradeNo })).input);
+    expect((await readWorkspace(recipient.id)).startReview.payment.receivedCents).toBe(5000);
+    await prisma.paymentAttempt.update({ where: { id: attempt.id }, data: { tradeNo } });
+    await prisma.orderEvent.create({ data: { orderId: nativeOrder.id, type: 'payment_received', message: '合成实际收款',
+      metadata: JSON.stringify({ outTradeNo: attempt.outTradeNo, tradeNo }) } });
+
+    const checked = await readWorkspace(recipient.id);
+    expect(checked.eligibility.eligible).toBe(false);
+    expect(checked.startReview.payment).toMatchObject({ receivedCents: 0, receipts: [{ transactionReference: tradeNo, amountCents: 5000 }],
+      excludedReceiptIds: [expect.any(String)] });
+    expect((await readWorkspace(nativeOrder.id)).startReview.payment).toMatchObject({ receivedCents: 20000, paymentAttemptId: attempt.id });
+    await expect(startReview(recipient.id, { ...request, receiptKind: 'platform_receipt', transactionReference: tradeNo,
+      requestId: 'attempt-second-allocation' })).rejects.toThrow(/原生流水.*归属原订单/);
+  });
+
+  it('counts live sibling and nested replacement quantities together and rechecks new shipments before confirmation', async () => {
+    const order = await seedOrder('test-replacement-tree', { quantities: [10] });
+    const [item] = order.orderItems;
+    await acceptAsMerchant(order.id);
+    const [draft] = (await saveLine(await readWorkspace(order.id), 0, terms(10))).orders;
+    const [approved] = (await submit(order.id, draft, { action: 'approve', requestId: 'approve-root' })).orders;
+    const [root] = (await register(order.id, approved, 'register-root')).orders;
+    await prisma.order.update({ where: { id: order.id }, data: { status: 'partially_shipped' } });
+    await prisma.orderItem.update({ where: { id: item.id }, data: { shippedQty: 5 } });
+
+    const replace = (quantity: number, requestId: string): ActionRequest => ({
+      action: 'resolve_change', outcome: 'replacement', requestId, ...written,
+      dispositions: [{ orderItemId: item.id, quantity, outcome: 'replace', replacement: {
+        name: `合成替代商品 ${requestId}`, brand: '合成品牌', catalogNumber: `TEST-${requestId}`, spec: '合成规格', unit: '件',
+        terms: terms(quantity, { sourceReference: `TEST-QUOTE-${requestId}`, sourceSha256: pricingContentHash(requestId) }),
+      } }],
+    });
+    const firstHold = (await hold(order.id, root, 'root-first')).orders[0];
+    const first = await submit(order.id, firstHold, replace(3, 'first-alternate'));
+    const firstAlternate = first.orders.find(po => po.id !== root.id)!;
+    const firstApproved = (await submit(order.id, firstAlternate, { action: 'approve', requestId: 'approve-first-alternate' })).orders.find(po => po.id === firstAlternate.id)!;
+    const firstOrdered = (await register(order.id, firstApproved, 'register-first-alternate')).orders.find(po => po.id === firstAlternate.id)!;
+
+    const nextHold = (await hold(order.id, first.orders.find(po => po.id === root.id)!, 'root-second')).orders.find(po => po.id === root.id)!;
+    const stale = await previewAction(order.id, nextHold, replace(2, 'too-many-after-shipment'));
+    await prisma.orderItem.update({ where: { id: item.id }, data: { shippedQty: 6 } });
+    await expect(apply(stale)).rejects.toThrow(/累计有效替代采购.*未发货数量/);
+    expect((await readWorkspace(order.id)).orders).toHaveLength(2);
+    const second = await submit(order.id, nextHold, replace(1, 'second-alternate'));
+    const secondAlternate = second.orders.find(po => po.id !== root.id && po.id !== firstAlternate.id)!;
+    expect(secondAlternate.remaining).toEqual([{ orderItemId: item.id, quantity: 1 }]);
+
+    const childHold = (await hold(order.id, firstOrdered, 'child-first')).orders.find(po => po.id === firstAlternate.id)!;
+    const nested = await submit(order.id, childHold, replace(2, 'nested-alternate'));
+    const grandchild = nested.orders.find(po => po.lines[0].fromPurchaseOrderId === firstAlternate.id)!;
+    expect(nested.orders.find(po => po.id === firstAlternate.id)?.remaining).toEqual([{ orderItemId: item.id, quantity: 1 }]);
+    expect(grandchild.remaining).toEqual([{ orderItemId: item.id, quantity: 2 }]);
+    const preview = await previewAction(order.id, grandchild, { action: 'approve', requestId: 'approve-nested' });
+    await prisma.orderItem.update({ where: { id: item.id }, data: { shippedQty: 7 } });
+    await expect(apply(preview)).rejects.toThrow(/未发货数量/);
+    expect((await readWorkspace(order.id)).orders.find(po => po.id === grandchild.id)?.status).toBe('draft');
+  });
+
+  it.each([false, true])('authorizes only explicit unaffected payables after a deposit (supplier already ordered=%s)', async (orderedBefore) => {
+    const order = await seedOrder(`test-remaining-payable-${orderedBefore}`, { quantities: [2, 1] });
+    const [cancelled, unaffected] = order.orderItems;
+    await acceptAsMerchant(order.id);
+    const first = await saveLine(await readWorkspace(order.id), 0, terms(2));
+    const [draft] = (await saveLine(first, 1, terms(1))).orders;
+    const [approved] = (await submit(order.id, draft, { action: 'approve', requestId: 'approve-deposit-case' })).orders;
+    const [deposited] = (await submit(order.id, approved, payment('original-deposit', 1200))).orders;
+    const before = orderedBefore ? (await register(order.id, deposited, 'register-before-partial-cancellation')).orders[0] : deposited;
+    const [held] = (await hold(order.id, before, 'partial-cancellation')).orders;
+    const [adjusted] = (await submit(order.id, held, { action: 'resolve_change', requestId: 'agreed-partial-cancellation', outcome: 'declined',
+      ...written, refundFollowup: '财务核对原款与退款安排。', dispositions: [{ orderItemId: cancelled.id, quantity: 2, outcome: 'cancel' }],
+    })).orders;
+    expect(adjusted).toMatchObject({ totalCents: 4125, paidCents: 1200, dueCents: null, needsRemainingReview: true,
+      remaining: [{ orderItemId: unaffected.id, quantity: 1 }] });
+    await expect(submit(order.id, adjusted, payment('unreviewed-entire-order', 2925))).rejects.toThrow();
+    const review = { action: 'approve_remaining', requestId: 'review-unaffected-only', reference: 'TEST-SIGNED-REMAINING-STATEMENT',
+      referenceSha256: 'f'.repeat(64), description: '剩余一件与已付归属经双方书面核实。', remainingLines: [{ orderItemId: unaffected.id, payableCents: 1300 }],
+    } as const;
+    await expect(submit(order.id, adjusted, { ...review, remainingLines: [...review.remainingLines] })).rejects.toThrow(/已付款中抵扣/);
+    const [reviewed] = (await submit(order.id, adjusted, { ...review, remainingLines: [...review.remainingLines], appliedPaidCents: 600 })).orders;
+    expect(reviewed).toMatchObject({ status: orderedBefore ? 'ordered' : 'approved', totalCents: 4125, paidCents: 1200, dueCents: 700,
+      remainingScope: { totalCents: 1300, appliedPaidCents: 600, payments: [{ id: expect.any(String), amountCents: 1200 }] } });
+    const [ready] = orderedBefore ? [reviewed] : (await register(order.id, reviewed, 'register-unaffected-only')).orders;
+    if (!orderedBefore) expect(ready.ledger.find(row => row.action === 'register_order')?.detail).toMatchObject({ snapshot: { operation: { execution: {
+      totalCents: 1300, lines: [{ orderItemId: unaffected.id, quantity: 1, payableCents: 1300 }],
+    } } } });
+    await expect(register(order.id, ready, 'no-second-register')).rejects.toThrow(/已登记过/);
+    await expect(submit(order.id, ready, payment('over-reviewed-payable', 701))).rejects.toThrow(/未付合计/);
+    const [final] = (await submit(order.id, ready, payment('reviewed-payable', 700))).orders;
+    expect(final).toMatchObject({ totalCents: 4125, paidCents: 1900, dueCents: 0, orderedBefore: true });
+    expect(final.ledger.find(row => row.action === 'resolve_change')?.detail).toMatchObject({ snapshot: { operation: { refund: { status: 'pending_review', paidCents: 1200 } } } });
+    expect(activities(final.id, 'register_order')).toHaveLength(1);
+    expect(activities(final.id, 'record_payment')).toHaveLength(2);
+  });
+
+  it('prepares only the outstanding quantities of a historically partially shipped customer order', async () => {
+    const order = await seedOrder('test-historic-partial-shipment', { quantities: [5, 2, 1] });
+    await acceptAsMerchant(order.id);
+    const [partial, done, alreadyPrepared] = order.orderItems;
+    await prisma.$transaction([
+      prisma.purchaseActivity.deleteMany({ where: { orderId: order.id, action: 'prepare', orderItemId: { in: [partial.id, done.id] } } }),
+      prisma.purchaseRequirement.deleteMany({ where: { orderItemId: { in: [partial.id, done.id] } } }),
+      prisma.orderItem.update({ where: { id: partial.id }, data: { shippedQty: 3, status: 'partially_shipped' } }),
+      prisma.orderItem.update({ where: { id: done.id }, data: { shippedQty: 2, status: 'shipped' } }),
+      prisma.order.update({ where: { id: order.id }, data: { status: 'partially_shipped' } }),
+    ]);
+    const before = await readWorkspace(order.id);
+    expect(before).toMatchObject({ canPrepare: true, lines: [{ orderItemId: alreadyPrepared.id, revision: 1 }] });
+    const prepared = await prepare(order.id);
+    expect(prepared.canPrepare).toBe(false);
+    expect(prepared.lines).toMatchObject([{ orderItemId: partial.id, source: { quantity: 2 } }, { orderItemId: alreadyPrepared.id, revision: 1 }]);
+    expect(await prepare(order.id)).toEqual(prepared);
+    const [purchase] = (await saveLine(prepared, 0, terms(2))).orders;
+    const [approved] = (await submit(order.id, purchase, { action: 'approve', requestId: 'approve-partial-remainder' })).orders;
+    expect(approved).toMatchObject({ status: 'approved', lines: [{ orderItemId: partial.id, source: { quantity: 2 } }] });
+  });
+
+  it('preserves a pre-cancellation supplier confirmation and uses a separately audited action for a late one', async () => {
+    const order = await seedOrder('test-registered-after-cancellation');
+    await acceptAsMerchant(order.id);
+    const [draft] = (await saveLine(await readWorkspace(order.id), 0, terms(2))).orders;
+    const [approved] = (await submit(order.id, draft, { action: 'approve', requestId: 'approved-before-customer-cancellation' })).orders;
+    const at = approved.ledger.find(row => row.action === 'approve')!.createdAt;
+    const result = await orderPATCH(new NextRequest(`http://localhost/api/admin/orders/${order.id}`, { method: 'PATCH',
+      body: JSON.stringify({ status: 'cancelled', reason: '合成客户取消' }) }), { params: Promise.resolve({ id: order.id }) });
+    expect(result.status, JSON.stringify(await result.json())).toBe(200);
+    const closed = await readWorkspace(order.id);
+    expect(closed).toMatchObject({ orderStatus: 'cancelled', eligibility: { eligible: false }, cancellation: { id: expect.any(String) } });
+    expect(Date.parse(closed.cancellation!.occurredAt)).toBeGreaterThan(Date.parse(at));
+    expect(closed.orders[0].canRegisterHistorical).toBe(true);
+    const late = { ...registrationEvidence(), occurredAt: closed.cancellation!.occurredAt, reference: 'TEST-AFTER-CUTOFF' };
+    await expect(submit(order.id, closed.orders[0], { ...late, action: 'register_order', requestId: 'normal-register-too-late' })).rejects.toThrow(/须走异常处理/);
+    const [exception] = (await submit(order.id, closed.orders[0], { ...late, action: 'record_late_order_exception',
+      requestId: 'late-order-resolved', exceptionOutcome: 'supplier_cancelled', description: '供方书面确认撤销迟发的订购。' })).orders;
+    expect(exception).toMatchObject({ orderedBefore: false, paidCents: 0, orderReceipt: null });
+    expect(exception.ledger.at(-1)?.detail).toMatchObject({ snapshot: { operation: {
+      exceptionOutcome: 'supplier_cancelled', responsibleActor: approver.id, cancellation: { id: closed.cancellation!.id },
+    } } });
+    const original = { action: 'register_order', requestId: 'register-earlier-business-fact', referenceSha256: 'e'.repeat(64), occurredAt: at } as const;
+    await expect(submit(order.id, exception, { ...original, reference: late.reference })).rejects.toThrow(/同一笔实际业务凭证/);
+    const documented = await previewAction(order.id, exception, { ...original, reference: 'TEST-BEFORE-CUTOFF' });
+    await apply(documented);
+    await apply(documented);
+    const final = await readWorkspace(order.id);
+    expect(final).toMatchObject({ orderStatus: 'cancelled', canPrepare: false,
+      orders: [{ orderedBefore: true, paidCents: 0, orderReceipt: { occurredAt: at, reference: 'TEST-BEFORE-CUTOFF' } }] });
+    expect(activities(approved.id, 'register_order')).toHaveLength(1);
+    expect(activities(approved.id, 'record_late_order_exception')).toHaveLength(1);
+    expect(activities(approved.id, 'record_payment')).toHaveLength(0);
+  });
+
+  it('continues an actual v1-shaped approved deposit without changing the legacy approval, request or payment rows', async () => {
+    const order = await seedOrder('test-legacy-v1-deposit');
+    await acceptAsMerchant(order.id);
+    const workspace = await readWorkspace(order.id);
+    const id = 'PO-TEST-V1-DEPOSIT';
+    const source = workspace.lines[0].source;
+    const fullTerms = terms(source.quantity);
+    // The previous version's approval/payment snapshots had these commercial fields and no injected plan version.
+    const oldTerms = Object.fromEntries(Object.entries(fullTerms).filter(([key]) => ![
+      'writtenSupplier', 'supplierConditions', 'sourceSha256', 'settlementReference', 'settlementSha256', 'leadTimeAssessment',
+    ].includes(key)));
+    const totalCents = fullTerms.linePayableCents!;
+    const lines = [{ orderItemId: source.orderItemId, source, terms: oldTerms, revision: 2 }];
+    const contentHash = pricingContentHash({ orderId: order.id, purchaseOrderId: id, totalCents, lines });
+    const basis = workspace.eligibility.basis!;
+    const eligibility = { eligible: true, reason: null, basis: { acceptanceId: basis.acceptanceId,
+      receivableId: basis.receivableId, reserveId: basis.reserveId, amount: order.total } };
+    const stamp = new Date().toISOString();
+    const approval = { action: 'approve' };
+    const deposit = { action: 'record_payment', reference: 'TEST-V1-DEPOSIT-RECEIPT', amountCents: 900, conditionReference: 'TEST-V1-BOOKING-CONDITION' };
+    await prisma.$transaction(async tx => {
+      await tx.purchaseOrder.create({ data: { id, orderId: order.id, status: 'approved', groupKey: 'TEST-V1-TERMS', revision: 4,
+        approvedHash: contentHash, createdAt: stamp, updatedAt: stamp } });
+      await tx.purchaseRequirement.update({ where: { orderItemId: source.orderItemId }, data: {
+        purchaseOrderId: id, terms: JSON.stringify(oldTerms), revision: 2, updatedAt: stamp,
+      } });
+      await tx.purchaseActivity.create({ data: { id: 'TEST-V1-SAVED-LINE', orderId: order.id, purchaseOrderId: id, orderItemId: source.orderItemId,
+        action: 'save_line', actorId: preparer.id, createdAt: stamp,
+        detail: JSON.stringify({ previous: {}, terms: oldTerms, fromPurchase: null, missing: [] }) } });
+      for (const operation of [approval, deposit]) {
+        const approving = operation.action === 'approve';
+        const requestId = `v1-${operation.action}`;
+        const version = pricingContentHash({ contentHash, revision: approving ? 2 : 3, status: approving ? 'draft' : 'approved',
+          approvedHash: approving ? null : contentHash, paidCents: 0, eligibility, orderStatus: 'confirmed' });
+        const snapshot = { actorId: approver.id, requestId, orderId: order.id, purchaseOrderId: id, version,
+          totalCents, paidCents: 0, lines, eligibility, operation };
+        const intent = pricingContentHash({ actorId: approver.id, input: { orderId: order.id, purchaseOrderId: id, version, requestId, ...operation } });
+        await tx.purchaseActivity.create({ data: { id: `TEST-${requestId}`, orderId: order.id, purchaseOrderId: id, actorId: approver.id,
+          action: operation.action, createdAt: stamp, requestKey: pricingContentHash({ orderId: order.id, purchaseOrderId: id, requestId }),
+          referenceKey: approving ? null : pricingContentHash({ action: operation.action, party: fullTerms.payee, reference: deposit.reference }),
+          amountCents: approving ? null : BigInt(900), detail: JSON.stringify({ intent, actionHash: pricingContentHash(snapshot), snapshot }) } });
+      }
+    });
+    const readLegacyRows = () => prisma.purchaseActivity.findMany({ where: { orderId: order.id, action: { in: ['approve', 'record_payment'] } }, orderBy: { id: 'asc' } });
+    const archive = await readLegacyRows();
+    const [before] = (await readWorkspace(order.id)).orders;
+    expect(before).toMatchObject({ needsLegacyReview: true, totalCents, paidCents: 900, orderedBefore: false });
+    await expect(register(order.id, before, 'requires-legacy-proof')).rejects.toThrow(/旧采购批准须先具名核对/);
+    const review = {
+      action: 'review_legacy_approval', requestId: 'archive-proof-review', reference: 'TEST-V1-APPROVAL-ARCHIVE', referenceSha256: 'e'.repeat(64),
+      paymentReference: deposit.reference, paymentSha256: '3'.repeat(64), description: '原授权、定金与供货记录相符。',
+      revisedTerms: [{ orderItemId: source.orderItemId, terms: fullTerms }],
+    } as const;
+    await expect(submit(order.id, before, { ...review, revisedTerms: [{ orderItemId: source.orderItemId, terms: { ...fullTerms, linePayableCents: 4000 } }] })).rejects.toThrow(/不改变原授权/);
+    const checked = await previewAction(order.id, before, { ...review, revisedTerms: [...review.revisedTerms] });
+    await apply(checked);
+    await apply(checked);
+    const [reviewed] = (await readWorkspace(order.id)).orders;
+    expect(reviewed).toMatchObject({ needsLegacyReview: false, totalCents, paidCents: 900, orderedBefore: false });
+    expect(reviewed.ledger.at(-1)?.detail).toMatchObject({ snapshot: { operation: { legacyApprovalId: 'TEST-v1-approve',
+      evidence: { payments: [{ requestId: 'v1-record_payment', amountCents: 900, receiptReference: deposit.reference }] },
+    } } });
+    const [registered] = (await submit(order.id, reviewed, { action: 'register_order', requestId: 'continue-historical-registration',
+      occurredAt: stamp, reference: 'TEST-V1-DOCUMENTED-SUPPLIER-ORDER', referenceSha256: '4'.repeat(64) })).orders;
+    expect(registered).toMatchObject({ totalCents, paidCents: 900, orderedBefore: true, orderReceipt: { occurredAt: stamp } });
+    expect(await readLegacyRows()).toEqual(archive);
+    expect(activities(id, 'review_legacy_approval')).toHaveLength(1);
+    expect(activities(id, 'record_payment')).toHaveLength(1);
   });
 });
 
@@ -311,9 +565,21 @@ describe('purchase preparation from an accepted customer order', () => {
     expect(noMapping.lines[0].missing).toContain('原供货方名称对应实际法人主体的书面核对');
     const wrongSource = await saveLine(noMapping, 0, { ...alias, writtenSupplier: alias.supplier });
     expect(wrongSource.lines[0].missing).toContain('与原函供货方及版本一致的书面依据');
-    const verified = await saveLine(wrongSource, 0, { ...alias, identityReference: 'TEST-LEGAL-NAME-ARCHIVE', identitySha256: 'f'.repeat(64) });
+    const mapped = { ...alias, identityReference: 'TEST-LEGAL-NAME-ARCHIVE', identitySha256: 'f'.repeat(64) };
+    const relabelled = await saveLine(wrongSource, 0, {
+      ...mapped, sourceReference: 'TEST-RENAMED-SAME-FILE', writtenSupplier: alias.supplier,
+      unitPriceCents: 1400, linePayableCents: 2800, leadTime: '改成次日', supplierConditions: '改写报盘条件',
+      validUntil: new Date(Date.parse(reply.validUntil!) + 86_400_000).toISOString(),
+    });
+    expect(relabelled.orders).toEqual([]);
+    expect(relabelled.lines[0].missing).toEqual(expect.arrayContaining(['与原函供货方及版本一致的书面依据', '覆盖变更后条款的新供应商书面依据']));
+    const verified = await saveLine(relabelled, 0, { ...mapped, sourceReference: 'TEST-ARCHIVE-ALIAS-FOR-ORIGINAL' });
     expect(verified.orders).toEqual([expect.objectContaining({ status: 'draft', totalCents: 2750 })]);
     expect(verified.lines[0].terms.verification).toMatchObject({ actorId: preparer.id, version: expect.stringMatching(/^[a-f0-9]{64}$/) });
+    const newTerms = { ...verified.lines[0].terms, sourceReference: 'TEST-NEW-SUPPLIER-QUOTE', leadTime: '10个工作日' };
+    await expect(saveLine(verified, 0, newTerms)).rejects.toThrow(/新的供货书证/);
+    const newVersion = await saveLine(verified, 0, { ...newTerms, sourceSha256: '6'.repeat(64) });
+    expect(newVersion.orders[0].contentHash).not.toBe(verified.orders[0].contentHash);
   });
 
   it('blocks a customer-accepted quote awaiting platform acceptance', async () => {
@@ -439,7 +705,7 @@ describe('purchase order approval and execution records', () => {
     })).rejects.toThrow();
     const staleApproval = await previewAction(order.id, firstDraft, { action: 'approve', requestId: 'test-approve-before-edit' });
     await saveLine(await readWorkspace(order.id), 0, {
-      ...supplierTerms, unitPriceCents: 1500, linePayableCents: 3000, sourceReference: 'TEST-REVISED-REPLY',
+      ...supplierTerms, unitPriceCents: 1500, linePayableCents: 3000, sourceReference: 'TEST-REVISED-REPLY', sourceSha256: 'c'.repeat(64),
     });
     const [current] = (await readWorkspace(order.id)).orders;
     expect(current).toMatchObject({ status: 'draft', totalCents: 3000 });
@@ -520,7 +786,7 @@ describe('purchase order approval and execution records', () => {
     })).rejects.toThrow(/另建替代采购/);
     const replacement = {
       name: '合成替代品', brand: '合成替代品牌', catalogNumber: 'TEST-ALTERNATE', spec: '合成规格', unit: '件',
-      terms: terms(1, { unitPriceCents: 1750, linePayableCents: 1750, sourceReference: 'TEST-PRICE-REPLY-02' }),
+      terms: terms(1, { unitPriceCents: 1750, linePayableCents: 1750, sourceReference: 'TEST-PRICE-REPLY-02', sourceSha256: 'e'.repeat(64) }),
     };
     const direction = { action: 'resolve_change', requestId: 'test-new-replacement', outcome: 'replacement', ...written,
       refundFollowup: '原付款留在原单，由财务核对退回凭据。',

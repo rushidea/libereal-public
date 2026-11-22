@@ -42,7 +42,7 @@ function makeWorkspace(status?: Purchase['status'], lineChanges: Partial<Line> =
       leadTime: terms.leadTime, validUntil: terms.validUntil,
     },
     revision: 3, purchaseOrderId: status ? purchaseId : null, replacementId: null, fromPurchaseOrderId: null,
-    missing: status ? [] : ['收款方', '供应商付款条件'],
+    missing: status ? [] : ['收款方', '供应商付款条件'], availableQuantity: source.quantity,
     ...lineChanges,
   };
   const purchase: Purchase | null = status ? {
@@ -50,8 +50,10 @@ function makeWorkspace(status?: Purchase['status'], lineChanges: Partial<Line> =
     approvedHash: status === 'draft' ? null : 'd'.repeat(64),
     totalCents: 8642, paidCents: 0, lines: [line], ledger: [], orderedBefore: status === 'ordered',
     openIncidentId: status === 'on_hold' ? 'TEST-INCIDENT' : null, orderReceipt: null, leadTimeApproved: false,
+    dueCents: 8642, remaining: [{ orderItemId, quantity: source.quantity }], remainingScope: null,
+    needsRemainingReview: false, needsLegacyReview: false, canRegisterHistorical: false,
   } : null;
-  const payment = { receivedCents: 0, allocatedCents: 0, receipts: [], paymentAttemptId: null, settledReceivableId: null };
+  const payment = { receivedCents: 0, allocatedCents: 0, receipts: [], excludedReceiptIds: [], paymentAttemptId: null, settledReceivableId: null };
   const startReview: Workspace['startReview'] = {
     orderTerms: { orderId, inquiryId: null, organizationId: null, ownerScope: 'personal', customerId: 'test-buyer',
       customerEmail: 'synthetic@example.test', payee: 'Libereal', total: 250, subtotal: 250, pointsDiscount: 0,
@@ -65,7 +67,7 @@ function makeWorkspace(status?: Purchase['status'], lineChanges: Partial<Line> =
     payment, outstandingCents: 25000, credit: null, creditVersion: null, overCredit: false, creditExceptionRequired: false, version,
   };
   return {
-    orderId, orderStatus: 'confirmed', startReview,
+    orderId, orderStatus: 'confirmed', cancellation: null, canPrepare: false, startReview,
     eligibility: { eligible: true, reason: null, basis: { acceptanceId: 'test-acceptance', receivableId: 'test-receivable',
       reserveId: 'test-credit-reserve', amount: 250, mode: 'credit', payment, planEvidenceId: null } },
     lines: [line], orders: purchase ? [purchase] : [], activities: [],
@@ -172,8 +174,8 @@ describe('supplier purchasing page', () => {
     ]));
   });
 
-  it('asks an operator to prepare an eligible order that has no purchase requirements', async () => {
-    const workspace = { ...makeWorkspace(), lines: [] };
+  it.each(['confirmed', 'partially_shipped'])('prepares the eligible outstanding lines from the normal page (%s)', async orderStatus => {
+    const workspace = { ...makeWorkspace(), orderStatus, canPrepare: true, lines: orderStatus === 'confirmed' ? [] : makeWorkspace().lines };
     const posts = mockWorkspace(workspace, ['purchases.read', 'purchases.write'], () =>
       Response.json({ workspace: makeWorkspace() }),
     );
@@ -184,7 +186,79 @@ describe('supplier purchasing page', () => {
     fireEvent.click(prepare);
 
     expect(await screen.findByText('待补 收款方、供应商付款条件')).toBeInTheDocument();
-    expect(posts).toEqual([{ action: 'prepare', orderId }]);
+    await waitFor(() => expect(posts).toEqual([{ action: 'prepare', orderId }]));
+    await waitFor(() => expect(screen.queryByRole('button', { name: '从原订单准备采购' })).not.toBeInTheDocument());
+  });
+
+  it('keeps the original contract and deposit visible during explicit review of the unaffected payable', async () => {
+    const workspace = makeWorkspace('on_hold');
+    const [purchase] = workspace.orders;
+    Object.assign(purchase, { openIncidentId: null, dueCents: null, paidCents: 2300, needsRemainingReview: true, remaining: [{ orderItemId, quantity: 1 }] });
+    const scope = { lines: [{ orderItemId, quantity: 1, payableCents: 4000 }], totalCents: 4000, appliedPaidCents: 1000, dispositionIds: ['TEST-CANCEL'],
+      payments: [{ id: 'TEST-DEPOSIT', amountCents: 2300 }] };
+    const posts = mockWorkspace(workspace, ['purchases.read', 'purchases.approve', 'purchases.pay'], body => {
+      if (body.stage === 'preview') {
+        const result = preview(body, workspace);
+        return Response.json({ preview: { ...result.preview, snapshot: { ...result.preview.snapshot, operation: { ...result.preview.snapshot.operation, scope } } } });
+      }
+      return Response.json({ workspace: { ...workspace, orders: [{ ...purchase, status: 'approved', revision: 5, version: 'e'.repeat(64),
+        dueCents: 3000, needsRemainingReview: false, remainingScope: scope }] } });
+    });
+    render(<PurchaseManager initialOrder={orderId} />);
+    expect(await screen.findByText(/原合同应付/)).toHaveTextContent(/86\.42.*已登记实际付款.*23\.00/);
+    expect(screen.queryByRole('button', { name: '登记实际付款' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '核准原单剩余应付' }));
+    fill('本行核实应付（元）', '40');
+    fill('已付款中确认抵扣剩余应付的金额（元，可填 0）', '10');
+    fill('供方确认剩余行金额及付款归属的书面依据', 'TEST-SIGNED-STATEMENT');
+    fill('剩余应付确认书证摘要', 'd'.repeat(64));
+    fill('逐行应付和原付款归属核对结果', '已核对合成剩余款。');
+    fireEvent.click(screen.getByRole('button', { name: '查看完整预览' }));
+    const panel = await screen.findByRole('region', { name: '操作预览' });
+    expect(panel).toHaveTextContent(/剩余商品应付.*40\.00.*已付款确认抵扣.*10\.00.*本次核实未付.*30\.00/);
+    expect(posts[0]).toMatchObject({ action: 'approve_remaining', appliedPaidCents: 1000, remainingLines: [{ orderItemId, payableCents: 4000 }] });
+    fireEvent.click(within(panel).getByRole('button', { name: '确认核准原单剩余应付' }));
+    expect(await screen.findByText(/核准的剩余商品应付.*40\.00.*尚未付.*30\.00/)).toBeInTheDocument();
+    expect(screen.getByText(/原合同应付/)).toHaveTextContent(/86\.42.*已登记实际付款.*23\.00/);
+    expect(posts[1]).toMatchObject({ stage: 'confirm', actionHash, requestId: posts[0].requestId });
+  });
+
+  it('requires legacy proof on the same paid purchase before it can be registered', async () => {
+    const workspace = makeWorkspace('approved');
+    const [purchase] = workspace.orders;
+    Object.assign(purchase, { paidCents: 900, dueCents: 7742, needsLegacyReview: true });
+    const posts = mockWorkspace(workspace, ['purchases.read', 'purchases.approve', 'purchases.write', 'purchases.pay'], body => {
+      if (body.stage === 'preview') {
+        const result = preview(body, workspace);
+        const operation = { ...result.preview.snapshot.operation, paymentReference: body.paymentReference, checkedTerms: body.revisedTerms,
+          evidence: { approval: { actorId: 'test-original-approver', recordedAt: '2031-04-05T00:00:00Z' },
+            payments: [{ id: 'test-deposit', amountCents: 900, receiptReference: 'TEST-ORIGINAL-TRANSFER' }] } };
+        return Response.json({ preview: { ...result.preview, snapshot: { ...result.preview.snapshot, operation } } });
+      }
+      return Response.json({ workspace: { ...workspace, orders: [{ ...purchase, version: 'd'.repeat(64), needsLegacyReview: false }] } });
+    });
+    render(<PurchaseManager initialOrder={orderId} />);
+    fireEvent.click(await screen.findByRole('button', { name: '复核旧采购批准' }));
+    expect(screen.queryByRole('button', { name: '登记供应商订购结果' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '登记实际付款' })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('采购单价（元）')).not.toBeInTheDocument();
+    fill('原采购授权的档案出处', 'TEST-ORIGINAL-PURCHASE-APPROVAL');
+    fill('原采购授权书证摘要', 'b'.repeat(64));
+    fill('已付款凭证的档案出处', 'TEST-ORIGINAL-TRANSFER');
+    fill('已付款凭证摘要', 'c'.repeat(64));
+    fill('核对原授权、付款及本次接续结果', '已核对原授权和原定金。');
+    fill('供货书证摘要', 'd'.repeat(64));
+    fill('结算书证摘要', 'e'.repeat(64));
+    fill('本单交期核对结果', 'within_agreement');
+    fireEvent.click(screen.getByRole('button', { name: '查看完整预览' }));
+    const panel = await screen.findByRole('region', { name: '操作预览' });
+    expect(panel).toHaveTextContent(/原批准人 test-original-approver/);
+    expect(panel).toHaveTextContent(/原付款.*9\.00.*TEST-ORIGINAL-TRANSFER/);
+    expect(posts[0]).toMatchObject({ action: 'review_legacy_approval', purchaseOrderId: purchaseId,
+      revisedTerms: [{ orderItemId, terms: { linePayableCents: 8642, sourceSha256: 'd'.repeat(64), settlementSha256: 'e'.repeat(64) } }] });
+    fireEvent.click(within(panel).getByRole('button', { name: '确认复核旧采购批准' }));
+    expect(await screen.findByRole('button', { name: '登记供应商订购结果' })).toBeInTheDocument();
+    expect(posts.map(body => body.action)).toEqual(['review_legacy_approval', 'review_legacy_approval']);
   });
 
   it.each(['draft', 'approved', 'on_hold'] as const)('shows records without mutation controls to a read-only role (%s)', async status => {
