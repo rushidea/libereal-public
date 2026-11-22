@@ -30,6 +30,7 @@ export type SupplyIncident = {
   outstanding: IncidentQuantity[] | null;
   lastReviewedBy: string | null;
   factReview: { reference: string; description: string; actorId: string } | null;
+  shortfallFollowups?: {activityId:string;resolutionId:string;quantity:number;responsibility:string;description:string;reference:string;actorId:string}[];
 };
 
 export function locateIncidentQuantity(scope: IncidentQuantity[], {from,to}: IncidentLocation) {
@@ -73,7 +74,13 @@ export function supplyIncidentHistory(ledger: PurchaseActivity[]) {
       const scope=location && incident.scope ? locateIncidentQuantity(incident.scope,location) : incident.scope;
       const outstanding=location ? locateIncidentQuantity(incident.outstanding,location)
         : subtractQuantities(incident.outstanding,[op.quantity as IncidentQuantity]);
-      history.set(incident.id,{...reviewed,scope,status:outstanding.length?'open':'settled',outstanding});
+      const followup=purchaseObject(op.followup);
+      const shortfallFollowups=location?.to.source?.kind==='shortfall' && typeof followup.responsibility==='string'
+        && typeof followup.description==='string' && typeof op.reference==='string'
+        ? [...(incident.shortfallFollowups ?? []),{activityId:row.id,resolutionId:location.to.source.id,quantity:location.to.quantity,
+          responsibility:followup.responsibility,description:followup.description,reference:op.reference,actorId:row.actorId}]
+        : incident.shortfallFollowups;
+      history.set(incident.id,{...reviewed,scope,status:outstanding.length?'open':'settled',outstanding,shortfallFollowups});
     }
     if (row.action === 'review_change_scope') {
       const factReview = {reference:String(op.reference),description:String(op.description),actorId:row.actorId};

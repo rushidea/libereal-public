@@ -30,7 +30,7 @@ function eventInput(raw: unknown) {
       identityDocumentRow: row.identityDocumentRow,
       outcome: kind === 'confirm_shortfall' || kind==='review_dispatch_hold' ? requiredText(row.outcome, '实际核对结果') : undefined,
       receiptId: kind === 'confirm_shortfall' || kind==='review_dispatch_hold' ? optionalText(row.receiptId, '原实收批次') : undefined,
-      resolutionId:kind==='review_dispatch_hold' ? optionalText(row.resolutionId,'具名的实际退回记录') : undefined,
+      resolutionId:kind==='review_dispatch_hold' ? optionalText(row.resolutionId,'已登记的实际短失或退回记录') : undefined,
       incidentId:kind==='review_dispatch_hold' ? optionalText(row.incidentId,'原暂停事项') : undefined,
       holdAssignments:kind==='review_dispatch_hold' ? readHoldAssignments(row.holdAssignments) : undefined };
   }).sort((a,b) => a.parcelLineId.localeCompare(b.parcelLineId) || (a.batchNumber ?? '').localeCompare(b.batchNumber ?? ''));
@@ -40,7 +40,9 @@ function eventInput(raw: unknown) {
     quantity: positiveQuantity(input.quantity, '实际处置数量'),
     outcome: requiredText(input.disposition, '实物处置结果'),
   } : undefined;
-  const decisions = kind==='confirm_shortfall' || (kind==='review_dispatch_hold' && lines.some(row=>row.outcome!=='identify')) ? {
+  const decidesCommercialTreatment = kind==='review_dispatch_hold'
+    && lines.some(row=>row.outcome==='continue' || row.outcome==='return' || row.outcome==='release_to_stock');
+  const decisions = kind==='confirm_shortfall' || decidesCommercialTreatment ? {
     supplier: { reference: requiredText(input.supplierReference, '供应商或责任方书面确认的出处'),
       sha256: documentSha256(input.supplierSha256, '供应商或责任方书证摘要') },
     customer: { reference: requiredText(input.customerReference, '客户书面处理决定的出处'),
@@ -77,7 +79,8 @@ async function planHoldDecisions(tx: Db, orderId: string, parcel: FulfillmentPar
   const needsLocation=input.lines.some(row=>row.outcome==='identify');
   const workspace=needsLocation ? await purchaseWorkspace(tx,orderId) : undefined;
   const planned: Array<{parcelLineId:string;orderItemId:string;purchaseOrderId:string;quantity:number;outcome:string;
-    incidentId?:string;receiptId?:string;resolutionId?:string;assignments?:HoldAssignment[];source?:IncidentSource}>=[];
+    incidentId?:string;receiptId?:string;resolutionId?:string;assignments?:HoldAssignment[];source?:IncidentSource;
+    shortfallEvidence?:{kind:string;eventId:string;reference:string;occurredAt:string;sha256:string;documentRow:number|null}}>=[];
   for (const row of input.lines) {
     const line=parcel.lines.find(line=>line.id===row.parcelLineId);
     const hold=facts.find(fact=>fact.parcelLineId===row.parcelLineId);
@@ -126,17 +129,26 @@ async function planHoldDecisions(tx: Db, orderId: string, parcel: FulfillmentPar
       throw new PurchaseError('处理结果须对应尚未办结的原暂停事项及其实际份额');
     }
     const decision={...base,incidentId:selected.incidentId};
-    if (outcome==='return') {
-      const actual=line.resolutions.find(result=>result.id===row.resolutionId && result.kind==='return');
-      const recorded=parcel.events.find(event=>event.id===actual?.eventId && event.status==='applied');
-      const applied=recorded ? JSON.parse(recorded.details).resolutions as Array<{parcelLineId:string;kind:string;receipt?:{id:string}}> : [];
-      const receiptId=applied?.find(item=>item.parcelLineId===line.id && item.kind==='return')?.receipt?.id;
+    if (outcome==='return' || outcome==='shortfall') {
+      const returning=outcome==='return';
+      const actual=line.resolutions.find(result=>result.id===row.resolutionId
+        && (returning ? result.kind==='return' : result.kind==='loss' || result.kind==='shortage'));
+      const recorded=parcel.events.find(event=>event.id===actual?.eventId && event.kind==='confirm_shortfall' && event.status==='applied');
+      const applied=recorded ? JSON.parse(recorded.details).resolutions as Array<{
+        parcelLineId:string;kind:string;quantity:number;receipt?:{id:string};
+      }> : undefined;
+      const original=Array.isArray(applied) ? applied.find(item=>item.parcelLineId===line.id
+        && item.kind===actual?.kind && item.quantity===actual?.quantity) : undefined;
+      const receiptId=original?.receipt?.id;
       const used=[...hold.decisions,...planned].filter(item=>item.resolutionId===row.resolutionId).reduce((sum,item)=>sum+item.quantity,0);
-      if (!actual || !recorded || recorded.occurredAt.getTime()>Date.parse(input.occurredAt)
-        || actual.quantity<quantity+used || row.receiptId || inbound && !receiptId) {
-        throw new PurchaseError('退回处理须对应本包裹行已登记的实际退回与数量');
+      if (!actual || !original || !recorded?.reference || !recorded.evidenceSha256 || recorded.occurredAt.getTime()>Date.parse(input.occurredAt)
+        || actual.quantity<quantity+used || row.receiptId || (returning && inbound && !receiptId)) {
+        throw new PurchaseError(returning ? '退回处理须对应本包裹行已登记的实际退回与数量'
+          : '短失核对须对应本包裹行已登记的实际短少或丢失与未核对数量');
       }
-      planned.push({...decision,resolutionId:actual.id,receiptId});
+      const shortfallEvidence=returning ? undefined : {kind:actual.kind,eventId:recorded.id,reference:recorded.reference,
+        occurredAt:recorded.occurredAt.toISOString(),sha256:recorded.evidenceSha256,documentRow:recorded.evidenceRow};
+      planned.push({...decision,resolutionId:actual.id,...(receiptId ? {receiptId} : {}),...(shortfallEvidence ? {shortfallEvidence} : {})});
       continue;
     }
     if (row.resolutionId || (outcome!=='continue' && outcome!=='release_to_stock')) throw new PurchaseError('请按双方书面决定选择实际处理结果');
@@ -291,8 +303,9 @@ export async function recordParcelEvent(tx: Db, orderId: string, parcelId: strin
   for (const row of holdDecisions) {
     if (row.source && row.assignments) await locateHeldDispatch(tx,orderId,[{...row,source:row.source,assignments:row.assignments}],
       {...input,occurredAt:parcel.dispatchedAt.toISOString()},actor);
-    if (row.incidentId && (row.outcome==='continue' || row.outcome==='return' || row.outcome==='release_to_stock')) {
-      await clearHeldDispatchShare(tx,orderId,row,row.incidentId,input,actor);
+    if (row.incidentId) {
+      const followup=row.outcome==='shortfall' ? {responsibility:input.holdResponsibility!,description:input.description} : undefined;
+      await clearHeldDispatchShare(tx,orderId,{...row,followup},row.incidentId,input,actor);
     }
     if (row.outcome==='release_to_stock' && row.receiptId) {
       await disposeProcurementBatch(tx,{receiptId:row.receiptId,orderId,quantity:row.quantity,disposition:'released_to_stock',actorId:actor.id});
