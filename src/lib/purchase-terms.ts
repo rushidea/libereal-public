@@ -114,7 +114,7 @@ export function missingWrittenTerms(terms: PurchaseTerms, source: PurchaseSource
   if (terms.writtenSupplier && terms.supplier && terms.writtenSupplier !== terms.supplier
     && (!terms.identityReference || !terms.identitySha256)) missing.push('原供货方名称对应实际法人主体的书面核对');
   const reply = source.written;
-  if (reply && reply.reference === terms.sourceReference) {
+  if (reply && (reply.reference === terms.sourceReference || reply.replyHash === terms.sourceSha256)) {
     if (terms.writtenSupplier !== reply.supplier || terms.sourceSha256 !== reply.replyHash) {
       missing.push('与原函供货方及版本一致的书面依据');
     }
@@ -124,6 +124,21 @@ export function missingWrittenTerms(terms: PurchaseTerms, source: PurchaseSource
     }
   }
   return missing;
+}
+
+export function requireNewDocumentsForChangedTerms(previous: PurchaseTerms, next: PurchaseTerms, quantityChanged = false) {
+  if (!previous.verification) return;
+  const changed = (keys: Array<keyof PurchaseTerms>) => keys.some(key => previous[key] !== next[key]);
+  if (previous.sourceSha256 && previous.sourceSha256 === next.sourceSha256
+    && changed(['writtenSupplier', 'unitPriceCents', 'currency', 'taxBasis', 'freightTerms', 'leadTime', 'validUntil', 'supplierConditions'])) {
+    throw new PurchaseError('变更供货方、价格或供货条款须核对新的供货书证');
+  }
+  if (previous.settlementSha256 && previous.settlementSha256 === next.settlementSha256 && changed(['supplier', 'payee', 'paymentTerms'])) {
+    throw new PurchaseError('变更供货主体、收款方或付款条件须核对新的结算书证');
+  }
+  if (!quantityChanged && previous.sourceSha256 === next.sourceSha256 && previous.settlementSha256 === next.settlementSha256 && changed(['linePayableCents'])) {
+    throw new PurchaseError('变更本行应付金额须核对新的供货或结算书证');
+  }
 }
 
 export function attestPurchaseTerms(

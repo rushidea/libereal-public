@@ -10,11 +10,11 @@ export type PurchaseAuthorization = {
 type Db = Prisma.TransactionClient;
 type ActivityRow = {
   id: string; purchaseOrderId: string | null; orderItemId: string | null; actorId: string;
-  action: string; amountCents: bigint | null; detail: string; createdAt: string;
+  action: string; requestKey: string | null; referenceKey: string | null; amountCents: bigint | null; detail: string; createdAt: string;
 };
 
 export async function readPurchaseActivities(tx: Db, orderId: string) {
-  const rows = await tx.$queryRaw<ActivityRow[]>`SELECT id,purchaseOrderId,orderItemId,actorId,action,amountCents,detail,createdAt
+  const rows = await tx.$queryRaw<ActivityRow[]>`SELECT id,purchaseOrderId,orderItemId,actorId,action,requestKey,referenceKey,amountCents,detail,createdAt
     FROM PurchaseActivity WHERE orderId=${orderId} ORDER BY rowid`;
   return rows.map(row => ({ ...row, amountCents: row.amountCents == null ? null : Number(row.amountCents), detail: jsonObject(row.detail) }));
 }

@@ -8,7 +8,7 @@ import { validateSupplierQuoteReply } from '@/lib/supplier-quote-review';
 type Db = Prisma.TransactionClient;
 const include = {
   ...ORDER_APPROVAL_TERMS_INCLUDE, receivable: true, creditTransactions: true,
-  paymentAttempts: true, statusHistory: { where: { toStatus: 'confirmed' } },
+  paymentAttempts: true, statusHistory: { where: { toStatus: { in: ['confirmed', 'cancelled', 'closed'] } } },
 } satisfies Prisma.OrderInclude;
 export type SourceOrder = Prisma.OrderGetPayload<{ include: typeof include }>;
 type Item = SourceOrder['orderItems'][number];

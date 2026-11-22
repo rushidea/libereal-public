@@ -42,7 +42,7 @@ function cents(value: number) {
 async function acceptance(tx: Db, order: SourceOrder, activities: PurchaseActivity[]) {
   const terms = orderApprovalTerms(order);
   const termsVersion = pricingContentHash(terms);
-  const recorded = order.statusHistory.filter(entry => entry.fromStatus === 'pending' && entry.actorId);
+  const recorded = order.statusHistory.filter(entry => entry.toStatus === 'confirmed' && entry.fromStatus === 'pending' && entry.actorId);
   const platformSnapshots = recorded.filter(entry => {
     const meta = jsonObject(entry.metadata);
     return meta.action === 'accept_order' && meta.actorType === 'libereal_admin' && meta.version === 2;
@@ -124,10 +124,24 @@ function paymentPlan(order: SourceOrder, activities: PurchaseActivity[], termsVe
   return null;
 }
 
+async function nativePaymentReferences(tx: Db, references: string[]) {
+  if (!references.length) return new Set<string>();
+  const attempts = await tx.paymentAttempt.findMany({ where: { provider: 'alipay', OR: [
+    { outTradeNo: { in: references } }, { tradeNo: { in: references } },
+  ] }, select: { outTradeNo: true, tradeNo: true } });
+  return new Set(attempts.flatMap(row => row.tradeNo ? [row.outTradeNo, row.tradeNo] : [row.outTradeNo]));
+}
+
 async function receiptEvidence(tx: Db, order: SourceOrder, activities: PurchaseActivity[], principal: number) {
   const receipts = activities.filter(row => row.purchaseOrderId === null && row.action === 'record_customer_receipt')
-    .map(row => ({ id: row.id, ...operation(row), amountCents: row.amountCents ?? 0 }));
-  const allocatedCents = receipts.reduce((sum, item) => sum + item.amountCents, 0);
+    .map(row => {
+      const evidence = operation(row);
+      return { id: row.id, ...evidence, transactionReference: evidence.transactionReference, amountCents: row.amountCents ?? 0 };
+    });
+  const references = Array.from(new Set(receipts.flatMap(row => typeof row.transactionReference === 'string' ? [row.transactionReference] : [])));
+  const native = await nativePaymentReferences(tx, references);
+  const countedReceipts = receipts.filter(row => typeof row.transactionReference === 'string' && !native.has(row.transactionReference));
+  const allocatedCents = countedReceipts.reduce((sum, item) => sum + item.amountCents, 0);
   const alipay = order.paymentAttempts.filter(row => row.provider === 'alipay' && row.status === 'paid'
     && row.paidAt && row.tradeNo && order.paidAt && cents(row.amount) === principal);
   let paymentAttemptId: string | null = null;
@@ -144,7 +158,9 @@ async function receiptEvidence(tx: Db, order: SourceOrder, activities: PurchaseA
     && !row.reason && cents(row.amount) === -principal);
   const settled = ar && ar.status === 'paid' && ar.paidAt && order.paidAt?.getTime() === ar.paidAt.getTime()
     && ar.userId === order.customerId && cents(ar.amount) === principal && release.length === 1 ? ar.id : null;
-  return { receivedCents: paymentAttemptId || settled ? principal : allocatedCents, allocatedCents, receipts, paymentAttemptId, settledReceivableId: settled };
+  return { receivedCents: paymentAttemptId || settled ? principal : allocatedCents, allocatedCents, receipts,
+    excludedReceiptIds: receipts.filter(row => !countedReceipts.includes(row)).map(row => row.id),
+    paymentAttemptId, settledReceivableId: settled };
 }
 
 async function creditEvidence(tx: Db, order: SourceOrder, outstandingCents: number) {
@@ -190,7 +206,7 @@ export async function purchaseStartReview(tx: Db, order: SourceOrder, activities
   } : null };
   const review = {
     orderTerms, orderCreatedAt: order.createdAt.toISOString(), termsVersion, acceptance: accepted.proof, canVerifyAcceptance: active && accepted.manual,
-    history: order.statusHistory.filter(row => row.fromStatus === 'pending').map(row => ({
+    history: order.statusHistory.filter(row => row.toStatus === 'confirmed' && row.fromStatus === 'pending').map(row => ({
       id: row.id, actorId: row.actorId, actorEmail: row.actorEmail, recordedAt: row.createdAt.toISOString(),
     })),
     active, principal, plan, payment, outstandingCents, credit, creditVersion, overCredit,
@@ -237,6 +253,9 @@ async function previewOperation(tx: Db, input: PurchaseStartInput, state: Awaite
     if (receiptKind !== 'bank_receipt' && receiptKind !== 'platform_receipt') {
       throw new PurchaseError('须提供银行或结算平台的实际到账凭证', 400);
     }
+    if ((await nativePaymentReferences(tx, [transactionReference])).has(transactionReference)) {
+      throw new PurchaseError('该笔支付宝原生流水已归属原订单，不可再作人工回款分摊');
+    }
     const occurredAt = purchaseTimestamp(input.occurredAt, '实际到账时间');
     if (Date.parse(occurredAt) > Date.now() || !state.plan || state.outstandingCents === 0
       || !positiveCents(input.receiptTotalCents) || !positiveCents(input.amountCents)
@@ -251,10 +270,12 @@ async function previewOperation(tx: Db, input: PurchaseStartInput, state: Awaite
       return prior.sha256 === sha256 && prior.receiptKind === receiptKind && prior.receiptTotalCents === input.receiptTotalCents
         && prior.occurredAt === occurredAt;
     });
-    if (!consistent || allocations.reduce((sum, row) => sum + Number(row.amountCents), 0) + input.amountCents > input.receiptTotalCents) {
+    const allocatedBeforeCents = allocations.reduce((sum, row) => sum + Number(row.amountCents), 0);
+    if (!consistent || allocatedBeforeCents + input.amountCents > input.receiptTotalCents) {
       throw new PurchaseError('同一到账凭据的版本、日期和可用分配金额须与原登记一致');
     }
-    return { ...evidence, transactionReference, allocationReference, receiptKind, occurredAt, amountCents: input.amountCents, receiptTotalCents: input.receiptTotalCents };
+    return { ...evidence, transactionReference, allocationReference, receiptKind, occurredAt, amountCents: input.amountCents,
+      receiptTotalCents: input.receiptTotalCents, allocatedBeforeCents };
   }
   if (!state.creditExceptionRequired || !state.creditVersion) throw new PurchaseError('目前没有可单独批准的超授信例外');
   return { ...evidence, creditVersion: state.creditVersion, credit: state.credit };

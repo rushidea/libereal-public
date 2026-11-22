@@ -33,7 +33,9 @@ export async function GET(req: NextRequest) {
     const rows = await prisma.$queryRaw<{ id: string; status: string; prepared: bigint; purchases: bigint }[]>`
       SELECT o.id,o.status,(SELECT COUNT(*) FROM PurchaseRequirement r WHERE r.orderId=o.id) AS prepared,
         (SELECT COUNT(*) FROM PurchaseOrder p WHERE p.orderId=o.id AND p.status<>'superseded') AS purchases
-      FROM "Order" o WHERE (o.status='confirmed' AND o.archivedAt IS NULL OR EXISTS(SELECT 1 FROM PurchaseRequirement r WHERE r.orderId=o.id))
+      FROM "Order" o WHERE (o.status IN ('confirmed','partially_shipped') AND o.archivedAt IS NULL
+          AND EXISTS(SELECT 1 FROM OrderItem i WHERE i.orderId=o.id AND i.quantity>i.shippedQty)
+        OR EXISTS(SELECT 1 FROM PurchaseRequirement r WHERE r.orderId=o.id))
         AND (instr(lower(o.id),lower(${query}))>0 OR EXISTS(SELECT 1 FROM PurchaseOrder p WHERE p.orderId=o.id AND instr(lower(p.id),lower(${query}))>0))
       ORDER BY o.createdAt DESC,o.id LIMIT 100`;
     return NextResponse.json({ permissions, orders: rows.map(row => ({ ...row, prepared: Number(row.prepared), purchases: Number(row.purchases) })) });
@@ -43,6 +45,7 @@ export async function GET(req: NextRequest) {
 const purchasePermissions = {
   approve: 'purchases.approve', approve_lead_time: 'purchases.approve', register_order: 'purchases.write',
   record_payment: 'purchases.pay', report_change: 'purchases.write', resolve_change: 'purchases.read',
+  review_legacy_approval: 'purchases.approve', approve_remaining: 'purchases.approve', record_late_order_exception: 'purchases.approve',
 } as const satisfies Record<PurchaseActionInput['action'], AdminPermissionKey>;
 
 const startPermissions = {
@@ -104,6 +107,9 @@ export async function POST(req: NextRequest) {
       description: body.description, outcome: body.outcome, supplierReference: body.supplierReference,
       supplierSha256: body.supplierSha256, customerReference: body.customerReference, customerSha256: body.customerSha256,
       revisedTerms: body.revisedTerms, dispositions: body.dispositions, refundFollowup: body.refundFollowup,
+      paymentReference: body.paymentReference, paymentSha256: body.paymentSha256, leadTimeReference: body.leadTimeReference,
+      leadTimeSha256: body.leadTimeSha256, remainingLines: body.remainingLines, appliedPaidCents: body.appliedPaidCents,
+      exceptionOutcome: body.exceptionOutcome,
     };
     if (body.stage === 'preview') {
       const preview = await prisma.$transaction(async tx => {
