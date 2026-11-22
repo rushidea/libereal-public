@@ -568,6 +568,9 @@ model Order {
   organization    Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
   receivable      AccountReceivable?
   creditTransactions CreditTransaction[]
+  purchaseOrders PurchaseOrder[]
+  purchaseRequirements PurchaseRequirement[]
+  purchaseActivities PurchaseActivity[]
   inventoryReservations InventoryReservation[]
   inventoryTransactions InventoryTransaction[]
   paymentAttempts PaymentAttempt[]
@@ -949,12 +952,66 @@ model OrderItem {
   updatedAt     DateTime @updatedAt
   order         Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
   shipmentItems ShipmentItem[]
+  purchaseRequirement PurchaseRequirement?
   inventoryReservation InventoryReservation?
 
   @@unique([orderId, position])
   @@index([orderId])
   @@index([catalogNumber])
   @@index([productId])
+}
+
+model PurchaseOrder {
+  id           String @id
+  orderId      String
+  groupKey     String
+  status       String
+  revision     Int @default(1)
+  approvedHash String?
+  createdAt    String
+  updatedAt    String
+  order        Order @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  lines        PurchaseRequirement[]
+  activities   PurchaseActivity[]
+
+  @@unique([id, orderId])
+  @@index([orderId, status])
+}
+
+model PurchaseRequirement {
+  orderItemId     String @id
+  orderId         String
+  ownerId         String
+  source          String
+  terms           String
+  revision        Int @default(1)
+  purchaseOrderId String?
+  createdAt       String
+  updatedAt       String
+  orderItem       OrderItem @relation(fields: [orderItemId], references: [id], onDelete: Restrict)
+  order           Order @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  purchaseOrder   PurchaseOrder? @relation(fields: [purchaseOrderId, orderId], references: [id, orderId], onDelete: Restrict)
+
+  @@index([orderId])
+  @@index([purchaseOrderId])
+}
+
+model PurchaseActivity {
+  id              String @id
+  orderId         String
+  purchaseOrderId String?
+  orderItemId     String?
+  actorId         String
+  action          String
+  requestKey      String? @unique
+  referenceKey    String? @unique
+  amountCents     BigInt?
+  detail          String
+  createdAt       String
+  order           Order @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  purchaseOrder   PurchaseOrder? @relation(fields: [purchaseOrderId, orderId], references: [id, orderId], onDelete: Restrict)
+
+  @@index([orderId, createdAt])
 }
 
 model OrderStatusHistory {
