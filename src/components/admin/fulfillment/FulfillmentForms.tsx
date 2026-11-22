@@ -43,12 +43,18 @@ export function DispatchForm({ view, submit, busy }: { view: Workspace; submit: 
   const forwarding = route === 'libereal_to_customer';
   const rows = forwarding ? view.receipts.flatMap(receipt => {
     const p = view.purchases.find(row => row.purchaseOrderId === receipt.purchaseOrderId && row.orderItemId === receipt.orderItemId);
-    return p ? [{ ...p, sourceReceiptId: receipt.id, batchNumber: receipt.batchNumber, available: receipt.available }] : [];
-  }) : view.purchases.filter(p => p.available > 0).map(p => ({ ...p, sourceReceiptId: null, batchNumber: null }));
+    return p ? [{ ...p, sourceReceiptId: receipt.id, batchNumber: receipt.batchNumber, available: receipt.available, resendApprovalId: undefined }] : [];
+  }) : [
+    ...view.purchases.filter(p => p.available > 0).map(p => ({ ...p, sourceReceiptId: null, batchNumber: null, resendApprovalId: undefined })),
+    ...view.freeResends.flatMap(resend => {
+      const p = view.purchases.find(row => row.purchaseOrderId === resend.purchaseOrderId && row.orderItemId === resend.orderItemId);
+      return p ? [{ ...p, sourceReceiptId: null, batchNumber: null, available: resend.available, resendApprovalId: resend.approvalId }] : [];
+    }),
+  ];
   return <form className="space-y-3" onSubmit={event => {
     event.preventDefault(); const form = new FormData(event.currentTarget);
     const lines = rows.map((row,index) => ({ purchaseOrderId: row.purchaseOrderId, orderItemId: row.orderItemId,
-      sourceReceiptId: row.sourceReceiptId, quantity: Number(read(form,'qty'+index)) })).filter(row => row.quantity > 0);
+      sourceReceiptId: row.sourceReceiptId, resendApprovalId: row.resendApprovalId, quantity: Number(read(form,'qty'+index)) })).filter(row => row.quantity > 0);
     submit('dispatch',{ ...evidence(form), route, lines, carrier: read(form,'carrier'), trackingNumber: read(form,'trackingNumber'),
       feedSource: form.has('feed') ? view.feedSource : null });
   }}>
@@ -56,8 +62,9 @@ export function DispatchForm({ view, submit, busy }: { view: Workspace; submit: 
       {Object.entries(routeLabels).filter(([value]) => value !== 'legacy_customer').map(([value,label]) => <option key={value} value={value}>{label}</option>)}
     </select></Label>
     {rows.length ? <fieldset key={route} className="space-y-1"><legend className="text-sm font-medium">本次实际发出的商品</legend>
-      {rows.map((row,index) => <Label key={JSON.stringify([row.purchaseOrderId,row.orderItemId,row.sourceReceiptId])}
-        title={[row.name,row.supplier,row.purchaseOrderId,row.batchNumber && '批次 '+row.batchNumber,'可发 '+row.available].filter(Boolean).join(' · ')}>
+      {rows.map((row,index) => <Label key={JSON.stringify([row.purchaseOrderId,row.orderItemId,row.sourceReceiptId,row.resendApprovalId])}
+        title={[row.name,row.supplier,row.purchaseOrderId,row.batchNumber && '批次 '+row.batchNumber,
+          row.resendApprovalId && '已批准的免费重发','可发 '+row.available].filter(Boolean).join(' · ')}>
         <input className={inputStyle} type="number" name={'qty'+index} min={0} max={row.available} step={1} defaultValue={0}/>
       </Label>)}</fieldset> : <p className="text-sm text-gray-600">{forwarding ? '这笔订单还没有可转发的实际收货批次。' : '这笔订单还没有可用于本次发货的供方订购记录。'}</p>}
     {rows.length > 0 && <>
@@ -226,21 +233,35 @@ export function HistoricalInventoryForm({ row,submit,busy }: {
   row: Workspace['legacyInventory'][number]; submit: SubmitIntent; busy: boolean;
 }) {
   const [outcome,setOutcome] = useState('');
+  const allocate = outcome === 'allocate_recorded_movement';
   return <form className="space-y-2" onSubmit={event => {
     event.preventDefault(); const form = new FormData(event.currentTarget);
     submit('reconcile_legacy_inventory',{ ...evidence(form), parcelId: row.parcelId, parcelLineId: row.parcelLineId,
-      quantity: Number(read(form,'legacyStockQuantity')), outcome, batchId: read(form,'legacyStockBatch'), description: read(form,'description') });
+      quantity: Number(read(form,'legacyStockQuantity')), outcome, batchId: read(form,'legacyStockBatch'),
+      inventoryTransactionId: read(form,'inventoryTransaction'), shipmentItemId: read(form,'stockShipmentItem'), description: read(form,'description') });
   }}>
     <Label title="经原件核实的实际发货来源"><select name="legacyStockRoute" className={inputStyle} value={outcome}
       onChange={e => setOutcome(e.target.value)} required>
-      <option value="">请选择</option><option value="warehouse_stock_shipped">本仓实际出库，核实库存扣减</option>
-      <option value="external_supply_release">外部实际供货，释放原订单预留</option>
+      <option value="">请选择</option>
+      {row.available > 0 && <><option value="warehouse_stock_shipped">本仓实际出库，核实库存扣减</option>
+        <option value="external_supply_release">外部实际供货，释放原订单预留</option></>}
+      {row.recordedOutsideReview > 0 && row.oldMovements.length > 0 && row.shipmentItems.length > 0
+        && <option value="allocate_recorded_movement">按凭据把已记出库归到原运单商品行</option>}
     </select></Label>
     {outcome === 'warehouse_stock_shipped' && <Label title="本单原预占的实际批次"><select name="legacyStockBatch" className={inputStyle}>
       {row.noBatch > 0 && <option value="">原记录无批次 · 可核对 {row.noBatch}</option>}
       {row.lots.map(lot => <option key={lot.batchId} value={lot.batchId}>{lot.batchNumber} · 可核对 {lot.quantity}</option>)}
     </select></Label>}
-    <Label title="本次核对的原预留数量"><input name="legacyStockQuantity" type="number" min={1} max={row.available} className={inputStyle} required/></Label>
+    {allocate && <>
+      <Label title="原库存出库流水"><select name="inventoryTransaction" className={inputStyle} required>
+        {row.oldMovements.map(movement => <option key={movement.id} value={movement.id}>{movement.id} · 尚可归属 {movement.available}</option>)}
+      </select></Label>
+      <Label title="原运单商品行"><select name="stockShipmentItem" className={inputStyle} required>
+        {row.shipmentItems.map(item => <option key={item.id} value={item.id}>{item.trackingNumber ?? item.shipmentId} · 尚可归属 {item.available}</option>)}
+      </select></Label>
+    </>}
+    <Label title="本次核对的原预留数量"><input name="legacyStockQuantity" type="number" min={1}
+      max={allocate ? row.recordedOutsideReview : row.available} className={inputStyle} required/></Label>
     <Proof explanation="原库存凭据与实际发货来源的核对结果"/>
     <button className={actionStyle} disabled={busy}>预览核对旧库存预留</button>
   </form>;

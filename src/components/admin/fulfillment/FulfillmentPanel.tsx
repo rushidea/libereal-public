@@ -18,6 +18,7 @@ const labels: Record<string,string> = {
   orderStatus:'原订单状态', receiptId:'原实收记录', inventoryAccountId:'库存账户', spec:'规格', unit:'单位', packageType:'包装', baseQuantity:'包装数量',
   inventory:'入仓归属', identity:'核对依据', approved:'已批准的商品', decisions:'双方确认', resolutions:'实物短失或退回', disposition:'本次实物处置',
   receivedAt:'实际入仓时间', history:'历史状态记录', priorShippedQty:'此前记录的已发数量', historicalAttributionId:'原核对记录',
+  resendApprovalId:'免费重发批准', resend:'原免费重发依据', allocation:'原出库流水归属', shipmentItemId:'原运单商品行',
 };
 function PreviewValue({ value }: { value: unknown }) {
   if (value === null || value === undefined || value === '') return <span>未填写</span>;
@@ -117,8 +118,10 @@ export default function FulfillmentPanel({ orderId, canWrite, stepUp, onUpdated 
             <EventForm parcel={parcel} view={view} capabilities={capabilities} busy={busy} submit={preview}/></details>}
           {view.legacyInventory.filter(row => row.parcelId === parcel.id).map(row => <details key={row.parcelLineId}>
             <summary className="cursor-pointer text-sm font-medium text-amber-900">旧库存预留待核实 · {row.awaitingReview}</summary>
+            {row.recognized.length > 0 && <p className="text-sm">已有原生运单及出库凭据可核对，已计 {row.recognized.reduce((sum,item) => sum+item.quantity,0)} 件。</p>}
             {row.recordedOutsideReview > 0 && <p className="text-sm">已有部分库存流水，须核对其覆盖的历史发货数量。</p>}
-            {canWrite && capabilities.warehouse && row.available > 0 && <HistoricalInventoryForm row={row} busy={busy} submit={preview}/>}
+            {canWrite && capabilities.warehouse && (row.available > 0 || row.recordedOutsideReview > 0 && row.oldMovements.length > 0 && row.shipmentItems.length > 0)
+              && <HistoricalInventoryForm row={row} busy={busy} submit={preview}/>}
           </details>)}
           {canWrite && view.unmatched.filter(n => n.carrier === parcel.carrier && n.trackingNumber === parcel.trackingNumber &&
             n.source === 'carrier/'+parcel.feedSource && n.occurredAt >= parcel.dispatchedAt).map(notice =>
