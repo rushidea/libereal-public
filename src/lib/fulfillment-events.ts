@@ -122,6 +122,9 @@ async function eventPlan(tx: Db, orderId: string, parcelId: string, raw: unknown
       const purchase = purchasing?.orders.find(po => po.id === line.purchaseOrderId);
       const source = purchase?.lines.find(item => item.orderItemId === line.orderItemId)?.source;
       if (!purchase || !source) throw new PurchaseError('请核对原批准的采购商品');
+      if (purchasing?.fulfillment.parcelLinesWithUnverifiedStockSource.includes(line.id)) {
+        throw new PurchaseError('该补货行的原库存归属待核，请由采购审批人员核对原行及书证');
+      }
       let options = selectedIdentities.get(line.id);
       if (!options) {
         options = await receiptInventoryOptions(tx, source, purchase.version);

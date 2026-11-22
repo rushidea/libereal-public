@@ -69,6 +69,8 @@ export async function fulfillmentWorkspace(tx: Db, orderId: string) {
         catalogNumber: line.source.catalogNumber, productId: line.source.productId, variantId: line.source.variantId,
         orderedAt: receipt.occurredAt!, available, contractVersion: po.version,
         originalHoldAlreadyMoved: purchasing.fulfillment.replacementsWithPriorHoldTransfer.some(row =>
+          row.purchaseOrderId === po.id && row.orderItemId === line.orderItemId),
+        stockSourceUnverified: purchasing.fulfillment.replacementsWithUnverifiedStockSource.some(row =>
           row.purchaseOrderId === po.id && row.orderItemId === line.orderItemId) }];
     });
   });
@@ -134,6 +136,9 @@ async function dispatchPlan(tx: Db, orderId: string, raw: unknown, actor: Fulfil
     const resend = row.resendApprovalId ? view.freeResends.find(item => item.approvalId === row.resendApprovalId
       && item.purchaseOrderId === row.purchaseOrderId && item.orderItemId === row.orderItemId) : null;
     if (row.resendApprovalId && (!resend || resend.authorizedAt > input.occurredAt)) throw new PurchaseError('发货须对应当时已经批准的本行免费重发数量');
+    if (resend?.originalHoldAlreadyMoved === null || (!resend && !receipt && purchased.stockSourceUnverified)) {
+      throw new PurchaseError('该补货行的原库存归属待核，请由采购审批人员核对原行及书证');
+    }
     if (row.quantity > (receipt?.available ?? resend?.available ?? purchased.available)) {
       throw new PurchaseError(resend ? '发货数量超过本行免费重发核准数量' : '发货数量超过该采购行或实收批次可用数量');
     }

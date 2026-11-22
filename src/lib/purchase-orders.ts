@@ -11,7 +11,7 @@ import { pricingContentHash } from '@/lib/pricing-adjustment-approval';
 import { loadPurchaseOrderSource, loadPurchaseLines, type PurchaseSource, type SourceOrder } from '@/lib/purchase-source';
 import { creditExceptionMatches, paymentPlanAt, paymentPlanContent, paymentPlanFromReview, purchaseCreditVersion, purchaseStartReview, type PaymentPlan } from '@/lib/purchase-start';
 import { purchaseCreditAt } from '@/lib/purchase-credit-history';
-import type { ShortfallDecision } from '@/lib/purchase-shortfalls';
+import type { ContractDispatchSource, ShortfallDecision } from '@/lib/purchase-shortfalls';
 import {
   attestPurchaseTerms, documentSha256, initialPurchaseTerms, missingPurchaseTerms, missingWrittenTerms, normalizePurchaseTerms, positiveCents, PurchaseError,
   purchaseTimestamp, requireNewDocumentsForChangedTerms, requiredText, type PurchaseTerms,
@@ -26,7 +26,9 @@ type OrderRow = { id: string; status: Status; revision: number; approvedHash: st
 type LineEdit = { orderItemId: string; terms: PurchaseTerms };
 type ReplacementInput = { name?: unknown; brand?: unknown; catalogNumber?: unknown; spec?: unknown; unit?: unknown; terms?: unknown };
 type DispositionInput = { orderItemId: string; quantity: number; outcome: 'cancel' | 'replace'; replacement?: ReplacementInput;
-  forwardingLossId?: string; shortfallId?: string; shortfallDecision?: ShortfallDecision; revisesResendApprovalId?: string };
+  forwardingLossId?: string; shortfallId?: string; shortfallDecision?: ShortfallDecision; revisesResendApprovalId?: string;
+  supplierDocumentRow?: number; customerDocumentRow?: number;
+};
 export type PurchaseActionInput = {
   orderId: string; purchaseOrderId: string;
   action: 'approve' | 'approve_lead_time' | 'register_order' | 'record_payment' | 'report_change' | 'resolve_change'
@@ -355,6 +357,9 @@ type Disposition = {
   shortfallId?: string; shortfallDecision?: ShortfallDecision;
   revisesResendApprovalId?: string;
   priorResend?: { authorized: number; dispatched: number; redirected: number; available: number };
+  supplierDocumentRow?: number;
+  customerDocumentRow?: number;
+  contractSource?: ContractDispatchSource;
 };
 
 function checkedEdits(po: PO, input: PurchaseActionInput) {
@@ -395,6 +400,16 @@ function activeReplacementQuantity(view: Workspace, orderItemId: string) {
   return view.orders.reduce((sum, purchase) => sum + pendingReplacementQuantity(view, purchase, orderItemId), 0);
 }
 
+function decisionDocumentRow(value: unknown) {
+  if (value === undefined) return undefined;
+  if (!positiveCents(value)) throw new PurchaseError('书面决定的行号须为原件所载的正整数', 400);
+  return value;
+}
+
+function sameDecisionDocument(sha256: string, row: number | undefined, previousSha256: unknown, previousRow: unknown) {
+  return sha256 === previousSha256 && (row === undefined || !positiveCents(previousRow) || row === previousRow);
+}
+
 function committedDispositions(
   view: Workspace, po: PO, input: PurchaseActionInput, customerLines: PurchaseSource[], remainingQuantities: ReadonlyMap<string, number>,
   writtenEvidence: { supplierSha256: string; customerSha256: string },
@@ -409,7 +424,8 @@ function committedDispositions(
     const { orderItemId, quantity, outcome, replacement, forwardingLossId } = entry;
     const revisesResendApprovalId = entry.revisesResendApprovalId === undefined ? undefined
       : requiredText(entry.revisesResendApprovalId, '原免费重发批准');
-    let priorResend: Disposition['priorResend'];
+    let revisedApproval: Pick<Disposition,'revisesResendApprovalId' | 'priorResend' | 'supplierDocumentRow' | 'customerDocumentRow'> = {};
+    let contractSource: ContractDispatchSource | undefined;
     const shortfallId = entry.shortfallId ?? forwardingLossId;
     const shortfallDecision = entry.shortfallDecision ?? (forwardingLossId ? 'new_purchase' : undefined);
     const line = po.lines.find(row => row.orderItemId === orderItemId);
@@ -431,28 +447,34 @@ function committedDispositions(
         if (!resend || quantity > resend.available || shortfallDecision === 'free_resend') {
           throw new PurchaseError('改办数量须对应本行原免费重发批准中尚未发货或改办的部分');
         }
-        const priorDecisions = po.ledger.filter(row => row.action === 'resolve_change').map(row => ({
-          id: row.id, operation: purchaseOperation(row.detail),
-        })).filter(({id,operation}) => id === resend.approvalId || (Array.isArray(operation.dispositions)
-          && operation.dispositions.some(line => line?.orderItemId === orderItemId && line.revisesResendApprovalId === resend.approvalId)));
-        if (priorDecisions.some(({operation}) => writtenEvidence.supplierSha256 === operation.supplierSha256
-          || writtenEvidence.customerSha256 === operation.customerSha256)) {
-          throw new PurchaseError('改办须提供新的供应商书面决定和客户同意书证');
-        }
-        priorResend = { authorized: resend.quantity, dispatched: resend.dispatched, redirected: resend.redirected, available: resend.available };
+        const supplierDocumentRow = decisionDocumentRow(entry.supplierDocumentRow);
+        const customerDocumentRow = decisionDocumentRow(entry.customerDocumentRow);
+        const usedDocuments = view.activities.filter(row => row.action === 'resolve_change').some(row => {
+          const operation = purchaseOperation(row.detail);
+          return Array.isArray(operation.dispositions) && operation.dispositions.some(applied =>
+            applied?.orderItemId === orderItemId && (applied.shortfallId || applied.forwardingLossId)
+            && (sameDecisionDocument(writtenEvidence.supplierSha256,supplierDocumentRow,operation.supplierSha256,applied.supplierDocumentRow)
+              || sameDecisionDocument(writtenEvidence.customerSha256,customerDocumentRow,operation.customerSha256,applied.customerDocumentRow)));
+        });
+        if (usedDocuments) throw new PurchaseError('改办须提供新的供应商书面决定和客户同意书证，或核对同份原件中尚未使用的独立行');
+        revisedApproval = { revisesResendApprovalId, supplierDocumentRow, customerDocumentRow,
+          priorResend: { authorized: resend.quantity, dispatched: resend.dispatched, redirected: resend.redirected, available: resend.available } };
       } else if (quantity > loss.available) {
         throw new PurchaseError('短失处理须对应本行尚未使用的实际物流书证数量');
       }
       if (shortfallDecision === 'free_resend') return { orderItemId, quantity, outcome: 'resend', replacement: null, shortfallId, shortfallDecision };
-      if (shortfallDecision === 'change_contract' && (!loss.originalContract || quantity + (prior.get(orderItemId) ?? 0) > line.source.quantity)) {
-        throw new PurchaseError('原合同变动须对应其中尚可核准的商品份额');
+      if (shortfallDecision === 'change_contract') {
+        if (!loss.contractSource || quantity + (prior.get(orderItemId) ?? 0) > line.source.quantity) {
+          throw new PurchaseError('原合同变动须对应其中尚可核准的商品份额');
+        }
+        contractSource = loss.contractSource;
       }
       if (shortfallDecision === 'new_purchase' && outcome !== 'replace') throw new PurchaseError('保留原应付时须独立填报另购商品和条款');
     } else if (quantity + (prior.get(orderItemId) ?? 0) + supplierDispatchQuantity(view, po.id, orderItemId) > line.source.quantity) {
       throw new PurchaseError('替代或取消的累计数量不得超过原采购行尚未发出的数量，有短失或退回须先据实核对');
     }
-    const priorAuthorization = revisesResendApprovalId ? { revisesResendApprovalId, priorResend } : {};
-    if (outcome === 'cancel') return { orderItemId, quantity, outcome, replacement: null, shortfallId, shortfallDecision, ...priorAuthorization };
+    const archivedOrigin = { ...revisedApproval, ...(contractSource ? { contractSource } : {}) };
+    if (outcome === 'cancel') return { orderItemId, quantity, outcome, replacement: null, shortfallId, shortfallDecision, ...archivedOrigin };
     const active = activeReplacementQuantity(view, orderItemId);
     const retained = active - Math.min(quantity, pendingReplacementQuantity(view, po, orderItemId));
     if (retained + quantity > (remainingQuantities.get(orderItemId) ?? 0)) {
@@ -470,7 +492,7 @@ function committedDispositions(
     const terms = normalizePurchaseTerms(replacement.terms);
     requireNewDocumentsForChangedTerms(line.terms, terms, line.source.quantity !== quantity);
     if (missingWrittenTerms(terms, source).length) throw new PurchaseError('替代行须具备当前有效的供货、收款和付款书证');
-    return { orderItemId, quantity, outcome, replacement: { terms, source }, shortfallId, shortfallDecision, ...priorAuthorization };
+    return { orderItemId, quantity, outcome, replacement: { terms, source }, shortfallId, shortfallDecision, ...archivedOrigin };
   });
   if (input.outcome === 'replacement' && !dispositions.some(line => line.outcome === 'replace')) {
     throw new PurchaseError('请填写至少一条待独立批准的替代采购行', 400);
