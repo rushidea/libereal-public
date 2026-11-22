@@ -28,7 +28,7 @@ vi.mock('@/lib/ephemeral-store', () => ({ getEphemeralStore: () => ({
 }) }));
 
 import { getStagingMfaTestConfig, hashStagingMfaTestCode } from '@/lib/security/staging-mfa-test';
-import { completeSecurityStepUp, consumeSecurityStepUpGrant, getSecurityStepUpAvailability, hasSecurityStepUpGrant, startSecurityStepUp } from '@/lib/security/security-step-up';
+import { completeSecurityStepUp, consumeSecurityStepUpGrant, getSecurityStepUpAvailability, hasRecentStagingTestAdminStepUp, hasSecurityStepUpGrant, startSecurityStepUp } from '@/lib/security/security-step-up';
 import { GET, POST } from '@/app/api/auth/security/step-up/route';
 
 const code = '825174'; // Synthetic test-only input; deployed configuration is separate.
@@ -132,5 +132,41 @@ describe('explicit staging MFA simulation', () => {
     const verified = await POST(request({ action: scope.action, method: 'staging_test', challengeId: challenge.challengeId, code }));
     expect(verified.status).toBe(200); expect(await verified.json()).toHaveProperty('grantToken');
     expect(mocks.markMfa).not.toHaveBeenCalled();
+  });
+
+  it('opens a 10-minute scoped staging admin window after admin_sensitive test verification without upgrading the session', async () => {
+    expect(await hasRecentStagingTestAdminStepUp(scope.userId, scope.sessionId)).toBe(false);
+    const verified = await POST(request({ action: scope.action, method: 'staging_test', challengeId: (await (await POST(request({ action: scope.action, method: 'staging_test' }))).json()).challengeId, code }));
+    expect(verified.status).toBe(200);
+    expect(mocks.markMfa).not.toHaveBeenCalled();
+
+    // Active for the exact verified admin user + session within 10 minutes
+    expect(await hasRecentStagingTestAdminStepUp(scope.userId, scope.sessionId)).toBe(true);
+    expect(await hasRecentStagingTestAdminStepUp(scope.userId, 'another-session')).toBe(false);
+    expect(await hasRecentStagingTestAdminStepUp('another-admin', scope.sessionId)).toBe(false);
+
+    // Invalidates immediately on config rotation, disable, production mode, freeze, demotion, or 10-min expiry
+    vi.stubEnv('STAGING_MFA_TEST_CODE_SHA256', hashStagingMfaTestCode('999999'));
+    expect(await hasRecentStagingTestAdminStepUp(scope.userId, scope.sessionId)).toBe(false);
+    vi.stubEnv('STAGING_MFA_TEST_CODE_SHA256', hashStagingMfaTestCode(code));
+    expect(await hasRecentStagingTestAdminStepUp(scope.userId, scope.sessionId)).toBe(true);
+
+    vi.stubEnv('STAGING_MFA_TEST_ENABLED', 'false');
+    expect(await hasRecentStagingTestAdminStepUp(scope.userId, scope.sessionId)).toBe(false);
+    vi.stubEnv('STAGING_MFA_TEST_ENABLED', 'true');
+
+    vi.stubEnv('LIBEREAL_RUNTIME_ENV', 'production');
+    expect(await hasRecentStagingTestAdminStepUp(scope.userId, scope.sessionId)).toBe(false);
+    vi.stubEnv('LIBEREAL_RUNTIME_ENV', 'staging');
+
+    mocks.user.isFrozen = true;
+    expect(await hasRecentStagingTestAdminStepUp(scope.userId, scope.sessionId)).toBe(false);
+    mocks.user.isFrozen = false;
+    mocks.user.role = 'customer';
+    expect(await hasRecentStagingTestAdminStepUp(scope.userId, scope.sessionId)).toBe(false);
+    mocks.user.role = 'admin';
+
+    vi.advanceTimersByTime(10 * 60_000 + 1);
+    expect(await hasRecentStagingTestAdminStepUp(scope.userId, scope.sessionId)).toBe(false);
   });
 });

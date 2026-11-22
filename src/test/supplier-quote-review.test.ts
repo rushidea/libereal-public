@@ -63,7 +63,7 @@ async function seedQuote(orderStatus?: string, orderedQty = 2) {
     items: { create: [{ inquiryItemId: 'line_supplier', productId: 'product_supplier', catalogNumber: 'EX-1', name: 'Example item', position: 0,
       quantity: 2, orderedQty: orderStatus ? orderedQty : 0, unitPrice: 640, lineTotal: 1280, metadata: JSON.stringify({ brand: 'Example Brand' }) }] } }, include: { items: true } });
   const order = orderStatus ? await prisma.order.create({ data: { id: 'order_supplier', inquiryId: 'inquiry_supplier', email: 'customer@example.test', customerId: 'customer_supplier',
-    status: orderStatus, subtotal: 640 * orderedQty, total: 640 * orderedQty,
+    status: orderStatus, paymentMethod: 'bank_transfer', subtotal: 640 * orderedQty, total: 640 * orderedQty,
     orderItems: { create: [{ position: 0, productId: 'product_supplier', catalogNumber: 'EX-1', name: 'Example item', unitPrice: 640, quantity: orderedQty, metadata: JSON.stringify({ brand: 'Example Brand' }) }] } }, include: { orderItems: true } }) : null;
   if (order) await prisma.quoteConfirmation.create({ data: { quoteId: quote.id, userId: 'customer_supplier', email: order.email, action: 'accept',
     details: JSON.stringify({ orderId: order.id, items: [{ quoteItemId: quote.items[0].id, orderedQuantity: orderedQty }] }) } });
@@ -81,7 +81,7 @@ describe('written supplier quotation in the original inquiry', () => {
     await prisma.brand.create({ data: { id: 'brand_supplier', name: 'Example Brand', defaultDiscountRate: 0.8 } });
     await prisma.product.create({ data: { id: 'product_supplier', catalogNumber: 'EX-1', name: 'Example item', brand: 'Example Brand',
       brandRecordId: 'brand_supplier', price: 640, originalPrice: 800 } });
-    await prisma.inquiry.create({ data: { id: 'inquiry_supplier', userId: 'customer_supplier', email: 'customer@example.test', name: 'Example customer', phone: 'test', institution: 'test',
+    await prisma.inquiry.create({ data: { id: 'inquiry_supplier', userId: 'customer_supplier', email: 'customer@example.test', name: 'Example customer', phone: 'test', institution: 'test', paymentMethod: 'bank_transfer',
       operationLogs: '[{"historicalFailure":"preserve"}]', inquiryItems: { create: [{ id: 'line_supplier', position: 0, productId: 'product_supplier', catalogNumber: 'EX-1', name: 'Example item', quantity: 2,
         unitPrice: 640, lineTotal: 1280, metadata: JSON.stringify({ brand: 'Example Brand', originalEvidence: 'preserve' }) }] } } });
   });

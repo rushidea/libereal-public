@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { assertOrderPricingResolved, closeOrderRepricing } from '@/lib/order-catalog-repricing';
 import { requireActiveSession, requireAdmin } from '@/lib/session';
+import { authorizeAdminOrderMutation, consumeAdminOrderStepUp, extractStepUpToken } from '@/lib/admin-order-step-up';
 import type { Prisma } from '@prisma/client';
 import { orderItemView, toOrderItemCreates } from '@/lib/commerce-records';
 import { releaseOrderReceivableOnCancellation, reserveOrderCredit, settleOrderReceivable } from '@/lib/customer-credit';
@@ -109,6 +110,7 @@ export async function PATCH(
 
   try {
     const body = await req.json();
+    const stepUpToken = isPlatformAdmin ? extractStepUpToken(body) : undefined;
     const order = await prisma.order.findUnique({
       where: { id },
       include: {
@@ -127,12 +129,12 @@ export async function PATCH(
         && body.status !== order.status
         ? receivableOccupiesCredit((await prisma.accountReceivable.findUnique({ where: { orderId: id }, select: { status: true } }))?.status)
         : false;
-      const admin = await requireAdmin(orderStatusRequiresFinanceWrite({
+      const admin = await authorizeAdminOrderMutation(orderStatusRequiresFinanceWrite({
         currentStatus: order.status,
         nextStatus: body.status,
         paymentMethod: order.paymentMethod,
         hasOpenReceivable,
-      }) ? 'finance.write' : 'orders.write');
+      }) ? 'finance.write' : 'orders.write', stepUpToken);
       if (admin instanceof NextResponse) return admin;
       user = admin;
     }
@@ -243,6 +245,10 @@ export async function PATCH(
     }
 
     if (Object.keys(updateData).length > 0) {
+      if (isPlatformAdmin) {
+        const consumedFailure = await consumeAdminOrderStepUp(user, stepUpToken);
+        if (consumedFailure) return consumedFailure;
+      }
       await prisma.$transaction(async (tx) => {
         if (body.status === 'confirmed' || body.items !== undefined) await assertOrderPricingResolved(tx, id, prospectiveItems);
         if (body.status === 'cancelled') {

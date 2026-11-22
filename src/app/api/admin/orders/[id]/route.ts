@@ -16,6 +16,7 @@ import { restoreRedeemedOrderCoupons } from '@/lib/coupon-service';
 import { releaseOrderInventory, reserveOrderInventory } from '@/lib/inventory';
 import { orderStatusRequiresFinanceWrite, receivableOccupiesCredit } from '@/lib/order-finance-access';
 import { requireAdmin } from '@/lib/session';
+import { authorizeAdminOrderMutation, consumeAdminOrderStepUp, extractStepUpToken } from '@/lib/admin-order-step-up';
 import { writeAuditLog } from '@/lib/audit';
 import { isPostDeliveryPaymentMethod, normalizeOrderPaymentMethod } from '@/data/payment-methods';
 import { refundOrderPointsProportionally, requirePointsRefund, POINTS_REFUND_FAILED } from '@/lib/points-checkout-service';
@@ -90,7 +91,9 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
   try {
     const { id } = await params;
-    const { status, reason } = await req.json();
+    const body = await req.json();
+    const { status, reason } = body;
+    const stepUpToken = extractStepUpToken(body);
 
     const existing = await prisma.order.findUnique({
       where: { id },
@@ -113,12 +116,12 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       && status !== existing.status
       ? receivableOccupiesCredit((await prisma.accountReceivable.findUnique({ where: { orderId: id }, select: { status: true } }))?.status)
       : false;
-    const admin = await requireAdmin(orderStatusRequiresFinanceWrite({
+    const admin = await authorizeAdminOrderMutation(orderStatusRequiresFinanceWrite({
       currentStatus: existing.status,
       nextStatus: status,
       paymentMethod: existing.paymentMethod,
       hasOpenReceivable,
-    }) ? 'finance.write' : 'orders.write');
+    }) ? 'finance.write' : 'orders.write', stepUpToken);
     if (admin instanceof NextResponse) return admin;
 
     const updateData: Prisma.OrderUpdateInput = {};
@@ -141,6 +144,9 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       updateData.status = status;
       if (!isAutoCloseableOrderStatus(status)) updateData.autoCloseAt = null;
     }
+
+    const stepUpFailure = await consumeAdminOrderStepUp(admin, stepUpToken);
+    if (stepUpFailure) return stepUpFailure;
 
     const updated = await prisma.$transaction(async (tx) => {
       if (status === 'confirmed') {

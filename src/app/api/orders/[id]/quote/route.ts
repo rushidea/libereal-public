@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { assertOrderPricingResolved } from '@/lib/order-catalog-repricing';
-import { requireAdmin } from '@/lib/session';
+import { authorizeAdminOrderMutation, consumeAdminOrderStepUp, extractStepUpToken } from '@/lib/admin-order-step-up';
 import { enqueueBackgroundTask } from '@/lib/background-tasks';
 import { reserveOrderCredit } from '@/lib/customer-credit';
 import { reserveOrderInventory } from '@/lib/inventory';
@@ -23,11 +23,13 @@ const CONFIRMATION_CONFLICTS = [
 ];
 
 export async function POST(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
-  const user = await requireAdmin('orders.write');
+  const body = await req.json().catch(() => null);
+  const stepUpToken = extractStepUpToken(body);
+  const user = await authorizeAdminOrderMutation('orders.write', stepUpToken);
   if (user instanceof NextResponse) return user;
 
   try {
@@ -54,6 +56,9 @@ export async function POST(
         throw error;
       }
     }
+
+    const stepUpFailure = await consumeAdminOrderStepUp(user, stepUpToken);
+    if (stepUpFailure) return stepUpFailure;
 
     await prisma.$transaction(async (tx) => {
       await assertOrderPricingResolved(tx, id);

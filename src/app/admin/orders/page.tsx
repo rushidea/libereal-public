@@ -11,6 +11,7 @@ import {
 import ProductSearchOverlayForOrder from '@/components/admin/ProductSearchOverlayForOrder';
 import { CatalogRepricingFinance } from '@/components/admin/CatalogRepricingFinance';
 import CustomerCreditEditor from '@/components/admin/CustomerCreditEditor';
+import { isAdminMfaStepUpResponse, useAdminMfaStepUp } from '@/components/admin/AdminMfaStepUpDialog';
 import { adminPermissionErrorMessage } from '@/data/admin-permission-message';
 import { isPostDeliveryPaymentMethod, normalizeOrderPaymentMethod, ORDER_PAYMENT_METHODS } from '@/data/payment-methods';
 import { orderStatusRequiresFinanceWrite } from '@/lib/order-finance-access';
@@ -88,20 +89,54 @@ interface OrderItem {
   };
 }
 
-async function patchOrderItems(orderId: string, items: OrderItem[], confirmed = false): Promise<{ ok: boolean; cancelled?: boolean; message?: string }> {
+type BeginAdminMfaStepUp = (action: (grantToken: string) => Promise<void>) => Promise<void>;
+
+async function patchOrderItems(
+  orderId: string,
+  items: OrderItem[],
+  options: { confirmed?: boolean; stepUpToken?: string } = {},
+): Promise<{ ok: boolean; cancelled?: boolean; mfaRequired?: boolean; message?: string }> {
+  const { confirmed = false, stepUpToken } = options;
   const response = await fetch(`/api/orders/${orderId}`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ items, ...(confirmed ? { confirmWarnings: true } : {}) }),
+    body: JSON.stringify({
+      items,
+      ...(confirmed ? { confirmWarnings: true } : {}),
+      ...(stepUpToken ? { stepUpToken } : {}),
+    }),
   });
-  const data = await response.json().catch(() => ({}));
+  const data = await response.json().catch(() => ({})) as { error?: string; requiredPermission?: string };
   const warnings = commerceLineWarningList(data);
   if (warnings && !confirmed) {
     if (!window.confirm(commerceLineWarningPrompt(warnings, '保存订单商品'))) return { ok: false, cancelled: true };
-    return patchOrderItems(orderId, items, true);
+    return patchOrderItems(orderId, items, { confirmed: true, stepUpToken });
   }
-  if (!response.ok) return { ok: false, message: data.error || data.requiredPermission ? orderActionErrorMessage(data as { error?: string; requiredPermission?: string }) : '保存失败' };
+  if (!response.ok) {
+    if (!stepUpToken && isAdminMfaStepUpResponse(response.status, data.error)) {
+      return { ok: false, mfaRequired: true };
+    }
+    return { ok: false, message: data.error || data.requiredPermission ? orderActionErrorMessage(data) : '保存失败' };
+  }
   return { ok: true };
+}
+
+function hasUnsavedOrderItems(savedItems: OrderItem[] | undefined, draftItems: OrderItem[]): boolean {
+  const baseline = Array.isArray(savedItems) ? savedItems : [];
+  if (baseline.length !== draftItems.length) return true;
+  return draftItems.some((draft, index) => {
+    const saved = baseline[index];
+    if (!saved) return true;
+    return (draft.productId ?? null) !== (saved.productId ?? null)
+      || (draft.name ?? '') !== (saved.name ?? '')
+      || (draft.brand ?? '') !== (saved.brand ?? '')
+      || (draft.catalogNumber ?? '') !== (saved.catalogNumber ?? '')
+      || (draft.spec ?? '') !== (saved.spec ?? '')
+      || (draft.price ?? 0) !== (saved.price ?? 0)
+      || (draft.quantity ?? 1) !== (saved.quantity ?? 1)
+      || (draft.leadTime ?? '') !== (saved.leadTime ?? '')
+      || Boolean(draft.confirmed) !== Boolean(saved.confirmed);
+  });
 }
 
 const ORDER_STATUS_CONFIG: Record<string, { label: string; color: string; icon: React.ComponentType<{ className?: string }> }> = {
@@ -153,6 +188,7 @@ function orderActionErrorMessage(data: { error?: string; requiredPermission?: st
     QUOTE_REPRICE_REQUIRED: '商品价格已变化，请先完成原订单价格复核后再确认。',
     INSUFFICIENT_AVAILABLE_INVENTORY: '可用库存不足，暂时无法确认订单。',
     'Admin MFA required': '请先完成管理员身份确认后再执行订单确认。',
+    'Recent MFA verification required': '请先完成管理员身份确认后再执行订单确认。',
     'Admin authenticator policy required': '请先完成验证器身份策略校验后再执行订单确认。',
     'Admin MFA state unavailable': '暂时无法确认身份验证状态，请稍后重试。',
   };
@@ -173,6 +209,7 @@ function withdrawOrderErrorMessage(error: unknown, orderId: unknown): string {
     POINTS_REFUND_FAILED: '积分未能退回，订单未移除。请刷新后重试。',
     CREDIT_ACCOUNT_NOT_FOUND: '找不到对应的授信账户，订单未移除。请先核对客户授信。',
     'Admin MFA required': '请先完成再次确认身份，然后再取消并归档订单。',
+    'Recent MFA verification required': '请先完成再次确认身份，然后再取消并归档订单。',
     'Admin authenticator policy required': '请先完成再次确认身份，然后再取消并归档订单。',
     'Admin MFA state unavailable': '暂时无法确认身份，请稍后重试。订单未改动。',
   };
@@ -272,6 +309,7 @@ function OrdersPanel() {
   const [detailError, setDetailError] = useState('');
   const [listError, setListError] = useState('');
   const [permissions, setPermissions] = useState<string[] | null>(null);
+  const { begin: beginMfaStepUp, dialog: mfaDialog } = useAdminMfaStepUp();
   const selectedIdRef = useRef<string | null>(null);
   const listRequestRef = useRef(0);
   const detailRequestRef = useRef(0);
@@ -299,7 +337,10 @@ function OrdersPanel() {
   const loadOrderDetail = useCallback(async (orderId: string, summary?: Order) => {
     const seq = ++detailRequestRef.current;
     setDetailError('');
-    if (summary) setSelectedOrder({ ...summary, items: [], detailLoaded: false });
+    if (summary) {
+      setSelectedOrder({ ...summary, items: [], detailLoaded: false });
+      setOrderItems([]);
+    }
     try {
       const res = await fetch(`/api/admin/orders/${orderId}`, { cache: 'no-store' });
       const data = await res.json().catch(() => ({}));
@@ -308,10 +349,13 @@ function OrdersPanel() {
         setDetailError(chineseOrFallback(data.error, '订单详情加载失败，请重试'));
         return;
       }
+      if (selectedIdRef.current !== orderId && !summary) return;
+      const loadedItems = Array.isArray(data.order?.items) ? data.order.items : [];
       setSelectedOrder((current) => {
         if (current?.id !== orderId) return current;
         return withOrderDetail(current, data.order ?? {});
       });
+      setOrderItems(loadedItems);
     } catch (e) {
       console.error(e);
       if (seq === detailRequestRef.current) setDetailError('订单详情加载失败，请重试');
@@ -322,9 +366,11 @@ function OrdersPanel() {
     if (selectedOrder?.id === order.id) {
       detailRequestRef.current += 1;
       setSelectedOrder(null);
+      setOrderItems([]);
       setDetailError('');
       return;
     }
+    selectedIdRef.current = order.id;
     void loadOrderDetail(order.id, order);
   };
 
@@ -382,47 +428,79 @@ function OrdersPanel() {
     setPage(1);
   }, [receivableView]);
 
-  async function updateOrderStatus(orderId: string, newStatus: string): Promise<string | null> {
+  async function updateOrderStatus(
+    orderId: string,
+    newStatus: string,
+    onError?: (message: string) => void,
+    stepUpToken?: string,
+  ): Promise<string | null> {
     const response = await fetch(`/api/orders/${orderId}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ status: newStatus }),
+      body: JSON.stringify({ status: newStatus, ...(stepUpToken ? { stepUpToken } : {}) }),
     });
-    const data = await response.json().catch(() => ({}));
-    if (!response.ok) return orderActionErrorMessage(data);
-    fetchData();
-    if (selectedOrder?.id === orderId) {
-      setSelectedOrder(prev => prev ? { ...prev, status: newStatus } : null);
+    const data = await response.json().catch(() => ({})) as { error?: string; requiredPermission?: string };
+    if (!response.ok) {
+      if (!stepUpToken && isAdminMfaStepUpResponse(response.status, data.error)) {
+        await beginMfaStepUp(async (grantToken) => {
+          onError?.('');
+          const retryMessage = await updateOrderStatus(orderId, newStatus, onError, grantToken);
+          onError?.(retryMessage || '');
+        });
+        return null;
+      }
+      return orderActionErrorMessage(data);
     }
+    fetchData();
+    setSelectedOrder(prev => prev && prev.id === orderId ? { ...prev, status: newStatus } : prev);
     return null;
   }
 
-  async function archiveOrders(orderIds: string[]) {
-    if (!confirm(`确定要归档 ${orderIds.length} 个订单吗？`)) return;
-    try {
-      const res = await fetch('/api/admin/orders/archive', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ orderIds, action: 'archive' }),
-      });
-      if (res.ok) {
-        fetchData();
-        setSelectedOrder(null);
-      }
-    } catch (e) { console.error(e); }
-  }
-
-  async function deleteOrders(orderIds: string[]) {
-    if (!confirm(`确定取消并归档 ${orderIds.length} 个订单吗？未发货的订单会取消，并释放预占库存、授信和已扣积分。已发货、已完成或已付款的订单不会移除。`)) return;
+  async function submitArchiveOrders(orderIds: string[], stepUpToken?: string) {
     setListError('');
     try {
       const res = await fetch('/api/admin/orders/archive', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ orderIds, action: 'delete' }),
+        body: JSON.stringify({ orderIds, action: 'archive', ...(stepUpToken ? { stepUpToken } : {}) }),
       });
-      const data = await res.json().catch(() => ({}));
+      const data = await res.json().catch(() => ({})) as { error?: string; requiredPermission?: string };
       if (!res.ok) {
+        if (!stepUpToken && isAdminMfaStepUpResponse(res.status, data.error)) {
+          await beginMfaStepUp((grantToken) => submitArchiveOrders(orderIds, grantToken));
+          return;
+        }
+        setListError(orderActionErrorMessage(data));
+        return;
+      }
+      await fetchData();
+      setSelectedOrder(null);
+      setSelectedOrders(new Set());
+    } catch (e) {
+      console.error(e);
+      setListError('归档失败，请稍后重试。');
+    }
+  }
+
+  async function archiveOrders(orderIds: string[]) {
+    if (!confirm(`确定要归档 ${orderIds.length} 个订单吗？`)) return;
+    await submitArchiveOrders(orderIds);
+  }
+
+  async function submitDeleteOrders(orderIds: string[], stepUpToken?: string) {
+    setListError('');
+    try {
+      const res = await fetch('/api/admin/orders/archive', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ orderIds, action: 'delete', ...(stepUpToken ? { stepUpToken } : {}) }),
+      });
+      const data = await res.json().catch(() => ({})) as { error?: string; orderId?: unknown };
+      if (!res.ok) {
+        if (!stepUpToken && isAdminMfaStepUpResponse(res.status, data.error)) {
+          await beginMfaStepUp((grantToken) => submitDeleteOrders(orderIds, grantToken));
+          return;
+        }
         setListError(withdrawOrderErrorMessage(data.error, data.orderId));
         return;
       }
@@ -433,6 +511,30 @@ function OrdersPanel() {
       console.error(e);
       setListError('取消并归档失败，请稍后重试。');
     }
+  }
+
+  async function deleteOrders(orderIds: string[]) {
+    if (!confirm(`确定取消并归档 ${orderIds.length} 个订单吗？未发货的订单会取消，并释放预占库存、授信和已扣积分。已发货、已完成或已付款的订单不会移除。`)) return;
+    await submitDeleteOrders(orderIds);
+  }
+
+  async function submitAddProductToOrder(orderId: string, updatedItems: OrderItem[], newSubtotal: number, stepUpToken?: string) {
+    try {
+      const result = await patchOrderItems(orderId, updatedItems, { stepUpToken });
+      if (!result.ok) {
+        if (result.mfaRequired && !stepUpToken) {
+          await beginMfaStepUp((grantToken) => submitAddProductToOrder(orderId, updatedItems, newSubtotal, grantToken));
+          return;
+        }
+        if (!result.cancelled) alert(result.message || '保存失败');
+        return;
+      }
+      setOrderItems(updatedItems);
+      setSelectedOrder(prev => prev && prev.id === orderId ? { ...prev, items: updatedItems, subtotal: newSubtotal } : prev);
+      setAddProductSearch('');
+      setAddingToOrder(false);
+      fetchData();
+    } catch (e) { console.error(e); }
   }
 
   async function handleAddProductToOrder(product: { id?: string; name: string; brand: string; catalogNumber: string; spec?: string; price?: number; promotionalPrice?: number }) {
@@ -450,18 +552,7 @@ function OrdersPanel() {
     };
     const updatedItems = [...orderItems, newItem];
     const newSubtotal = updatedItems.reduce((sum, it) => sum + (it.price || 0) * (it.quantity || 1), 0);
-    try {
-      const result = await patchOrderItems(selectedOrder.id, updatedItems);
-      if (!result.ok) {
-        if (!result.cancelled) alert(result.message || '保存失败');
-        return;
-      }
-      setOrderItems(updatedItems);
-      setSelectedOrder(prev => prev ? { ...prev, items: updatedItems, subtotal: newSubtotal } : null);
-      setAddProductSearch('');
-      setAddingToOrder(false);
-      fetchData();
-    } catch (e) { console.error(e); }
+    await submitAddProductToOrder(selectedOrder.id, updatedItems, newSubtotal);
   }
 
   const formatPrice = (price: number) =>
@@ -601,6 +692,7 @@ function OrdersPanel() {
             formatPrice={formatPrice}
             fetchData={fetchData}
             permissions={permissions}
+            beginMfaStepUp={beginMfaStepUp}
           />
         ))}
         {paginatedOrders.length === 0 && (
@@ -662,6 +754,7 @@ function OrdersPanel() {
                   formatPrice={formatPrice}
                   fetchData={fetchData}
                   permissions={permissions}
+                  beginMfaStepUp={beginMfaStepUp}
                 />
               ))}
               {paginatedOrders.length === 0 && (
@@ -694,6 +787,7 @@ function OrdersPanel() {
           </div>
         </div>
       )}
+      {mfaDialog}
     </div>
   );
 }
@@ -702,7 +796,7 @@ function OrdersRow({
   order, selectedOrder, openOrder, detailError, retryDetail, selectedOrders, setSelectedOrders,
   orderItems, setOrderItems, addingToOrder, setAddingToOrder, addProductSearch, setAddProductSearch,
   updateOrderStatus, archiveOrders, deleteOrders, handleAddProductToOrder,
-  formatPrice, fetchData, permissions,
+  formatPrice, fetchData, permissions, beginMfaStepUp,
 }: {
   order: Order;
   selectedOrder: Order | null;
@@ -717,13 +811,14 @@ function OrdersRow({
   setAddingToOrder: (b: boolean) => void;
   addProductSearch: string;
   setAddProductSearch: (s: string) => void;
-  updateOrderStatus: (id: string, s: string) => Promise<string | null>;
+  updateOrderStatus: (id: string, s: string, onError?: (msg: string) => void, stepUpToken?: string) => Promise<string | null>;
   archiveOrders: (ids: string[]) => Promise<void>;
   deleteOrders: (ids: string[]) => Promise<void>;
   handleAddProductToOrder: (p: { name: string; brand: string; catalogNumber: string; price?: number; promotionalPrice?: number }) => Promise<void>;
   formatPrice: (p: number) => string;
   fetchData: () => Promise<void>;
   permissions: string[] | null;
+  beginMfaStepUp: BeginAdminMfaStepUp;
 }) {
   const isExpanded = selectedOrder?.id === order.id;
 
@@ -807,6 +902,7 @@ function OrdersRow({
                 formatPrice={formatPrice}
                 fetchData={fetchData}
                 permissions={permissions}
+                beginMfaStepUp={beginMfaStepUp}
               />
             </div>
           </td>
@@ -820,7 +916,7 @@ function MobileOrderCard({
   order, selectedOrder, openOrder, detailError, retryDetail,
   orderItems, setOrderItems, addingToOrder, setAddingToOrder, addProductSearch, setAddProductSearch,
   updateOrderStatus, archiveOrders, deleteOrders, handleAddProductToOrder,
-  formatPrice, fetchData, permissions,
+  formatPrice, fetchData, permissions, beginMfaStepUp,
 }: {
   order: Order;
   selectedOrder: Order | null;
@@ -833,13 +929,14 @@ function MobileOrderCard({
   setAddingToOrder: (b: boolean) => void;
   addProductSearch: string;
   setAddProductSearch: (s: string) => void;
-  updateOrderStatus: (id: string, s: string) => Promise<string | null>;
+  updateOrderStatus: (id: string, s: string, onError?: (msg: string) => void, stepUpToken?: string) => Promise<string | null>;
   archiveOrders: (ids: string[]) => Promise<void>;
   deleteOrders: (ids: string[]) => Promise<void>;
   handleAddProductToOrder: (p: { name: string; brand: string; catalogNumber: string; price?: number; promotionalPrice?: number }) => Promise<void>;
   formatPrice: (p: number) => string;
   fetchData: () => Promise<void>;
   permissions: string[] | null;
+  beginMfaStepUp: BeginAdminMfaStepUp;
 }) {
   const isExpanded = selectedOrder?.id === order.id;
   const status = ORDER_STATUS_CONFIG[displayedOrderStatus(order)];
@@ -917,6 +1014,7 @@ function MobileOrderCard({
             formatPrice={formatPrice}
             fetchData={fetchData}
             permissions={permissions}
+            beginMfaStepUp={beginMfaStepUp}
           />
         </div>
       )}
@@ -927,7 +1025,7 @@ function MobileOrderCard({
 function OrderDetailSlot({
   selectedOrder, detailError, retryDetail, orderItems, setOrderItems, addingToOrder, setAddingToOrder,
   addProductSearch, setAddProductSearch, updateOrderStatus, handleAddProductToOrder,
-  formatPrice, fetchData, permissions,
+  formatPrice, fetchData, permissions, beginMfaStepUp,
 }: {
   selectedOrder: Order | null;
   detailError: string;
@@ -938,11 +1036,12 @@ function OrderDetailSlot({
   setAddingToOrder: (b: boolean) => void;
   addProductSearch: string;
   setAddProductSearch: (s: string) => void;
-  updateOrderStatus: (id: string, s: string) => Promise<string | null>;
+  updateOrderStatus: (id: string, s: string, onError?: (msg: string) => void, stepUpToken?: string) => Promise<string | null>;
   handleAddProductToOrder: (p: { name: string; brand: string; catalogNumber: string; price?: number; promotionalPrice?: number }) => Promise<void>;
   formatPrice: (p: number) => string;
   fetchData: () => Promise<void>;
   permissions: string[] | null;
+  beginMfaStepUp: BeginAdminMfaStepUp;
 }) {
   if (!selectedOrder) return null;
   if (detailError) {
@@ -970,6 +1069,7 @@ function OrderDetailSlot({
       formatPrice={formatPrice}
       fetchData={fetchData}
       permissions={permissions}
+      beginMfaStepUp={beginMfaStepUp}
     />
   );
 }
@@ -977,7 +1077,7 @@ function OrderDetailSlot({
 function OrderDetailPanel({
   order, orderItems, setOrderItems, addingToOrder, setAddingToOrder,
   addProductSearch, setAddProductSearch, updateOrderStatus, handleAddProductToOrder,
-  formatPrice, fetchData, permissions,
+  formatPrice, fetchData, permissions, beginMfaStepUp,
 }: {
   order: Order;
   orderItems: OrderItem[];
@@ -986,23 +1086,14 @@ function OrderDetailPanel({
   setAddingToOrder: (b: boolean) => void;
   addProductSearch: string;
   setAddProductSearch: (s: string) => void;
-  updateOrderStatus: (id: string, s: string) => Promise<string | null>;
+  updateOrderStatus: (id: string, s: string, onError?: (msg: string) => void, stepUpToken?: string) => Promise<string | null>;
   handleAddProductToOrder: (p: { catalogNumber: string; name: string; price?: number; brand: string }) => Promise<void>;
   formatPrice: (p: number) => string;
   fetchData: () => Promise<void>;
   permissions: string[] | null;
+  beginMfaStepUp: BeginAdminMfaStepUp;
 }) {
   const canWriteOrders = !permissions || permissions.includes('orders.write');
-  async function persistItems(items: OrderItem[]) {
-    const result = await patchOrderItems(order.id, items);
-    if (!result.ok) {
-      if (!result.cancelled) alert(result.message || '保存失败');
-      await fetchData();
-      return false;
-    }
-    await fetchData();
-    return true;
-  }
   const canWriteFinance = !permissions || permissions.includes('finance.write');
   const [actionError, setActionError] = useState('');
   const [creditEditorOpen, setCreditEditorOpen] = useState(false);
@@ -1017,7 +1108,75 @@ function OrderDetailPanel({
     detailCreditReview && (detailCreditReview.needsReview || detailCreditReview.flaggedAtSubmission),
   );
 
-  async function refundPoints() {
+  async function persistItems(
+    items: OrderItem[],
+    options: { stepUpToken?: string; onSuccess?: () => Promise<void> } = {},
+  ) {
+    const result = await patchOrderItems(order.id, items, { stepUpToken: options.stepUpToken });
+    if (!result.ok) {
+      if (result.mfaRequired && !options.stepUpToken) {
+        await beginMfaStepUp(async (grantToken) => {
+          setActionError('');
+          await persistItems(items, { stepUpToken: grantToken, onSuccess: options.onSuccess });
+        });
+        return false;
+      }
+      if (!result.cancelled) setActionError(result.message || '保存失败');
+      await fetchData();
+      return false;
+    }
+    await fetchData();
+    if (options.onSuccess) {
+      await options.onSuccess();
+    }
+    return true;
+  }
+
+  async function updatePaymentMethod(newMethod: string, stepUpToken?: string) {
+    const res = await fetch(`/api/orders/${order.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ paymentMethod: newMethod, ...(stepUpToken ? { stepUpToken } : {}) }),
+    });
+    const data = await res.json().catch(() => ({})) as { error?: string; requiredPermission?: string };
+    if (!res.ok) {
+      if (!stepUpToken && isAdminMfaStepUpResponse(res.status, data.error)) {
+        await beginMfaStepUp(async (grantToken) => {
+          setActionError('');
+          await updatePaymentMethod(newMethod, grantToken);
+        });
+        return;
+      }
+      setActionError(orderActionErrorMessage(data));
+      return;
+    }
+    setActionError('');
+    await fetchData();
+  }
+
+  async function confirmOrderQuote(stepUpToken?: string) {
+    const res = await fetch(`/api/orders/${order.id}/quote`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(stepUpToken ? { stepUpToken } : {}),
+    });
+    const data = await res.json().catch(() => ({})) as { error?: string; requiredPermission?: string };
+    if (!res.ok) {
+      if (!stepUpToken && isAdminMfaStepUpResponse(res.status, data.error)) {
+        await beginMfaStepUp(async (grantToken) => {
+          setActionError('');
+          await confirmOrderQuote(grantToken);
+        });
+        return;
+      }
+      setActionError(orderActionErrorMessage(data));
+      return;
+    }
+    setActionError('');
+    await fetchData();
+  }
+
+  async function refundPoints(stepUpToken?: string) {
     setPointsRefundMsg('');
     const refundYuan = Number(pointsRefundYuan);
     if (!Number.isFinite(refundYuan) || refundYuan <= 0) {
@@ -1029,10 +1188,23 @@ function OrderDetailPanel({
       const res = await fetch(`/api/admin/orders/${order.id}/points-refund`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ refundYuan, reason: '管理员按退款金额退回积分' }),
+        body: JSON.stringify({
+          refundYuan,
+          reason: '管理员按退款金额退回积分',
+          ...(stepUpToken ? { stepUpToken } : {}),
+        }),
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => ({})) as {
+        error?: string;
+        requiredPermission?: string;
+        personal?: number;
+        group?: number;
+      };
       if (!res.ok) {
+        if (!stepUpToken && isAdminMfaStepUpResponse(res.status, data.error)) {
+          await beginMfaStepUp((grantToken) => refundPoints(grantToken));
+          return;
+        }
         setPointsRefundMsg(adminPermissionErrorMessage(data.error, data.requiredPermission));
         return;
       }
@@ -1065,18 +1237,8 @@ function OrderDetailPanel({
             <select value={normalizeOrderPaymentMethod(order.paymentMethod) ?? order.paymentMethod ?? ''}
               disabled={paymentMethodLocked}
               onChange={async e => {
-                const newMethod = e.target.value;
-                const res = await fetch(`/api/orders/${order.id}`, {
-                  method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ paymentMethod: newMethod }),
-                });
-                const data = await res.json().catch(() => ({}));
-                if (res.ok) {
-                  setActionError('');
-                  fetchData();
-                } else {
-                  setActionError(orderActionErrorMessage(data));
-                }
+                setActionError('');
+                await updatePaymentMethod(e.target.value);
               }}
               className="text-sm px-2 py-1 border border-gray-200 rounded w-full text-gray-900 disabled:cursor-not-allowed disabled:bg-gray-100 disabled:text-gray-500">
               {!normalizeOrderPaymentMethod(order.paymentMethod) && (
@@ -1258,7 +1420,10 @@ function OrderDetailPanel({
               && canApplyOrderStatus(permissions, order, s)
               && !(s === 'closed' && normalizeOrderPaymentMethod(order.paymentMethod) === 'alipay' && order.paidAt))
           )).map(s => (
-            <button key={s} onClick={async () => setActionError(await updateOrderStatus(order.id, s) || '')}
+            <button key={s} onClick={async () => {
+              setActionError('');
+              setActionError(await updateOrderStatus(order.id, s, setActionError) || '');
+            }}
               className={`px-3 py-1.5 rounded-lg text-sm font-medium ${order.status === s ? ORDER_STATUS_CONFIG[s].color : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>
               {ORDER_STATUS_CONFIG[s].label}
             </button>
@@ -1333,6 +1498,7 @@ function OrderDetailPanel({
                           }}
                           onBlur={async e => {
                             const newPrice = parseFloat(e.target.value) || 0;
+                            if (newPrice === (order.items[i]?.price ?? 0)) return;
                             const updated = [...orderItems];
                             updated[i] = { ...updated[i], price: newPrice };
                             await persistItems(updated);
@@ -1350,7 +1516,9 @@ function OrderDetailPanel({
                           onBlur={async e => {
                             const raw = e.target.value.trim();
                             const parsed = Number(raw);
-                            const quantity = Number.isInteger(parsed) && parsed > 0 ? parsed : raw;
+                            const validQty = Number.isInteger(parsed) && parsed > 0;
+                            if (validQty && parsed === (order.items[i]?.quantity ?? 1)) return;
+                            const quantity = validQty ? parsed : raw;
                             const updated = [...orderItems];
                             updated[i] = { ...updated[i], quantity: quantity as number };
                             await persistItems(updated);
@@ -1366,6 +1534,7 @@ function OrderDetailPanel({
                             setOrderItems(updated);
                           }}
                           onBlur={async e => {
+                            if (e.target.value === (order.items[i]?.leadTime ?? '')) return;
                             const updated = [...orderItems];
                             updated[i] = { ...updated[i], leadTime: e.target.value };
                             await persistItems(updated);
@@ -1383,7 +1552,7 @@ function OrderDetailPanel({
           })()}
         </div>
       </div>
-      <ShipmentPanel order={order} orderItems={orderItems} fetchData={fetchData} canWriteOrders={canWriteOrders} />
+      <ShipmentPanel order={order} orderItems={orderItems} fetchData={fetchData} canWriteOrders={canWriteOrders} beginMfaStepUp={beginMfaStepUp} />
       <div className="flex flex-wrap justify-between items-center gap-2 pt-4 border-t border-gray-200">
         <span className="text-gray-700 font-medium">订单总计</span>
         <span className="text-xl font-bold text-brand-600">¥{orderItems.reduce((s, it) => s + (it.price||0)*(it.quantity||1), 0).toLocaleString('zh-CN', { minimumFractionDigits: 2 })}</span>
@@ -1399,16 +1568,11 @@ function OrderDetailPanel({
           <button onClick={async () => {
             if (!confirm('确定确认订单并通知客户吗？')) return;
             setActionError('');
-            const saved = await persistItems(orderItems);
-            if (!saved) return;
-            const res = await fetch(`/api/orders/${order.id}/quote`, { method: 'POST' });
-            if (res.ok) {
-              setActionError('');
-              fetchData();
-            } else {
-              const data = await res.json().catch(() => ({})) as { error?: string; requiredPermission?: string };
-              setActionError(orderActionErrorMessage(data));
+            if (hasUnsavedOrderItems(order.items, orderItems)) {
+              await persistItems(orderItems, { onSuccess: () => confirmOrderQuote() });
+              return;
             }
+            await confirmOrderQuote();
           }} className="w-full py-3 bg-brand-600 text-white rounded-lg font-medium hover:bg-brand-700">
             确认订单
           </button>
@@ -1420,34 +1584,44 @@ function OrderDetailPanel({
     </div>
   );
 
-function ShipmentPanel({ order, orderItems, fetchData, canWriteOrders }: { order: Order; orderItems: OrderItem[]; fetchData: () => Promise<void>; canWriteOrders: boolean }) {
+function ShipmentPanel({ order, orderItems, fetchData, canWriteOrders, beginMfaStepUp }: { order: Order; orderItems: OrderItem[]; fetchData: () => Promise<void>; canWriteOrders: boolean; beginMfaStepUp: BeginAdminMfaStepUp }) {
   const [carrier, setCarrier] = useState('');
   const [trackingNumber, setTrackingNumber] = useState('');
   const [quantities, setQuantities] = useState<Record<string, number>>({});
   const [submitting, setSubmitting] = useState(false);
+  const [shipmentError, setShipmentError] = useState('');
   const canShip = canWriteOrders && ['confirmed', 'partially_shipped'].includes(order.status);
 
-  const submit = async () => {
+  const submit = async (stepUpToken?: string) => {
     const items = orderItems
       .filter((item): item is OrderItem & { id: string } => Boolean(item.id))
       .map((item) => ({ orderItemId: item.id, quantity: quantities[item.id] || 0 }))
       .filter((item) => item.quantity > 0);
     if (!carrier.trim() || !trackingNumber.trim() || items.length === 0) return;
+    setShipmentError('');
     setSubmitting(true);
     try {
       const response = await fetch(`/api/admin/orders/${order.id}/shipments`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ method: 'logistics', carrier: carrier.trim(), trackingNumber: trackingNumber.trim(), items }),
+        body: JSON.stringify({
+          method: 'logistics',
+          carrier: carrier.trim(),
+          trackingNumber: trackingNumber.trim(),
+          items,
+          ...(stepUpToken ? { stepUpToken } : {}),
+        }),
       });
+      const data = await response.json().catch(() => ({})) as { error?: string; requiredPermission?: string };
       if (response.ok) {
         setCarrier('');
         setTrackingNumber('');
         setQuantities({});
         await fetchData();
+      } else if (!stepUpToken && isAdminMfaStepUpResponse(response.status, data.error)) {
+        await beginMfaStepUp((grantToken) => submit(grantToken));
       } else {
-        const data = await response.json();
-        alert(data.error || '发货失败');
+        setShipmentError(orderActionErrorMessage(data));
       }
     } finally {
       setSubmitting(false);
@@ -1457,6 +1631,7 @@ function ShipmentPanel({ order, orderItems, fetchData, canWriteOrders }: { order
   return (
     <div className="pt-4 border-t border-gray-200 space-y-3">
       <p className="text-xs text-gray-600 font-medium">发货记录</p>
+      {shipmentError && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{shipmentError}</p>}
       {order.shipments?.length ? order.shipments.map((shipment) => (
         <div key={shipment.id} className="text-sm text-gray-700 rounded-lg bg-gray-50 px-3 py-2">
           {shipment.carrier || '物流'} · {shipment.trackingNumber || '-'}
@@ -1483,7 +1658,7 @@ function ShipmentPanel({ order, orderItems, fetchData, canWriteOrders }: { order
               );
             })}
           </div>
-          <button onClick={submit} disabled={submitting || !carrier.trim() || !trackingNumber.trim()}
+          <button onClick={() => void submit()} disabled={submitting || !carrier.trim() || !trackingNumber.trim()}
             className="w-full py-2 rounded-lg bg-brand-600 text-white text-sm font-medium disabled:opacity-50">
             {submitting ? '提交中' : '创建发货单'}
           </button>

@@ -6,7 +6,7 @@ import { getEphemeralStore } from '@/lib/ephemeral-store';
 import { getMfaAuthenticatorPresence, createMfaStepUpChallenge, verifyMfaStepUpChallenge } from './mfa-service';
 import type { MfaStepUpVerification } from './mfa-service';
 import { enforceMfaRateLimits } from './mfa-rate-limit';
-import { isMfaPhase1Enabled } from './mfa-config';
+import { isMfaPhase1Enabled, MFA_RECENT_WINDOW_MS } from './mfa-config';
 import { getStagingMfaTestConfig, hashStagingMfaTestCode } from './staging-mfa-test';
 
 export const SECURITY_STEP_UP_METHODS = ['totp', 'sms', 'email', 'staging_test'] as const;
@@ -48,6 +48,10 @@ function intentKey(challengeId: string): string {
 
 function grantKey(token: string): string {
   return `security-step-up:grant:${createHmac('sha256', getSecret()).update(token).digest('hex')}`;
+}
+
+function stagingAdminWindowKey(userId: string, sessionId: string): string {
+  return `security-step-up:staging-admin-window:${createHmac('sha256', getSecret()).update(`${userId}:${sessionId}`).digest('hex')}`;
 }
 
 function getSecret(): string {
@@ -277,9 +281,37 @@ export async function completeSecurityStepUp(input: {
     }
     if (!(await store.compareAndDelete(key, currentRaw))) return { error: 'invalid' };
     await recordStepUpEvent({ userId: input.userId, eventType: 'SECURITY_STEP_UP_SUCCESS', action: input.action, method: input.method, ip: input.ip });
+    if (input.method === 'staging_test' && input.action === 'admin_sensitive' && current.testScope) {
+      await recordStagingTestAdminStepUp(input.userId, input.sessionId, current.testScope);
+    }
     return issueSecurityStepUpGrant(input.userId, input.sessionId, input.action, Date.now(), current.testScope);
   } finally {
     await store.releaseLock(`security-step-up:verify-lock:${input.challengeId}`, lock);
+  }
+}
+
+async function recordStagingTestAdminStepUp(userId: string, sessionId: string, testScope: string): Promise<void> {
+  await getEphemeralStore().set(
+    stagingAdminWindowKey(userId, sessionId),
+    JSON.stringify({ userId, sessionId, action: 'admin_sensitive', testScope }),
+    MFA_RECENT_WINDOW_MS,
+  );
+}
+
+export async function hasRecentStagingTestAdminStepUp(userId: string, sessionId: string): Promise<boolean> {
+  if (!userId || !sessionId) return false;
+  const config = await currentTestConfig(userId, 'admin_sensitive');
+  if (!config) return false;
+  const raw = await getEphemeralStore().get(stagingAdminWindowKey(userId, sessionId));
+  if (!raw) return false;
+  try {
+    const record = JSON.parse(raw) as Partial<StepUpIntent>;
+    return record.userId === userId
+      && record.sessionId === sessionId
+      && record.action === 'admin_sensitive'
+      && record.testScope === config.scope;
+  } catch {
+    return false;
   }
 }
 

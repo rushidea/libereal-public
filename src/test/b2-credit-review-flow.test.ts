@@ -34,6 +34,12 @@ vi.mock('@/lib/organization-service', async (importOriginal) => {
   };
 });
 
+vi.mock('@/lib/security/mfa-service', () => ({
+  getMfaAuthenticatorPresence: () => ({ hasTotp: false, hasPasskey: false }),
+  createMfaStepUpChallenge: vi.fn(),
+  verifyMfaStepUpChallenge: vi.fn(),
+}));
+
 import { POST as quotePOST } from '@/app/api/inquiries/[id]/quote/route';
 import { POST as confirmQuotePOST } from '@/app/api/orders/[id]/confirm-items/route';
 import { GET as ordersListGET } from '@/app/api/orders/route';
@@ -41,6 +47,11 @@ import { GET as orderDetailGET, PATCH as customerOrAdminOrderPATCH } from '@/app
 import { POST as orderQuotePOST } from '@/app/api/orders/[id]/quote/route';
 import { GET as adminOrdersGET } from '@/app/api/admin/orders/route';
 import { GET as adminOrderDetailGET, PATCH as adminOrderPATCH } from '@/app/api/admin/orders/[id]/route';
+import { POST as orderShipmentsPOST } from '@/app/api/admin/orders/[id]/shipments/route';
+import { POST as orderPointsRefundPOST } from '@/app/api/admin/orders/[id]/points-refund/route';
+import { PATCH as adminOrdersArchivePATCH } from '@/app/api/admin/orders/archive/route';
+import { POST as securityStepUpPOST } from '@/app/api/auth/security/step-up/route';
+import { hashStagingMfaTestCode } from '@/lib/security/staging-mfa-test';
 import { GET as adminUsersGET } from '@/app/api/users/route';
 import { PATCH as creditPATCH } from '@/app/api/admin/users/[id]/credit/route';
 
@@ -488,5 +499,204 @@ describe('B2 Direction 2 over-credit manual review & credit entry flow', () => {
     );
     expect(centConfirmRes.status).toBe(200);
     expect(db.prepare('SELECT usedAmount FROM CreditAccount WHERE userId = ?').get(buyerUser.id)).toEqual({ usedAmount: 300.3 });
+  });
+
+  it('supports single-use stepUpToken across order confirmation routes and allows follow-up confirmation within staging test window', async () => {
+    const db = getTestDb();
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS SecurityEvent (
+        id TEXT PRIMARY KEY,
+        userId TEXT NOT NULL,
+        eventType TEXT NOT NULL,
+        ip TEXT,
+        userAgent TEXT,
+        metadata TEXT,
+        createdAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+    seedInquiryForCredit(db, 'INQ-CREDIT-1');
+    await publishQuoteAndAccept('INQ-CREDIT-1', 'att-mfa-1', 13230);
+    db.prepare(`INSERT INTO Inquiry (id, userId, name, email, phone, institution, paymentMethod, status, createdAt, operationLogs) VALUES ('INQ-CREDIT-2', ?, 'Realgent', ?, '13800000000', '测试高校', 'rjmart', 'pending_quote', datetime('now'), '[]')`).run(buyerUser.id, buyerUser.email);
+    db.prepare(`INSERT INTO InquiryItem (id, inquiryId, position, productId, name, unitPrice, quantity, lineTotal, createdAt, updatedAt) VALUES ('INQ-CREDIT-2_item_0', 'INQ-CREDIT-2', 0, 'p1', '测试抗体', 100, 1, 100, datetime('now'), datetime('now'))`).run();
+    await publishQuoteAndAccept('INQ-CREDIT-2', 'att-mfa-2', 100);
+
+    process.env.MFA_ADMIN_REQUIRED = 'true';
+    process.env.LIBEREAL_RUNTIME_ENV = 'staging';
+    process.env.AUTH_URL = 'https://staging.example.test';
+    process.env.STAGING_MFA_TEST_ENABLED = 'true';
+    process.env.STAGING_MFA_TEST_ORIGIN = 'https://staging.example.test';
+    process.env.STAGING_MFA_TEST_USER_IDS = JSON.stringify([adminUser.id]);
+    process.env.STAGING_MFA_TEST_CODE_SHA256 = hashStagingMfaTestCode('503219');
+
+    try {
+      const secret = process.env.SECURITY_CODE_SECRET ?? process.env.AUTH_SECRET ?? process.env.NEXTAUTH_SECRET ?? 'local-security-code-secret';
+      const issueToken = async (token: string, sessionId = 'sess-order-mfa') => {
+        const key = `security-step-up:grant:${createHmac('sha256', secret).update(token).digest('hex')}`;
+        await getEphemeralStore().set(
+          key,
+          JSON.stringify({ userId: adminUser.id, sessionId, action: 'admin_sensitive' }),
+          60_000,
+        );
+      };
+
+      const orderRow = db.prepare('SELECT id FROM "Order" WHERE inquiryId = ?').get('INQ-CREDIT-1') as { id: string };
+
+      // Raise credit limit using staging_test flow, then immediately confirm order without second MFA
+      asUser(adminUser, 'sess-staging-flow');
+      const startRes = await securityStepUpPOST(
+        new NextRequest('https://staging.example.test/api/auth/security/step-up', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'admin_sensitive', method: 'staging_test' }),
+        }),
+      );
+      expect(startRes.status).toBe(200);
+      const { challengeId } = await startRes.json() as { challengeId: string };
+
+      const verifyRes = await securityStepUpPOST(
+        new NextRequest('https://staging.example.test/api/auth/security/step-up', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'admin_sensitive', method: 'staging_test', challengeId, code: '503219' }),
+        }),
+      );
+      expect(verifyRes.status).toBe(200);
+      const { grantToken } = await verifyRes.json() as { grantToken: string };
+
+      const adjustRes = await creditPATCH(
+        new NextRequest(`http://localhost:3000/api/admin/users/${buyerUser.id}/credit`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ temporaryLimit: 10000, temporaryUntil: '2099-12-30', stepUpToken: grantToken }),
+        }),
+        { params: Promise.resolve({ id: buyerUser.id }) },
+      );
+      expect(adjustRes.status).toBe(200);
+
+      // Replaying the consumed single-use token must still fail closed even inside the staging test window
+      const replayQuoteRes = await orderQuotePOST(
+        new NextRequest(`http://localhost:3000/api/orders/${orderRow.id}/quote`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ stepUpToken: grantToken }),
+        }),
+        { params: Promise.resolve({ id: orderRow.id }) },
+      );
+      expect(replayQuoteRes.status).toBe(403);
+      expect((await replayQuoteRes.json() as { error: string }).error).toBe('Admin MFA required');
+
+      // Confirming immediately without a token in the same staging-verified session succeeds via scoped window
+      const windowQuoteRes = await orderQuotePOST(
+        new NextRequest(`http://localhost:3000/api/orders/${orderRow.id}/quote`, { method: 'POST' }),
+        { params: Promise.resolve({ id: orderRow.id }) },
+      );
+      expect(windowQuoteRes.status).toBe(200);
+
+      // Different session without MFA is blocked until verified via stepUpToken across all order write routes
+      const secondOrder = db.prepare('SELECT id FROM "Order" WHERE inquiryId = ?').get('INQ-CREDIT-2') as { id: string };
+
+      asUser(adminUser, 'sess-order-mfa');
+      const unauthPatch = await customerOrAdminOrderPATCH(
+        new NextRequest(`http://localhost:3000/api/orders/${secondOrder.id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ status: 'confirmed' }),
+        }),
+        { params: Promise.resolve({ id: secondOrder.id }) },
+      );
+      expect(unauthPatch.status).toBe(403);
+      expect((await unauthPatch.json() as { error: string }).error).toBe('Admin MFA required');
+
+      // 409 validation error must NOT consume a valid stepUpToken
+      db.prepare(`UPDATE "Order" SET paymentMethod = 'alipay', paidAt = NULL WHERE id = ?`).run(secondOrder.id);
+      await issueToken('tok-order-1');
+      const conflictPatch = await customerOrAdminOrderPATCH(
+        new NextRequest(`http://localhost:3000/api/orders/${secondOrder.id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ status: 'confirmed', stepUpToken: 'tok-order-1' }),
+        }),
+        { params: Promise.resolve({ id: secondOrder.id }) },
+      );
+      expect(conflictPatch.status).toBe(409);
+
+      db.prepare(`UPDATE "Order" SET paymentMethod = 'rjmart' WHERE id = ?`).run(secondOrder.id);
+      const okPatch = await customerOrAdminOrderPATCH(
+        new NextRequest(`http://localhost:3000/api/orders/${secondOrder.id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ status: 'confirmed', stepUpToken: 'tok-order-1' }),
+        }),
+        { params: Promise.resolve({ id: secondOrder.id }) },
+      );
+      expect(okPatch.status).toBe(200);
+
+      // Replaying tok-order-1 fails
+      const replayAdminOrder = await adminOrderPATCH(
+        new NextRequest(`http://localhost:3000/api/admin/orders/${secondOrder.id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ status: 'cancelled', stepUpToken: 'tok-order-1' }),
+        }),
+        { params: Promise.resolve({ id: secondOrder.id }) },
+      );
+      expect(replayAdminOrder.status).toBe(403);
+
+      // Archive, shipment, points-refund also enforce & consume single-use stepUpToken
+      await issueToken('tok-ship-1');
+      const orderItemRow = db.prepare('SELECT id FROM OrderItem WHERE orderId = ? LIMIT 1').get(secondOrder.id) as { id: string };
+      const shipRes = await orderShipmentsPOST(
+        new NextRequest(`http://localhost:3000/api/admin/orders/${secondOrder.id}/shipments`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            method: 'logistics',
+            carrier: '顺丰',
+            trackingNumber: 'SF123456',
+            items: [{ orderItemId: orderItemRow.id, quantity: 1 }],
+            stepUpToken: 'tok-ship-1',
+          }),
+        }),
+        { params: Promise.resolve({ id: secondOrder.id }) },
+      );
+      expect(shipRes.status).toBe(201);
+
+      await issueToken('tok-archive-1');
+      const archiveRes = await adminOrdersArchivePATCH(
+        new NextRequest('http://localhost:3000/api/admin/orders/archive', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ orderIds: [secondOrder.id], action: 'archive', stepUpToken: 'tok-archive-1' }),
+        }),
+      );
+      expect(archiveRes.status).toBe(200);
+
+      // Invalid/400 points-refund must not consume a fresh token, and replay after consumption fails
+      await issueToken('tok-points-1');
+      const badPointsRes = await orderPointsRefundPOST(
+        new NextRequest(`http://localhost:3000/api/admin/orders/${secondOrder.id}/points-refund`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ refundYuan: -5, stepUpToken: 'tok-points-1' }),
+        }),
+        { params: Promise.resolve({ id: secondOrder.id }) },
+      );
+      expect(badPointsRes.status).toBe(400);
+      const stillValidArchive = await adminOrdersArchivePATCH(
+        new NextRequest('http://localhost:3000/api/admin/orders/archive', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ orderIds: [secondOrder.id], action: 'unarchive', stepUpToken: 'tok-points-1' }),
+        }),
+      );
+      expect(stillValidArchive.status).toBe(200);
+    } finally {
+      delete process.env.LIBEREAL_RUNTIME_ENV;
+      delete process.env.AUTH_URL;
+      delete process.env.STAGING_MFA_TEST_ENABLED;
+      delete process.env.STAGING_MFA_TEST_ORIGIN;
+      delete process.env.STAGING_MFA_TEST_USER_IDS;
+      delete process.env.STAGING_MFA_TEST_CODE_SHA256;
+    }
   });
 });

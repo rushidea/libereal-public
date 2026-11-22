@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { requireAdmin } from '@/lib/session';
+import { authorizeAdminOrderMutation, consumeAdminOrderStepUp, extractStepUpToken } from '@/lib/admin-order-step-up';
 import { calculateCumulativePointsRefund } from '@/lib/points-checkout';
 import { POINTS_REFUND_FAILED, refundOrderPointsProportionally, requirePointsRefund } from '@/lib/points-checkout-service';
 import { writeAuditLog } from '@/lib/audit';
@@ -10,14 +10,19 @@ import { writeAuditLog } from '@/lib/audit';
  * originalPaidYuan = 现金应付 + 积分抵扣额。
  */
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const admin = await requireAdmin('finance.write');
-  if (admin instanceof NextResponse) return admin;
-
-  const { id } = await params;
-  let body: { refundYuan?: number; reason?: string };
+  let body: { refundYuan?: number; reason?: string; stepUpToken?: unknown } | null = null;
+  let invalidJson = false;
   try {
     body = await req.json();
   } catch {
+    invalidJson = true;
+  }
+  const stepUpToken = extractStepUpToken(body);
+  const admin = await authorizeAdminOrderMutation('finance.write', stepUpToken);
+  if (admin instanceof NextResponse) return admin;
+
+  const { id } = await params;
+  if (invalidJson || !body || typeof body !== 'object' || Array.isArray(body)) {
     return NextResponse.json({ error: '请求内容格式无效' }, { status: 400 });
   }
 
@@ -62,6 +67,9 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     originalPaidYuan,
   });
   if (!plan.ok) return NextResponse.json({ error: plan.error }, { status: 400 });
+
+  const stepUpFailure = await consumeAdminOrderStepUp(admin, stepUpToken);
+  if (stepUpFailure) return stepUpFailure;
 
   try {
     const result = await prisma.$transaction(async (tx) => {

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { requireAdmin } from '@/lib/session';
+import { authorizeAdminOrderMutation, consumeAdminOrderStepUp, extractStepUpToken } from '@/lib/admin-order-step-up';
 import { assertOrderTransition, fulfillmentStatus, validateShipmentItems } from '@/lib/order-domain';
 import { shipOrderInventory } from '@/lib/inventory';
 import { startOrderReceivableTerm } from '@/lib/customer-credit';
@@ -9,12 +9,16 @@ import { isPostDeliveryPaymentMethod } from '@/data/payment-methods';
 const METHODS = ['logistics', 'self_pickup', 'dedicated_delivery'];
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const admin = await requireAdmin('orders.write');
+  const body = await req.json().catch(() => null);
+  const stepUpToken = extractStepUpToken(body);
+  const admin = await authorizeAdminOrderMutation('orders.write', stepUpToken);
   if (admin instanceof NextResponse) return admin;
 
   try {
     const { id } = await params;
-    const body = await req.json();
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      return NextResponse.json({ error: 'INVALID_SHIPMENT_METHOD' }, { status: 400 });
+    }
     if (!METHODS.includes(body.method)) return NextResponse.json({ error: 'INVALID_SHIPMENT_METHOD' }, { status: 400 });
     if (body.method === 'logistics' && (!body.carrier || !body.trackingNumber)) {
       return NextResponse.json({ error: '物流公司和运单号不能为空' }, { status: 400 });
@@ -22,6 +26,9 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     if (body.method === 'self_pickup' && !body.pickupPoint) {
       return NextResponse.json({ error: '自提点不能为空' }, { status: 400 });
     }
+
+    const stepUpFailure = await consumeAdminOrderStepUp(admin, stepUpToken);
+    if (stepUpFailure) return stepUpFailure;
 
     const result = await prisma.$transaction(async (tx) => {
       const order = await tx.order.findUnique({
