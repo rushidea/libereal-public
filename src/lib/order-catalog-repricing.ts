@@ -21,7 +21,7 @@ type RepricingOrder = Prisma.OrderGetPayload<{ include: typeof REPRICING_ORDER_I
 
 // A payment callback can settle while a customer reply is awaited. It does not
 // change the proposed goods/quantity/amount; finance must review its fresh result.
-export function orderRepricingTermsFingerprint(order: RepricingOrder) {
+export function orderRepricingTermsFingerprint(order: Omit<RepricingOrder, 'paymentAttempts'>) {
   return pricingContentHash({
     id: order.id, inquiryId: order.inquiryId, customerId: order.customerId, email: order.email,
     organizationId: order.organizationId, ownerScope: order.ownerScope,

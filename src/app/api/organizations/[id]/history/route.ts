@@ -4,7 +4,12 @@ import { requireActiveSession } from '@/lib/session';
 import { CREDIT_REVIEW_POLICY, creditRestrictionForOverdueDays, overdueDaysFromDueAt } from '@/lib/customer-credit';
 import { QUOTE_EXPIRED_INQUIRY_STATUS } from '@/lib/quote-expiry';
 import { settleExpiredQuotes } from '@/lib/quote-expiry-settle';
-import { ORGANIZATION_ORDER_APPROVAL } from '@/lib/organization-order-review';
+import {
+  isOrganizationOrderCustomer,
+  ORGANIZATION_ORDER_REVIEW_INCLUDE,
+  organizationOrderCreator,
+  organizationReviewState,
+} from '@/lib/organization-order-review';
 import {
   hasOrganizationPermission,
   organizationRbacErrorStatus,
@@ -26,23 +31,8 @@ export async function GET(_request: Request, { params }: RouteParams) {
         where: { organizationId: id, ownerScope: 'organization' },
         orderBy: { createdAt: 'desc' },
         take: 200,
-        select: {
-          id: true,
-          customerId: true,
-          status: true,
-          subtotal: true,
-          adjustmentTotal: true,
-          total: true,
-          paymentMethod: true,
-          pointsPersonal: true,
-          pointsGroup: true,
-          pointsGroupId: true,
-          pointsDiscount: true,
-          pointsRefundedPersonal: true,
-          pointsRefundedGroup: true,
-          createdAt: true,
-          archivedAt: true,
-          events: { where: { type: ORGANIZATION_ORDER_APPROVAL }, take: 1, select: { id: true } },
+        include: {
+          ...ORGANIZATION_ORDER_REVIEW_INCLUDE,
           researchGroup: { select: { id: true, name: true } },
           receivable: {
             select: { id: true, amount: true, status: true, dueAt: true, paidAt: true },
@@ -99,11 +89,21 @@ export async function GET(_request: Request, { params }: RouteParams) {
         policy: CREDIT_REVIEW_POLICY,
         checkedAt: now,
       },
-      orders: orders.map(({ events, ...order }) => ({
-        ...order,
-        hasOrganizationReview: events.length > 0,
-        canReview: canReviewOrders && !order.archivedAt && order.status === 'pending' && order.customerId !== user.id,
-      })),
+      orders: orders.map((order) => {
+        const creatorId = organizationOrderCreator(order);
+        const canCancel = canReviewOrders && !order.archivedAt && order.status === 'pending'
+          && !isOrganizationOrderCustomer(order, user);
+        return {
+          id: order.id, customerId: order.customerId, status: order.status, subtotal: order.subtotal,
+          adjustmentTotal: order.adjustmentTotal, total: order.total, paymentMethod: order.paymentMethod,
+          pointsPersonal: order.pointsPersonal, pointsGroup: order.pointsGroup, pointsGroupId: order.pointsGroupId,
+          pointsDiscount: order.pointsDiscount, pointsRefundedPersonal: order.pointsRefundedPersonal,
+          pointsRefundedGroup: order.pointsRefundedGroup, createdAt: order.createdAt, archivedAt: order.archivedAt,
+          researchGroup: order.researchGroup, receivable: order.receivable,
+          organizationReview: organizationReviewState(order, creatorId),
+          canCancel, canReview: canCancel && Boolean(creatorId && creatorId !== user.id),
+        };
+      }),
       inquiries: visibleInquiries,
       payables,
     });

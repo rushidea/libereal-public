@@ -62,7 +62,8 @@ describe('OrganizationHistoryPanel', () => {
           orders: [{
             id: orderId, status, paymentMethod: 'bank_transfer', subtotal: 50, total: 55,
             createdAt: '2026-08-09T00:00:00Z', archivedAt: null, receivable: null,
-            canReview: status === 'pending', hasOrganizationReview: Boolean(approvedVersion),
+            canReview: status === 'pending', canCancel: status === 'pending',
+            organizationReview: approvedVersion === version ? 'current' : approvedVersion ? 'historical' : null,
           }],
         });
       }
@@ -73,7 +74,7 @@ describe('OrganizationHistoryPanel', () => {
       }
       if (url === reviewUrl) {
         return Response.json({
-          orderId, organizationId: 'org-1', version, reviewed: approvedVersion === version,
+          orderId, organizationId: 'org-1', customerEmail: 'customer@example.test', payee: 'Libereal', version, reviewed: approvedVersion === version,
           total: 55, subtotal: 50, pointsDiscount: 0, paymentMethod: 'bank_transfer',
           recipient: { name: '测试收件人', phone: '00000000000', address: '测试地址' },
           lines: [{ id: 'test-line', name: '合成商品', catalogNumber: 'TEST-SKU', quantity: 1,
@@ -97,12 +98,12 @@ describe('OrganizationHistoryPanel', () => {
     expect(fetchMock).toHaveBeenLastCalledWith(reviewUrl, { cache: 'no-store' });
     fireEvent.click(preview.getByRole('button', { name: '通过组织审核，提交 Libereal 接单' }));
 
-    expect(await screen.findByText('已有组织审核记录，等待 Libereal 接单')).toBeInTheDocument();
+    expect(await screen.findByText('本版已通过组织审核，等待 Libereal 接单')).toBeInTheDocument();
     expect(screen.getByText(/待确认$/)).toBeInTheDocument();
     initial.unmount();
 
     const afterOrganizationApproval = render(panel);
-    expect(await screen.findByText('已有组织审核记录，等待 Libereal 接单')).toBeInTheDocument();
+    expect(await screen.findByText('本版已通过组织审核，等待 Libereal 接单')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '查看组织审核明细' }));
     expect(await screen.findByText('本版已通过组织审核')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '收起明细' }));
@@ -110,12 +111,14 @@ describe('OrganizationHistoryPanel', () => {
     version = 'test-version-2';
     fireEvent.click(screen.getByRole('button', { name: '查看组织审核明细' }));
     expect(await screen.findByRole('button', { name: '通过组织审核，提交 Libereal 接单' })).toBeInTheDocument();
+    expect(screen.getByText('曾有组织审核记录')).toBeInTheDocument();
+    expect(screen.queryByText('本版已通过组织审核，等待 Libereal 接单')).not.toBeInTheDocument();
     afterOrganizationApproval.unmount();
 
     status = 'confirmed';
     render(panel);
     expect(await screen.findByText(/已确认$/)).toBeInTheDocument();
-    expect(screen.queryByText('已有组织审核记录，等待 Libereal 接单')).not.toBeInTheDocument();
+    expect(screen.queryByText('本版已通过组织审核，等待 Libereal 接单')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '查看组织审核明细' })).not.toBeInTheDocument();
   });
 });

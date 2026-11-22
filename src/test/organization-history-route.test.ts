@@ -55,6 +55,7 @@ describe('organization history route', () => {
         updatedAt: new Date('2026-08-01T00:00:00Z'),
         archivedAt: null,
         events: [],
+        statusHistory: [],
         receivable: { id: 'receivable-1', amount: 100, status: 'paid', dueAt: null, paidAt: new Date('2026-08-02T00:00:00Z') },
       },
     ]);
@@ -71,7 +72,7 @@ describe('organization history route', () => {
     const body = await response.json();
     expect(body).toMatchObject({
       organization: { id: 'org-1', name: '原组织' },
-      orders: [{ id: 'order-1', hasOrganizationReview: false, canReview: false }],
+      orders: [{ id: 'order-1', organizationReview: null, canCancel: false, canReview: false }],
       inquiries: [{ id: 'inquiry-1' }],
       payables: [{ orderId: 'order-1', id: 'receivable-1', overdueDays: -1, trigger: 'normal' }],
     });
@@ -79,13 +80,10 @@ describe('organization history route', () => {
     expect(mocks.requireOrganizationPermission).toHaveBeenCalledWith('owner-1', 'org-1', 'organization.records.read');
     expect(mocks.orderFindMany).toHaveBeenCalledWith(expect.objectContaining({ where: { organizationId: 'org-1', ownerScope: 'organization' } }));
     expect(mocks.orderFindMany).toHaveBeenCalledWith(expect.objectContaining({
-      select: expect.objectContaining({
-        pointsPersonal: true,
-        pointsGroup: true,
-        pointsGroupId: true,
-        pointsDiscount: true,
-        pointsRefundedPersonal: true,
-        pointsRefundedGroup: true,
+      include: expect.objectContaining({
+        events: expect.any(Object),
+        statusHistory: expect.any(Object),
+        orderItems: expect.any(Object),
         researchGroup: expect.any(Object),
       }),
     }));

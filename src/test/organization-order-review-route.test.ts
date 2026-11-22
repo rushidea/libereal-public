@@ -4,7 +4,7 @@ import { prisma } from '@/lib/prisma';
 import { OrganizationRbacError, requireOrganizationPermission } from '@/lib/organization-service';
 import { GET as historyGET } from '@/app/api/organizations/[id]/history/route';
 import { GET as reviewGET, POST as reviewPOST } from '@/app/api/organizations/[id]/orders/[orderId]/review/route';
-import { PATCH as orderPATCH } from '@/app/api/orders/[id]/route';
+import { GET as orderGET, PATCH as orderPATCH } from '@/app/api/orders/[id]/route';
 import { POST as shipmentPOST } from '@/app/api/admin/orders/[id]/shipments/route';
 import { clearAllTables, closeTestDb, getTestDb, seedAdmin, seedUser } from './db-helpers';
 
@@ -20,6 +20,7 @@ vi.mock('@/lib/admin-mfa-settings', () => ({
 vi.mock('@/lib/organization-service', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/organization-service')>()),
   requireOrganizationPermission: organizationPermission,
+  listOrganizationIdsForPermission: async () => [orgId],
 }));
 
 const orderId = 'test-org-order';
@@ -80,7 +81,7 @@ async function expectOrderPendingWithoutMerchantEffects() {
   expect(await prisma.creditTransaction.count()).toBe(0);
   expect(await prisma.inventoryReservation.count()).toBe(0);
   expect(await prisma.shipment.count()).toBe(0);
-  expect(await prisma.orderStatusHistory.count()).toBe(0);
+  expect(await prisma.orderStatusHistory.count({ where: { toStatus: 'confirmed' } })).toBe(0);
   expect(await prisma.notification.count()).toBe(0);
   expect(await prisma.backgroundTask.count()).toBe(0);
 }
@@ -116,7 +117,11 @@ describe('organization order review and merchant acceptance', () => {
         adjustments: { create: { type: 'platform_fee', label: '测试费用', amount: 5 } },
         addressSnapshot: { create: { name: '测试收件人', phone: '00000000000', address: '测试地址' } },
         orderItems: { create: { id: 'test-line', position: 0, productId: 'test-product', name: '合成商品',
-          catalogNumber: 'TEST-SKU', quantity: 2, unitPrice: 50, leadTime: '测试货期' } },
+          catalogNumber: 'TEST-SKU', quantity: 2, unitPrice: 50, leadTime: '测试货期',
+          pricingSnapshot: JSON.stringify({ supplierCost: 'SYNTHETIC-PRIVATE-COST', customerSupplyConditions: '合成供货条件' }),
+        } },
+        statusHistory: { create: { toStatus: 'pending', actorId: buyerId, reason: 'inquiry_items_confirmed' } },
+        events: { create: { type: 'order_created', actorId: buyerId } },
       },
     });
   });
@@ -127,7 +132,7 @@ describe('organization order review and merchant acceptance', () => {
     expect(response.status).toBe(409);
     await expect(response.json()).resolves.toMatchObject({ code: 'ORG_ORDER_REVIEW_PREVIEW_REQUIRED' });
     expect(requireOrganizationPermission).toHaveBeenCalledWith(managerId, orgId, 'organization.orders.review');
-    expect(await prisma.orderEvent.count()).toBe(0);
+    expect(await prisma.orderEvent.count({ where: { type: approvalType } })).toBe(0);
     await expectOrderPendingWithoutMerchantEffects();
   });
 
@@ -151,12 +156,18 @@ describe('organization order review and merchant acceptance', () => {
         orderId, status: 'pending', organizationReviewed: true, version: body.version,
       });
     }
-    expect(await prisma.orderEvent.findMany({ where: { orderId } })).toEqual([
+    expect(await prisma.orderEvent.findMany({ where: { orderId, type: approvalType } })).toEqual([
       expect.objectContaining({ type: approvalType, actorId: managerId, actorEmail: `${managerId}@example.test` }),
     ]);
+    const recorded = await prisma.orderEvent.findFirstOrThrow({ where: { orderId, type: approvalType } });
+    const { version, reviewed, ...snapshot } = body;
+    expect(reviewed).toBe(false);
+    expect(JSON.parse(recorded.metadata!)).toEqual({ schema: 2, organizationId: orgId, creatorId: buyerId, version, snapshot });
+    expect(recorded.metadata).not.toContain('SYNTHETIC-PRIVATE-COST');
+    expect(snapshot.lines[0].conditions).toBe('合成供货条件');
     await expect((await preview()).json()).resolves.toMatchObject({ reviewed: true, version: body.version });
     expect((await readHistory()).orders).toEqual([
-      expect.objectContaining({ id: orderId, status: 'pending', hasOrganizationReview: true, canReview: true }),
+      expect.objectContaining({ id: orderId, status: 'pending', organizationReview: 'current', canReview: true }),
     ]);
 
     signIn(adminId, 'admin');
@@ -177,7 +188,7 @@ describe('organization order review and merchant acceptance', () => {
     expect((await preview()).status).toBe(403);
     expect((await approve({ version })).status).toBe(403);
     expect(requireOrganizationPermission).toHaveBeenCalledWith(adminId, orgId, 'organization.orders.review');
-    expect(await prisma.orderEvent.count()).toBe(0);
+    expect(await prisma.orderEvent.count({ where: { type: approvalType } })).toBe(0);
     await expectOrderPendingWithoutMerchantEffects();
   });
 
@@ -188,7 +199,38 @@ describe('organization order review and merchant acceptance', () => {
 
     expect((await preview()).status).toBe(403);
     expect((await approve({ version })).status).toBe(403);
-    expect(await prisma.orderEvent.count()).toBe(0);
+    expect(await prisma.orderEvent.count({ where: { type: approvalType } })).toBe(0);
+  });
+
+  it.each([
+    { actorId: managerId, role: 'customer' },
+    { actorId: adminId, role: 'admin' },
+  ] as const)('identifies the actual quote converter $actorId even when the original customer is different', async ({ actorId, role }) => {
+    const version = await previewVersion();
+    await prisma.orderStatusHistory.updateMany({ where: { orderId, fromStatus: null }, data: { actorId } });
+    await prisma.orderEvent.updateMany({ where: { orderId, type: 'order_created' }, data: { actorId } });
+    signIn(actorId, role);
+
+    expect((await preview()).status).toBe(403);
+    expect((await approve({ version })).status).toBe(403);
+    expect((await readHistory()).orders[0]).toMatchObject({ customerId: buyerId, canReview: false });
+    expect(await prisma.orderEvent.count({ where: { type: approvalType } })).toBe(0);
+  });
+
+  it.each(['missing', 'conflicting'] as const)('blocks review with %s creation evidence and retains a legacy audit event', async (evidence) => {
+    const version = await previewVersion();
+    if (evidence === 'missing') await prisma.orderStatusHistory.deleteMany({ where: { orderId } });
+    else await prisma.orderEvent.updateMany({ where: { orderId, type: 'order_created' }, data: { actorId: managerId } });
+    const historical = await prisma.orderEvent.create({
+      data: { orderId, type: approvalType, actorId: managerId, metadata: JSON.stringify({ version: 'legacy', total: 105 }) },
+    });
+
+    for (const response of [await preview(), await approve({ version })]) {
+      expect(response.status).toBe(409);
+      await expect(response.json()).resolves.toMatchObject({ code: 'ORG_ORDER_CREATOR_UNVERIFIED' });
+    }
+    expect((await readHistory()).orders[0]).toMatchObject({ organizationReview: 'historical', canReview: false });
+    expect(await prisma.orderEvent.findUnique({ where: { id: historical.id } })).toEqual(historical);
   });
 
   it('does not expose or approve an order through a different organization', async () => {
@@ -197,7 +239,7 @@ describe('organization order review and merchant acceptance', () => {
     expect((await preview('test-other-org')).status).toBe(404);
     expect((await approve({ version }, 'test-other-org')).status).toBe(404);
     expect(requireOrganizationPermission).toHaveBeenCalledWith(managerId, 'test-other-org', 'organization.orders.review');
-    expect(await prisma.orderEvent.count()).toBe(0);
+    expect(await prisma.orderEvent.count({ where: { type: approvalType } })).toBe(0);
   });
 
   it('rejects an old preview after an order line changes and allows review of the new version', async () => {
@@ -205,10 +247,11 @@ describe('organization order review and merchant acceptance', () => {
     expect((await approve({ version })).status).toBe(200);
     await prisma.orderItem.update({ where: { id: 'test-line' }, data: { leadTime: '更新后的测试货期' } });
 
+    expect((await readHistory()).orders[0]).toMatchObject({ organizationReview: 'historical' });
     const stale = await approve({ version });
     expect(stale.status).toBe(409);
     await expect(stale.json()).resolves.toMatchObject({ error: expect.stringContaining('订单已变化') });
-    expect(await prisma.orderEvent.count()).toBe(1);
+    expect(await prisma.orderEvent.count({ where: { type: approvalType } })).toBe(1);
 
     const response = await preview();
     expect(response.status).toBe(200);
@@ -217,6 +260,9 @@ describe('organization order review and merchant acceptance', () => {
     expect(updated.version).not.toBe(version);
     expect((await approve({ version: updated.version })).status).toBe(200);
     expect(await prisma.orderEvent.count({ where: { type: approvalType } })).toBe(2);
+    expect((await readHistory()).orders[0]).toMatchObject({ organizationReview: 'current' });
+    const original = await prisma.orderEvent.findUniqueOrThrow({ where: { id: approvalType + ':' + version } });
+    expect(JSON.parse(original.metadata!).snapshot.lines[0].leadTime).toBe('测试货期');
     await expectOrderPendingWithoutMerchantEffects();
   });
 
@@ -244,16 +290,34 @@ describe('organization order review and merchant acceptance', () => {
     await expectOrderPendingWithoutMerchantEffects();
 
     signIn(adminId, 'admin');
-    const response = await patchOrder({ status: 'confirmed', action: 'accept_order', metadata: { actorType: 'customer' } });
+    const detail = await orderGET(new NextRequest(`http://localhost/api/orders/${orderId}`), { params: Promise.resolve({ id: orderId }) });
+    expect(detail.status).toBe(200);
+    const { approvalPreview } = await detail.json();
+    const response = await patchOrder({
+      status: 'confirmed', action: 'accept_order', approvalVersion: approvalPreview.version, metadata: { actorType: 'customer' },
+    });
     expect(response.status).toBe(200);
-    expect(await prisma.orderStatusHistory.findMany({ where: { orderId } })).toEqual([
-      expect.objectContaining({ fromStatus: 'pending', toStatus: 'confirmed', actorId: adminId,
-        metadata: JSON.stringify({ action: 'accept_order', actorType: 'libereal_admin', version: 1 }) }),
-    ]);
+    const history = await prisma.orderStatusHistory.findFirstOrThrow({ where: { orderId, toStatus: 'confirmed' } });
+    expect(history).toMatchObject({ fromStatus: 'pending', actorId: adminId });
+    expect(JSON.parse(history.metadata!)).toMatchObject({
+      action: 'accept_order', actorType: 'libereal_admin', version: 2, orderVersion: approvalPreview.version,
+      snapshot: { lines: approvalPreview.snapshot.lines, total: 105 },
+    });
     expect(await prisma.accountReceivable.findUnique({ where: { orderId } })).toMatchObject({ amount: 105, status: 'open' });
     expect(await prisma.inventoryReservation.findFirst({ where: { orderId } })).toMatchObject({ quantity: 2, status: 'active' });
     expect((await readHistory()).orders).toEqual([
-      expect.objectContaining({ id: orderId, status: 'confirmed', hasOrganizationReview: true, canReview: false }),
+      expect.objectContaining({ id: orderId, status: 'confirmed', organizationReview: 'historical', canReview: false }),
     ]);
+
+    signIn(managerId);
+    const customerDetail = await orderGET(new NextRequest(`http://localhost/api/orders/${orderId}`), { params: Promise.resolve({ id: orderId }) });
+    expect(customerDetail.status).toBe(200);
+    const customerOrder = await customerDetail.json();
+    expect(customerOrder).not.toHaveProperty('approvalPreview');
+    expect(JSON.parse(customerOrder.statusHistory.find((entry: { toStatus: string }) => entry.toStatus === 'confirmed').metadata))
+      .toEqual({ action: 'accept_order', actorType: 'libereal_admin', version: 2, orderVersion: approvalPreview.version });
+    const organizationReview = customerOrder.events.find((event: { type: string }) => event.type === approvalType);
+    expect(JSON.parse(organizationReview.metadata)).toMatchObject({ snapshot: { total: 105, lines: [{ quantity: 2 }] } });
+    expect(organizationReview.metadata).not.toContain('SYNTHETIC-PRIVATE-COST');
   });
 });

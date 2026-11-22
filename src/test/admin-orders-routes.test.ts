@@ -541,14 +541,17 @@ describe('finance.write MFA scenario gating', () => {
     vi.mocked(requiresAdminMfaForPermission).mockImplementation(async (permission) => permission === 'finance.write');
     getTestDb().prepare(`UPDATE "Order" SET paymentMethod = 'alipay', paidAt = datetime('now') WHERE id = 'o1'`).run();
 
-    const res = await orderPATCH(makePatch('o1', { status: 'confirmed' }) as NextRequest, {
-      params: Promise.resolve({ id: 'o1' }),
-    });
+    const params = { params: Promise.resolve({ id: 'o1' }) };
+    const detail = await orderGET(new NextRequest('http://localhost:3000/api/admin/orders/o1'), params);
+    const approval = (await detail.json()).order.approvalPreview;
+    const res = await orderPATCH(makePatch('o1', { status: 'confirmed', approvalVersion: approval.version }), params);
 
     expect(sessionMocks.requireAdminStepUp).not.toHaveBeenCalled();
     expect(res.status).toBe(200);
-    expect(getTestDb().prepare('SELECT actorId, metadata FROM OrderStatusHistory WHERE orderId = ? AND toStatus = ?').get('o1', 'confirmed'))
-      .toEqual({ actorId: 'admin_test_id', metadata: JSON.stringify({ action: 'accept_order', actorType: 'libereal_admin', version: 1 }) });
+    const history = getTestDb().prepare('SELECT actorId, metadata FROM OrderStatusHistory WHERE orderId = ? AND toStatus = ?')
+      .get('o1', 'confirmed') as { actorId: string; metadata: string };
+    expect(history.actorId).toBe('admin_test_id');
+    expect(JSON.parse(history.metadata)).toMatchObject({ action: 'accept_order', actorType: 'libereal_admin', orderVersion: approval.version });
   });
 
   it('requires admin step-up for points refund with finance.write enabled', async () => {

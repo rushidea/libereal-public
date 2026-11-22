@@ -7,7 +7,7 @@ import type { Prisma } from '@prisma/client';
 import { orderItemView, toOrderItemCreates } from '@/lib/commerce-records';
 import { releaseOrderReceivableOnCancellation, reserveOrderCredit, settleOrderReceivable } from '@/lib/customer-credit';
 import { orderStatusRequiresFinanceWrite, receivableOccupiesCredit } from '@/lib/order-finance-access';
-import { assertOrderTransition, calculateOrderAmounts, isAutoCloseableOrderStatus, isInactiveOrderStatus, MERCHANT_ACCEPTANCE_METADATA, ORDER_STATUS_LABELS, requiresPaidAlipayRefund } from '@/lib/order-domain';
+import { assertOrderTransition, calculateOrderAmounts, isAutoCloseableOrderStatus, isInactiveOrderStatus, ORDER_STATUS_LABELS, requiresPaidAlipayRefund } from '@/lib/order-domain';
 import { restoreRedeemedOrderCoupons } from '@/lib/coupon-service';
 import { releaseOrderInventory, reserveOrderInventory } from '@/lib/inventory';
 import { isPostDeliveryPaymentMethod, normalizeOrderPaymentMethod } from '@/data/payment-methods';
@@ -20,6 +20,7 @@ import { writeAuditLog } from '@/lib/audit';
 import { commerceLineRefFromRecord, reviewCommerceLinesWithCatalog } from '@/lib/commerce-line-catalog';
 import { decideCommerceLineReview, type CommerceLineFinding } from '@/lib/commerce-line-review';
 import { ownerPrepaySettlementViews } from '@/lib/order-prepay-settlement';
+import { customerOrderStatusMetadata, getLatestAlipayAttempt, merchantOrderApprovalPreview, ORDER_APPROVAL_INCLUDE, orderApprovalConflict, verifyMerchantOrderAcceptance } from '@/lib/order-approval';
 
 export async function GET(
   _req: NextRequest,
@@ -38,13 +39,10 @@ export async function GET(
     const order = await prisma.order.findUnique({
       where: { id },
       include: {
-        orderItems: { orderBy: { position: 'asc' } },
+        ...ORDER_APPROVAL_INCLUDE,
         statusHistory: { orderBy: { createdAt: 'asc' } },
-        addressSnapshot: true,
-        adjustments: { orderBy: { createdAt: 'asc' } },
         shipments: { orderBy: { createdAt: 'desc' }, include: { items: true } },
         events: { orderBy: { createdAt: 'asc' } },
-        paymentAttempts: { where: { provider: 'alipay' }, orderBy: { createdAt: 'desc' }, take: 1 },
       },
     });
     if (!order) {
@@ -75,19 +73,24 @@ export async function GET(
       });
     }
 
-    const { orderItems, paymentAttempts, ...rest } = order;
+    const { orderItems, statusHistory, paymentAttempts, ...rest } = order;
     const settlementViews = await ownerPrepaySettlementViews(prisma, [order]);
     const creditReviewPending = order.status === 'pending'
       && isPostDeliveryPaymentMethod(order.paymentMethod)
       && order.events.some((event) => event.type === 'credit_review_required');
     return NextResponse.json({
       ...rest,
+      receivable: undefined,
       items: orderItems.map(orderItemView),
       inquiry,
-      payment: getAlipayPaymentSummary(order, paymentAttempts[0]),
+      statusHistory: isAdmin ? statusHistory : statusHistory.map((entry) => ({
+        ...entry, metadata: customerOrderStatusMetadata(entry.metadata),
+      })),
+      ...(isAdmin ? { approvalPreview: await merchantOrderApprovalPreview(prisma, order) } : {}),
+      payment: getAlipayPaymentSummary(order, getLatestAlipayAttempt(paymentAttempts)),
       ownerPrepaySettlement: settlementViews.get(order.id) ?? null,
       creditReviewPending,
-    });
+    }, { headers: { 'Cache-Control': 'private, no-store' } });
   } catch (err) {
     console.error('[order GET] error:', err);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
@@ -108,8 +111,10 @@ export async function PATCH(
     if (reader instanceof NextResponse) return reader;
   }
 
+  let accepting = false;
   try {
     const body = await req.json();
+    accepting = isPlatformAdmin && body.status === 'confirmed';
     const stepUpToken = isPlatformAdmin ? extractStepUpToken(body) : undefined;
     const order = await prisma.order.findUnique({
       where: { id },
@@ -250,13 +255,18 @@ export async function PATCH(
       }
     }
 
+    let confirmedInquiryId: string | null = null;
     if (Object.keys(updateData).length > 0) {
       if (isPlatformAdmin) {
         const consumedFailure = await consumeAdminOrderStepUp(user, stepUpToken);
         if (consumedFailure) return consumedFailure;
       }
-      await prisma.$transaction(async (tx) => {
-        if (body.status === 'confirmed' || body.items !== undefined) await assertOrderPricingResolved(tx, id, prospectiveItems);
+      confirmedInquiryId = await prisma.$transaction(async (tx) => {
+        if (accepting || body.items !== undefined) await assertOrderPricingResolved(tx, id, prospectiveItems);
+        if (accepting && (body.items !== undefined || body.paymentMethod !== undefined)) {
+          throw new Error('ORDER_APPROVAL_SAVE_CHANGES_FIRST');
+        }
+        const acceptance = accepting ? await verifyMerchantOrderAcceptance(tx, id, body.approvalVersion) : null;
         if (body.status === 'cancelled') {
           // Claim cancellation before any history or resource releases. The payment
           // callback competes on the same row, so a stale unpaid snapshot cannot win.
@@ -282,7 +292,7 @@ export async function PATCH(
               : null,
           }] : []),
         ];
-        await tx.order.update({ where: { id, ...(body.status === 'confirmed' ? { status: order.status, archivedAt: null } : {}) }, data: {
+        await tx.order.update({ where: { id, ...(acceptance ? { status: 'pending', archivedAt: null } : {}) }, data: {
           ...updateData,
           ...(body.status && body.status !== order.status ? {
             statusHistory: {
@@ -292,7 +302,7 @@ export async function PATCH(
                 actorId: user.id,
                 actorEmail: user.email,
                 reason: body.reason || null,
-                ...(body.status === 'confirmed' ? { metadata: MERCHANT_ACCEPTANCE_METADATA } : {}),
+                ...(acceptance ? { metadata: acceptance.metadata } : {}),
               },
             },
           } : {}),
@@ -310,9 +320,16 @@ export async function PATCH(
             metadata: { confirmWarnings: true, warnings: confirmedLineWarnings },
           }, tx);
         }
-        if (body.status === 'confirmed' && order.status !== 'confirmed') {
-          if (isPostDeliveryPaymentMethod(effectivePaymentMethod)) await reserveOrderCredit(tx, id, user.id);
+        if (acceptance) {
+          if (isPostDeliveryPaymentMethod(acceptance.order.paymentMethod)) await reserveOrderCredit(tx, id, user.id);
           await reserveOrderInventory(tx, id, user.id);
+          await tx.notification.create({
+            data: {
+              email: acceptance.order.email, role: 'customer', type: 'order_status_changed',
+              title: '订单状态更新', content: `订单 ${id} 状态已更新为：${ORDER_STATUS_LABELS.confirmed}`,
+              linkUrl: '/account/orders', metadata: JSON.stringify({ orderId: id, status: 'confirmed' }),
+            },
+          });
         }
         if (isInactiveOrderStatus(body.status) && !isInactiveOrderStatus(order.status)) {
           await closeOrderRepricing(tx, id, { id: user.id, email: user.email });
@@ -331,14 +348,15 @@ export async function PATCH(
         if (body.status === 'completed' && order.status !== 'completed') {
           if (isPostDeliveryPaymentMethod(effectivePaymentMethod)) await settleOrderReceivable(tx, id, user.id);
         }
-      });
+        return acceptance?.order.inquiryId ?? null;
+      }, { isolationLevel: 'Serializable' });
     }
 
     // On confirm: clear user's isNewUser flag
-    if (body.status === 'confirmed' && order.inquiryId) {
+    if (confirmedInquiryId) {
       try {
         const inquiryRow = await prisma.inquiry.findUnique({
-          where: { id: order.inquiryId },
+          where: { id: confirmedInquiryId },
           select: { userId: true },
         });
         if (inquiryRow?.userId) {
@@ -352,7 +370,7 @@ export async function PATCH(
       }
     }
 
-    if (body.status && body.status !== order.status) {
+    if (!accepting && body.status && body.status !== order.status) {
       const statusLabel = (ORDER_STATUS_LABELS as Record<string, string>)[body.status] || body.status;
       await prisma.notification.create({
         data: {
@@ -371,6 +389,8 @@ export async function PATCH(
   } catch (err) {
     console.error('[order PATCH] error:', err);
     const message = err instanceof Error ? err.message : '';
+    const approvalConflict = accepting && orderApprovalConflict(err);
+    if (approvalConflict) return NextResponse.json(approvalConflict, { status: 409 });
     if ((err as { code?: string })?.code === 'P2025') return NextResponse.json({ error: '订单已变化，请重新查看。' }, { status: 409 });
     if (message === 'QUOTE_REPRICE_REQUIRED') return NextResponse.json({ error: '商品价格已变化，请先完成原订单价格复核', code: message }, { status: 409 });
     if (message === POINTS_REFUND_FAILED) {

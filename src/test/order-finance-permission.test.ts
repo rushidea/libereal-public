@@ -14,7 +14,7 @@ vi.mock('@/lib/session', () => ({
   requireActiveSession: sessionMocks.requireActiveSession,
 }));
 
-import { PATCH as adminOrderPATCH } from '@/app/api/admin/orders/[id]/route';
+import { GET as adminOrderGET, PATCH as adminOrderPATCH } from '@/app/api/admin/orders/[id]/route';
 import { POST as pointsRefundPOST } from '@/app/api/admin/orders/[id]/points-refund/route';
 import { PATCH as customerOrderPATCH } from '@/app/api/orders/[id]/route';
 
@@ -134,9 +134,11 @@ describe('finance permissions on payment, refund and settlement', () => {
     });
     seedOrder({ id: 'o_confirm', status: 'pending', paymentMethod: 'bank_transfer' });
     allowExcept('finance.write');
-    const confirmed = await adminOrderPATCH(patch('http://localhost/api/admin/orders/o_confirm', { status: 'confirmed' }), {
-      params: Promise.resolve({ id: 'o_confirm' }),
-    });
+    const params = { params: Promise.resolve({ id: 'o_confirm' }) };
+    const url = 'http://localhost/api/admin/orders/o_confirm';
+    const detail = await adminOrderGET(new NextRequest(url), params);
+    const approval = (await detail.json()).order.approvalPreview;
+    const confirmed = await adminOrderPATCH(patch(url, { status: 'confirmed', approvalVersion: approval.version }), params);
     expect(confirmed.status).toBe(200);
     expect(sessionMocks.requireAdmin).toHaveBeenCalledWith('orders.write');
     expect(sessionMocks.requireAdmin).not.toHaveBeenCalledWith('finance.write');

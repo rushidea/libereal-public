@@ -14,7 +14,6 @@ export const ORDER_STATUSES = [
 export type OrderStatus = (typeof ORDER_STATUSES)[number];
 
 // Written by the server only when an authorized Libereal administrator accepts an order.
-export const MERCHANT_ACCEPTANCE_METADATA = JSON.stringify({ action: 'accept_order', actorType: 'libereal_admin', version: 1 });
 
 export const ORDER_STATUS_LABELS: Record<OrderStatus, string> = {
   unpaid: '未付款',

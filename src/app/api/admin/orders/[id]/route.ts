@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { assertOrderPricingResolved, closeOrderRepricing, pendingOrderRepricing } from '@/lib/order-catalog-repricing';
+import { assertOrderPricingResolved, closeOrderRepricing, jsonObject, pendingOrderRepricing } from '@/lib/order-catalog-repricing';
 import type { Prisma } from '@prisma/client';
 import { orderItemView } from '@/lib/commerce-records';
 import { getAlipayPaymentSummary } from '@/data/alipay-payment';
@@ -11,11 +11,12 @@ import {
   settleOrderReceivable,
 } from '@/lib/customer-credit';
 import type { OrderCreditReviewSummary } from '@/lib/credit-summary';
-import { assertOrderTransition, isAutoCloseableOrderStatus, isInactiveOrderStatus, MERCHANT_ACCEPTANCE_METADATA, requiresPaidAlipayRefund } from '@/lib/order-domain';
+import { assertOrderTransition, isAutoCloseableOrderStatus, isInactiveOrderStatus, requiresPaidAlipayRefund } from '@/lib/order-domain';
 import { restoreRedeemedOrderCoupons } from '@/lib/coupon-service';
 import { releaseOrderInventory, reserveOrderInventory } from '@/lib/inventory';
 import { orderStatusRequiresFinanceWrite, receivableOccupiesCredit } from '@/lib/order-finance-access';
 import { requireAdmin } from '@/lib/session';
+import { getLatestAlipayAttempt, merchantOrderApprovalPreview, ORDER_APPROVAL_INCLUDE, orderApprovalConflict, verifyMerchantOrderAcceptance } from '@/lib/order-approval';
 import { authorizeAdminOrderMutation, consumeAdminOrderStepUp, extractStepUpToken } from '@/lib/admin-order-step-up';
 import { writeAuditLog } from '@/lib/audit';
 import { isPostDeliveryPaymentMethod, normalizeOrderPaymentMethod } from '@/data/payment-methods';
@@ -30,13 +31,10 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     const order = await prisma.order.findUnique({
       where: { id },
       include: {
-        orderItems: { orderBy: { position: 'asc' } },
+        ...ORDER_APPROVAL_INCLUDE,
         statusHistory: { orderBy: { createdAt: 'asc' } },
-        addressSnapshot: true,
-        adjustments: { orderBy: { createdAt: 'asc' } },
         shipments: { orderBy: { createdAt: 'desc' }, include: { items: true } },
         events: { orderBy: { createdAt: 'asc' } },
-        paymentAttempts: { where: { provider: 'alipay' }, orderBy: { createdAt: 'desc' }, take: 1 },
       },
     });
     if (!order) {
@@ -45,40 +43,46 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     const { orderItems, paymentAttempts, ...rest } = order;
     const pendingPricing = order.inquiryId && isAutoCloseableOrderStatus(order.status)
       ? await pendingOrderRepricing(prisma, order.id) : null;
+    const creditEval = order.status === 'pending' && isPostDeliveryPaymentMethod(order.paymentMethod)
+      ? await evaluatePostDeliveryCredit(prisma, {
+        userId: order.customerId, email: order.email, paymentMethod: order.paymentMethod, total: order.total,
+      })
+      : undefined;
     let creditReview: OrderCreditReviewSummary | null = null;
-    if (order.status === 'pending' && isPostDeliveryPaymentMethod(order.paymentMethod)) {
-      const creditEval = await evaluatePostDeliveryCredit(prisma, {
-        userId: order.customerId,
-        email: order.email,
+    if (creditEval?.applicable) {
+      const flaggedAtSubmission = order.events.some((event) => event.type === 'credit_review_required');
+      creditReview = {
+        userId: creditEval.userId,
+        tier: creditEval.tier,
+        orderTotal: order.total,
         paymentMethod: order.paymentMethod ?? null,
-        total: order.total,
-      });
-      if (creditEval.applicable) {
-        const flaggedAtSubmission = order.events.some((event) => event.type === 'credit_review_required');
-        creditReview = {
-          userId: creditEval.userId,
-          tier: creditEval.tier,
-          orderTotal: order.total,
-          paymentMethod: order.paymentMethod ?? null,
-          flaggedAtSubmission,
-          needsReview: creditEval.suspended || creditEval.exceedsLimit,
-          suspended: creditEval.suspended,
-          exceedsLimit: creditEval.exceedsLimit,
-          shortfall: creditEval.shortfall,
-          summary: creditEval.summary,
-        };
-      }
+        flaggedAtSubmission,
+        needsReview: creditEval.suspended || creditEval.exceedsLimit,
+        suspended: creditEval.suspended,
+        exceedsLimit: creditEval.exceedsLimit,
+        shortfall: creditEval.shortfall,
+        summary: creditEval.summary,
+      };
     }
+    const acceptanceHistory = order.statusHistory.find(({ fromStatus, toStatus, actorId, metadata }) => {
+      const details = jsonObject(metadata);
+      return fromStatus === 'pending' && toStatus === 'confirmed' && Boolean(actorId)
+        && details.action === 'accept_order' && details.actorType === 'libereal_admin';
+    });
     return NextResponse.json({
       order: {
         ...rest,
+        inquiry: undefined,
+        receivable: undefined,
         items: orderItems.map(orderItemView),
-        payment: getAlipayPaymentSummary(rest, paymentAttempts[0]),
+        payment: getAlipayPaymentSummary(rest, getLatestAlipayAttempt(paymentAttempts)),
+        approvalPreview: await merchantOrderApprovalPreview(prisma, order, creditEval),
+        acceptedAt: acceptanceHistory?.createdAt ?? null,
         pendingCatalogRepricing: pendingPricing && typeof pendingPricing.quoteId === 'string' && typeof pendingPricing.proposalHash === 'string'
           ? { inquiryId: order.inquiryId, quoteId: pendingPricing.quoteId, orderId: order.id, proposalHash: pendingPricing.proposalHash } : null,
         creditReview,
       },
-    });
+    }, { headers: { 'Cache-Control': 'private, no-store' } });
   } catch (err) {
     console.error('[admin/orders/[id] GET] error:', err);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
@@ -89,10 +93,12 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   const reader = await requireAdmin('orders.read');
   if (reader instanceof NextResponse) return reader;
 
+  let accepting = false;
   try {
     const { id } = await params;
     const body = await req.json();
     const { status, reason } = body;
+    accepting = status === 'confirmed';
     const stepUpToken = extractStepUpToken(body);
 
     const existing = await prisma.order.findUnique({
@@ -149,9 +155,8 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     if (stepUpFailure) return stepUpFailure;
 
     const updated = await prisma.$transaction(async (tx) => {
-      if (status === 'confirmed') {
-        await assertOrderPricingResolved(tx, id);
-      }
+      if (accepting) await assertOrderPricingResolved(tx, id);
+      const acceptance = accepting ? await verifyMerchantOrderAcceptance(tx, id, body.approvalVersion) : null;
       if (status === 'cancelled') {
         // Claim cancellation before any history or resource releases. The payment
         // callback competes on the same row, so a stale unpaid snapshot cannot win.
@@ -161,7 +166,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
         });
         if (cancelled.count !== 1) throw new Error('ORDER_CANCELLATION_CONFLICT');
       }
-      const result = await tx.order.update({ where: { id, ...(status === 'confirmed' ? { status: existing.status, archivedAt: null } : {}) }, data: {
+      const result = await tx.order.update({ where: { id, ...(acceptance ? { status: 'pending', archivedAt: null } : {}) }, data: {
         ...updateData,
         ...(status && status !== existing.status ? {
           statusHistory: {
@@ -171,7 +176,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
               actorId: admin.id,
               actorEmail: admin.email,
               reason: reason || 'admin_status_update',
-              ...(status === 'confirmed' ? { metadata: MERCHANT_ACCEPTANCE_METADATA } : {}),
+              ...(acceptance ? { metadata: acceptance.metadata } : {}),
             },
           },
           events: {
@@ -185,8 +190,10 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
           },
         } : {}),
       } });
-      if (status === 'confirmed' && existing.status !== 'confirmed' && isPostDeliveryPaymentMethod(existing.paymentMethod)) await reserveOrderCredit(tx, id, admin.id);
-      if (status === 'confirmed' && existing.status !== 'confirmed') await reserveOrderInventory(tx, id, admin.id);
+      if (acceptance) {
+        if (isPostDeliveryPaymentMethod(acceptance.order.paymentMethod)) await reserveOrderCredit(tx, id, admin.id);
+        await reserveOrderInventory(tx, id, admin.id);
+      }
       if (isInactiveOrderStatus(status) && !isInactiveOrderStatus(existing.status)) {
         await closeOrderRepricing(tx, id, { id: admin.id, email: admin.email });
         if (isPostDeliveryPaymentMethod(existing.paymentMethod)) await releaseOrderReceivableOnCancellation(tx, id, admin.id);
@@ -204,11 +211,13 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       if (status === 'completed' && existing.status !== 'completed' && isPostDeliveryPaymentMethod(existing.paymentMethod)) await settleOrderReceivable(tx, id, admin.id);
       if (status && status !== existing.status) await writeAuditLog({ actorId: admin.id, actorEmail: admin.email, action: 'order.status_changed', resource: 'orders', targetType: 'Order', targetId: id, before: { status: existing.status }, after: { status }, reason }, tx);
       return result;
-    });
+    }, { isolationLevel: 'Serializable' });
     return NextResponse.json({ order: updated });
   } catch (err) {
     console.error('[admin/orders/[id] PATCH] error:', err);
     const message = err instanceof Error ? err.message : '';
+    const approvalConflict = accepting && orderApprovalConflict(err);
+    if (approvalConflict) return NextResponse.json(approvalConflict, { status: 409 });
     if ((err as { code?: string })?.code === 'P2025') return NextResponse.json({ error: '订单已变化，请重新查看。' }, { status: 409 });
     if (message === POINTS_REFUND_FAILED) {
       return NextResponse.json({ error: POINTS_REFUND_FAILED }, { status: 409 });

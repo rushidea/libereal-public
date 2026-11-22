@@ -13,11 +13,12 @@ import { CatalogRepricingFinance } from '@/components/admin/CatalogRepricingFina
 import CustomerCreditEditor from '@/components/admin/CustomerCreditEditor';
 import { isAdminMfaStepUpResponse, useAdminMfaStepUp } from '@/components/admin/AdminMfaStepUpDialog';
 import { adminPermissionErrorMessage } from '@/data/admin-permission-message';
-import { isPostDeliveryPaymentMethod, normalizeOrderPaymentMethod, ORDER_PAYMENT_METHODS } from '@/data/payment-methods';
+import { formatOrderPaymentMethod, isPostDeliveryPaymentMethod, normalizeOrderPaymentMethod, ORDER_PAYMENT_METHODS } from '@/data/payment-methods';
 import { orderStatusRequiresFinanceWrite } from '@/lib/order-finance-access';
 import AlipayPaymentStatusView from '@/components/payment/AlipayPaymentStatus';
 import type { AlipayPaymentSummary } from '@/data/alipay-payment';
 import { canTransitionOrder, displayedOrderStatus, isOrderStatus } from '@/lib/order-domain';
+import type { MerchantOrderApprovalPreview } from '@/lib/order-approval';
 import { ADMIN_ORDER_LIST_PAGE_SIZE, toAdminOrderListSearchParams } from '@/data/admin-order-list-query';
 import { commerceLineWarningList, commerceLineWarningPrompt } from '@/lib/commerce-line-review';
 import {
@@ -48,6 +49,8 @@ interface Order {
   quoteSent?: boolean;
   quoteSentAt?: string;
   quoteConfirmed?: boolean;
+  acceptedAt?: string | null;
+  approvalPreview?: MerchantOrderApprovalPreview | null;
   events?: Array<{ id: string; type: string; actorEmail?: string; message?: string; createdAt: string }>;
   shipments?: Array<{ id: string; method: string; carrier?: string; trackingNumber?: string; shippedAt?: string }>;
   userDepartment?: string;
@@ -218,6 +221,8 @@ function withdrawOrderErrorMessage(error: unknown, orderId: unknown): string {
 
 function withOrderDetail(summary: Order, detail: {
   pendingCatalogRepricing?: Order['pendingCatalogRepricing'];
+  approvalPreview?: Order['approvalPreview'];
+  acceptedAt?: Order['acceptedAt'];
   creditReview?: Order['creditReview'];
   items?: OrderItem[];
   events?: Order['events'];
@@ -247,6 +252,8 @@ function withOrderDetail(summary: Order, detail: {
     total: detail.total ?? summary.total,
     quoteSent: detail.quoteSent ?? summary.quoteSent,
     quoteSentAt: detail.quoteSentAt ?? summary.quoteSentAt,
+    acceptedAt: detail.acceptedAt ?? null,
+    approvalPreview: detail.approvalPreview ?? null,
     pointsPersonal: detail.pointsPersonal ?? summary.pointsPersonal,
     pointsGroup: detail.pointsGroup ?? summary.pointsGroup,
     pointsDiscount: detail.pointsDiscount ?? summary.pointsDiscount,
@@ -437,7 +444,7 @@ function OrdersPanel() {
     const response = await fetch(`/api/orders/${orderId}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ status: newStatus, ...(newStatus === 'confirmed' ? { action: 'accept_order' } : {}), ...(stepUpToken ? { stepUpToken } : {}) }),
+      body: JSON.stringify({ status: newStatus, ...(stepUpToken ? { stepUpToken } : {}) }),
     });
     const data = await response.json().catch(() => ({})) as { error?: string; requiredPermission?: string };
     if (!response.ok) {
@@ -530,7 +537,7 @@ function OrdersPanel() {
         return;
       }
       setOrderItems(updatedItems);
-      setSelectedOrder(prev => prev && prev.id === orderId ? { ...prev, items: updatedItems, subtotal: newSubtotal } : prev);
+      setSelectedOrder(prev => prev && prev.id === orderId ? { ...prev, items: updatedItems, subtotal: newSubtotal, approvalPreview: null } : prev);
       setAddProductSearch('');
       setAddingToOrder(false);
       fetchData();
@@ -1074,6 +1081,11 @@ function OrderDetailSlot({
   );
 }
 
+type OrderApprovalIntent = {
+  via: 'status' | 'quote';
+  preview: MerchantOrderApprovalPreview;
+};
+
 function OrderDetailPanel({
   order, orderItems, setOrderItems, addingToOrder, setAddingToOrder,
   addProductSearch, setAddProductSearch, updateOrderStatus, handleAddProductToOrder,
@@ -1096,6 +1108,9 @@ function OrderDetailPanel({
   const canWriteOrders = !permissions || permissions.includes('orders.write');
   const canWriteFinance = !permissions || permissions.includes('finance.write');
   const [actionError, setActionError] = useState('');
+  const [approval, setApproval] = useState<OrderApprovalIntent | null>(null);
+  const [submittingApproval, setSubmittingApproval] = useState(false);
+  const [pendingEdits, setPendingEdits] = useState(0);
   const [creditEditorOpen, setCreditEditorOpen] = useState(false);
   const [pointsRefundYuan, setPointsRefundYuan] = useState('');
   const [pointsRefundMsg, setPointsRefundMsg] = useState('');
@@ -1108,72 +1123,118 @@ function OrderDetailPanel({
     detailCreditReview && (detailCreditReview.needsReview || detailCreditReview.flaggedAtSubmission),
   );
 
-  async function persistItems(
-    items: OrderItem[],
-    options: { stepUpToken?: string; onSuccess?: () => Promise<void> } = {},
-  ) {
-    const result = await patchOrderItems(order.id, items, { stepUpToken: options.stepUpToken });
-    if (!result.ok) {
-      if (result.mfaRequired && !options.stepUpToken) {
-        await beginMfaStepUp(async (grantToken) => {
-          setActionError('');
-          await persistItems(items, { stepUpToken: grantToken, onSuccess: options.onSuccess });
-        });
-        return false;
+  const editingTerms = pendingEdits > 0 || addingToOrder || creditEditorOpen || pointsRefundLoading;
+  const unsavedItems = hasUnsavedOrderItems(order.items, orderItems);
+  const merchantAccepted = ['confirmed', 'partially_shipped', 'shipped', 'completed'].includes(order.status);
+  const displayedStatus = displayedOrderStatus(order);
+
+  async function persistItems(items: OrderItem[], stepUpToken?: string) {
+    setApproval(null);
+    setPendingEdits((value) => value + 1);
+    try {
+      const result = await patchOrderItems(order.id, items, { stepUpToken });
+      if (!result.ok) {
+        if (result.mfaRequired && !stepUpToken) {
+          await beginMfaStepUp(async (grantToken) => {
+            setActionError('');
+            await persistItems(items, grantToken);
+          });
+          return;
+        }
+        if (!result.cancelled) setActionError(result.message || '保存失败');
       }
-      if (!result.cancelled) setActionError(result.message || '保存失败');
       await fetchData();
-      return false;
+    } catch {
+      setActionError('保存商品失败，请重试。');
+    } finally {
+      setPendingEdits((value) => value - 1);
     }
-    await fetchData();
-    if (options.onSuccess) {
-      await options.onSuccess();
-    }
-    return true;
   }
 
   async function updatePaymentMethod(newMethod: string, stepUpToken?: string) {
-    const res = await fetch(`/api/orders/${order.id}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ paymentMethod: newMethod, ...(stepUpToken ? { stepUpToken } : {}) }),
-    });
-    const data = await res.json().catch(() => ({})) as { error?: string; requiredPermission?: string };
-    if (!res.ok) {
-      if (!stepUpToken && isAdminMfaStepUpResponse(res.status, data.error)) {
-        await beginMfaStepUp(async (grantToken) => {
-          setActionError('');
-          await updatePaymentMethod(newMethod, grantToken);
-        });
+    setApproval(null);
+    setPendingEdits((value) => value + 1);
+    try {
+      const res = await fetch(`/api/orders/${order.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ paymentMethod: newMethod, ...(stepUpToken ? { stepUpToken } : {}) }),
+      });
+      const data = await res.json().catch(() => ({})) as { error?: string; requiredPermission?: string };
+      if (!res.ok) {
+        if (!stepUpToken && isAdminMfaStepUpResponse(res.status, data.error)) {
+          await beginMfaStepUp(async (grantToken) => {
+            setActionError('');
+            await updatePaymentMethod(newMethod, grantToken);
+          });
+          return;
+        }
+        setActionError(orderActionErrorMessage(data));
         return;
       }
-      setActionError(orderActionErrorMessage(data));
-      return;
+      setActionError('');
+      await fetchData();
+    } catch {
+      setActionError('保存付款方式失败，请重试。');
+    } finally {
+      setPendingEdits((value) => value - 1);
     }
-    setActionError('');
-    await fetchData();
   }
 
-  async function confirmOrderQuote(stepUpToken?: string) {
-    const res = await fetch(`/api/orders/${order.id}/quote`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(stepUpToken ? { stepUpToken } : {}),
-    });
-    const data = await res.json().catch(() => ({})) as { error?: string; requiredPermission?: string };
-    if (!res.ok) {
-      if (!stepUpToken && isAdminMfaStepUpResponse(res.status, data.error)) {
-        await beginMfaStepUp(async (grantToken) => {
-          setActionError('');
-          await confirmOrderQuote(grantToken);
-        });
-        return;
-      }
-      setActionError(orderActionErrorMessage(data));
+  async function openOrderApproval(via: OrderApprovalIntent['via']) {
+    setActionError('');
+    if (editingTerms) {
+      setActionError('请先完成订单修改，再核对确认。');
       return;
     }
-    setActionError('');
-    await fetchData();
+    if (unsavedItems) {
+      await persistItems(orderItems);
+      setActionError((message) => message || '请重新核对保存后的订单明细。');
+      return;
+    }
+    if (!order.approvalPreview || (via === 'status' && order.approvalPreview.action !== 'accept_order')) {
+      await fetchData();
+      setActionError('请重新查看订单明细和付款条件后确认。');
+      return;
+    }
+    setApproval({ via, preview: order.approvalPreview });
+  }
+
+  async function submitOrderApproval(intent: OrderApprovalIntent, stepUpToken?: string) {
+    setSubmittingApproval(true);
+    try {
+      const isQuote = intent.via === 'quote';
+      const response = await fetch(isQuote ? `/api/orders/${order.id}/quote` : `/api/orders/${order.id}`, {
+        method: isQuote ? 'POST' : 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: intent.preview.action,
+          approvalVersion: intent.preview.version,
+          ...(isQuote ? {} : { status: 'confirmed' }),
+          ...(stepUpToken ? { stepUpToken } : {}),
+        }),
+      });
+      const data = await response.json().catch(() => ({})) as { error?: string; requiredPermission?: string };
+      if (!response.ok) {
+        if (!stepUpToken && isAdminMfaStepUpResponse(response.status, data.error)) {
+          await beginMfaStepUp((grantToken) => submitOrderApproval(intent, grantToken));
+          return;
+        }
+        setActionError(orderActionErrorMessage(data));
+        if (response.status === 409) {
+          setApproval(null);
+          await fetchData();
+        }
+        return;
+      }
+      setApproval(null);
+      setActionError('');
+      await fetchData();
+    } catch {
+      setActionError('暂时无法提交，请重新核对订单状态。');
+    } finally {
+      setSubmittingApproval(false);
+    }
   }
 
   async function refundPoints(stepUpToken?: string) {
@@ -1410,7 +1471,6 @@ function OrderDetailPanel({
           {pointsRefundMsg && <p className="text-xs text-gray-700">{pointsRefundMsg}</p>}
         </div>
       )}
-      {actionError && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{actionError}</p>}
       <div>
         <p className="text-xs text-gray-600 mb-2">状态更新</p>
         <div className="flex flex-wrap gap-2 min-w-0">
@@ -1418,14 +1478,19 @@ function OrderDetailPanel({
             order.status === s
             || (isOrderStatus(order.status) && isOrderStatus(s) && canTransitionOrder(order.status, s)
               && canApplyOrderStatus(permissions, order, s)
+              && (s !== 'confirmed' || order.approvalPreview?.action === 'accept_order')
               && !(s === 'closed' && normalizeOrderPaymentMethod(order.paymentMethod) === 'alipay' && order.paidAt))
           )).map(s => (
-            <button key={s} onClick={async () => {
+            <button key={s} type="button" disabled={order.status === s} onClick={async () => {
+              if (s === 'confirmed') {
+                await openOrderApproval('status');
+                return;
+              }
               setActionError('');
               setActionError(await updateOrderStatus(order.id, s, setActionError) || '');
             }}
               className={`px-3 py-1.5 rounded-lg text-sm font-medium ${order.status === s ? ORDER_STATUS_CONFIG[s].color : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>
-              {ORDER_STATUS_CONFIG[s].label}
+              {s === 'confirmed' && order.status !== s ? '核对接单明细' : ORDER_STATUS_CONFIG[s].label}
             </button>
           ))}
         </div>
@@ -1558,31 +1623,95 @@ function OrderDetailPanel({
         <span className="text-xl font-bold text-brand-600">¥{orderItems.reduce((s, it) => s + (it.price||0)*(it.quantity||1), 0).toLocaleString('zh-CN', { minimumFractionDigits: 2 })}</span>
       </div>
       <div className="pt-4 border-t border-gray-200 space-y-2">
-        {actionError && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{actionError}</p>}
-        {order.quoteSent ? (
+        {actionError && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700" role="alert">{actionError}</p>}
+        {merchantAccepted ? (
           <div className="flex items-center gap-2 text-green-600 bg-green-50 p-3 rounded-lg">
             <Check className="w-5 h-5" />
-            <div><p className="text-sm font-medium">订单已确认</p>{order.quoteSentAt && <p className="text-xs text-green-600/70">确认时间：{new Date(order.quoteSentAt).toLocaleString('zh-CN')}</p>}</div>
+            <div><p className="text-sm font-medium">订单已确认</p>{order.acceptedAt && <p className="text-xs">接单时间 {new Date(order.acceptedAt).toLocaleString('zh-CN')}</p>}</div>
           </div>
-        ) : canWriteOrders ? (
-          <button onClick={async () => {
-            if (!confirm('确定确认订单并通知客户吗？')) return;
-            setActionError('');
-            if (hasUnsavedOrderItems(order.items, orderItems)) {
-              await persistItems(orderItems, { onSuccess: () => confirmOrderQuote() });
-              return;
-            }
-            await confirmOrderQuote();
-          }} className="w-full py-3 bg-brand-600 text-white rounded-lg font-medium hover:bg-brand-700">
-            确认订单
-          </button>
+        ) : order.quoteSent ? (
+          <div className="flex items-center gap-2 text-blue-700 bg-blue-50 p-3 rounded-lg">
+            <Clock className="w-5 h-5" />
+            <div>
+              <p className="text-sm font-medium">报价已发送</p>
+              {displayedStatus === 'unpaid' && <p className="text-xs">等待客户付款</p>}
+              {displayedStatus === 'pending' && <p className="text-xs">等待 Libereal 接单</p>}
+              {order.quoteSentAt && <p className="text-xs">发送时间 {new Date(order.quoteSentAt).toLocaleString('zh-CN')}</p>}
+            </div>
+          </div>
         ) : null}
+        {canWriteOrders && order.approvalPreview && (order.approvalPreview.action === 'accept_order' || !order.quoteSent) && (
+          <button type="button" onClick={() => void openOrderApproval('quote')}
+            className="w-full py-3 bg-brand-600 text-white rounded-lg font-medium hover:bg-brand-700">
+            {order.approvalPreview.action === 'accept_order' ? '核对接单并通知客户' : '核对并发送报价'}
+          </button>
+        )}
+        {approval && <MerchantOrderApproval
+          intent={approval}
+          formatPrice={formatPrice}
+          stale={approval.preview.version !== order.approvalPreview?.version}
+          submitting={submittingApproval}
+          disabled={editingTerms || unsavedItems || !canWriteOrders}
+          onConfirm={() => void submitOrderApproval(approval)}
+          onClose={() => setApproval(null)}
+        />}
       </div>
       <OrderEvents events={order.events} />
       {order.notes && <div><p className="text-xs text-gray-600 mb-1">备注</p><p className="text-sm text-gray-700 bg-gray-50 p-3 rounded-lg">{order.notes}</p></div>}
       <div><p className="text-xs text-gray-600 mb-1">下单时间</p><p className="text-sm text-gray-700">{new Date(order.createdAt).toLocaleString('zh-CN')}</p></div>
     </div>
   );
+
+function MerchantOrderApproval({ intent, formatPrice, stale, submitting, disabled, onConfirm, onClose }: {
+  intent: OrderApprovalIntent;
+  formatPrice: (amount: number) => string;
+  stale: boolean;
+  submitting: boolean;
+  disabled: boolean;
+  onConfirm: () => void;
+  onClose: () => void;
+}) {
+  const { action, snapshot } = intent.preview;
+  const title = action === 'send_quote' ? '确认发送报价'
+    : intent.via === 'quote' ? '确认接单并通知客户' : '确认 Libereal 接单';
+  const payment = formatOrderPaymentMethod(snapshot.paymentMethod ?? '') || '付款方式待确认';
+  return (
+    <section aria-label="订单确认明细" className="rounded-lg border border-brand-300 bg-white p-4 text-sm text-gray-800 space-y-2">
+      <p className="font-semibold">{title} · 订单 {snapshot.orderId}</p>
+      <p>客户 {snapshot.customerEmail}{snapshot.organizationId && ` · 组织 ${snapshot.organizationId}`}</p>
+      <p>收款方 {snapshot.payee} · {payment}</p>
+      {snapshot.paidAt && <p>已付款 {new Date(snapshot.paidAt).toLocaleString('zh-CN')}</p>}
+      {snapshot.alipay && <p>支付宝 {formatPrice(snapshot.alipay.amount)} · {snapshot.alipay.tradeNo || snapshot.alipay.outTradeNo}</p>}
+      {snapshot.credit && <p>
+        {snapshot.credit.debtorId && `授信客户 ${snapshot.credit.debtorId} · `}
+        {snapshot.credit.paymentTermDays != null && `账期 ${snapshot.credit.paymentTermDays} 天`}
+        {snapshot.credit.availableAmount != null && ` · 可用授信 ${formatPrice(snapshot.credit.availableAmount)}`}
+        {snapshot.credit.status && ` · ${CREDIT_STATUS_LABELS[snapshot.credit.status] || snapshot.credit.status}`}
+      </p>}
+      {snapshot.recipient && <p>收货信息 {[snapshot.recipient.name, snapshot.recipient.institution,
+        snapshot.recipient.phone, snapshot.recipient.address].filter(Boolean).join(' · ')}</p>}
+      <ul className="space-y-1">
+        {snapshot.lines.map((line) => <li key={line.id}>
+          {[line.brand, line.name, line.catalogNumber, line.spec].filter(Boolean).join(' · ')}，{formatPrice(line.unitPrice)} × {line.quantity}{line.unit}
+          {line.leadTime && <p>货期 {line.leadTime}</p>}
+          {line.conditions && <p>{line.conditions}</p>}
+        </li>)}
+      </ul>
+      <p>商品金额 {formatPrice(snapshot.subtotal)}</p>
+      {snapshot.adjustments.map((row) => <p key={row.id}>{row.label} {formatPrice(row.amount)}</p>)}
+      {snapshot.pointsDiscount > 0 && <p>积分抵扣 {formatPrice(snapshot.pointsDiscount)}</p>}
+      <p className="font-semibold">订单合计 {formatPrice(snapshot.total)}</p>
+      {stale && <p role="alert" className="text-amber-800">订单明细已更新，请关闭后重新核对。</p>}
+      <div className="flex flex-wrap gap-2">
+        <button type="button" disabled={stale || submitting || disabled} onClick={onConfirm}
+          className="rounded-lg bg-brand-600 px-3 py-2 text-white disabled:opacity-50">
+          {title}
+        </button>
+        <button type="button" onClick={onClose} className="rounded-lg border border-gray-300 px-3 py-2">关闭明细</button>
+      </div>
+    </section>
+  );
+}
 
 function ShipmentPanel({ order, orderItems, fetchData, canWriteOrders, beginMfaStepUp }: { order: Order; orderItems: OrderItem[]; fetchData: () => Promise<void>; canWriteOrders: boolean; beginMfaStepUp: BeginAdminMfaStepUp }) {
   const [carrier, setCarrier] = useState('');
@@ -1680,7 +1809,9 @@ function OrderEvents({ events }: { events?: Array<{ id: string; type: string; ac
               <span className="font-medium break-all">{event.actorEmail || event.type}</span>
               <span className="whitespace-nowrap">{new Date(event.createdAt).toLocaleString('zh-CN')}</span>
             </div>
-            {event.message && <div className="text-gray-700 break-words">{event.message}</div>}
+            {event.message && <div className="text-gray-700 break-words">
+              {event.type === 'organization_order_approved' ? '客户单位已通过当时版本的内部审核。' : event.message}
+            </div>}
           </div>
         ))}
       </div>

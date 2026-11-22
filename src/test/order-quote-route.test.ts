@@ -12,11 +12,35 @@ vi.mock('@/lib/auth', () => ({
 }));
 
 import { POST as quotePOST } from '@/app/api/orders/[id]/quote/route';
+import { GET as adminOrderGET, PATCH as adminOrderPATCH } from '@/app/api/admin/orders/[id]/route';
+import { PATCH as legacyOrderPATCH } from '@/app/api/orders/[id]/route';
 
 const TERMINAL_STATUSES = ['cancelled', 'closed', 'shipped', 'completed', 'partially_shipped', 'confirmed'] as const;
 
-function quoteRequest(id: string) {
-  return new NextRequest(`http://localhost:3000/api/orders/${id}/quote`, { method: 'POST' });
+function quoteRequest(id: string, body?: object) {
+  return new NextRequest(`http://localhost:3000/api/orders/${id}/quote`, { method: 'POST',
+    ...(body ? { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : {}),
+  });
+}
+
+async function displayedApproval(id = 'o1') {
+  const response = await adminOrderGET(new NextRequest(`http://localhost:3000/api/admin/orders/${id}`), {
+    params: Promise.resolve({ id }),
+  });
+  expect(response.status).toBe(200);
+  return (await response.json()).order.approvalPreview;
+}
+
+const acceptancePaths = ['admin PATCH', 'legacy PATCH', 'quote POST'] as const;
+
+function submitAcceptance(path: (typeof acceptancePaths)[number], approvalVersion?: string, extra: object = {}) {
+  const id = 'o1';
+  const body = { status: 'confirmed', action: 'accept_order', approvalVersion, ...extra };
+  if (path === 'quote POST') return postQuote(id, body);
+  const req = new NextRequest(`http://localhost:3000/api/orders/${id}`, {
+    method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+  });
+  return (path === 'admin PATCH' ? adminOrderPATCH : legacyOrderPATCH)(req, { params: Promise.resolve({ id }) });
 }
 
 function seedCatalog(stockQuantity: number) {
@@ -49,8 +73,8 @@ function seedOrder(input: {
   `).run(`${id}_item`, id, quantity);
 }
 
-async function postQuote(id = 'o1') {
-  return quotePOST(quoteRequest(id), { params: Promise.resolve({ id }) });
+async function postQuote(id = 'o1', body?: object) {
+  return quotePOST(quoteRequest(id, body), { params: Promise.resolve({ id }) });
 }
 
 function orderRow(id = 'o1') {
@@ -88,7 +112,7 @@ describe('POST /api/orders/[id]/quote', () => {
 
   it('does not revive a cancelled order that already released inventory and credit', async () => {
     seedOrder({ status: 'pending', paymentMethod: 'bank_transfer', total: 200, quantity: 2 });
-    const confirmed = await postQuote();
+    const confirmed = await postQuote('o1', { approvalVersion: (await displayedApproval()).version });
     expect(confirmed.status).toBe(200);
     expect(await prisma.inventoryAccount.findFirst()).toMatchObject({ reservedQuantity: 2, availableQuantity: 8 });
     expect(await prisma.creditAccount.findUnique({ where: { userId: 'buyer_1' } })).toMatchObject({ usedAmount: 200 });
@@ -119,17 +143,18 @@ describe('POST /api/orders/[id]/quote', () => {
   it('confirms a pending post-delivery order and reserves product inventory and credit', async () => {
     seedOrder({ status: 'pending', paymentMethod: 'bank_transfer', total: 200, quantity: 2 });
 
-    const response = await postQuote();
+    const approval = await displayedApproval();
+    const response = await postQuote('o1', { approvalVersion: approval.version });
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({ success: true });
     expect(orderRow()).toEqual({ status: 'confirmed', quoteSent: 1 });
-    expect(await prisma.orderStatusHistory.findFirst()).toMatchObject({
-      fromStatus: 'pending',
-      toStatus: 'confirmed',
-      reason: 'quote_sent',
-      actorId: 'admin_test_id',
-      metadata: JSON.stringify({ action: 'accept_order', actorType: 'libereal_admin', version: 1 }),
+    const history = await prisma.orderStatusHistory.findFirstOrThrow();
+    expect(history).toMatchObject({
+      fromStatus: 'pending', toStatus: 'confirmed', reason: 'quote_sent', actorId: 'admin_test_id',
+    });
+    expect(JSON.parse(history.metadata!)).toMatchObject({
+      action: 'accept_order', actorType: 'libereal_admin', version: 2, orderVersion: approval.version, snapshot: approval.snapshot,
     });
     expect(await prisma.inventoryAccount.findFirst()).toMatchObject({
       variantId: null,
@@ -145,7 +170,7 @@ describe('POST /api/orders/[id]/quote', () => {
   it('confirms a paid Alipay order that is pending and reserves inventory without credit', async () => {
     seedOrder({ status: 'pending', paymentMethod: 'alipay', paidAt: new Date().toISOString(), total: 200, quantity: 2 });
 
-    const response = await postQuote();
+    const response = await postQuote('o1', { approvalVersion: (await displayedApproval()).version });
 
     expect(response.status).toBe(200);
     expect(orderRow()).toEqual({ status: 'confirmed', quoteSent: 1 });
@@ -180,7 +205,7 @@ describe('POST /api/orders/[id]/quote', () => {
     getTestDb().prepare(`UPDATE Product SET stockQuantity = 1 WHERE id = 'p1'`).run();
     seedOrder({ status: 'pending', paymentMethod: 'bank_transfer', quantity: 2, total: 200 });
 
-    const response = await postQuote();
+    const response = await postQuote('o1', { approvalVersion: (await displayedApproval()).version });
 
     expect(response.status).toBe(409);
     await expect(response.json()).resolves.toEqual({ error: 'INSUFFICIENT_AVAILABLE_INVENTORY' });
@@ -188,6 +213,92 @@ describe('POST /api/orders/[id]/quote', () => {
     expect(await prisma.inventoryReservation.count()).toBe(0);
     expect(await prisma.accountReceivable.count()).toBe(0);
     expect(await prisma.creditAccount.findUnique({ where: { userId: 'buyer_1' } })).toMatchObject({ usedAmount: 0 });
+  });
+
+  it.each(acceptancePaths)('%s rejects missing and changed approvals before committing a single current version', async (path) => {
+    seedOrder({});
+    const missing = await submitAcceptance(path);
+    expect(missing.status).toBe(409);
+    await expect(missing.json()).resolves.toMatchObject({ code: 'ORDER_APPROVAL_PREVIEW_REQUIRED' });
+
+    const original = await displayedApproval();
+    await prisma.orderItem.update({ where: { id: 'o1_item' }, data: { quantity: 3, unitPrice: 80 } });
+    await prisma.order.update({ where: { id: 'o1' }, data: { subtotal: 240, total: 240 } });
+    const staleLines = await submitAcceptance(path, original.version);
+    expect(staleLines.status).toBe(409);
+    await expect(staleLines.json()).resolves.toMatchObject({ code: 'ORDER_APPROVAL_CHANGED' });
+
+    const beforeCreditChange = await displayedApproval();
+    await prisma.creditAccount.update({ where: { userId: 'buyer_1' }, data: { paymentTermDays: 45 } });
+    const staleCredit = await submitAcceptance(path, beforeCreditChange.version);
+    expect(staleCredit.status).toBe(409);
+    await expect(staleCredit.json()).resolves.toMatchObject({ code: 'ORDER_APPROVAL_CHANGED' });
+    expect(orderRow()).toEqual({ status: 'pending', quoteSent: 0 });
+    expect(await prisma.orderStatusHistory.count()).toBe(0);
+    expect(await prisma.accountReceivable.count()).toBe(0);
+    expect(await prisma.inventoryReservation.count()).toBe(0);
+    expect(await prisma.notification.count()).toBe(0);
+
+    const latest = await displayedApproval();
+    expect(latest.snapshot).toMatchObject({
+      customerEmail: 'buyer@test.com', total: 240, credit: { debtorId: 'buyer_1', paymentTermDays: 45 },
+      lines: [{ quantity: 3, unitPrice: 80 }],
+    });
+    expect((await submitAcceptance(path, latest.version)).status).toBe(200);
+    expect((await submitAcceptance(path, latest.version)).status).toBe(409);
+    const history = await prisma.orderStatusHistory.findFirstOrThrow();
+    expect(JSON.parse(history.metadata!)).toMatchObject({ orderVersion: latest.version, snapshot: latest.snapshot });
+    expect(await prisma.orderStatusHistory.count()).toBe(1);
+    expect(await prisma.accountReceivable.findFirst()).toMatchObject({ amount: 240, paymentTermDaysSnapshot: 45 });
+    expect(await prisma.inventoryReservation.count()).toBe(1);
+  });
+
+  it('commits one acceptance when different endpoints race with the same preview', async () => {
+    seedOrder({});
+    const approval = await displayedApproval();
+    const attempts = await Promise.all([
+      submitAcceptance('admin PATCH', approval.version),
+      submitAcceptance('quote POST', approval.version),
+    ]);
+    expect(attempts.map((response) => response.status).sort()).toEqual([200, 409]);
+    expect(await prisma.orderStatusHistory.count({ where: { orderId: 'o1', toStatus: 'confirmed' } })).toBe(1);
+    expect(await prisma.accountReceivable.count()).toBe(1);
+    expect(await prisma.creditTransaction.count()).toBe(1);
+    expect(await prisma.inventoryReservation.count()).toBe(1);
+  });
+
+  it('requires saving a payment edit before an administrator can approve the new terms', async () => {
+    seedOrder({});
+    const current = await displayedApproval();
+    const response = await submitAcceptance('legacy PATCH', current.version, { paymentMethod: 'rjmart' });
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toMatchObject({ code: 'ORDER_APPROVAL_SAVE_CHANGES_FIRST' });
+    expect(await prisma.order.findUnique({ where: { id: 'o1' } })).toMatchObject({ status: 'pending', paymentMethod: 'bank_transfer' });
+    expect(await prisma.orderStatusHistory.count()).toBe(0);
+  });
+
+  it('keeps sending a quote and accepting a later paid order as distinct actions', async () => {
+    seedOrder({ status: 'pending', paymentMethod: 'alipay' });
+    const initial = await displayedApproval();
+    expect(initial.action).toBe('send_quote');
+    expect((await postQuote('o1', { action: 'send_quote', approvalVersion: initial.version })).status).toBe(200);
+    expect(orderRow()).toEqual({ status: 'pending', quoteSent: 1 });
+    expect(await prisma.orderStatusHistory.count()).toBe(0);
+
+    await prisma.order.update({ where: { id: 'o1' }, data: { paidAt: new Date() } });
+    const stale = await postQuote('o1', { action: 'send_quote', approvalVersion: initial.version });
+    expect(stale.status).toBe(409);
+    await expect(stale.json()).resolves.toMatchObject({ code: 'ORDER_APPROVAL_CHANGED' });
+    const oldConsumer = await postQuote();
+    expect(oldConsumer.status).toBe(409);
+    await expect(oldConsumer.json()).resolves.toMatchObject({ code: 'ORDER_APPROVAL_PREVIEW_REQUIRED' });
+    expect(orderRow()).toEqual({ status: 'pending', quoteSent: 1 });
+
+    expect((await submitAcceptance('quote POST', (await displayedApproval()).version)).status).toBe(200);
+    expect(orderRow()).toEqual({ status: 'confirmed', quoteSent: 1 });
+    expect(await prisma.notification.count()).toBe(2);
+    expect((await prisma.backgroundTask.findMany({ select: { dedupeKey: true } })).map((task) => task.dedupeKey))
+      .toEqual(expect.arrayContaining(['order-quote-email:o1', 'order-acceptance-email:o1']));
   });
 
   it('returns 404 when the order does not exist', async () => {
