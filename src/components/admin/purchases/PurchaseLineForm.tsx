@@ -15,7 +15,8 @@ export const primary = 'rounded bg-slate-900 px-3 py-1.5 text-sm text-white hove
 export const statuses = { draft:'待独立批准',approved:'采购已批准',ordered:'已登记供应商订购',on_hold:'供货变化待处理',superseded:'草稿已归并' };
 export const actionNames = { approve:'批准采购单',approve_lead_time:'单独批准超长订货周期',register_order:'登记供应商订购结果',record_payment:'登记实际付款',
   report_change:'登记供货变化',resolve_change:'回填协调结果',prepare:'准备采购',save_line:'保存采购资料',
-  review_legacy_approval:'复核旧采购批准',approve_remaining:'核准原单剩余应付',record_late_order_exception:'登记取消后的订购异常',
+  review_legacy_approval:'复核旧采购批准',approve_remaining:'核准原单剩余应付',record_late_order_exception:'登记实际订购异常',
+  resolve_order_exception:'核对订购异常处理结果',
   reapprove_purchase:'重新核准本单后续动作' };
 
 const textFields = {
