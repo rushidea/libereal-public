@@ -85,7 +85,7 @@ export default function PurchaseActions({ orderId, orderStatus, cancellation, po
   }
   if (po.needsLegacyReview && permit('approve')) choices.push('review_legacy_approval');
   if (po.needsFundingReapproval && permit('approve')) choices.push('reapprove_purchase');
-  if (po.needsRemainingReview && !po.openIncidentId && !po.needsLegacyReview && (!closed || po.orderedBefore) && permit('approve')) choices.push('approve_remaining');
+  if (po.canApproveRemaining && permit('approve')) choices.push('approve_remaining');
   if ((po.canRegisterHistorical || (!closed && po.status === 'approved')) && !po.orderedBefore && !po.needsLegacyReview && !po.commitmentExceptions.length && permit('write')) choices.push('register_order');
   if (po.canRecordCommitmentException && permit('approve')) choices.push('record_late_order_exception');
   if (openExceptions.length && permit('approve')) choices.push('resolve_order_exception');
@@ -140,12 +140,14 @@ export default function PurchaseActions({ orderId, orderStatus, cancellation, po
     && (row.detail.snapshot as { operation?: { refund?: { status?: string } } } | undefined)?.operation?.refund?.status === 'pending_review');
   return <article className="space-y-3 rounded border border-slate-200 p-4">
     <div className="flex flex-wrap justify-between gap-2"><strong>{po.lines[0]?.terms.supplier}</strong>
-      <span>{po.status === 'on_hold' && !po.openIncidentId ? '供货处理结果已登记' : statuses[po.status]}</span></div>
+      <span>{po.status === 'on_hold' && !po.openIncidentId ? '采购暂停' : statuses[po.status]}</span></div>
     <p className="break-all text-xs text-slate-600">{po.id} · 第 {po.revision} 版</p>
     {po.lines[0]?.fromPurchaseOrderId && <p className="break-all text-sm">替代采购 · 原采购单 {po.lines[0].fromPurchaseOrderId}</p>}
     <p className="text-sm">{po.remainingScope || po.dueCents === null ? '原合同应付' : '本单应付'} <strong>{money(po.totalCents)}</strong>　已登记实际付款 {money(po.paidCents)}</p>
     {po.remainingScope && <p className="text-sm">核准的剩余商品应付 {money(po.remainingScope.totalCents)} · 经核实冲抵 {money(po.remainingScope.appliedPaidCents)} · 尚未付 {money(po.dueCents ?? undefined)}</p>}
-    {po.needsRemainingReview && <p className="text-sm text-amber-900">部分商品已取消或转替代采购，须逐行核准原单剩余应付。</p>}
+    {po.needsRemainingReview && <p className="text-sm text-amber-900">{openExceptions.length
+      ? '核对实际承诺后，再逐行核准原单剩余应付。'
+      : '部分商品已取消或转替代采购，须逐行核准原单剩余应付。'}</p>}
     {po.needsLegacyReview && <p className="text-sm text-amber-900">继续登记前须复核原批准、书证和已付凭据。</p>}
     {po.needsFundingReapproval && <p className="text-sm text-amber-900">客户付款条件已变化。后续动作需重新核准，已实际发生的订购按原有效期补录。</p>}
     {cancellation && <p className="text-sm">客户订单{cancellation.status === 'closed' ? '关闭' : '取消'}时间 {new Date(cancellation.occurredAt).toLocaleString('zh-CN')}</p>}
@@ -188,6 +190,7 @@ export default function PurchaseActions({ orderId, orderStatus, cancellation, po
         {legacyFiles.map(sha256 => <fieldset key={sha256} className="space-y-3 rounded border p-3">
           <legend>核对原供货文件</legend>
           <p className="text-sm">原件出处 {po.documentReviewLines.find(row => row.sha256 === sha256)?.reference}</p>
+          <p className="text-sm">按原件标明本单采用的报价行。原件列有多项报价时，即使本单只采用一项，也请填写该项的原件行号。</p>
           <DocumentDigestField name={`document-${sha256}`} label="旧供货原件摘要" required/>
           <label className="grid gap-1 text-sm">原供货文件范围<select className={field} value={fileKinds[sha256] ?? ''} required
             onChange={event => setFileKinds(current => ({ ...current, [sha256]: event.target.value }))}>
@@ -309,7 +312,10 @@ export default function PurchaseActions({ orderId, orderStatus, cancellation, po
         {op.category === 'credit' && <p>{op.credit.status === 'unproven' ? '承诺时的授信依据或先后待核实' : '承诺时授信不满足原采购批准条件'}</p>}
         <p>责任人 {op.responsibleActor} · {op.description}</p>
       </div>}
-      {op.action === 'resolve_order_exception' && <p>核对 {op.resolution === 'payable_verified' ? '原合同应付' : '供方取消'} · 责任人 {op.responsibleActor} · {op.description}</p>}
+      {op.action === 'resolve_order_exception' && <div className="space-y-1 text-sm">
+        <p>核对 {op.resolution === 'payable_verified' ? '原合同应付' : '供方取消'} · 责任人 {op.responsibleActor} · {op.description}</p>
+        {op.remainingReviewPending && <p>部分商品的取消或替代已登记，剩余应付还需逐行核准。</p>}
+      </div>}
       {op.action === 'review_legacy_approval' && <div className="space-y-2 text-sm">
         <p>原批准人 {op.evidence.approval.actorId} · 原批准时间 {new Date(op.evidence.approval.recordedAt).toLocaleString('zh-CN')}</p>
         {op.evidence.payments.map(payment => <p key={payment.id}>原付款 {money(payment.amountCents)} · 流水 {payment.receiptReference}</p>)}
