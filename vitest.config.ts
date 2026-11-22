@@ -1,13 +1,12 @@
 import { defineConfig } from 'vitest/config'
 import react from '@vitejs/plugin-react'
-import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const root = path.dirname(fileURLToPath(import.meta.url))
 
 export default defineConfig({
-  cacheDir: path.join(tmpdir(), 'libereal-vitest-cache'),
+  cacheDir: path.join(root, '.tmp-ci-cache', 'vitest', 'vite'),
   plugins: [react()],
   test: {
     environment: 'jsdom',

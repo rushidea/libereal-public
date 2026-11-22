@@ -285,7 +285,7 @@ describe('credit summary helpers and admin credit UI', () => {
 
     const user = {
       id: 'usr_row_1',
-      email: '61216888@qq.com',
+      email: 'credit-customer@example.invalid',
       name: '张工',
       phone: '13800138000',
       company: '光谷科研',
@@ -403,11 +403,11 @@ describe('credit summary helpers and admin credit UI', () => {
   });
 
   it('removes desktop table horizontal clipping on /admin/users and auto-opens credit editor from query params', async () => {
-    window.history.replaceState({}, '', '/admin/users?q=61216888@qq.com&creditUserId=usr_target');
+    window.history.replaceState({}, '', '/admin/users?q=credit-customer@example.invalid&creditUserId=usr_target');
 
     const targetUser = {
       id: 'usr_target',
-      email: '61216888@qq.com',
+      email: 'credit-customer@example.invalid',
       name: '靶向客户',
       phone: null,
       company: '测试单位',
@@ -508,7 +508,7 @@ describe('credit summary helpers and admin credit UI', () => {
   });
 
   it('shows 超授信待审 and the Chinese credit error after reviewing either acceptance preview', async () => {
-    const customerEmail = '61216888@qq.com';
+    const customerEmail = 'credit-customer@example.invalid';
     const acceptance: MerchantOrderApprovalPreview = {
       version: 'a'.repeat(64),
       action: 'accept_order',
@@ -628,7 +628,7 @@ describe('credit summary helpers and admin credit UI', () => {
     const reviewSection = reviewSections[0]!;
     expect(reviewSection).toBeInTheDocument();
     const userLink = within(reviewSection).getByRole('link', { name: '去用户管理查看' });
-    expect(userLink).toHaveAttribute('href', '/admin/users?q=61216888%40qq.com&creditUserId=usr_target');
+    expect(userLink).toHaveAttribute('href', '/admin/users?q=credit-customer%40example.invalid&creditUserId=usr_target');
 
     // Toggle inline CustomerCreditEditor
     fireEvent.click(within(reviewSection).getByRole('button', { name: '调整永久 / 临时额度' }));

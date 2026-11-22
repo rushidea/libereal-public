@@ -75,6 +75,7 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "coverage/**",
+    ".tmp-ci-cache/**",
     "playwright-report/**",
     "test-results/**",
     "next-env.d.ts",
