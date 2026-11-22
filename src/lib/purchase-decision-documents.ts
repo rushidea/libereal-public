@@ -19,7 +19,7 @@ export type DecisionDocumentInput = {
 type Purpose = 'free_resend' | 'supplier_facts' | 'new_purchase' | 'amend_contract' | 'amend_and_replace' | 'cancel_unshipped' | 'replace_unshipped'
   | 'reduce_contract' | 'continue_contract' | 'decline_preparation' | 'reconfirm_terms';
 export type DecisionEffect = {
-  orderItemId: string; quantity: number; shortfallId?: string; shortfallDecision?: string; forwardingLossId?: string; outcome: string;
+  orderItemId: string; quantity: number; shortfallId?: string; shortfallDecision?: string; forwardingLossId?: string; outcome: string; document?: DecisionDocumentInput;
   replacement?: { terms: PurchaseTerms; source: { brand?: string | null; catalogNumber?: string | null; spec?: string | null; unit?: string | null; quantity: number } } | null;
 };
 
@@ -252,7 +252,7 @@ export async function previewDecisionDocuments(tx: Db, input: {
   }
   const requested = new Map<string,RequestedUse>();
   for (const use of input.effects) {
-    const selected = input.documents.find(row => row.orderItemId === use.orderItemId);
+    const selected = use.document ?? input.documents.find(row => row.orderItemId === use.orderItemId);
     const {orderId,purchaseOrderId} = input;
     const allocation = { orderId, purchaseOrderId, orderItemId: use.orderItemId, ...(use.shortfallId ? { shortfallId: use.shortfallId } : {}), quantity: use.quantity };
     for (const role of parties) {

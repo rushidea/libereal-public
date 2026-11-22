@@ -7,7 +7,7 @@ import { reviewCarrierMatch } from '@/lib/fulfillment-carrier';
 import { linkLegacyShipment } from '@/lib/fulfillment-legacy';
 import { reviewLegacyInventory } from '@/lib/fulfillment-legacy-stock';
 import { inputObject } from '@/lib/fulfillment-records';
-import { PurchaseError, requiredText } from '@/lib/purchase-terms';
+import { PurchaseError, purchaseTimestamp, requiredText } from '@/lib/purchase-terms';
 import { isPriceAdjustmentApprovalHash } from '@/lib/pricing-adjustment-approval';
 
 type Context = { params: Promise<{ id: string }> };
@@ -26,12 +26,15 @@ function failure(error: unknown) {
   return NextResponse.json({ error: '物流记录暂时无法处理' }, { status: 500 });
 }
 
-export async function GET(_req: NextRequest, { params }: Context) {
+export async function GET(req: NextRequest, { params }: Context) {
   const user = await requireAdmin('orders.read');
   if (user instanceof NextResponse) return user;
   try {
     const { id } = await params;
-    const workspace = await prisma.$transaction(tx => fulfillmentWorkspace(tx,id));
+    const actual = req.nextUrl.searchParams.get('dispatchAt');
+    const dispatchedAt = actual===null ? undefined : Date.parse(purchaseTimestamp(actual,'实际发运时间'));
+    if (dispatchedAt!==undefined && dispatchedAt>Date.now()) throw new PurchaseError('实际发运时间不能晚于今天的登记时间',400);
+    const workspace = await prisma.$transaction(tx => fulfillmentWorkspace(tx,id,dispatchedAt));
     const permissions = await getAdminPermissions(user);
     return NextResponse.json({ workspace, capabilities: { warehouse: permissions.includes('inventory.write'),
       shortfall: permissions.includes('purchases.approve') } }, { headers: { 'Cache-Control': 'private, no-store' } });

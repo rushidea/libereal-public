@@ -40,10 +40,30 @@ export async function purchaseShortfalls(tx: Db, orderId: string, activities: Pu
     select: { purchaseOrderId: true, orderItemId: true, fromPurchaseOrderId: true, authorizationId: true, quantity: true } });
   const authorized = new Map(dispositions.map(row => [sourceKey(row.approvalId,row.orderItemId),row]));
   const authorizedShortfalls = new Map(decisions.map(row => [sourceKey(row.approvalId,row.orderItemId),row]));
+  // Each draft split spends a share of the already authorized quantity. It never creates a new shortfall decision.
+  const replacementRights = new Map([...authorized].filter(([,row])=>row.outcome==='replace'));
+  for (const entry of activities) {
+    if (entry.action !== 'resolve_change') continue;
+    const allocations = purchaseOperation(entry.detail).draftAllocations;
+    if (!Array.isArray(allocations)) continue;
+    for (const split of allocations) {
+      const originKey = sourceKey(split.authorizationId,split.orderItemId);
+      const parent = replacementRights.get(originKey);
+      const retained = split.retained?.source?.quantity;
+      if (!parent || parent.purchaseOrderId!==split.fromPurchaseOrderId || parent.quantity!==split.originalQuantity
+        || !positiveCents(retained) || !positiveCents(split.quantity) || retained+split.quantity!==parent.quantity
+        || (split.moved && split.moved.source?.quantity!==split.quantity)) {
+        replacementRights.delete(originKey);
+        continue;
+      }
+      replacementRights.set(originKey,{...parent,quantity:retained});
+      if (split.moved) replacementRights.set(sourceKey(entry.id,split.orderItemId),{...parent,quantity:split.quantity});
+    }
+  }
   const replacementOrigins = new Map<string,StockSource | null>();
   for (const row of replacements) {
-    const decision = authorized.get(sourceKey(row.authorizationId,row.orderItemId));
-    const proved = decision?.purchaseOrderId === row.fromPurchaseOrderId && decision.outcome === 'replace' && decision.quantity === row.quantity;
+    const decision = replacementRights.get(sourceKey(row.authorizationId,row.orderItemId));
+    const proved = decision?.purchaseOrderId === row.fromPurchaseOrderId && decision.quantity === row.quantity;
     replacementOrigins.set(sourceKey(row.purchaseOrderId,row.orderItemId), !proved ? null
       : decision.shortfallId ? { shortfallId: decision.shortfallId } : { purchaseLine: sourceKey(row.fromPurchaseOrderId,row.orderItemId) });
   }

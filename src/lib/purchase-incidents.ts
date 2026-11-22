@@ -9,9 +9,14 @@ type IncidentProgress = {
   scopeBasis: 'recorded' | 'reviewed' | 'reviewed_disposition' | 'entire_contract';
 };
 
+export type IncidentReviewResult = 'scope_confirmed' | 'duplicate' | 'no_impact';
+
 export type SupplyIncident = {
   id: string;
   reportedBy: string;
+  reportVersion: string | null;
+  status: 'open' | 'settled' | 'duplicate' | 'no_impact';
+  linkedTo: string | null;
   reference: string;
   description: string;
   changeKind: string;
@@ -23,33 +28,76 @@ export type SupplyIncident = {
   factReview: { reference: string; description: string; actorId: string } | null;
 };
 
-export function supplyIncidents(ledger: PurchaseActivity[]) {
-  const active = new Map<string,SupplyIncident>();
+export function supplyIncidentHistory(ledger: PurchaseActivity[]) {
+  const history = new Map<string,SupplyIncident>();
   for (const row of ledger) {
     if (row.action !== 'report_change' && row.action !== 'review_change_scope' && row.action !== 'resolve_change') continue;
     const op = purchaseOperation(row.detail);
     const responsibility = typeof op.responsibility === 'string' ? op.responsibility : null;
     if (row.action === 'report_change') {
       const scope = Array.isArray(op.affectedLines) ? op.affectedLines as IncidentQuantity[] : null;
-      active.set(row.id,{ id:row.id,reportedBy:row.actorId,reference:String(op.reference),description:String(op.description),
+      const version = purchaseObject(row.detail.snapshot).version;
+      history.set(row.id,{ id:row.id,reportedBy:row.actorId,reportVersion:typeof version==='string'?version:null,
+        status:'open',linkedTo:null,reference:String(op.reference),description:String(op.description),
         changeKind:String(op.changeKind),previousStatus:String(op.previousStatus),responsibility,scope,outstanding:scope,
         lastReviewedBy:null,factReview:null });
       continue;
     }
-    const incident = typeof op.incidentId === 'string' ? active.get(op.incidentId) : undefined;
-    if (!incident) continue;
+    const incident = typeof op.incidentId === 'string' ? history.get(op.incidentId) : undefined;
+    if (!incident || incident.status !== 'open') continue;
+    const reviewed = {...incident,responsibility:responsibility ?? incident.responsibility,lastReviewedBy:row.actorId};
     if (row.action === 'review_change_scope') {
-      active.set(incident.id,{...incident,scope:op.scope as IncidentQuantity[],outstanding:op.outstanding as IncidentQuantity[],
-        responsibility:responsibility ?? incident.responsibility,lastReviewedBy:row.actorId,
-        factReview:{reference:String(op.reference),description:String(op.description),actorId:row.actorId}});
+      const factReview = {reference:String(op.reference),description:String(op.description),actorId:row.actorId};
+      if (op.reviewResult === 'duplicate' || op.reviewResult === 'no_impact') {
+        const linkedTo = op.reviewResult === 'duplicate' && typeof op.relatedIncidentId === 'string' ? op.relatedIncidentId : null;
+        history.set(incident.id,{...reviewed,status:op.reviewResult,linkedTo,outstanding:[],factReview});
+        if (linkedTo) for (const [id,entry] of history) {
+          if (entry.linkedTo === incident.id) history.set(id,{...entry,linkedTo});
+        }
+      } else {
+        history.set(incident.id,{...reviewed,scope:op.scope as IncidentQuantity[],outstanding:op.outstanding as IncidentQuantity[],factReview});
+      }
     } else {
       const progress = purchaseObject(op.incidentProgress) as Partial<IncidentProgress>;
-      if (!progress.outstanding?.length) active.delete(incident.id);
-      else active.set(incident.id,{...incident,scope:progress.scope ?? incident.scope,outstanding:progress.outstanding,
-        responsibility:responsibility ?? incident.responsibility,lastReviewedBy:row.actorId});
+      history.set(incident.id,{...reviewed,scope:progress.scope ?? incident.scope,
+        status:progress.outstanding?.length ? 'open' : 'settled',outstanding:progress.outstanding ?? []});
     }
   }
-  return [...active.values()];
+  return [...history.values()];
+}
+
+export function supplyIncidents(ledger: PurchaseActivity[]) {
+  return supplyIncidentHistory(ledger).filter(row=>row.status==='open');
+}
+
+export function supplyIncidentsForDispatchAt(ledger: PurchaseActivity[], at: number) {
+  const existing = supplyIncidents(ledger.filter(row=>Date.parse(row.createdAt)<=at));
+  if (!existing.length) return existing;
+  const laterReviews = ledger.filter(row=>row.action==='review_change_scope' && Date.parse(row.createdAt)>at)
+    .map(row=>purchaseOperation(row.detail));
+  return existing.flatMap(issue=>{
+    const facts = laterReviews.filter(row=>row.incidentId===issue.id);
+    if (facts.some(row=>row.reviewResult==='duplicate' || row.reviewResult==='no_impact')) return [];
+    // A later verification can identify what an old notice affected. A later commercial decision supplies no earlier authority.
+    const clarified = !issue.outstanding && facts.find(row=>row.previousOutstanding===null && Array.isArray(row.outstanding));
+    return [clarified ? {...issue,outstanding:clarified.outstanding as IncidentQuantity[]} : issue];
+  });
+}
+
+export function incidentLink(incident: SupplyIncident, history: SupplyIncident[], relatedId: string | undefined) {
+  const selected = history.find(row=>row.id===relatedId);
+  const canonical = selected?.linkedTo ? history.find(row=>row.id===selected.linkedTo) : selected;
+  if (!canonical || canonical.id===incident.id || (canonical.status!=='open' && canonical.status!=='settled')) {
+    throw new PurchaseError('请选择同一采购单的原供货事项，不能关联本事项或无影响记录');
+  }
+  if (incident.outstanding?.length) {
+    const coverage = canonical.scope;
+    if (!coverage || incident.outstanding.some(row=>!coverage.some(original=>
+      incidentQuantityKey(row)===incidentQuantityKey(original) && row.quantity<=original.quantity))) {
+      throw new PurchaseError('本事项还包含原事项未覆盖的货物，请核对独立范围后再关联');
+    }
+  }
+  return canonical;
 }
 
 function readSource(raw: unknown): IncidentSource | undefined {

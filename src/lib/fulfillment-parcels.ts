@@ -3,7 +3,7 @@ import { configuredCarrier, pendingForWaybill, reconcilePendingForParcel } from 
 import { fulfillmentStatus, isInactiveOrderStatus, validateShipmentItems } from '@/lib/order-domain';
 import { releaseProcurementInventoryHold, shipProcurementBatch } from '@/lib/inventory';
 import { purchaseWorkspace } from '@/lib/purchase-orders';
-import { heldIncidentQuantity } from '@/lib/purchase-incidents';
+import { heldIncidentQuantity, supplyIncidentsForDispatchAt } from '@/lib/purchase-incidents';
 import { PurchaseError, requiredText } from '@/lib/purchase-terms';
 import { availableReceipt, confirmPreview, inputObject, optionalText, parcelInclude, parcelKeys, parcelLineBalance, positiveQuantity,
   shipmentEvidence, verifyRepeat, type FulfillmentActor, type FulfillmentDb as Db } from '@/lib/fulfillment-records';
@@ -46,7 +46,7 @@ function dispatchInput(raw: unknown) {
   return { requestId: requiredText(input.requestId, '操作编号'), route, lines, carrier, trackingNumber, feedSource, ...shipmentEvidence(input) };
 }
 
-export async function fulfillmentWorkspace(tx: Db, orderId: string) {
+export async function fulfillmentWorkspace(tx: Db, orderId: string, dispatchedAt?: number) {
   const order = await tx.order.findUnique({ where: { id: orderId }, select: { id: true, status: true, email: true,
     addressSnapshot: { select: { name: true, address: true, phone: true, institution: true } },
     orderItems: { select: { id: true, name: true, quantity: true, shippedQty: true }, orderBy: { position: 'asc' } } } });
@@ -62,8 +62,9 @@ export async function fulfillmentWorkspace(tx: Db, orderId: string) {
   const freeResends: typeof purchasing.fulfillment.freeResends = [];
   const purchases = purchasing.orders.flatMap(po => {
     const receipt = po.orderReceipt;
-    if (!receipt?.occurredAt || po.commitmentState === 'supplier_cancelled' || po.commitmentState === 'pending'
-      || po.incidents.some(row=>!row.outstanding)
+    const incidents = dispatchedAt === undefined ? po.incidents : supplyIncidentsForDispatchAt(po.ledger,dispatchedAt);
+    if (!receipt?.occurredAt || (dispatchedAt!==undefined && Date.parse(receipt.occurredAt)>dispatchedAt) || po.commitmentState === 'supplier_cancelled' || po.commitmentState === 'pending'
+      || incidents.some(row=>!row.outstanding)
       || ((po.status === 'on_hold' || po.incidents.length) && po.needsLegacyReview)
       || (po.status === 'on_hold' && !po.incidents.length && !po.needsRemainingReview)) return [];
     return receipt.lines.flatMap(ordered => {
@@ -73,25 +74,32 @@ export async function fulfillmentWorkspace(tx: Db, orderId: string) {
       const supplied = dispatched.get(lineKey({ purchaseOrderId: po.id, orderItemId: line.orderItemId })) ?? 0;
       const purchaseOrderId = po.id;
       const orderItemId = line.orderItemId;
-      const held = heldIncidentQuantity(po.incidents,orderItemId,{kind:'unshipped'});
-      const available = po.needsRemainingReview ? 0 : Math.max(0,Math.min(ordered.quantity,remaining)-supplied-held);
+      const held = heldIncidentQuantity(incidents,orderItemId,{kind:'unshipped'});
+      const payableNotProved = po.payableReviewWindows.some(row=>row.orderItemId===orderItemId
+        && (dispatchedAt===undefined ? !row.reviewedAt
+          : Date.parse(row.changedAt)<=dispatchedAt && (!row.reviewedAt || Date.parse(row.reviewedAt)>dispatchedAt)));
+      const available = payableNotProved ? 0 : Math.max(0,Math.min(ordered.quantity,remaining)-supplied-held);
       let canForward = false;
       if (remaining > 0) for (const source of po.incidentSources) {
         if (source.orderItemId !== orderItemId || source.source.kind !== 'receipt') continue;
         // A received lot still belongs to the specific parcel whose commercial terms are under review.
-        if (source.parcelLineId && po.incidents.some(issue=>issue.outstanding?.some(row=>
+        if (source.parcelLineId && incidents.some(issue=>issue.outstanding?.some(row=>
           row.source?.kind==='parcel' && row.source.id===source.parcelLineId))) continue;
-        const permitted = source.quantity-heldIncidentQuantity(po.incidents,orderItemId,source.source);
+        const permitted = source.quantity-heldIncidentQuantity(incidents,orderItemId,source.source);
         if (permitted <= 0) continue;
         forwardLimits.set(source.source.id,permitted);
         canForward = true;
       }
-      if (po.needsRemainingReview && !canForward) return [];
-      if (!po.needsRemainingReview) for (const resend of purchasing.fulfillment.freeResends) {
+      let canResend = false;
+      for (const resend of purchasing.fulfillment.freeResends) {
         if (resend.purchaseOrderId !== purchaseOrderId || resend.orderItemId !== orderItemId) continue;
-        const permitted = resend.available-heldIncidentQuantity(po.incidents,orderItemId,{kind:'resend',id:resend.approvalId});
-        if (permitted > 0) freeResends.push({...resend,available:permitted});
+        if (dispatchedAt!==undefined && Date.parse(resend.authorizedAt)>dispatchedAt) continue;
+        const permitted = resend.available-heldIncidentQuantity(incidents,orderItemId,{kind:'resend',id:resend.approvalId});
+        if (permitted <= 0) continue;
+        freeResends.push({...resend,available:permitted});
+        canResend = true;
       }
+      if (dispatchedAt===undefined && po.needsRemainingReview && !canForward && !canResend && available<=0) return [];
       return [{ purchaseOrderId, orderItemId, name: line.source.name, supplier: line.terms.supplier ?? '',
         catalogNumber: line.source.catalogNumber, productId: line.source.productId, variantId: line.source.variantId,
         orderedAt: receipt.occurredAt!, available, contractVersion: po.version,
@@ -105,10 +113,10 @@ export async function fulfillmentWorkspace(tx: Db, orderId: string) {
     parcel.route !== 'supplier_to_libereal' || parcel.status === 'exception' ? [] : parcel.lines.flatMap(line =>
       line.receipts.flatMap(row => {
         const available = forwardLimits.get(row.id);
-        if (!available) return [];
+        const receivedAt = parcel.events.find(event=>event.id===row.eventId)?.occurredAt.toISOString() ?? null;
+        if (!available || (dispatchedAt!==undefined && (!receivedAt || Date.parse(receivedAt)>dispatchedAt))) return [];
         return [{id:row.id,purchaseOrderId:line.purchaseOrderId,orderItemId:line.orderItemId,batchNumber:row.inventoryBatch.batchNumber,
-          available,inventoryAccountId:row.inventoryBatch.inventoryAccountId,...row.inventoryBatch.account,
-          receivedAt:parcel.events.find(event=>event.id===row.eventId)?.occurredAt.toISOString() ?? null}];
+          available,inventoryAccountId:row.inventoryBatch.inventoryAccountId,...row.inventoryBatch.account,receivedAt}];
       })));
   const inventoryChoices = [];
   for (const parcel of parcels) {
@@ -154,7 +162,7 @@ async function dispatchPlan(tx: Db, orderId: string, raw: unknown, actor: Fulfil
   if (input.trackingNumber && await tx.fulfillmentParcel.count({ where: { orderId, route: input.route, carrier: input.carrier, trackingNumber: input.trackingNumber } })) {
     throw new PurchaseError('本单同一运输路线已经登记该运单，请核对原包裹');
   }
-  const view = await fulfillmentWorkspace(tx, orderId);
+  const view = await fulfillmentWorkspace(tx, orderId, Date.parse(input.occurredAt));
   if (!['confirmed','partially_shipped'].includes(view.order.status)) throw new PurchaseError('当前订单不能登记新的发货，请核对原接单和履约状态');
   const lines = input.lines.map(row => {
     const purchased = view.purchases.find(line => line.purchaseOrderId === row.purchaseOrderId && line.orderItemId === row.orderItemId);
