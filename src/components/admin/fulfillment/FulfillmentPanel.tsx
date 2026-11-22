@@ -18,6 +18,8 @@ const labels: Record<string,string> = {
   orderStatus:'原订单状态', receiptId:'原实收记录', inventoryAccountId:'库存账户', spec:'规格', unit:'单位', packageType:'包装', baseQuantity:'包装数量',
   inventory:'入仓归属', identity:'核对依据', approved:'已批准的商品', decisions:'双方确认', resolutions:'实物短失或退回', disposition:'本次实物处置',
   receivedAt:'实际入仓时间', history:'历史状态记录', priorShippedQty:'此前记录的已发数量', historicalAttributionId:'原核对记录',
+  holdReview:'发运偏差核对',unreleased:'发运时未放行的数量',incidentIds:'当时相关供货事项',
+  responsibility:'责任人',supplierReference:'供方书面核对',customerReference:'客户书面回复',
   resendApprovalId:'免费重发批准', resend:'原免费重发依据', allocation:'原出库流水归属', shipmentItemId:'原运单商品行',
 };
 function PreviewValue({ value }: { value: unknown }) {
@@ -30,6 +32,13 @@ function PreviewValue({ value }: { value: unknown }) {
   const text = String(value);
   const display = routeLabels[text] ?? statusLabels[text] ?? (text === 'customer' ? '客户' : text);
   return <span className="break-all">{display}</span>;
+}
+function reviewedHold(raw: string) {
+  try {
+    const review = JSON.parse(raw).holdReview;
+    return review && typeof review.responsibility==='string' && typeof review.description==='string'
+      ? {responsibility:review.responsibility,description:review.description} : null;
+  } catch { return null; }
 }
 function progressDetail(raw: string) {
   try { const data = JSON.parse(raw); return typeof data.description === 'string' ? data.description : ''; } catch { return ''; }
@@ -45,8 +54,8 @@ export default function FulfillmentPanel({ orderId, canWrite, stepUp, onUpdated 
   const [pending,setPending] = useState<Pending|null>(null);
   const [error,setError] = useState('');
   const url = '/api/admin/orders/'+encodeURIComponent(orderId)+'/fulfillment';
-  async function readAt(dispatchedAt: string): Promise<Workspace> {
-    const response = await fetch(url+'?dispatchAt='+encodeURIComponent(dispatchedAt),{cache:'no-store'});
+  async function readAt(dispatchedAt: string, reviewHold: boolean): Promise<Workspace> {
+    const response = await fetch(url+'?dispatchAt='+encodeURIComponent(dispatchedAt)+(reviewHold?'&reviewHold=1':''),{cache:'no-store'});
     const body = await response.json();
     if (!response.ok || !body.workspace) throw new Error(body.error || '无法核对当时可用的货物');
     return body.workspace;
@@ -116,7 +125,13 @@ export default function FulfillmentPanel({ orderId, canWrite, stepUp, onUpdated 
               {receipt.releasedQuantity > 0 && ' · 已处置 '+receipt.releasedQuantity}）</span>)}
           </li>)}</ul>
           <details><summary className="cursor-pointer text-sm text-brand-700">物流进展和凭据</summary>
-            <ol className="mt-2 space-y-2 text-sm">{parcel.events.map(event => <li key={event.id}>
+            {parcel.events.filter(event=>event.kind==='dispatch').map(event=>{
+              const review=reviewedHold(event.details);
+              return review && <p key={event.id} className="rounded bg-amber-50 p-2 text-sm text-amber-900">
+                当时未放行的实际发运已核对 · 核对人 {event.actorId} · 责任人 {review.responsibility} · {review.description}
+              </p>;
+            })}
+          <ol className="mt-2 space-y-2 text-sm">{parcel.events.map(event => <li key={event.id}>
               {new Date(event.occurredAt).toLocaleString('zh-CN')} · {statusLabels[event.kind] ?? event.kind} · {event.source === 'staff' ? '人工登记' : event.source}
               {event.status === 'resolved' && ' · 已核结'}<div>{progressDetail(event.details)} {event.reference}</div>
             </li>)}</ol></details>
@@ -144,7 +159,7 @@ export default function FulfillmentPanel({ orderId, canWrite, stepUp, onUpdated 
         </details>}
         {canWrite && ['confirmed','partially_shipped'].includes(view.order.status) && <details className="rounded border border-gray-200 p-3">
           <summary className="cursor-pointer text-sm font-medium text-brand-700">登记采购发货或转发</summary>
-          <div className="mt-3"><DispatchForm view={view} submit={preview} busy={busy} readAt={readAt}/></div></details>}
+          <div className="mt-3"><DispatchForm view={view} submit={preview} busy={busy} readAt={readAt} canReviewHold={capabilities.shortfall}/></div></details>}
         {!view.parcels.length && !view.legacyShipments.length && <p className="text-sm text-gray-600">这笔订单还没有实际发出的包裹。</p>}
       </>}
     </>}

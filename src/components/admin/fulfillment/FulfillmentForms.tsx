@@ -38,11 +38,13 @@ export function Proof({ explanation, fixedDate }: { explanation?: string; fixedD
   </div>;
 }
 
-export function DispatchForm({ view, submit, busy, readAt }: {
-  view: Workspace; submit: SubmitIntent; busy: boolean; readAt: (value: string) => Promise<Workspace>;
+export function DispatchForm({ view, submit, busy, readAt, canReviewHold }: {
+  view: Workspace; submit: SubmitIntent; busy: boolean; canReviewHold: boolean;
+  readAt: (value: string, reviewHold: boolean) => Promise<Workspace>;
 }) {
   const [route,setRoute] = useState('supplier_to_customer');
   const [earlier,setEarlier] = useState(false);
+  const [reviewHold,setReviewHold] = useState(false);
   const [date,setDate] = useState('');
   const [checked,setChecked] = useState<Workspace|null>(null);
   const [looking,setLooking] = useState(false);
@@ -51,35 +53,43 @@ export function DispatchForm({ view, submit, busy, readAt }: {
   async function lookup() {
     if (!date || looking) return;
     setLooking(true);setLookupError('');setChecked(null);
-    try { setChecked(await readAt(new Date(date).toISOString())); }
+    try { setChecked(await readAt(new Date(date).toISOString(),reviewHold)); }
     catch (e) { setLookupError(e instanceof Error ? e.message : '无法核对该时点的订购与实物'); }
     finally { setLooking(false); }
   }
   const forwarding = route === 'libereal_to_customer';
   const rows = !sources ? [] : forwarding ? sources.receipts.flatMap(receipt => {
     const p = sources.purchases.find(row => row.purchaseOrderId === receipt.purchaseOrderId && row.orderItemId === receipt.orderItemId);
-    return p ? [{ ...p, sourceReceiptId: receipt.id, batchNumber: receipt.batchNumber, available: receipt.available, resendApprovalId: undefined }] : [];
+    return p ? [{ ...p, sourceReceiptId: receipt.id, batchNumber: receipt.batchNumber, available: receipt.available, holdAllowance:receipt.holdAllowance, resendApprovalId: undefined }] : [];
   }) : [
     ...sources.purchases.filter(p => p.available > 0).map(p => ({ ...p, sourceReceiptId: null, batchNumber: null, resendApprovalId: undefined })),
     ...sources.freeResends.flatMap(resend => {
       const p = sources.purchases.find(row => row.purchaseOrderId === resend.purchaseOrderId && row.orderItemId === resend.orderItemId);
-      return p ? [{ ...p, sourceReceiptId: null, batchNumber: null, available: resend.available, resendApprovalId: resend.approvalId }] : [];
+      return p ? [{ ...p, sourceReceiptId: null, batchNumber: null, available: resend.available, holdAllowance:resend.holdAllowance, resendApprovalId: resend.approvalId }] : [];
     }),
   ];
   return <div className="space-y-3">
     <label className="flex gap-2 text-sm"><input type="checkbox" checked={earlier} disabled={looking || busy}
-      onChange={event=>{setEarlier(event.target.checked);setChecked(null);setLookupError('');}}/>补录已实际发运的包裹</label>
+      onChange={event=>{setEarlier(event.target.checked);setReviewHold(false);setChecked(null);setLookupError('');}}/>补录已实际发运的包裹</label>
     {earlier && <div className="flex flex-wrap items-end gap-2">
       <Label title="要查询的实际发运时间"><input type="datetime-local" step="1" className={inputStyle} value={date} disabled={looking}
         onChange={event=>{setDate(event.target.value);setChecked(null);setLookupError('');}}/></Label>
       <button type="button" className={actionStyle} disabled={looking || busy || !date} onClick={()=>void lookup()}>核对当时可用的货物</button>
+      {canReviewHold && <label className="flex w-full items-center gap-2 text-sm">
+        <input type="checkbox" checked={reviewHold} disabled={looking || busy}
+          onChange={event=>{setReviewHold(event.target.checked);setChecked(null);setLookupError('');}}/>
+        核对当时未放行的实际发运
+      </label>}
       {lookupError && <p role="alert" className="text-sm text-red-700">{lookupError}</p>}
+      {reviewHold && <p className="w-full text-sm text-gray-700">此处凭原运单登记实际发运及双方核对结果。包裹以实际发运时间跟踪，保留当时未放行的事实。</p>}
     </div>}
     {sources && <form key={earlier ? date : 'current'} className="space-y-3" onSubmit={event => {
     event.preventDefault(); const form = new FormData(event.currentTarget);
     const lines = rows.map((row,index) => ({ purchaseOrderId: row.purchaseOrderId, orderItemId: row.orderItemId,
       sourceReceiptId: row.sourceReceiptId, resendApprovalId: row.resendApprovalId, quantity: Number(read(form,'qty'+index)) })).filter(row => row.quantity > 0);
-    submit('dispatch',{ ...evidence(form), route, lines, carrier: read(form,'carrier'), trackingNumber: read(form,'trackingNumber'),
+    const holdReview = reviewHold ? {supplierReference:read(form,'heldSupplierReference'),customerReference:read(form,'heldCustomerReference'),
+      responsibility:read(form,'heldResponsibility'),description:read(form,'heldDescription'),sha256:read(form,'heldSha256')} : undefined;
+    submit('dispatch',{ ...evidence(form), route, lines, carrier: read(form,'carrier'), trackingNumber: read(form,'trackingNumber'),holdReview,
       feedSource: form.has('feed') ? view.feedSource : null });
   }}>
     <Label title="发货路线"><select className={inputStyle} value={route} onChange={e => setRoute(e.target.value)}>
@@ -88,14 +98,24 @@ export function DispatchForm({ view, submit, busy, readAt }: {
     {rows.length ? <fieldset key={route} className="space-y-1"><legend className="text-sm font-medium">本次实际发出的商品</legend>
       {rows.map((row,index) => <Label key={JSON.stringify([row.purchaseOrderId,row.orderItemId,row.sourceReceiptId,row.resendApprovalId])}
         title={[row.name,row.supplier,row.purchaseOrderId,row.batchNumber && '批次 '+row.batchNumber,
-          row.resendApprovalId && '已批准的免费重发','可发 '+row.available].filter(Boolean).join(' · ')}>
+          row.resendApprovalId && '已批准的免费重发',reviewHold ? '当时正常可发 '+(row.holdAllowance?.ordinarilyAvailable ?? 0)+' · 可核对实发 '+row.available : '可发 '+row.available]
+        .filter(Boolean).join(' · ')}>
         <input className={inputStyle} type="number" name={'qty'+index} min={0} max={row.available} step={1} defaultValue={0}/>
       </Label>)}</fieldset> : <p className="text-sm text-gray-600">{forwarding ? '这笔订单还没有可转发的实际收货批次。' : '这笔订单还没有可用于本次发货的供方订购记录。'}</p>}
     {rows.length > 0 && <>
       <div className="grid gap-3 sm:grid-cols-2"><Label title="承运方"><input name="carrier" className={inputStyle}/></Label>
         <Label title="运单号"><input name="trackingNumber" className={inputStyle}/></Label></div>
       {view.feedSource && <label className="flex gap-2 text-sm"><input type="checkbox" name="feed"/>接收 {view.feedSource} 的运单回传</label>}
-      <Proof fixedDate={earlier?date:undefined}/><button className={actionStyle} disabled={busy}>预览发货</button>
+      <Proof fixedDate={earlier?date:undefined}/>
+      {reviewHold && <fieldset className="grid gap-3 sm:grid-cols-2">
+        <legend className="font-medium">当时未放行的实际发运核对</legend>
+        <Label title="供方对实际发运的书面确认"><input name="heldSupplierReference" className={inputStyle} required/></Label>
+        <Label title="客户对接续履约的书面回复"><input name="heldCustomerReference" className={inputStyle} required/></Label>
+        <Label title="发运偏差的责任人"><input name="heldResponsibility" className={inputStyle} required/></Label>
+        <Label title="已核实的偏差与后续处理结果"><textarea name="heldDescription" className={inputStyle} required/></Label>
+        <DocumentDigestField name="heldSha256" label="双方核对结论的书证摘要" required/>
+      </fieldset>}
+      <button className={actionStyle} disabled={busy}>预览发货</button>
     </>}
   </form>}
   </div>;
