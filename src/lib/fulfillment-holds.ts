@@ -3,7 +3,8 @@ import { purchaseObject } from '@/lib/purchase-activity';
 import { positiveCents, PurchaseError } from '@/lib/purchase-terms';
 
 export type HoldAssignment = { incidentId: string; quantity: number };
-type Event = { kind: string; status: string; details: string; createdAt: Date };
+type Event = { kind: string; status: string; details: string; createdAt: Date; id?:string;
+  reference?:string|null; evidenceSha256?:string|null };
 
 export function readHoldAssignments(raw: unknown): HoldAssignment[] | undefined {
   if (raw===undefined) return undefined;
@@ -26,7 +27,7 @@ export function dispatchHoldFacts(events: Event[]) {
   const isPending=purchaseObject(dispatch.holdReview).status==='pending';
   const decisions=events.filter(row=>row.kind==='review_dispatch_hold' && row.status==='applied').flatMap(row=>{
     const facts=details(row).holdDecisions;
-    return Array.isArray(facts) ? facts.map(item=>({...item,recordedAt:row.createdAt})) : [];
+    return Array.isArray(facts) ? facts.map(item=>({...item,recordedAt:row.createdAt,reviewEventId:row.id,reference:row.reference,sha256:row.evidenceSha256})) : [];
   });
   return Array.isArray(dispatch.lines) ? dispatch.lines.flatMap(raw=>{
     const line=purchaseObject(raw);
@@ -44,7 +45,8 @@ export function dispatchHoldFacts(events: Event[]) {
     }) : [];
     return [{parcelLineId:line.parcelLineId,quantity,pending,isPending,incidentIds:old.incidentIds as string[],
       assignments:assigned,pendingAssignments,resendApprovalId:typeof line.resendApprovalId==='string'?line.resendApprovalId:undefined,
-      decisions:resolved as Array<{receiptId?:string;resolutionId?:string;incidentId?:string;quantity:number;outcome:string;recordedAt:Date}>}];
+      decisions:resolved as Array<{receiptId?:string;resolutionId?:string;incidentId?:string;quantity:number;outcome:string;recordedAt:Date;
+        reviewEventId?:string;reference?:string|null;sha256?:string|null}>}];
   }) : [];
 }
 

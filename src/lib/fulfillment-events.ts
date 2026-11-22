@@ -5,6 +5,7 @@ import { dispatchHoldFacts, forwardableHeldReceipt, readHoldAssignments, type Ho
 import { clearHeldDispatchShare, locateHeldDispatch } from '@/lib/fulfillment-hold-locations';
 import { supplyIncidentsForDispatchAt } from '@/lib/purchase-incidents';
 import { incidentQuantityKey, type IncidentSource } from '@/lib/purchase-incident-scope';
+import { planShortfallFollowup, recordShortfallFollowup, type ShortfallFollowupPlan } from '@/lib/purchase-shortfall-followup';
 import { purchaseWorkspace } from '@/lib/purchase-orders';
 import { documentSha256, PurchaseError, requiredText } from '@/lib/purchase-terms';
 import { availableReceipt, confirmPreview, inputObject, optionalText, parcelInclude, parcelKeys, parcelLineBalance, parcelProgress,
@@ -76,11 +77,12 @@ async function planHoldDecisions(tx: Db, orderId: string, parcel: FulfillmentPar
   if (input.kind!=='review_dispatch_hold') return [];
   const inbound=parcel.route==='supplier_to_libereal';
   const facts=dispatchHoldFacts(parcel.events);
-  const needsLocation=input.lines.some(row=>row.outcome==='identify');
+  const needsLocation=input.lines.some(row=>row.outcome==='identify' || row.outcome==='shortfall');
   const workspace=needsLocation ? await purchaseWorkspace(tx,orderId) : undefined;
   const planned: Array<{parcelLineId:string;orderItemId:string;purchaseOrderId:string;quantity:number;outcome:string;
     incidentId?:string;receiptId?:string;resolutionId?:string;assignments?:HoldAssignment[];source?:IncidentSource;
-    shortfallEvidence?:{kind:string;eventId:string;reference:string;occurredAt:string;sha256:string;documentRow:number|null}}>=[];
+    shortfallEvidence?:{kind:string;eventId:string;reference:string;occurredAt:string;sha256:string;documentRow:number|null};
+    purchaseFollowup?:ShortfallFollowupPlan}>=[];
   for (const row of input.lines) {
     const line=parcel.lines.find(line=>line.id===row.parcelLineId);
     const hold=facts.find(fact=>fact.parcelLineId===row.parcelLineId);
@@ -140,15 +142,27 @@ async function planHoldDecisions(tx: Db, orderId: string, parcel: FulfillmentPar
       const original=Array.isArray(applied) ? applied.find(item=>item.parcelLineId===line.id
         && item.kind===actual?.kind && item.quantity===actual?.quantity) : undefined;
       const receiptId=original?.receipt?.id;
-      const used=[...hold.decisions,...planned].filter(item=>item.resolutionId===row.resolutionId).reduce((sum,item)=>sum+item.quantity,0);
+      const previouslyReviewed=hold.decisions.filter(item=>item.resolutionId===row.resolutionId).reduce((sum,item)=>sum+item.quantity,0);
+      const staged=planned.filter(item=>item.resolutionId===row.resolutionId);
+      const used=previouslyReviewed+staged.reduce((sum,item)=>sum+item.quantity,0);
       if (!actual || !original || !recorded?.reference || !recorded.evidenceSha256 || recorded.occurredAt.getTime()>Date.parse(input.occurredAt)
         || actual.quantity<quantity+used || row.receiptId || (returning && inbound && !receiptId)) {
         throw new PurchaseError(returning ? '退回处理须对应本包裹行已登记的实际退回与数量'
           : '短失核对须对应本包裹行已登记的实际短少或丢失与未核对数量');
       }
-      const shortfallEvidence=returning ? undefined : {kind:actual.kind,eventId:recorded.id,reference:recorded.reference,
+      if (returning) {
+        planned.push({...decision,resolutionId:actual.id,...(receiptId ? {receiptId} : {})});
+        continue;
+      }
+      const shortfallEvidence={kind:actual.kind,eventId:recorded.id,reference:recorded.reference,
         occurredAt:recorded.occurredAt.toISOString(),sha256:recorded.evidenceSha256,documentRow:recorded.evidenceRow};
-      planned.push({...decision,resolutionId:actual.id,...(receiptId ? {receiptId} : {}),...(shortfallEvidence ? {shortfallEvidence} : {})});
+      const purchase=workspace?.orders.find(row=>row.id===line.purchaseOrderId);
+      if (!purchase) throw new PurchaseError('请核对短失实际对应的原采购单');
+      const purchaseFollowup=planShortfallFollowup(purchase,{parcelId:parcel.id,parcelLineId,orderItemId:line.orderItemId,
+        purchaseOrderId:purchase.id,incidentId:selected.incidentId,originalIncidentId:hold.incidentIds.length===1 ? hold.incidentIds[0] : undefined,
+        resolutionId:actual.id,quantity,occurredAt:shortfallEvidence.occurredAt},
+        previouslyReviewed,planned.flatMap(row=>row.purchaseFollowup?.transfers ?? []),staged.flatMap(row=>row.purchaseFollowup?.decisionLinks ?? []));
+      planned.push({...decision,resolutionId:actual.id,shortfallEvidence,purchaseFollowup});
       continue;
     }
     if (row.resolutionId || (outcome!=='continue' && outcome!=='release_to_stock')) throw new PurchaseError('请按双方书面决定选择实际处理结果');
@@ -300,13 +314,22 @@ export async function recordParcelEvent(tx: Db, orderId: string, parcelId: strin
     details: JSON.stringify({ description: input.description, exceptionId: input.exceptionId, lines, resolutions, disposal,
       decisions: input.decisions, holdDecisions:holdDecisions.length?holdDecisions:undefined,holdResponsibility:input.holdResponsibility,
       actionHash: expectedHash }) } });
+  const followupsRecorded=new Map<string,number>();
   for (const row of holdDecisions) {
+    if (!row.purchaseFollowup) continue;
+    const {revision,target}=row.purchaseFollowup;
+    const offset=followupsRecorded.get(target.purchaseOrderId) ?? 0;
+    await recordShortfallFollowup(tx,orderId,{...row.purchaseFollowup,revision:revision+offset},event.id,{
+      reference:input.reference,occurredAt:input.occurredAt,sha256:input.sha256,
+      description:input.description,responsibility:input.holdResponsibility!,
+    },actor);
+    followupsRecorded.set(target.purchaseOrderId,offset+1);
+  }
+  for (const row of holdDecisions) {
+    if (row.purchaseFollowup) continue;
     if (row.source && row.assignments) await locateHeldDispatch(tx,orderId,[{...row,source:row.source,assignments:row.assignments}],
       {...input,occurredAt:parcel.dispatchedAt.toISOString()},actor);
-    if (row.incidentId) {
-      const followup=row.outcome==='shortfall' ? {responsibility:input.holdResponsibility!,description:input.description} : undefined;
-      await clearHeldDispatchShare(tx,orderId,{...row,followup},row.incidentId,input,actor);
-    }
+    if (row.incidentId) await clearHeldDispatchShare(tx,orderId,row,row.incidentId,input,actor);
     if (row.outcome==='release_to_stock' && row.receiptId) {
       await disposeProcurementBatch(tx,{receiptId:row.receiptId,orderId,quantity:row.quantity,disposition:'released_to_stock',actorId:actor.id});
     }

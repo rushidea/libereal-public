@@ -1,4 +1,5 @@
 import { dispatchHoldFacts } from '@/lib/fulfillment-holds';
+import { dispatchShortfallKey, unlinkedShortfall, type DispatchShortfall } from '@/lib/purchase-shortfall-followup';
 import { purchaseOperation, type PurchaseActivity } from '@/lib/purchase-activity';
 import { jsonObject } from '@/lib/order-catalog-repricing';
 import { availableReceipt, parcelLineBalance, type FulfillmentDb as Db } from '@/lib/fulfillment-records';
@@ -36,7 +37,7 @@ export async function purchaseShortfalls(tx: Db, orderId: string, activities: Pu
       event: { select: { occurredAt: true, reference: true } },
     } } } },
     events: { where: { kind: {in:['dispatch','review_dispatch_hold']}, status:'applied' },
-      select: {kind:true,status:true,details:true,createdAt:true} },
+      select: {id:true,kind:true,status:true,details:true,createdAt:true,reference:true,evidenceSha256:true} },
   }, orderBy: [{ dispatchedAt: 'asc' }, { id: 'asc' }] });
   const replacements = await tx.purchaseReplacementLine.findMany({ where: { orderId },
     select: { purchaseOrderId: true, orderItemId: true, fromPurchaseOrderId: true, authorizationId: true, quantity: true } });
@@ -232,6 +233,18 @@ export async function purchaseShortfalls(tx: Db, orderId: string, activities: Pu
     return line?.purchaseOrderId ? [{...hold,purchaseOrderId:line.purchaseOrderId,orderItemId:line.orderItemId,
       parcelId:parcel.id,sourceReceiptId:line.sourceReceiptId}] : [];
   }));
-  return { supplierDispatched: [...supplierDispatched.values()], supplierReceived, warehouseReceived, warehouseTransit, shortfalls, freeResends, incidentSources,dispatchHolds,
+  const usedHandoffs=new Map<string,number>();
+  const unlinkedDispatchShortfalls=dispatchHolds.flatMap(hold=>hold.decisions.flatMap(decision=>{
+    const {resolutionId,incidentId,reviewEventId,reference,sha256,quantity}=decision;
+    const actual=resolutionId ? resolutions.get(resolutionId) : undefined;
+    if (decision.outcome!=='shortfall' || !resolutionId || !incidentId || !reviewEventId || !reference || !sha256
+      || !actual || actual.line.id!==hold.parcelLineId || !['loss','shortage'].includes(actual.resolution.kind) || !positiveCents(quantity) || quantity>actual.resolution.quantity) return [];
+    const target:DispatchShortfall={purchaseOrderId:hold.purchaseOrderId,orderItemId:hold.orderItemId,parcelId:hold.parcelId,
+      parcelLineId:hold.parcelLineId,incidentId,originalIncidentId:hold.incidentIds.length===1 ? hold.incidentIds[0] : undefined,
+      resolutionId,quantity,occurredAt:actual.resolution.event.occurredAt.toISOString()};
+    const missing=unlinkedShortfall({...target,key:dispatchShortfallKey(reviewEventId,target),reviewEventId,reference,sha256},activities,usedHandoffs);
+    return missing ? [missing] : [];
+  }));
+  return { supplierDispatched: [...supplierDispatched.values()], supplierReceived, warehouseReceived, warehouseTransit, shortfalls, freeResends, incidentSources,dispatchHolds,unlinkedDispatchShortfalls,
     parcelLinesWithPriorHoldTransfer, replacementsWithPriorHoldTransfer, parcelLinesWithUnverifiedStockSource, replacementsWithUnverifiedStockSource };
 }

@@ -38,7 +38,6 @@ type ReviewedShare = Omit<OwnedLine,'source'|'assignments'> & {
   quantity:number;
   receiptId?:string;
   resolutionId?:string;
-  followup?:{responsibility:string;description:string};
 };
 
 export async function clearHeldDispatchShare(
@@ -54,10 +53,7 @@ export async function clearHeldDispatchShare(
   const earlier=history.find(issue=>issue.id===(applied?.incidentId ?? historicalIncidentId));
   const issue=earlier?.linkedTo ? history.find(issue=>issue.id===earlier.linkedTo) : earlier;
   if (issue?.status!=='open' || !issue.outstanding) return;
-  const origins=[
-    ...(line.receiptId ? [{...located,source:{kind:'receipt' as const,id:line.receiptId}}] : []),located,
-    ...(line.followup && line.resolutionId ? [{...located,source:{kind:'shortfall' as const,id:line.resolutionId}}] : []),
-  ];
+  const origins=line.receiptId ? [{...located,source:{kind:'receipt' as const,id:line.receiptId}},located] : [located];
   let remaining=quantity;
   for (const origin of origins) {
     const outstanding=issue.outstanding.find(item=>incidentQuantityKey(item)===incidentQuantityKey(origin));
@@ -66,7 +62,7 @@ export async function clearHeldDispatchShare(
     const from={...origin,quantity:affected};
     const location=line.resolutionId ? {from,to:{...from,source:{kind:'shortfall' as const,id:line.resolutionId}}} : undefined;
     await addPurchaseActivity(tx,{orderId,purchaseOrderId,actor,action:'clear_held_dispatch',
-      detail:{snapshot:{operation:{incidentId:issue.id,quantity:from,location,followup:line.followup,occurredAt,reference,sha256}}}});
+      detail:{snapshot:{operation:{incidentId:issue.id,quantity:from,location,occurredAt,reference,sha256}}}});
     remaining-=affected;
   }
   if (remaining===quantity) return;

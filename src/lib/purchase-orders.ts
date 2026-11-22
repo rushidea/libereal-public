@@ -14,6 +14,7 @@ import { creditExceptionMatches, paymentPlanAt, paymentPlanContent, paymentPlanF
 import { purchaseCreditAt } from '@/lib/purchase-credit-history';
 import { availableIncidentSources, clarifiedIncidentScope, incidentQuantities, incidentLink, resolveIncidentScope, supplyIncidentHistory, type IncidentLocation, type IncidentReviewResult, type SupplyIncident } from '@/lib/purchase-incidents';
 import { incidentLineTotals, incidentQuantityKey, type IncidentCandidate, type IncidentQuantity } from '@/lib/purchase-incident-scope';
+import { planShortfallFollowup, recordShortfallFollowup, shortfallPart } from '@/lib/purchase-shortfall-followup';
 import type { ContractDispatchSource, ShortfallDecision } from '@/lib/purchase-shortfalls';
 import {
   attestPurchaseTerms, documentSha256, initialPurchaseTerms, missingPurchaseTerms, missingWrittenTerms, normalizePurchaseTerms, positiveCents, PurchaseError,
@@ -49,6 +50,7 @@ export type PurchaseActionInput = {
   coordinationLines?: IncidentQuantity[];
   confirmsFullIncidentScope?: boolean;
   responsibility?: string;
+  shortfallHandoffKey?: string;
   paymentReference?: string; paymentSha256?: string; leadTimeReference?: string; leadTimeSha256?: string;
   remainingLines?: Array<{ orderItemId: string; payableCents: number }>;
   appliedPaidCents?: number;
@@ -873,6 +875,9 @@ function actionDetails(
     return { action };
   }
   if (action === 'record_payment') {
+    if (view.fulfillment.unlinkedDispatchShortfalls.some(row=>row.purchaseOrderId===po.id)) {
+      throw new PurchaseError('本单已核实的误发短失仍待采购接续，请核对原记录并移交具名经办人');
+    }
     if (view.fulfillment.dispatchHolds.some(row=>row.purchaseOrderId===po.id && row.pending>0)) {
       throw new PurchaseError('实际发运偏差仍待客户书面处理，须核对完成后再登记相关采购付款');
     }
@@ -892,6 +897,21 @@ function actionDetails(
       authorizedDueCents: po.dueCents };
   }
   if (action === 'report_change') {
+    if (input.shortfallHandoffKey !== undefined) {
+      const review=view.fulfillment.unlinkedDispatchShortfalls.find(row=>row.key===input.shortfallHandoffKey && row.purchaseOrderId===po.id);
+      if (!review || input.affectedLines!==undefined) throw new PurchaseError('请选择本采购单仍未接续的已核实短失');
+      const reviewed=view.fulfillment.dispatchHolds.flatMap(row=>row.parcelLineId===review.parcelLineId ? row.decisions : [])
+        .filter(row=>row.outcome==='shortfall' && row.resolutionId===review.resolutionId).reduce((sum,row)=>sum+row.quantity,0);
+      const {key,reviewEventId,reference:reviewReference,sha256:reviewSha256,...target}=review;
+      const purchaseFollowup=planShortfallFollowup(po,target,Math.max(0,reviewed-target.quantity));
+      return { action,changeKind:'other' as const,previousStatus:po.status,
+        reference:requiredText(input.reference,'短失接续的档案出处'),
+        description:requiredText(input.description,'已核实的接续经过和结果'),
+        responsibility:requiredText(input.responsibility,'采购后续责任人'),
+        affectedLines:[shortfallPart(target)], supplyFacts:supplyFacts(view,po.id,[shortfallPart(target)]),
+        shortfallRecovery:{key,reviewEventId,reviewReference,reviewSha256,purchaseFollowup},
+      };
+    }
     if (!po.lines.length || !['unavailable', 'delay', 'price', 'other'].includes(input.changeKind ?? '')) conflict();
     const reference = requiredText(input.reference, '供货变化的来源');
     const affectedLines = input.affectedLines === undefined ? undefined : readIncidentScope(view,po,input.affectedLines,input.changeKind!);
@@ -1197,6 +1217,14 @@ export async function applyPurchaseAction(tx: Db, input: PurchaseActionInput, ac
   const view = await purchaseWorkspace(tx, input.orderId);
   const po = view.orders.find(row => row.id === input.purchaseOrderId)!;
   const op = preview.operation;
+  if (op.action==='report_change' && 'shortfallRecovery' in op && op.shortfallRecovery) {
+    const {purchaseFollowup,reviewEventId}=op.shortfallRecovery;
+    await recordShortfallFollowup(tx,input.orderId,purchaseFollowup,reviewEventId,{
+      reference:op.reference,description:op.description,responsibility:op.responsibility,
+      occurredAt:purchaseFollowup.target.occurredAt,
+    },actor,{requestKey,detail:{intent,actionHash,authorization,snapshot:preview}});
+    return purchaseWorkspace(tx,input.orderId);
+  }
   if (op.action !== 'resolve_change' || op.dispositions?.some(line => line.replacement)) {
     await assertSupplierDocumentScopes(tx, supplyEvidenceFor(po, op), {
       attestation: { orderId: input.orderId, purchaseOrderId: op.action === 'resolve_change' ? undefined : po.id, actor },

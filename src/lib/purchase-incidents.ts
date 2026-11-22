@@ -30,6 +30,7 @@ export type SupplyIncident = {
   outstanding: IncidentQuantity[] | null;
   lastReviewedBy: string | null;
   factReview: { reference: string; description: string; actorId: string } | null;
+  shortfallOrigin?: {incidentId:string;parcelId:string;parcelLineId:string;resolutionId:string};
   shortfallFollowups?: {activityId:string;resolutionId:string;quantity:number;responsibility:string;description:string;reference:string;actorId:string}[];
 };
 
@@ -55,10 +56,21 @@ export function supplyIncidentHistory(ledger: PurchaseActivity[]) {
     if (row.action === 'report_change') {
       const scope = Array.isArray(op.affectedLines) ? op.affectedLines as IncidentQuantity[] : null;
       const version = purchaseObject(row.detail.snapshot).version;
+      const handoff=purchaseObject(op.shortfallHandoff);
+      const source=scope?.[0]?.source;
+      const shortfallFollowups=typeof handoff.parcelLineId==='string' && typeof handoff.incidentId==='string'
+        && source?.kind==='shortfall' && typeof handoff.resolutionId==='string' && handoff.resolutionId===source.id && responsibility && scope?.length===1
+        ? [{activityId:row.id,resolutionId:source.id,quantity:scope[0].quantity,responsibility,
+          description:String(op.description),reference:String(op.reference),actorId:row.actorId}] : undefined;
+      const shortfallOrigin=shortfallFollowups && typeof handoff.incidentId==='string' && typeof handoff.parcelId==='string'
+        && typeof handoff.parcelLineId==='string' && typeof handoff.resolutionId==='string'
+        ? {incidentId:typeof handoff.originalIncidentId==='string' ? handoff.originalIncidentId : handoff.incidentId,
+          parcelId:handoff.parcelId,parcelLineId:handoff.parcelLineId,resolutionId:handoff.resolutionId}
+        : undefined;
       history.set(row.id,{ id:row.id,reportedBy:row.actorId,reportVersion:typeof version==='string'?version:null,
         status:'open',linkedTo:null,reference:String(op.reference),description:String(op.description),
         changeKind:String(op.changeKind),previousStatus:String(op.previousStatus),responsibility,scope,originalScope:scope,outstanding:scope,
-        lastReviewedBy:null,factReview:null });
+        lastReviewedBy:null,factReview:null,shortfallOrigin,shortfallFollowups });
       continue;
     }
     const incident = typeof op.incidentId === 'string' ? history.get(op.incidentId) : undefined;
