@@ -72,7 +72,7 @@ function makeWorkspace(status?: Purchase['status'], lineChanges: Partial<Line> =
     eligibility: { eligible: true, reason: null, basis: { acceptanceId: 'test-acceptance', receivableId: 'test-receivable',
       reserveId: 'test-credit-reserve', amount: 250, mode: 'credit', payment, planEvidenceId: null } },
     lines: [line], orders: purchase ? [purchase] : [], activities: [],
-    fulfillment: { version, targets: [], delivered: [], historicalDelivered: [], supplierDispatched: [], forwardingShortfalls: [], inconsistent: [], ledger: [] },
+    fulfillment: { version, targets: [], delivered: [], historicalDelivered: [], supplierDispatched: [], shortfalls: [], freeResends: [], inconsistent: [], ledger: [] },
   };
 }
 
@@ -126,6 +126,45 @@ afterEach(() => {
 });
 
 describe('supplier purchasing page', () => {
+  it('offers the three written shortfall decisions and previews a free resend without changing the payable', async () => {
+    const workspace=makeWorkspace('on_hold');
+    const [purchase]=workspace.orders;
+    purchase.orderedBefore=true;
+    purchase.paidCents=900;
+    const loss={resolutionId:'TEST-TRACKED-SHORTFALL',purchaseOrderId:purchaseId,orderItemId,route:'supplier_to_customer',
+      originalContract:true,quantity:1,available:1,reference:'TEST-ORIGINAL-LOSS-DOCUMENT',occurredAt:'2031-04-15T00:00:00.000Z',independentlyReplaced:0};
+    workspace.fulfillment.shortfalls=[loss];
+    workspace.fulfillment.supplierDispatched=[{purchaseOrderId:purchaseId,orderItemId,quantity:2}];
+    const posts=mockWorkspace(workspace,['purchases.read','purchases.approve'],body=>{
+      const result=preview(body,workspace);
+      const operation={...result.preview.snapshot.operation,dispositions:[{orderItemId,quantity:1,outcome:'resend',shortfallId:loss.resolutionId,
+        shortfallDecision:'free_resend'}],refund:null};
+      return Response.json({preview:{...result.preview,snapshot:{...result.preview.snapshot,operation}}});
+    });
+    render(<PurchaseManager initialOrder={orderId}/>);
+    fireEvent.click(await screen.findByRole('button',{name:'回填协调结果'}));
+    fill('协调结果','shortfall');
+    fill('已核实的物流短失',loss.resolutionId);
+    const decisions=within(screen.getByLabelText('双方书面决定'));
+    expect(decisions.getByRole('option',{name:/免费重发/})).toBeInTheDocument();
+    expect(decisions.getByRole('option',{name:/变更原合同/})).toBeInTheDocument();
+    expect(decisions.getByRole('option',{name:/保留原合同应付.*独立采购/})).toBeInTheDocument();
+    fill('双方书面决定','free_resend');
+    fill('本次受影响数量','1');
+    fill('人工与供应商协调的书面依据','TEST-SUPPLIER-AGREES-TO-RESEND');
+    fill('客户对方案的回复依据','TEST-CUSTOMER-AGREEMENT');
+    fill('供方书面回复摘要','e'.repeat(64));
+    fill('客户书面回复摘要','f'.repeat(64));
+    fill('双方确认的具体结果','供方书面承诺免费重发一件。');
+    expect(screen.queryByLabelText('原付款与未决退款的后续核对安排')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button',{name:'查看完整预览'}));
+    const panel=await screen.findByRole('region',{name:'操作预览'});
+    expect(panel).toHaveTextContent('免费重发，保留原合同');
+    expect(posts[0]).toMatchObject({action:'resolve_change',outcome:'shortfall',dispositions:[{
+      orderItemId,quantity:1,shortfallId:loss.resolutionId,shortfallDecision:'free_resend',
+    }]});
+  });
+
   it('finds the customer order, preserves missing terms, and keeps customer conditions out of supplier fields', async () => {
     const workspace = makeWorkspace();
     const requests: RequestBody[] = [];

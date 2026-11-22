@@ -6,6 +6,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import { NextRequest } from 'next/server';
 import { GET as noticesGET } from '@/app/api/admin/fulfillment/notices/route';
 import { GET as fulfillmentGET, POST as fulfillmentPOST } from '@/app/api/admin/orders/[id]/fulfillment/route';
+import { POST as nativeShipmentPOST } from '@/app/api/admin/orders/[id]/shipments/route';
 import { GET as orderGET } from '@/app/api/orders/[id]/route';
 import { GET as ordersGET } from '@/app/api/orders/route';
 import { ADMIN_ROLE_DEFINITIONS, type AdminRoleKey } from '@/lib/admin-permissions';
@@ -195,6 +196,54 @@ afterEach(() => {
 });
 
 describe('admin fulfillment HTTP and customer shipment views', () => {
+  it.each([true,false])('reconciles only the second unit after an original native shipment (automatic evidence=%s)', async witnessed => {
+    await prisma.shipment.delete({where:{id:orderId+'-shipment'}});
+    const itemId=orderId+'-line';
+    const product=await prisma.product.create({data:{name:'合成混合旧单',catalogNumber:'TEST-MIXED-NATIVE',brand:'合成品牌',price:100,stockQuantity:3}});
+    await prisma.order.update({where:{id:orderId},data:{status:'confirmed'}});
+    await prisma.orderItem.update({where:{id:itemId},data:{productId:product.id,shippedQty:0,status:'confirmed'}});
+    const account=await prisma.inventoryAccount.create({data:{productId:product.id,actualQuantity:5,availableQuantity:3,reservedQuantity:2}});
+    const hold=await prisma.inventoryReservation.create({data:{inventoryAccountId:account.id,orderId,orderItemId:itemId,quantity:2}});
+    const native=await nativeShipmentPOST(new NextRequest(endpoint(orderId).replace('fulfillment','shipments'),{method:'POST',
+      body:JSON.stringify({method:'logistics',carrier,trackingNumber:'TEST-ORIGINAL-NATIVE-WAYBILL',items:[{orderItemId:itemId,quantity:1}],
+        stepUpToken:await grant(operator)})}),params(orderId));
+    const first=(await expectJson(native,201)).shipment;
+    const firstItem=await prisma.shipmentItem.findFirstOrThrow({where:{shipmentId:first.id}});
+    const originalMove=await prisma.inventoryTransaction.findFirstOrThrow({where:{orderId,reservationId:hold.id,type:'ship'}});
+    expect(originalMove.quantity).toBe(-1);
+    if (!witnessed) await prisma.orderEvent.updateMany({where:{orderId,type:'shipment_created'},data:{metadata:null}});
+    vi.setSystemTime(Date.now()+1000);
+    const oldStatus=await prisma.orderStatusHistory.create({data:{orderId,fromStatus:'partially_shipped',toStatus:'shipped',
+      actorId:operator,actorEmail:email(operator),reason:'原后台人工标为发货',createdAt:new Date()}});
+    await prisma.order.update({where:{id:orderId},data:{status:'shipped'}});
+    const booking={...evidence('legacy-only-second-unit'),historyId:oldStatus.id,carrier,trackingNumber:'TEST-ARCHIVED-SECOND-WAYBILL',
+      description:'第二件有实际运单原件，旧系统只登记状态',lines:[{orderItemId:itemId,quantity:1}]};
+    const registered=await preview('link_legacy',booking);
+    await expectJson(await confirm('link_legacy',booking,registered.actionHash,await grant(operator)),200);
+    const stock=(await expectJson(await read(),200)).workspace.legacyInventory[0];
+    expect(stock).toMatchObject({awaitingReview:1,available:witnessed?1:0,recordedOutsideReview:witnessed?0:1});
+    if (witnessed) expect(stock.recognized).toMatchObject([{transactionId:originalMove.id,shipmentItemId:firstItem.id,quantity:1}]);
+    else {
+      const placement={...evidence('named-original-stock-allocation'),parcelId:stock.parcelId,parcelLineId:stock.parcelLineId,quantity:1,
+        outcome:'allocate_recorded_movement',description:'按原始库存出库凭证逐行归入第一张运单',
+        inventoryTransactionId:originalMove.id,shipmentItemId:firstItem.id};
+      const allocated=await preview('reconcile_legacy_inventory',placement);
+      await expectJson(await confirm('reconcile_legacy_inventory',placement,allocated.actionHash,await grant(operator)),200);
+      await expectJson(await confirm('reconcile_legacy_inventory',placement,allocated.actionHash,await grant(operator)),200);
+      await expectJson(await post({stage:'preview',action:'reconcile_legacy_inventory',input:{
+        ...placement,...evidence('attempt-use-same-stock-movement-again'),
+      }}),409);
+    }
+    expect(await prisma.inventoryAccount.findUnique({where:{id:account.id}})).toMatchObject({actualQuantity:4,reservedQuantity:1,shippedQuantity:1});
+    const final={...evidence('check-second-old-delivery-stock'),parcelId:stock.parcelId,parcelLineId:stock.parcelLineId,
+      quantity:1,outcome:'warehouse_stock_shipped',description:'第二件实际仓库出库，原库存流水只覆盖第一件'};
+    const checked=await preview('reconcile_legacy_inventory',final);
+    await expectJson(await confirm('reconcile_legacy_inventory',final,checked.actionHash,await grant(operator)),200);
+    expect(await prisma.inventoryAccount.findUnique({where:{id:account.id}})).toMatchObject({actualQuantity:3,reservedQuantity:0,shippedQuantity:2});
+    expect(await prisma.inventoryTransaction.findUnique({where:{id:originalMove.id}})).toEqual(originalMove);
+    expect(await prisma.inventoryTransaction.count({where:{orderId,reservationId:hold.id,type:'ship'}})).toBe(2);
+  });
+
   it.each(['external_supply_release','warehouse_stock_shipped'] as const)('separates historical waybill verification, receipt, and legacy stock reconciliation (%s)', async outcome => {
     await prisma.shipment.delete({where:{id:orderId+'-shipment'}});
     const itemId = orderId+'-line';

@@ -113,7 +113,7 @@ function mockAdmin(permissions: string[] | Promise<string[]>, startingInbound = 
       return Response.json({ capabilities: { warehouse: Array.isArray(permissions) && permissions.includes('inventory.write'), shortfall: false }, workspace: {
         order: { id: orderId, status: 'confirmed', orderItems: [item] },
         purchases: [purchase], receipts: [], legacyShipments: [], legacyBackfill: { history: [], lines: [] },
-        legacyInventory: [], inventoryChoices: [], unmatched: [], feedSource: source,
+        legacyInventory: [], inventoryChoices: [], unmatched: [], freeResends: [], feedSource: source,
         parcels: startingInbound ? [parcel('supplier_to_libereal', operationApplied ? 2 : 0)] :
           operationApplied ? [parcel('supplier_to_customer')] : [],
       } });

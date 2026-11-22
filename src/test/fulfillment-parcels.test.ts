@@ -2,6 +2,8 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import { NextRequest } from 'next/server';
 import { GET as orderGET, PATCH as orderPATCH } from '@/app/api/admin/orders/[id]/route';
 import { dispatchParcel, fulfillmentWorkspace, recordParcelEvent } from '@/lib/fulfillment-parcels';
+import { receiveCarrierNotice } from '@/lib/fulfillment-carrier';
+import { linkLegacyShipment } from '@/lib/fulfillment-legacy';
 import { receiveInventoryBatch, reserveOrderInventory } from '@/lib/inventory';
 import { pricingContentHash } from '@/lib/pricing-adjustment-approval';
 import { prisma } from '@/lib/prisma';
@@ -32,7 +34,7 @@ vi.mock('@/lib/admin-mfa-settings', () => ({
 }));
 
 type Route = 'supplier_to_customer' | 'supplier_to_libereal' | 'libereal_to_customer';
-type DispatchLine = { purchaseOrderId: string; orderItemId: string; quantity: number; sourceReceiptId?: string };
+type DispatchLine = { purchaseOrderId: string; orderItemId: string; quantity: number; sourceReceiptId?: string; resendApprovalId?: string };
 type EventLine = { parcelLineId: string; quantity: number; batchNumber?: string; productId?: string };
 type PurchaseAction = Omit<Parameters<typeof previewPurchaseAction>[1], 'orderId' | 'purchaseOrderId' | 'version'>;
 
@@ -318,8 +320,24 @@ describe('procurement-bound fulfillment parcels', () => {
     await event(inbound.id,missingInbound);
     await event(inbound.id,missingInbound);
     await expect(event(inbound.id,shortage('cannot-reopen-same-shortage',inbound.lines[0].id,'shortage'))).rejects.toThrow(/尚未签收/);
-    expect((await workspace()).purchases.find(row=>row.purchaseOrderId===relay)?.available).toBe(1);
-    await dispatch(dispatchInput('supplier-resends-one','supplier_to_libereal',[{purchaseOrderId:relay,orderItemId:relayLineId,quantity:1}]));
+    expect((await workspace()).purchases.find(row=>row.purchaseOrderId===relay)?.available).toBe(0);
+    await expect(dispatch(dispatchInput('unapproved-resend','supplier_to_libereal',[{purchaseOrderId:relay,orderItemId:relayLineId,quantity:1}]))).rejects.toThrow(/发货数量/);
+    const approveFreeResend = async (purchaseOrderId:string, orderItemId:string, tag:string) => {
+      const before = await prisma.$transaction(tx=>purchaseWorkspace(tx,orderId));
+      const loss = before.fulfillment.shortfalls.find(row=>row.purchaseOrderId===purchaseOrderId && row.orderItemId===orderItemId && row.available>0)!;
+      await purchaseAction(purchaseOrderId,{action:'report_change',requestId:'report-'+tag,changeKind:'unavailable',reference:loss.reference,
+        description:'核对供应商免费重发决定'});
+      const resolved = await purchaseAction(purchaseOrderId,{action:'resolve_change',requestId:'approve-'+tag,outcome:'shortfall',...decision,
+        dispositions:[{orderItemId,quantity:1,outcome:'cancel',shortfallId:loss.resolutionId,shortfallDecision:'free_resend'}]});
+      expect(resolved.fulfillment.shortfalls.find(row=>row.resolutionId===loss.resolutionId)?.available).toBe(0);
+      const approval = resolved.fulfillment.freeResends.find(row=>row.shortfallId===loss.resolutionId)!;
+      expect(approval.available).toBe(1);
+      return approval.approvalId;
+    };
+    const warehouseApproval = await approveFreeResend(relay,relayLineId,'free-supplier-resend');
+    await dispatch(dispatchInput('supplier-resends-one','supplier_to_libereal',[
+      {purchaseOrderId:relay,orderItemId:relayLineId,quantity:1,resendApprovalId:warehouseApproval},
+    ]));
     expect((await workspace()).purchases.find(row=>row.purchaseOrderId===relay)?.available).toBe(0);
 
     const outbound = await dispatch(dispatchInput('direct-first-dispatch','supplier_to_customer',[{purchaseOrderId:direct,orderItemId:directLineId,quantity:1}]));
@@ -327,7 +345,20 @@ describe('procurement-bound fulfillment parcels', () => {
     await event(outbound.id,shortage('direct-documented-loss',outbound.lines[0].id,'loss'));
     expect(await prisma.orderItem.findUnique({where:{id:directLineId}})).toMatchObject({shippedQty:0});
     expect(await prisma.shipment.findUnique({where:{id:firstShipment.id},include:{items:true}})).toEqual(firstShipment);
-    const directReplacement = await dispatch(dispatchInput('direct-second-dispatch','supplier_to_customer',[{purchaseOrderId:direct,orderItemId:directLineId,quantity:1}]));
+    const directApproval = await approveFreeResend(direct,directLineId,'free-direct-resend');
+    const alreadyClaimed = (await prisma.$transaction(tx=>purchaseWorkspace(tx,orderId))).fulfillment.shortfalls.find(row=>row.purchaseOrderId===direct)!;
+    await purchaseAction(direct,{action:'report_change',requestId:'review-claimed-direct-loss',changeKind:'other',reference:alreadyClaimed.reference,
+      description:'核对是否已走免费重发'});
+    await expect(purchaseAction(direct,{action:'resolve_change',requestId:'try-separate-purchase-on-free-resend',outcome:'shortfall',...decision,
+      dispositions:[{orderItemId:directLineId,quantity:1,outcome:'replace',shortfallId:alreadyClaimed.resolutionId,shortfallDecision:'new_purchase'}],
+    })).rejects.toThrow(/尚未使用的实际物流书证/);
+    await purchaseAction(direct,{action:'resolve_change',requestId:'confirm-keeping-free-approval',outcome:'original_terms',...decision});
+    await expect(dispatch(dispatchInput('wrong-free-decision','supplier_to_customer',[
+      {purchaseOrderId:direct,orderItemId:directLineId,quantity:1,resendApprovalId:warehouseApproval},
+    ]))).rejects.toThrow(/本行免费重发/);
+    const directReplacement = await dispatch(dispatchInput('direct-second-dispatch','supplier_to_customer',[
+      {purchaseOrderId:direct,orderItemId:directLineId,quantity:1,resendApprovalId:directApproval},
+    ]));
     await event(directReplacement.id,eventInput('direct-replacement-received','customer_delivery',[{parcelLineId:directReplacement.lines[0].id,quantity:1}]));
     await expect(dispatch(dispatchInput('direct-duplicate-dispatch','supplier_to_customer',[{purchaseOrderId:direct,orderItemId:directLineId,quantity:1}]))).rejects.toThrow(/发货数量/);
 
@@ -339,11 +370,11 @@ describe('procurement-bound fulfillment parcels', () => {
     const state = await prisma.$transaction(tx=>purchaseWorkspace(tx,orderId));
     const sourceUnits = state.fulfillment.supplierDispatched.filter(row=>row.purchaseOrderId===relay).reduce((sum,row)=>sum+row.quantity,0);
     expect(sourceUnits).toBe(2);
-    const [loss] = state.fulfillment.forwardingShortfalls;
+    const loss = state.fulfillment.shortfalls.find(row=>row.route==='libereal_to_customer')!;
     expect(loss).toMatchObject({purchaseOrderId:relay,available:1});
     const followUp = (requestId:string):PurchaseAction => ({
-      action:'resolve_change',requestId,outcome:'replacement',...decision,
-      dispositions:[{orderItemId:relayLineId,quantity:1,outcome:'replace',forwardingLossId:loss.resolutionId,replacement:{
+      action:'resolve_change',requestId,outcome:'shortfall',...decision,
+      dispositions:[{orderItemId:relayLineId,quantity:1,outcome:'replace',shortfallId:loss.resolutionId,shortfallDecision:'new_purchase',replacement:{
         name:'合成补发品',brand:'合成品牌',catalogNumber:'TEST-B3-REPLACEMENT-CATALOG',spec:'合成规格',unit:'件',
         terms:purchaseTerms(1,'TEST-B3-SEPARATE-REPLACEMENT-SUPPLIER'),
       }}],
@@ -353,9 +384,140 @@ describe('procurement-bound fulfillment parcels', () => {
     expect(updated.orders.find(row=>row.id===relay)).toMatchObject({ status:'ordered', paidCents:500, dueCents:4500,
       remaining:[{orderItemId:relayLineId,quantity:2}] });
     expect(updated.orders.find(row=>row.lines.some(line=>line.fromPurchaseOrderId===relay))).toMatchObject({status:'draft',approvedHash:null,paidCents:0});
-    expect(updated.fulfillment.forwardingShortfalls[0].available).toBe(0);
+    expect(updated.fulfillment.shortfalls.find(row=>row.resolutionId===loss.resolutionId)?.available).toBe(0);
+    const remainingPayable = await purchaseAction(relay,{action:'record_payment',requestId:'verified-original-tail',amountCents:4500,
+      reference:'TEST-ACTUAL-ORIGINAL-BALANCE',conditionReference:'TEST-ORIGINAL-AGREED-TAIL'});
+    expect(remainingPayable.orders.find(row=>row.id===relay)).toMatchObject({paidCents:5000,dueCents:0});
     await report('another-forward-loss-review');
-    await expect(purchaseAction(relay,followUp('duplicate-loss-use'))).rejects.toThrow(/尚未使用的转发短失书证/);
+    await expect(purchaseAction(relay,followUp('duplicate-loss-use'))).rejects.toThrow(/尚未使用的实际物流书证/);
+  });
+
+  it('can put an ordinary supplier unit and an explicitly free resend in one physical package with distinct evidence', async () => {
+    await acceptCustomerOrder();
+    const {relay}=await orderFromSuppliers();
+    const ordinary={purchaseOrderId:relay,orderItemId:relayLineId,quantity:1};
+    const original=await dispatch(dispatchInput('mixed-resend-first-unit','supplier_to_customer',[ordinary]));
+    const agreement={supplierReference:'TEST-MIXED-RESEND-SUPPLIER',supplierSha256:'c'.repeat(64),customerReference:'TEST-MIXED-RESEND-CUSTOMER',
+      customerSha256:'d'.repeat(64),description:'独立核实原寄件短失，供应方免费重发。'};
+    await event(original.id,{...eventInput('mixed-resend-original-loss','customer_delivery',[]),...agreement,kind:'confirm_shortfall',
+      lines:[{parcelLineId:original.lines[0].id,quantity:1,outcome:'loss'}]});
+    const state=await prisma.$transaction(tx=>purchaseWorkspace(tx,orderId));
+    const [loss]=state.fulfillment.shortfalls;
+    await purchaseAction(relay,{action:'report_change',requestId:'report-mixed-resend',changeKind:'other',reference:loss.reference,description:agreement.description});
+    const approved=await purchaseAction(relay,{action:'resolve_change',requestId:'approve-mixed-resend',outcome:'shortfall',...agreement,
+      dispositions:[{orderItemId:relayLineId,quantity:1,outcome:'cancel',shortfallId:loss.resolutionId,shortfallDecision:'free_resend'}]});
+    const [resend]=approved.fulfillment.freeResends;
+    const together=await dispatch(dispatchInput('normal-and-free-in-one','supplier_to_customer',[ordinary,{...ordinary,resendApprovalId:resend.approvalId}]));
+    expect(together.lines).toHaveLength(2);
+    const evidence=JSON.parse(together.events.find(row=>row.kind==='dispatch')!.details).lines;
+    expect(evidence).toContainEqual(expect.objectContaining({resendApprovalId:resend.approvalId,parcelLineId:expect.any(String)}));
+    const current=await prisma.$transaction(tx=>purchaseWorkspace(tx,orderId));
+    expect(current.fulfillment.supplierDispatched.find(row=>row.purchaseOrderId===relay)?.quantity).toBe(2);
+    expect(current.fulfillment.freeResends[0].available).toBe(0);
+    expect(current.orders.find(row=>row.id===relay)).toMatchObject({totalCents:5000,dueCents:5000,paidCents:0});
+  });
+
+  it('accepts a dated earlier lot return and changes contract scope only after the written decision', async () => {
+    await acceptCustomerOrder();
+    const {relay} = await orderFromSuppliers();
+    await purchaseAction(relay,{ action:'record_payment',requestId:'amended-goods-deposit',reference:'TEST-AMENDED-GOODS-DEPOSIT',
+      amountCents:500,conditionReference:'TEST-AMENDED-VALID-DEPOSIT' });
+    const inbound = await dispatch(dispatchInput('dated-return-inbound','supplier_to_libereal',[{purchaseOrderId:relay,orderItemId:relayLineId,quantity:2}]));
+    const [line]=inbound.lines;
+    await event(inbound.id,eventInput('first-real-lot','warehouse_receipt',[{parcelLineId:line.id,quantity:1,batchNumber:receivedLotA}]));
+    const returningAt = nextOccurrence();
+    await event(inbound.id,eventInput('later-other-lot','warehouse_receipt',[{parcelLineId:line.id,quantity:1,batchNumber:receivedLotB}]));
+    const a = await receipt(line.id,receivedLotA);
+    const paperwork = { supplierReference:'TEST-SIGNED-SUPPLIER-AMENDMENT',supplierSha256:'e'.repeat(64),
+      customerReference:'TEST-CUSTOMER-DECISION-ON-RETURN',customerSha256:'f'.repeat(64),description:'供方已接收早批退回。' };
+    const physicalReturn = (requestId:string,occurredAt:string) => ({
+      ...eventInput(requestId,'warehouse_receipt',[]),...paperwork,kind:'confirm_shortfall',occurredAt,
+      lines:[{parcelLineId:line.id,quantity:1,outcome:'return',receiptId:a.id}],
+    });
+    await expect(event(inbound.id,physicalReturn('too-early-lot-return',inbound.dispatchedAt.toISOString()))).rejects.toThrow(/尚未转发或处置/);
+    await event(inbound.id,physicalReturn('earlier-lot-return',returningAt));
+    await expect(event(inbound.id,physicalReturn('second-return-of-same-lot',returningAt))).rejects.toThrow(/尚未转发或处置/);
+    const raw = await prisma.$transaction(tx=>purchaseWorkspace(tx,orderId));
+    expect(raw.orders.find(row=>row.id===relay)).toMatchObject({status:'ordered',paidCents:500,dueCents:4500});
+    expect(await batch(receivedLotA)).toMatchObject({quantity:0,reservedQuantity:0});
+    expect(await batch(receivedLotB)).toMatchObject({quantity:1,reservedQuantity:1});
+    const loss=raw.fulfillment.shortfalls.find(row=>row.purchaseOrderId===relay)!;
+    await purchaseAction(relay,{action:'report_change',requestId:'document-actual-amendment',changeKind:'other',
+      reference:paperwork.supplierReference,description:'原合同确已减量，尚余实际收到的一件。'});
+    const result=await purchaseAction(relay,{action:'resolve_change',requestId:'apply-actual-amendment',outcome:'shortfall',...paperwork,
+      dispositions:[{orderItemId:relayLineId,quantity:1,outcome:'cancel',shortfallId:loss.resolutionId,shortfallDecision:'change_contract'}],
+      refundFollowup:'已付定金由财务核对抵扣，待核实实际结果。'});
+    expect(result.orders.find(row=>row.id===relay)).toMatchObject({dueCents:null,needsRemainingReview:true,paidCents:500});
+    expect(result.orders).toHaveLength(2);
+    const reviewed=await purchaseAction(relay,{action:'approve_remaining',requestId:'verify-amended-balance',reference:'TEST-SIGNED-COMMERCIAL-CHANGE',
+      referenceSha256:'b'.repeat(64),description:'只结剩下的一件，原500分定金抵扣。',remainingLines:[{orderItemId:relayLineId,payableCents:2500}],appliedPaidCents:500});
+    expect(reviewed.orders.find(row=>row.id===relay)).toMatchObject({dueCents:2000,paidCents:500,remaining:[{orderItemId:relayLineId,quantity:1}]});
+  });
+
+  it('uses the signed date on a linked legacy delivery for the actual customer return', async () => {
+    await acceptCustomerOrder();
+    const sentAt = new Date(nextOccurrence());
+    const deliveredAt = new Date(nextOccurrence());
+    const shipment = await prisma.shipment.create({data:{orderId,status:'delivered',method:'logistics',shippedAt:sentAt,deliveredAt,
+      items:{create:{orderItemId:directLineId,quantity:1}}}});
+    await prisma.orderItem.update({where:{id:directLineId},data:{shippedQty:1,status:'shipped'}});
+    const linking={...eventInput('link-already-signed-old-waybill','customer_delivery',[]),shipmentId:shipment.id};
+    const preview=await prisma.$transaction(tx=>linkLegacyShipment(tx,orderId,linking,operator));
+    await prisma.$transaction(tx=>linkLegacyShipment(tx,orderId,linking,operator,preview.actionHash));
+    const parcel=await prisma.fulfillmentParcel.findUniqueOrThrow({where:{shipmentId:shipment.id},include:{lines:true}});
+    const returning=(requestId:string,occurredAt:string)=>({...eventInput(requestId,'customer_delivery',[]),kind:'confirm_shortfall',occurredAt,
+      supplierReference:'TEST-OLD-RETURN',supplierSha256:'c'.repeat(64),customerReference:'TEST-OLD-CUSTOMER-RETURN',customerSha256:'d'.repeat(64),
+      lines:[{parcelLineId:parcel.lines[0].id,quantity:1,outcome:'return'}]});
+    await expect(event(parcel.id,returning('old-return-before-signature',sentAt.toISOString()))).rejects.toThrow(/有效签收数量/);
+    await event(parcel.id,returning('old-return-after-signature',nextOccurrence()));
+    await expect(event(parcel.id,returning('old-return-overrun',nextOccurrence()))).rejects.toThrow(/实收可退/);
+    expect(await prisma.shipment.findUnique({where:{id:shipment.id}})).toMatchObject({deliveredAt,status:'delivered'});
+  });
+
+  it('syncs real partial receipt when the last exception closes and completes only after the later package is signed', async () => {
+    vi.stubEnv('FULFILLMENT_CARRIER_SOURCE','TEST-SIGNATURE-CARRIER');
+    vi.stubEnv('FULFILLMENT_CARRIER_SECRET','SYNTHETIC-CARRIER-SECRET-FOR-TESTS-ONLY');
+    try {
+      await acceptCustomerOrder();
+      const {relay,direct}=await orderFromSuppliers();
+      const input={...dispatchInput('exception-first-package','supplier_to_customer',[{purchaseOrderId:relay,orderItemId:relayLineId,quantity:2}]),
+        feedSource:'TEST-SIGNATURE-CARRIER'};
+      const first=await dispatch(input);
+      const later=await dispatch(dispatchInput('exception-later-package','supplier_to_customer',[{purchaseOrderId:direct,orderItemId:directLineId,quantity:1}]));
+      const signed=eventInput('partial-real-signature','customer_delivery',[{parcelLineId:first.lines[0].id,quantity:1}]);
+      await event(first.id,signed);
+      const firstIncident=await event(first.id,{...eventInput('first-unresolved-exception','customer_delivery',[]),kind:'exception'});
+      const staff=firstIncident.events.find(row=>row.kind==='exception')!;
+      const second=await prisma.$transaction(tx=>receiveCarrierNotice(tx,'TEST-SIGNATURE-CARRIER',{
+        ...eventInput('second-unresolved-exception','customer_delivery',[]),eventId:'TEST-SECOND-REAL-CARRIER-EXCEPTION',kind:'exception',
+        carrier:input.carrier,trackingNumber:input.trackingNumber,
+      }));
+      const agreement={supplierReference:'TEST-FREE-AGREEMENT-SUPPLIER',supplierSha256:'c'.repeat(64),
+        customerReference:'TEST-FREE-AGREEMENT-CUSTOMER',customerSha256:'d'.repeat(64),description:'供方同意免费重发确实短少的一件。'};
+      await event(first.id,{...eventInput('one-of-two-missing','customer_delivery',[]),...agreement,kind:'confirm_shortfall',exceptionId:staff.id,
+        lines:[{parcelLineId:first.lines[0].id,quantity:1,outcome:'shortage'}]});
+      expect(await prisma.shipment.findUnique({where:{id:first.shipmentId!}})).toMatchObject({status:'shipped',deliveredAt:null});
+      await event(first.id,{...eventInput('last-exception-resolved','customer_delivery',[]),kind:'resolve_exception',exceptionId:second.id});
+      expect(await prisma.shipment.findUnique({where:{id:first.shipmentId!}})).toMatchObject({status:'delivered',deliveredAt:new Date(signed.occurredAt)});
+      const before = await prisma.accountReceivable.findUnique({where:{orderId}});
+      const state=await prisma.$transaction(tx=>purchaseWorkspace(tx,orderId));
+      const [loss]=state.fulfillment.shortfalls;
+      await purchaseAction(relay,{action:'report_change',requestId:'review-free-final',changeKind:'unavailable',reference:loss.reference,
+        description:agreement.description});
+      const decision=await purchaseAction(relay,{action:'resolve_change',requestId:'allow-one-free-final',outcome:'shortfall',...agreement,
+        dispositions:[{orderItemId:relayLineId,quantity:1,outcome:'cancel',shortfallId:loss.resolutionId,shortfallDecision:'free_resend'}]});
+      const [authorized]=decision.fulfillment.freeResends;
+      const resend=await dispatch(dispatchInput('final-free-resend','supplier_to_customer',[
+        {purchaseOrderId:relay,orderItemId:relayLineId,quantity:1,resendApprovalId:authorized.approvalId},
+      ]));
+      await event(resend.id,eventInput('final-free-signature','customer_delivery',[{parcelLineId:resend.lines[0].id,quantity:1}]));
+      expect(await prisma.order.findUnique({where:{id:orderId}})).toMatchObject({status:'shipped',paidAt:null});
+      await event(later.id,eventInput('last-genuine-signature','customer_delivery',[{parcelLineId:later.lines[0].id,quantity:1}]));
+      expect(await prisma.order.findUnique({where:{id:orderId}})).toMatchObject({status:'completed',paidAt:null});
+      expect(await prisma.accountReceivable.findUnique({where:{orderId}})).toEqual(before);
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 
   it('ships directly without consuming the warehouse and forwards only the units physically received into each batch', async () => {
