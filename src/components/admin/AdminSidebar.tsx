@@ -46,6 +46,7 @@ const NAV_SECTIONS: NavSection[] = [
     title: '订单管理',
     items: [
       { href: '/admin/orders', label: '活跃订单', icon: ClipboardList, permission: 'orders.read' },
+      { href: '/admin/purchases', label: '供应商采购', icon: Package, permission: 'purchases.read' },
       { href: '/admin/orders/new', label: '代客下单', icon: Receipt, permission: 'orders.write' },
       { href: '/admin/orders/archived', label: '归档订单', icon: Archive, permission: 'orders.read' },
     ],

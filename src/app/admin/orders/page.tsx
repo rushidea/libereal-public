@@ -1619,6 +1619,9 @@ function OrderDetailPanel({
         </div>
       </div>
       <ShipmentPanel order={order} orderItems={orderItems} fetchData={fetchData} canWriteOrders={canWriteOrders} beginMfaStepUp={beginMfaStepUp} />
+      {permissions?.includes('purchases.read') && ['confirmed','partially_shipped','shipped','completed'].includes(order.status) && (
+        <Link href={`/admin/purchases?orderId=${encodeURIComponent(order.id)}`} className="inline-flex text-sm font-medium text-brand-700 underline">查看本单采购</Link>
+      )}
       <div className="flex flex-wrap justify-between items-center gap-2 pt-4 border-t border-gray-200">
         <span className="text-gray-700 font-medium">订单总计</span>
         <span className="text-xl font-bold text-brand-600">¥{orderItems.reduce((s, it) => s + (it.price||0)*(it.quantity||1), 0).toLocaleString('zh-CN', { minimumFractionDigits: 2 })}</span>
