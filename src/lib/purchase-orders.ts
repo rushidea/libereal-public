@@ -189,12 +189,18 @@ export async function purchaseWorkspace(tx: Db, orderId: string) {
     const checkedTerms = snapshot(fundingApproval)?.operation.checkedTerms;
     const supply = lines.map(line => {
       const terms = checkedTerms?.find(checked => checked.orderItemId === line.orderItemId)?.terms ?? line.terms;
-      return { source: line.source, terms: agreedDocumentTerms({ source: line.source, terms }, activities) };
+      return { source: line.source, terms: agreedDocumentTerms({ source: line.source, terms }, ledger) };
     });
+    const openIncidentId = currentIncident(ledger)?.id ?? null;
+    const needsRemainingReview = disposed.ids.length > 0 && !reviewedScope && remaining.length > 0;
+    const needsLegacyReview = Boolean(legacy && !legacyReview && header.approvedHash === contentHash);
+    const canApproveRemaining = needsRemainingReview && !openIncidentId && !needsLegacyReview
+      && !exceptions.some(row => !row.resolution)
+      && (header.status === 'on_hold' || (header.status === 'ordered' && Boolean(registration)))
+      && (Boolean(registration) || eligibility.eligible);
     const revision = Number(header.revision);
     return { ...header, revision, totalCents, contentHash, lines, ledger, paidCents, dueCents, remaining,
-      remainingScope: reviewedScope ?? null, needsRemainingReview: disposed.ids.length > 0 && !reviewedScope && remaining.length > 0,
-      needsLegacyReview: Boolean(legacy && !legacyReview && header.approvedHash === contentHash),
+      remainingScope: reviewedScope ?? null, needsRemainingReview, canApproveRemaining, needsLegacyReview,
       needsFundingReapproval: !registration && header.status === 'approved' && eligibility.eligible && Boolean(fundingApproval && latestApproval
         && (!approvalMatchesFunding(fundingApproval, startReview, activities)
           || !fundingUnchangedSince(latestApproval, startReview, activities, startReview.plan, Date.now()))),
@@ -207,7 +213,7 @@ export async function purchaseWorkspace(tx: Db, orderId: string) {
       leadTimeApproved: ledger.some(row => row.action === 'approve_lead_time'
         && row.detail.contentHash === contentHash
         && approvalMatchesFunding(row, startReview, activities)),
-      openIncidentId: currentIncident(ledger)?.id ?? null,
+      openIncidentId,
       orderReceipt: registration ? {
         occurredAt: registered?.operation?.occurredAt ?? null, registeredAt: registration.createdAt,
         reference: registered?.operation?.reference ?? null,
@@ -474,9 +480,8 @@ function reviewLegacyApproval(view: Workspace, po: PO, input: PurchaseActionInpu
     description: requiredText(input.description, '核对原授权、付款及本次接续结果') };
 }
 
-function approveRemaining(view: Workspace, po: PO, input: PurchaseActionInput) {
-  if (po.status !== 'on_hold' || po.openIncidentId || !po.needsRemainingReview || po.needsLegacyReview
-    || po.commitmentExceptions.some(row => !row.resolution) || (!po.orderedBefore && !view.eligibility.eligible)) conflict();
+function approveRemaining(po: PO, input: PurchaseActionInput) {
+  if (!po.canApproveRemaining) conflict();
   const legacy = legacyApproval(po.ledger);
   const archived = legacy && legacyApprovalReview(po.ledger, legacy.id);
   const checkedTerms = snapshot(archived)?.operation.checkedTerms;
@@ -590,7 +595,7 @@ function reapprovePurchase(view: Workspace, po: PO, input: PurchaseActionInput) 
   const legacy = legacyApproval(po.ledger);
   const archived = legacy?.id === approval.id ? legacyApprovalReview(po.ledger, approval.id) : undefined;
   const verified = assertApprovedTerms(po, { approval, archived }, Date.now());
-  const supply = verified.lines.map(line => ({ ...line, terms: agreedDocumentTerms(line, view.activities) }));
+  const supply = verified.lines.map(line => ({ ...line, terms: agreedDocumentTerms(line, po.ledger) }));
   const lines = restoreDocumentScopes(supply, input.documentScopes);
   const checkedTerms = lines.map(line => ({ orderItemId: line.orderItemId, terms: line.terms }));
   const documentScopes = lines.filter(line => po.documentReviewLines.some(row => row.orderItemId === line.orderItemId))
@@ -612,7 +617,7 @@ function actionDetails(
   const action = input.action;
   if (action === 'review_legacy_approval') return reviewLegacyApproval(view, po, input);
   if (action === 'reapprove_purchase') return reapprovePurchase(view, po, input);
-  if (action === 'approve_remaining') return approveRemaining(view, po, input);
+  if (action === 'approve_remaining') return approveRemaining(po, input);
   if (action === 'resolve_order_exception') {
     const exception = po.commitmentExceptions.find(row => row.id === input.exceptionId && !row.resolution);
     const resolution = input.exceptionResolution;
@@ -622,6 +627,7 @@ function actionDetails(
     }
     const prior = po.ledger.find(row => row.id === exception.id)!;
     return { action, exceptionId: exception.id, resolution, responsibleActor: actor.id, actualCommitment: purchaseOperation(prior.detail),
+      remainingReviewPending: po.needsRemainingReview,
       reference: requiredText(input.reference, '供方书面处理结果及原合同应付核对依据'),
       referenceSha256: documentSha256(input.referenceSha256, '异常处理结果书证摘要'),
       description: requiredText(input.description, '核对结果及已付款的后续安排') };
@@ -719,7 +725,8 @@ export async function previewPurchaseAction(tx: Db, input: PurchaseActionInput, 
   const currentLines = original ? await loadPurchaseLines(tx, original) : [];
   const remaining = original ? remainingDemand(original) : new Map<string, number>();
   const operation = commitment ? await previewCommitment(tx, original!, view, po, input, actor) : actionDetails(view, po, input, currentLines, remaining, actor);
-  await assertSupplierDocumentScopes(tx, supplyEvidenceFor(po, operation), operation.action === 'reapprove_purchase' ? { restoredPurchaseId: po.id } : undefined);
+  await assertSupplierDocumentScopes(tx, supplyEvidenceFor(po, operation), operation.action === 'reapprove_purchase'
+    ? { restoredLines: operation.documentScopes } : undefined);
   const scoped = operation.action === 'register_order' ? operation.execution.lines
     : operation.action === 'approve_remaining' ? operation.scope.lines
     : operation.action === 'reapprove_purchase' ? operation.execution.lines
@@ -794,8 +801,10 @@ export async function applyPurchaseAction(tx: Db, input: PurchaseActionInput, ac
   const po = view.orders.find(row => row.id === input.purchaseOrderId)!;
   const op = preview.operation;
   if (op.action !== 'resolve_change' || op.dispositions?.some(line => line.replacement)) {
-    await assertSupplierDocumentScopes(tx, supplyEvidenceFor(po, op), { attestation: { orderId: input.orderId, actor },
-      restoredPurchaseId: op.action === 'reapprove_purchase' ? po.id : undefined });
+    await assertSupplierDocumentScopes(tx, supplyEvidenceFor(po, op), {
+      attestation: { orderId: input.orderId, purchaseOrderId: op.action === 'resolve_change' ? undefined : po.id, actor },
+      restoredLines: op.action === 'reapprove_purchase' ? op.documentScopes : undefined,
+    });
   }
   let status = po.status;
   let approvedHash = po.approvedHash;
@@ -804,7 +813,7 @@ export async function applyPurchaseAction(tx: Db, input: PurchaseActionInput, ac
   if (op.action === 'approve_remaining') { status = po.orderedBefore ? 'ordered' : 'approved'; approvedHash = po.contentHash; }
   if (op.action === 'register_order' && status === 'approved') status = 'ordered';
   if (op.action === 'record_late_order_exception' && op.category === 'credit') status = 'on_hold';
-  if (op.action === 'resolve_order_exception' && op.resolution === 'payable_verified' && !po.openIncidentId) status = 'ordered';
+  if (op.action === 'resolve_order_exception' && op.resolution === 'payable_verified' && !po.openIncidentId && po.dueCents !== null) status = 'ordered';
   if (op.action === 'report_change') status = 'on_hold';
   if (op.action === 'resolve_change' && op.outcome === 'original_terms') {
     if (po.commitmentExceptions.some(row => !row.resolution || row.resolution === 'supplier_cancelled')) status = 'on_hold';

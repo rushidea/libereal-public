@@ -26,9 +26,9 @@ function previouslyCheckedScope(previous: Scope[], intended: Scope) {
   return matches.length === 1 ? matches[0] : undefined;
 }
 
-export function agreedDocumentTerms(line: SupplyLine, activities: PurchaseActivity[]) {
+export function agreedDocumentTerms(line: SupplyLine, ledger: PurchaseActivity[]) {
   if (line.terms.sourceDocumentKind || !line.terms.sourceSha256 || line.source.written?.replyHash === line.terms.sourceSha256) return line.terms;
-  const known = previouslyCheckedScope(activities.filter(row => row.action === 'review_supplier_document_scope')
+  const known = previouslyCheckedScope(ledger.filter(row => row.action === 'review_supplier_document_scope' && row.orderItemId === line.source.orderItemId)
     .map(row => row.detail.document as Scope), documentLine(line));
   return known ? { ...line.terms, sourceDocumentKind: known.kind, sourceDocumentRow: known.kind === 'multiple_items' ? known.row : undefined } : line.terms;
 }
@@ -51,9 +51,6 @@ export function restoreDocumentScopes<Line extends SupplyLine>(lines: Line[], in
     const entry = input.find(row => row?.orderItemId === old.orderItemId);
     if (!entry || documentSha256(entry.sha256, '旧供货原件摘要') !== old.sha256
       || (entry.kind !== 'single_item' && entry.kind !== 'multiple_items')) throw new PurchaseError('补记范围须对应原批准所用的同一供货文件');
-    if (entry.kind === 'multiple_items' && !lines.some(other => other.source.orderItemId !== old.orderItemId && other.terms.sourceSha256 === old.sha256)) {
-      throw new PurchaseError('原批准只核对了此文件的一项报价，须有独立书证核实其他商品范围');
-    }
     const row = entry.kind === 'multiple_items' ? entry.row : 1;
     if (!positiveCents(row) || (entry.kind === 'single_item' && entry.row != null && entry.row !== 1)) throw new PurchaseError('请填写供货文件中实际对应的商品行');
     const key = `${old.sha256}:${row}`;
@@ -71,7 +68,7 @@ function compareScope(known: Scope, intended: Scope) {
 }
 
 export async function assertSupplierDocumentScopes(tx: Db, lines: SupplyLine[], options?: {
-  attestation?: { orderId: string; actor: PurchaseActor }; restoredPurchaseId?: string;
+  attestation?: { orderId: string; purchaseOrderId?: string; actor: PurchaseActor }; restoredLines?: SupplyLine[];
 }) {
   const checked: Scope[] = [];
   for (const line of lines) {
@@ -94,27 +91,28 @@ export async function assertSupplierDocumentScopes(tx: Db, lines: SupplyLine[], 
       SELECT detail FROM PurchaseActivity WHERE action='review_supplier_document_scope'
         AND json_extract(detail,'$.document.sha256')=${intended.sha256}`;
     const previous = receipts.map(row => jsonObject(row.detail).document as Scope);
-    const legacy = await tx.$queryRaw<{ source: string; terms: string; purchaseOrderId: string; orderItemId: string }[]>`
-      SELECT r.source,r.terms,r.purchaseOrderId,r.orderItemId FROM PurchaseRequirement r JOIN PurchaseOrder p ON p.id=r.purchaseOrderId
+    const legacy = await tx.$queryRaw<{ source: string; terms: string }[]>`
+      SELECT r.source,r.terms FROM PurchaseRequirement r JOIN PurchaseOrder p ON p.id=r.purchaseOrderId
       WHERE p.approvedHash IS NOT NULL AND json_extract(r.terms,'$.sourceSha256')=${intended.sha256}
         AND json_type(r.terms,'$.verification')='object'
-      UNION ALL SELECT r.source,r.terms,r.purchaseOrderId,r.orderItemId FROM PurchaseReplacementLine r JOIN PurchaseOrder p ON p.id=r.purchaseOrderId
+      UNION ALL SELECT r.source,r.terms FROM PurchaseReplacementLine r JOIN PurchaseOrder p ON p.id=r.purchaseOrderId
       WHERE p.approvedHash IS NOT NULL AND json_extract(r.terms,'$.sourceSha256')=${intended.sha256}
         AND json_type(r.terms,'$.verification')='object'`;
     for (const known of previous) compareScope(known, intended);
+    const alreadyVerified = previous.some(row => row.row === intended.row);
+    // The original file can establish this line's scope while other archived lines await their own review.
+    const restoring = options?.restoredLines?.some(row => row.source.orderItemId === line.source.orderItemId && row.terms.sourceSha256 === intended.sha256);
     for (const row of legacy) {
       const historical: SupplyLine = { source: JSON.parse(row.source), terms: JSON.parse(row.terms) };
-      const old = documentLine(historical);
-      const restored = row.purchaseOrderId === options?.restoredPurchaseId
-        ? lines.find(entry => entry.source.orderItemId === row.orderItemId && entry.terms.sourceDocumentKind && sameOffer(documentLine(entry), old)) : undefined;
-      const scope = historical.terms.sourceDocumentKind || (native && historical.source.written?.replyHash === intended.sha256) ? old
-        : previouslyCheckedScope(previous, old) ?? (restored && documentLine(restored));
-      if (!scope) throw new PurchaseError('旧供货书证须先以原件逐行核对适用的商品和数量');
-      compareScope(scope, intended);
+      if (historical.terms.sourceDocumentKind || (native && historical.source.written?.replyHash === intended.sha256)) {
+        compareScope(documentLine(historical), intended);
+      } else if (!restoring && !alreadyVerified) {
+        throw new PurchaseError('旧供货书证须先以原件逐行核对适用的商品和数量');
+      }
     }
     const attestation = options?.attestation;
-    if (attestation && !previous.some(row => row.row === intended.row)) {
-      await addPurchaseActivity(tx, { orderId: attestation.orderId, orderItemId: line.source.orderItemId,
+    if (attestation && !alreadyVerified) {
+      await addPurchaseActivity(tx, { orderId: attestation.orderId, purchaseOrderId: attestation.purchaseOrderId, orderItemId: line.source.orderItemId,
         actor: attestation.actor, action: 'review_supplier_document_scope',
         referenceKey: pricingContentHash({ purpose: 'supplier_document_row', sha256: intended.sha256, row: intended.row }),
         detail: { document: intended, reference: line.terms.sourceReference } });
