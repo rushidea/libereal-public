@@ -373,7 +373,7 @@ export default function AdminUsersPage() {
           <table className="w-full table-fixed border-separate border-spacing-0 text-sm">
             <thead>
               <tr>
-                <th className="sticky left-0 z-20 w-10 border-b border-gray-200 bg-gray-50 px-3 py-3 text-left font-semibold text-gray-700">
+                <th className="w-9 border-b border-gray-200 bg-gray-50 px-2.5 py-3 text-left font-semibold text-gray-700">
                   <input
                     type="checkbox"
                     checked={allVisibleSelected}
@@ -382,15 +382,12 @@ export default function AdminUsersPage() {
                     aria-label="全选当前结果"
                   />
                 </th>
-                <th className="sticky left-10 z-20 w-28 border-b border-gray-200 bg-gray-50 px-3 py-3 text-left font-semibold text-gray-700 shadow-[4px_0_6px_-4px_rgba(15,23,42,0.25)]">姓名</th>
-                <th className="border-b border-gray-200 bg-gray-50 px-3 py-3 text-left font-semibold text-gray-700">邮箱</th>
-                <th className={`border-b border-gray-200 bg-gray-50 px-3 py-3 text-left font-semibold text-gray-700 2xl:w-28 ${userTableColumn.phone}`}>电话</th>
-                <th className="border-b border-gray-200 bg-gray-50 px-3 py-3 text-left font-semibold text-gray-700">机构</th>
-                <th className={`border-b border-gray-200 bg-gray-50 px-3 py-3 text-left font-semibold text-gray-700 2xl:w-24 ${userTableColumn.role}`}>角色</th>
-                <th className="w-36 border-b border-gray-200 bg-gray-50 px-3 py-3 text-left font-semibold text-gray-700">授信额度</th>
-                <th className="w-20 border-b border-gray-200 bg-gray-50 px-3 py-3 text-left font-semibold text-gray-700">状态</th>
-                <th className={`border-b border-gray-200 bg-gray-50 px-3 py-3 text-left font-semibold text-gray-700 2xl:w-36 ${userTableColumn.dates}`}>注册 / 最近登录</th>
-                <th className="w-40 border-b border-gray-200 bg-gray-50 px-3 py-3 text-left font-semibold text-gray-700">操作</th>
+                <th className="border-b border-gray-200 bg-gray-50 px-3 py-3 text-left font-semibold text-gray-700 whitespace-nowrap">用户 / 邮箱</th>
+                <th className="border-b border-gray-200 bg-gray-50 px-3 py-3 text-left font-semibold text-gray-700 whitespace-nowrap">机构 / 电话</th>
+                <th className="w-[96px] border-b border-gray-200 bg-gray-50 px-2.5 py-3 text-left font-semibold text-gray-700 whitespace-nowrap">状态 / 等级</th>
+                <th className="w-[128px] border-b border-gray-200 bg-gray-50 px-2.5 py-3 text-left font-semibold text-gray-700 whitespace-nowrap">授信额度</th>
+                <th className={`w-[132px] border-b border-gray-200 bg-gray-50 px-2.5 py-3 text-left font-semibold text-gray-700 whitespace-nowrap ${userTableColumn.dates}`}>登录 / 注册</th>
+                <th className="w-[132px] border-b border-gray-200 bg-gray-50 px-2.5 py-3 text-left font-semibold text-gray-700 whitespace-nowrap">操作</th>
               </tr>
             </thead>
             <tbody>
@@ -418,7 +415,7 @@ export default function AdminUsersPage() {
               ))}
               {filteredUsers.length === 0 && (
                 <tr>
-                  <td colSpan={10} className="px-4 py-12 text-center text-gray-600">
+                  <td colSpan={7} className="px-4 py-12 text-center text-gray-600">
                     {users.length === 0 ? '暂无用户' : '没有匹配的用户'}
                   </td>
                 </tr>

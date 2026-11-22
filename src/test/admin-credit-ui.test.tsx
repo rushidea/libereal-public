@@ -323,11 +323,12 @@ describe('credit summary helpers and admin credit UI', () => {
     fireEvent.click(screen.getByTitle('调整授信额度'));
     expect(screen.getByText(/授信额度与账期调整/)).toBeInTheDocument();
 
-    // Switch to full editor and confirm colSpan=10 row layout
+    // Switch to full editor and confirm colSpan=7 row layout
     fireEvent.click(screen.getByRole('button', { name: '编辑完整用户资料' }));
     expect(screen.getByRole('button', { name: '保存' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '保存' }).closest('td')).toHaveAttribute('colspan', '7');
 
-    // Reopen credit mode and check compact card mode + summary sync
+    // Reopen credit mode and check compact card mode + summary sync (+临 badge)
     fireEvent.click(screen.getByTitle('调整授信额度'));
     const updatedUser = {
       ...user,
@@ -362,6 +363,7 @@ describe('credit summary helpers and admin credit UI', () => {
     await waitFor(() => {
       expect((screen.getByLabelText('永久额度（覆盖等级默认）') as HTMLInputElement).value).toBe('18000');
     });
+    expect(screen.getByText('+临')).toBeInTheDocument();
 
     cleanup();
 
@@ -377,9 +379,26 @@ describe('credit summary helpers and admin credit UI', () => {
       />,
     );
 
+    expect(screen.getByText('+临')).toBeInTheDocument();
     expect(screen.getByTitle('调整授信额度')).toBeInTheDocument();
     fireEvent.click(screen.getByTitle('调整授信额度'));
     expect(screen.getByText(/授信额度与账期调整/)).toBeInTheDocument();
+
+    cleanup();
+
+    render(
+      <table>
+        <tbody>
+          <UserRow
+            user={{ ...user, role: 'admin', tier: '璞玉' }}
+            onUpdate={vi.fn()}
+            showEditButton={false}
+          />
+        </tbody>
+      </table>,
+    );
+    expect(screen.getByText('管理员')).toBeInTheDocument();
+    expect(screen.queryByText('璞玉')).toBeNull();
   });
 
   it('removes desktop table horizontal clipping on /admin/users and auto-opens credit editor from query params', async () => {
@@ -466,11 +485,14 @@ describe('credit summary helpers and admin credit UI', () => {
     const table = container.querySelector('table');
     expect(table).not.toBeNull();
     expect(table?.className).not.toContain('min-w-[1240px]');
-    expect(screen.getByText('授信额度')).toBeInTheDocument();
-    expect(screen.getByText('操作')).toBeInTheDocument();
+    expect(container.querySelectorAll('thead th')).toHaveLength(7);
+    for (const heading of ['用户 / 邮箱', '机构 / 电话', '状态 / 等级', '授信额度', '登录 / 注册', '操作']) {
+      expect(screen.getByText(heading)).toBeInTheDocument();
+    }
+    const saveCreditBtn = screen.getByRole('button', { name: '保存授信' });
+    expect(saveCreditBtn.closest('td')).toHaveAttribute('colspan', '7');
 
     // Wait for /api/admin/access permissions so finance.write inputs/save button become enabled
-    const saveCreditBtn = screen.getByRole('button', { name: '保存授信' });
     await waitFor(() => {
       expect(saveCreditBtn).toBeEnabled();
     });

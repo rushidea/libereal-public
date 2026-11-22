@@ -117,6 +117,24 @@ function formatDateTime(value?: string | null): string {
   return date.toLocaleString('zh-CN', { hour12: false });
 }
 
+function formatShortDateTime(value?: string | null): string {
+  if (!value) return '—';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '—';
+  const yy = String(date.getFullYear()).slice(-2);
+  const m = date.getMonth() + 1;
+  const d = date.getDate();
+  const hh = String(date.getHours()).padStart(2, '0');
+  const mm = String(date.getMinutes()).padStart(2, '0');
+  return `${yy}/${m}/${d} ${hh}:${mm}`;
+}
+
+function roleDisplayLabel(role: string): string {
+  if (role === 'admin') return '管理员';
+  if (role === 'customer') return '客户';
+  return role || '—';
+}
+
 function organizationSummary(user: UserType): string {
   const parts = [
     getInstitution(user),
@@ -129,9 +147,7 @@ function organizationSummary(user: UserType): string {
 }
 
 export const userTableColumn = {
-  phone: 'hidden 2xl:table-cell',
-  role: 'hidden 2xl:table-cell',
-  dates: 'hidden 2xl:table-cell',
+  dates: 'hidden xl:table-cell',
 } as const;
 
 function StatusBadges({ user }: { user: UserType }) {
@@ -246,12 +262,6 @@ export default function UserRow({ user, onUpdate, selected, onSelectChange, show
     creditSummary.status,
     creditSummary.paymentTermDays,
   ]);
-
-  const parsedBrandDiscounts = (() => {
-    if (!user.brandDiscounts) return null;
-    try { return JSON.parse(user.brandDiscounts) as Record<string, number>; }
-    catch { return null; }
-  })();
 
   const creditDirty = () => {
     const nextOverride = creditOverride === '' ? null : Number(creditOverride);
@@ -547,40 +557,82 @@ export default function UserRow({ user, onUpdate, selected, onSelectChange, show
   const phoneLabel = displayValue(user.phone) || '—';
   const createdLabel = formatDate(user.createdAt);
   const lastLoginLabel = formatDateTime(user.lastLoginAt);
-  const actions = user.role !== 'admin' ? (
-    <div className="flex flex-wrap items-center gap-1.5">
-      {showEditButton && (
-        <button
-          type="button"
-          onClick={(e) => { e.stopPropagation(); toggleMode('credit'); }}
-          className="inline-flex items-center gap-1 rounded border border-brand-200 bg-brand-50 px-2 py-0.5 text-xs font-medium text-brand-700 hover:bg-brand-100"
-          title="调整授信额度"
-        >
-          <CreditCard className="h-3.5 w-3.5" />
-          <span>{editing && editMode === 'credit' ? '收起授信' : '授信'}</span>
-        </button>
-      )}
-      {showEditButton && (
-        <button
-          type="button"
-          onClick={(e) => { e.stopPropagation(); toggleMode('full'); }}
-          className="inline-flex items-center gap-1 text-xs text-gray-600 hover:text-brand-600"
-          title={editing && editMode === 'full' ? '收起' : '编辑'}
-        >
-          <Edit2 className="h-3.5 w-3.5" />
-          <span>{editing && editMode === 'full' ? '收起' : '编辑'}</span>
-        </button>
-      )}
-      <button
-        type="button"
-        disabled={saving}
-        onClick={(e) => { e.stopPropagation(); void handleToggleFreeze(); }}
-        className="inline-flex items-center gap-1 text-xs text-slate-500 hover:text-slate-800 disabled:opacity-50"
-        title={user.isFrozen ? '解冻' : '冻结'}
+  const shortLastLoginLabel = formatShortDateTime(user.lastLoginAt);
+  const creditStatusBadgeClass = creditSummary.status === 'paused' || creditSummary.status === 'overdue_hold'
+    ? 'bg-red-50 text-red-700'
+    : 'bg-amber-100 text-amber-800';
+
+  const roleBadge = (
+    <span className="inline-flex min-w-0 max-w-[45%] shrink-0">
+      <span
+        title={user.role}
+        className={`max-w-full truncate rounded-full px-1.5 py-0.5 text-[11px] font-medium leading-none ${
+          user.role === 'admin'
+            ? 'bg-purple-100 text-purple-700'
+            : 'bg-gray-100 text-gray-600'
+        }`}
       >
-        <LockKeyhole className="h-3.5 w-3.5" />
-        <span>{user.isFrozen ? '解冻' : '冻结'}</span>
-      </button>
+        {roleDisplayLabel(user.role)}
+      </span>
+    </span>
+  );
+
+  const creditActionButton = showEditButton ? (
+    <button
+      type="button"
+      onClick={(e) => { e.stopPropagation(); toggleMode('credit'); }}
+      className="inline-flex items-center gap-1 rounded border border-brand-200 bg-brand-50 px-2 py-0.5 text-xs font-medium text-brand-700 hover:bg-brand-100"
+      title="调整授信额度"
+    >
+      <CreditCard className="h-3.5 w-3.5" />
+      <span>{editing && editMode === 'credit' ? '收起授信' : '授信'}</span>
+    </button>
+  ) : null;
+
+  const fullEditActionButton = showEditButton ? (
+    <button
+      type="button"
+      onClick={(e) => { e.stopPropagation(); toggleMode('full'); }}
+      className="inline-flex items-center gap-1 text-xs text-gray-600 hover:text-brand-600"
+      title={editing && editMode === 'full' ? '收起' : '编辑'}
+    >
+      <Edit2 className="h-3.5 w-3.5" />
+      <span>{editing && editMode === 'full' ? '收起' : '编辑'}</span>
+    </button>
+  ) : null;
+
+  const freezeActionButton = (
+    <button
+      type="button"
+      disabled={saving}
+      onClick={(e) => { e.stopPropagation(); void handleToggleFreeze(); }}
+      className="inline-flex items-center gap-1 text-xs text-slate-500 hover:text-slate-800 disabled:opacity-50"
+      title={user.isFrozen ? '解冻' : '冻结'}
+    >
+      <LockKeyhole className="h-3.5 w-3.5" />
+      <span>{user.isFrozen ? '解冻' : '冻结'}</span>
+    </button>
+  );
+
+  const tableActions = user.role !== 'admin' ? (
+    <div className="space-y-1.5">
+      {showEditButton && (
+        <div className="flex items-center gap-2 whitespace-nowrap">
+          {creditActionButton}
+          {fullEditActionButton}
+        </div>
+      )}
+      <div className="flex items-center gap-2 whitespace-nowrap">
+        {freezeActionButton}
+      </div>
+    </div>
+  ) : null;
+
+  const compactActions = user.role !== 'admin' ? (
+    <div className="flex flex-wrap items-center justify-end gap-2">
+      {creditActionButton}
+      {fullEditActionButton}
+      {freezeActionButton}
     </div>
   ) : null;
 
@@ -908,76 +960,94 @@ export default function UserRow({ user, onUpdate, selected, onSelectChange, show
     return (
       <>
         <tr className={`group border-b border-gray-100 ${selected ? 'bg-brand-50/50' : 'hover:bg-gray-50/50'}`}>
-          <td className={`sticky left-0 z-10 w-10 border-b border-gray-100 px-3 py-3 ${selected ? 'bg-brand-50' : 'bg-white group-hover:bg-gray-50'}`}>
+          <td className="w-9 border-b border-gray-100 px-2.5 py-3 align-top">
             <input
               type="checkbox"
               checked={selected ?? false}
               onChange={e => { onSelectChange?.(e.target.checked); }}
-              className="h-4 w-4 cursor-pointer rounded border-gray-300 text-brand-600"
+              className="mt-0.5 h-4 w-4 cursor-pointer rounded border-gray-300 text-brand-600"
               aria-label={`选择${displayName}`}
             />
           </td>
-          <td className={`sticky left-10 z-10 w-28 border-b border-gray-100 px-3 py-3 shadow-[4px_0_6px_-4px_rgba(15,23,42,0.25)] ${selected ? 'bg-brand-50' : 'bg-white group-hover:bg-gray-50'}`}>
-            <TruncatedText text={displayName} className="font-medium text-gray-900" />
-            <TruncatedText text={user.tier || user.role} className="mt-0.5 text-xs text-gray-500 2xl:hidden" />
+          <td className="min-w-0 border-b border-gray-100 px-3 py-3 align-top">
+            <div className="flex min-w-0 items-center gap-1.5">
+              <TruncatedText text={displayName} className="min-w-0 font-medium text-gray-900" />
+              {roleBadge}
+            </div>
+            <TruncatedText text={user.email} className="mt-1 text-xs text-gray-600" />
           </td>
-          <td className="min-w-0 border-b border-gray-100 px-3 py-3">
-            <TruncatedText text={user.email} className="text-gray-700" />
+          <td className="min-w-0 border-b border-gray-100 px-3 py-3 align-top">
+            <TruncatedText text={orgLabel === '-' ? '—' : orgLabel} title={orgTitle} className="text-gray-800" />
+            <div className="mt-1 flex min-w-0 items-center gap-1.5 text-xs">
+              <TruncatedText text={phoneLabel} className="min-w-0 text-gray-600 tabular-nums" />
+              {discountText !== '—' && (
+                <>
+                  <span className="shrink-0 text-gray-300">·</span>
+                  <span className="min-w-0 max-w-[45%]">
+                    <TruncatedText text={`折扣 ${discountText}`} className="text-gray-500" />
+                  </span>
+                </>
+              )}
+            </div>
           </td>
-          <td className={`min-w-0 border-b border-gray-100 px-3 py-3 ${userTableColumn.phone}`}>
-            <TruncatedText text={phoneLabel} className="text-gray-700" />
+          <td className="min-w-0 overflow-hidden border-b border-gray-100 px-2.5 py-3 align-top">
+            <StatusBadges user={user} />
+            {user.role === 'admin' ? (
+              <div className="mt-1 text-xs text-gray-400">—</div>
+            ) : (
+              <TruncatedText text={user.tier || '—'} className="mt-1 text-xs text-gray-500" />
+            )}
           </td>
-          <td className="min-w-0 border-b border-gray-100 px-3 py-3">
-            <TruncatedText text={orgLabel === '-' ? '—' : orgLabel} title={orgTitle} className="text-gray-700" />
-            {discountText !== '—' && <TruncatedText text={`折扣 ${discountText}`} className="text-xs text-gray-500" />}
-          </td>
-          <td className={`min-w-0 overflow-hidden border-b border-gray-100 px-3 py-3 ${userTableColumn.role}`}>
-            <TruncatedText text={user.role} className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${user.role === 'admin' ? 'bg-purple-100 text-purple-700' : 'bg-gray-100 text-gray-700'}`} />
-            <TruncatedText text={user.tier || '—'} className="mt-1 text-xs text-gray-500" />
-          </td>
-          <td className="min-w-0 border-b border-gray-100 px-3 py-3">
+          <td className="min-w-0 border-b border-gray-100 px-2.5 py-3 align-top">
             {user.role === 'admin' ? (
               <span className="text-xs text-gray-400">—</span>
             ) : (
-              <div className="min-w-0 space-y-0.5">
-                <div className="font-medium text-gray-900 whitespace-nowrap">
-                  ¥{creditSummary.effectiveLimit.toLocaleString()}
-                </div>
-                <div className="text-xs text-gray-500 whitespace-nowrap">
-                  可用 ¥{creditSummary.availableAmount.toLocaleString()}
-                </div>
-                {creditSummary.status !== 'active' && (
-                  <span className="inline-block rounded bg-amber-100 px-1 py-0.5 text-[10px] text-amber-800">
-                    {CREDIT_STATUS_LABELS[creditSummary.status] || creditSummary.status}
+              <div className="min-w-0 space-y-1">
+                <div className="flex items-center gap-1 whitespace-nowrap">
+                  <span className="font-medium text-gray-900 tabular-nums">
+                    ¥{creditSummary.effectiveLimit.toLocaleString()}
                   </span>
-                )}
+                  {creditSummary.activeTemporaryLimit > 0 && (
+                    <span
+                      className="rounded bg-blue-50 px-1 py-0.5 text-[10px] font-medium leading-none text-blue-700"
+                      title={`含临时额度 ¥${creditSummary.activeTemporaryLimit.toLocaleString()}`}
+                    >
+                      +临
+                    </span>
+                  )}
+                </div>
+                <div className="flex flex-wrap items-center gap-1 text-xs text-gray-500 tabular-nums">
+                  <span className="whitespace-nowrap">可用 ¥{creditSummary.availableAmount.toLocaleString()}</span>
+                  {creditSummary.status !== 'active' && (
+                    <span className={`inline-block rounded px-1 py-0.5 text-[10px] leading-none ${creditStatusBadgeClass}`}>
+                      {CREDIT_STATUS_LABELS[creditSummary.status] || creditSummary.status}
+                    </span>
+                  )}
+                </div>
               </div>
             )}
           </td>
-          <td className="min-w-0 overflow-hidden border-b border-gray-100 px-3 py-3">
-            <StatusBadges user={user} />
+          <td className={`min-w-0 border-b border-gray-100 px-2.5 py-3 align-top text-xs ${userTableColumn.dates}`}>
+            <TruncatedText text={`登 ${shortLastLoginLabel}`} title={`最近登录：${lastLoginLabel}`} className="text-gray-700 tabular-nums" />
+            <TruncatedText text={`注 ${createdLabel}`} title={`注册时间：${createdLabel}`} className="mt-1 text-gray-500 tabular-nums" />
           </td>
-          <td className={`min-w-0 border-b border-gray-100 px-3 py-3 text-xs text-gray-600 ${userTableColumn.dates}`}>
-            <TruncatedText text={`注册 ${createdLabel}`} />
-            <TruncatedText text={`登录 ${lastLoginLabel}`} className="text-gray-500" />
-          </td>
-          <td className="border-b border-gray-100 px-3 py-3">{actions}</td>
+          <td className="border-b border-gray-100 px-2.5 py-3 align-top">{tableActions}</td>
         </tr>
         {feedback && !editing && (
           <tr>
-            <td colSpan={10} className={`px-3 pb-2 text-xs ${feedback.type === 'success' ? 'text-green-600' : 'text-red-600'}`}>{feedback.text}</td>
+            <td colSpan={7} className={`px-3 pb-2 text-xs ${feedback.type === 'success' ? 'text-green-600' : 'text-red-600'}`}>{feedback.text}</td>
           </tr>
         )}
         {editing && (
           <tr>
-            <td colSpan={10} className="border-b border-brand-200 bg-brand-50/70 p-3">
+            <td colSpan={7} className="border-b border-brand-200 bg-brand-50/70 p-3">
               {editor}
             </td>
           </tr>
         )}
         {mfaDialog && (
           <tr>
-            <td colSpan={10} className="p-0">
+            <td colSpan={7} className="p-0">
               {mfaDialog}
             </td>
           </tr>
@@ -987,8 +1057,8 @@ export default function UserRow({ user, onUpdate, selected, onSelectChange, show
   }
 
   return (
-    <div className={`min-w-0 overflow-hidden rounded-xl border bg-white/85 p-4 shadow-sm ${selected ? 'border-brand-300' : 'border-white/80'}`}>
-      <div className="flex min-w-0 items-start gap-3">
+    <div className={`min-w-0 overflow-hidden rounded-xl border bg-white/85 p-3.5 shadow-sm ${selected ? 'border-brand-300' : 'border-white/80'}`}>
+      <div className="flex min-w-0 items-start gap-2.5">
         <input
           type="checkbox"
           checked={selected ?? false}
@@ -997,50 +1067,70 @@ export default function UserRow({ user, onUpdate, selected, onSelectChange, show
           aria-label={`选择${displayName}`}
         />
         <div className="min-w-0 flex-1">
-          <TruncatedText text={displayName} className="font-medium text-gray-900" />
-          <TruncatedText text={user.email} className="text-xs text-gray-600" />
-          <div className="mt-3 grid grid-cols-1 gap-y-2">
+          <div className="flex min-w-0 items-start justify-between gap-2">
+            <div className="flex min-w-0 flex-1 items-center gap-1.5">
+              <TruncatedText text={displayName} className="min-w-0 font-medium text-gray-900" />
+              {roleBadge}
+            </div>
+            <div className="shrink-0">
+              <StatusBadges user={user} />
+            </div>
+          </div>
+          <TruncatedText text={user.email} className="mt-0.5 text-xs text-gray-600" />
+          <div className="mt-2.5 grid grid-cols-2 gap-x-3 gap-y-2">
+            <div className="col-span-2 min-w-0">
+              <div className="text-[11px] text-gray-500">机构</div>
+              <TruncatedText text={orgLabel === '-' ? '—' : orgLabel} title={orgTitle} className="text-sm text-gray-800" />
+              {discountText !== '—' && (
+                <TruncatedText text={`折扣 ${discountText}`} className="mt-0.5 text-xs text-gray-500" />
+              )}
+            </div>
             <div className="min-w-0">
               <div className="text-[11px] text-gray-500">电话</div>
-              <TruncatedText text={phoneLabel} className="text-sm text-gray-700" />
-            </div>
-            <div className="min-w-0">
-              <div className="text-[11px] text-gray-500">机构</div>
-              <TruncatedText text={orgLabel === '-' ? '—' : orgLabel} title={orgTitle} className="text-sm text-gray-700" />
-            </div>
-            <div className="min-w-0">
-              <div className="text-[11px] text-gray-500">角色</div>
-              <TruncatedText text={user.role} className="text-sm text-gray-700" />
+              <TruncatedText text={phoneLabel} className="text-sm text-gray-700 tabular-nums" />
             </div>
             <div className="min-w-0">
               <div className="text-[11px] text-gray-500">等级</div>
-              <TruncatedText text={user.tier || '—'} className="text-sm text-gray-700" />
+              {user.role === 'admin' ? (
+                <div className="text-sm text-gray-400">—</div>
+              ) : (
+                <TruncatedText text={user.tier || '—'} className="text-sm text-gray-700" />
+              )}
             </div>
             {user.role !== 'admin' && (
-              <div className="min-w-0">
+              <div className="col-span-2 min-w-0">
                 <div className="text-[11px] text-gray-500">授信额度</div>
-                <div className="text-sm text-gray-700">
-                  生效 ¥{creditSummary.effectiveLimit.toLocaleString()} · 可用 ¥{creditSummary.availableAmount.toLocaleString()}
-                  {creditSummary.status !== 'active' ? `（${CREDIT_STATUS_LABELS[creditSummary.status] || creditSummary.status}）` : ''}
+                <div className="flex flex-wrap items-center gap-1.5 text-sm text-gray-700 tabular-nums">
+                  <span>生效 ¥{creditSummary.effectiveLimit.toLocaleString()}</span>
+                  {creditSummary.activeTemporaryLimit > 0 && (
+                    <span
+                      className="rounded bg-blue-50 px-1 py-0.5 text-[10px] font-medium leading-none text-blue-700"
+                      title={`含临时额度 ¥${creditSummary.activeTemporaryLimit.toLocaleString()}`}
+                    >
+                      +临
+                    </span>
+                  )}
+                  <span className="text-xs text-gray-500">· 可用 ¥{creditSummary.availableAmount.toLocaleString()}</span>
+                  {creditSummary.status !== 'active' && (
+                    <span className={`inline-block rounded px-1 py-0.5 text-[10px] leading-none ${creditStatusBadgeClass}`}>
+                      {CREDIT_STATUS_LABELS[creditSummary.status] || creditSummary.status}
+                    </span>
+                  )}
                 </div>
               </div>
             )}
             <div className="min-w-0">
               <div className="text-[11px] text-gray-500">注册</div>
-              <TruncatedText text={createdLabel} className="text-sm text-gray-700" />
+              <TruncatedText text={createdLabel} className="text-xs text-gray-700 tabular-nums" />
             </div>
             <div className="min-w-0">
               <div className="text-[11px] text-gray-500">最近登录</div>
-              <TruncatedText text={lastLoginLabel} className="text-sm text-gray-700" />
+              <TruncatedText text={shortLastLoginLabel} title={lastLoginLabel} className="text-xs text-gray-700 tabular-nums" />
             </div>
           </div>
-          <div className="mt-3"><StatusBadges user={user} /></div>
-          {discountText !== '—' && (
-            <TruncatedText text={`折扣 ${discountText}`} className="mt-2 text-xs text-gray-500" />
-          )}
         </div>
       </div>
-      {actions && <div className="mt-3 flex justify-end">{actions}</div>}
+      {compactActions && <div className="mt-2.5 flex justify-end border-t border-gray-100 pt-2.5">{compactActions}</div>}
       {feedback && !editing && (
         <p className={`mt-2 text-xs ${feedback.type === 'success' ? 'text-green-600' : 'text-red-600'}`}>{feedback.text}</p>
       )}
