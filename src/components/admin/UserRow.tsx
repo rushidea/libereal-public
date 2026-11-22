@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useState } from 'react';
 import { Check, X, Edit2, Save, Shield, LockKeyhole, CreditCard } from 'lucide-react';
 import { adminPermissionErrorMessage } from '@/data/admin-permission-message';
 import { saveUserProfileThenCredit } from '@/lib/admin-user-row-save';
@@ -218,50 +218,7 @@ export default function UserRow({ user, onUpdate, selected, onSelectChange, show
   const [paymentTermDays, setPaymentTermDays] = useState(creditSummary.paymentTermDays.toString());
   const institutionLabels = getInstitutionLabels(institutionType);
   const { begin: beginMfaStepUp, dialog: mfaDialog } = useAdminMfaStepUp();
-  const autoOpenedRef = useRef(Boolean(autoOpenCredit));
-
-  useEffect(() => {
-    if (autoOpenCredit && !autoOpenedRef.current && showEditButton && user.role !== 'admin') {
-      autoOpenedRef.current = true;
-      setEditMode('credit');
-      setEditing(true);
-      setFeedback(null);
-    }
-  }, [autoOpenCredit, showEditButton, user.role]);
-
-  useEffect(() => {
-    if (editing) return;
-    setName(user.name ?? '');
-    setEmail(user.email ?? '');
-    setPassword('');
-    setRole(user.role ?? 'customer');
-    setInstitutionType(user.institutionType ?? (user.school ? '高校' : '待补充'));
-    setInstitutionName(user.institutionName ?? user.school ?? user.institution ?? '');
-    setInstitutionUnit(user.institutionUnit ?? user.college ?? '');
-    setDepartment(user.department ?? user.major ?? '');
-    setInstitutionFacility(user.institutionFacility ?? user.building ?? '');
-    setPiLab(user.piLab ?? '');
-    setAffiliatedLab(user.affiliatedLab ?? '');
-    setTier(user.tier ?? '');
-    setPhone(user.phone ?? '');
-    setIdentity(user.identity ?? '');
-    setApprovalStatus(user.approvalStatus ?? (user.isNewUser ? 'pending' : 'approved'));
-    setIsBlacklisted(Boolean(user.isBlacklisted));
-    setIsFrozen(Boolean(user.isFrozen));
-    setCreditOverride(creditSummary.overrideLimit?.toString() ?? '');
-    setTemporaryLimit(creditSummary.temporaryLimit.toString());
-    setTemporaryUntil(formatCreditDateForInput(creditSummary.temporaryUntil));
-    setCreditStatus(creditSummary.status || 'active');
-    setPaymentTermDays(creditSummary.paymentTermDays.toString());
-  }, [
-    editing,
-    user,
-    creditSummary.overrideLimit,
-    creditSummary.temporaryLimit,
-    creditSummary.temporaryUntil,
-    creditSummary.status,
-    creditSummary.paymentTermDays,
-  ]);
+  const [autoOpened, setAutoOpened] = useState(Boolean(autoOpenCredit));
 
   const creditDirty = () => {
     const nextOverride = creditOverride === '' ? null : Number(creditOverride);
@@ -503,7 +460,7 @@ export default function UserRow({ user, onUpdate, selected, onSelectChange, show
     }
   };
 
-  const handleCancel = () => {
+  function resetEditDraft() {
     setName(user.name ?? '');
     setEmail(user.email ?? '');
     setPassword('');
@@ -526,6 +483,18 @@ export default function UserRow({ user, onUpdate, selected, onSelectChange, show
     setTemporaryUntil(formatCreditDateForInput(creditSummary.temporaryUntil));
     setCreditStatus(creditSummary.status || 'active');
     setPaymentTermDays(creditSummary.paymentTermDays.toString());
+  }
+
+  if (autoOpenCredit && !autoOpened && showEditButton && user.role !== 'admin') {
+    setAutoOpened(true);
+    if (!editing) resetEditDraft();
+    setEditMode('credit');
+    setEditing(true);
+    setFeedback(null);
+  }
+
+  const handleCancel = () => {
+    setPassword('');
     setFeedback(null);
     if (editMode === 'credit') onCreditEditorHandled?.();
     setEditing(false);
@@ -535,12 +504,14 @@ export default function UserRow({ user, onUpdate, selected, onSelectChange, show
     setFeedback(null);
     if (editing && editMode === mode) {
       if (mode === 'credit') onCreditEditorHandled?.();
+      setPassword('');
       setEditing(false);
       return;
     }
     if (editing && editMode === 'credit' && mode !== 'credit') {
       onCreditEditorHandled?.();
     }
+    if (!editing) resetEditDraft();
     setEditMode(mode);
     setEditing(true);
   };
@@ -651,6 +622,7 @@ export default function UserRow({ user, onUpdate, selected, onSelectChange, show
         canWriteCredit={canWriteCredit}
         defaultReason="用户管理页面调整授信"
         onSaved={() => {
+          setPassword('');
           setEditing(false);
           setFeedback({ type: 'success', text: '授信已更新' });
           onCreditEditorHandled?.();

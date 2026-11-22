@@ -409,7 +409,11 @@ export function AdminFeedbackHandlingCard({
   );
 }
 
-export function AdminInquiryFeedbackPanel({
+export function AdminInquiryFeedbackPanel(props: AdminInquiryFeedbackPanelProps) {
+  return <AdminInquiryFeedbackContent key={props.inquiryId} {...props} />;
+}
+
+function AdminInquiryFeedbackContent({
   inquiryId,
   inquiryStatus,
   activeQuote,
@@ -419,35 +423,45 @@ export function AdminInquiryFeedbackPanel({
   const [feedbacks, setFeedbacks] = useState<AdminFeedbackView[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const loadRequest = useRef<AbortController | null>(null);
 
-  const fetchFeedbacks = useCallback(async () => {
-    setLoading(true);
-    setError('');
-    try {
-      const res = await fetch(`/api/inquiries/${encodeURIComponent(inquiryId)}/feedback`);
+  const fetchFeedbacks = useCallback(() => {
+    loadRequest.current?.abort();
+    const controller = new AbortController();
+    loadRequest.current = controller;
+    const { signal } = controller;
+    return fetch(`/api/inquiries/${encodeURIComponent(inquiryId)}/feedback`, { signal }).then(async (res) => {
+      if (signal.aborted) return;
       if (!res.ok) {
         setError('加载客户反馈失败');
         return;
       }
       const data = await res.json() as { feedbacks?: AdminFeedbackView[] };
+      if (signal.aborted) return;
       const rows = Array.isArray(data.feedbacks) ? data.feedbacks : [];
       setFeedbacks(rows);
-    } catch {
-      setError('网络异常，加载客户反馈失败');
-    } finally {
-      setLoading(false);
-    }
+    }).catch(() => {
+      if (!signal.aborted) setError('网络异常，加载客户反馈失败');
+    }).finally(() => {
+      if (!signal.aborted) setLoading(false);
+    });
   }, [inquiryId]);
 
   useEffect(() => {
     void fetchFeedbacks();
+    return () => loadRequest.current?.abort();
   }, [fetchFeedbacks]);
 
   const pendingCount = feedbacks.filter((f) => f.handlingStatus === 'pending').length;
 
   async function refreshAll() {
-    await fetchFeedbacks();
-    onUpdated?.();
+    if (loadRequest.current?.signal.aborted) return;
+    setLoading(true);
+    setError('');
+    const loadingFeedback = fetchFeedbacks();
+    const request = loadRequest.current;
+    await loadingFeedback;
+    if (!request?.signal.aborted) onUpdated?.();
   }
 
   return (

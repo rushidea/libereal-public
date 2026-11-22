@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useId, useMemo, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import {
   AlertCircle,
@@ -125,6 +125,8 @@ export function AdminInquiryTimelineWorkspace({
   const [supplierEntries, setSupplierEntries] = useState<SupplierQuoteEntry[]>([]);
   const [supplierLoading, setSupplierLoading] = useState(true);
   const [supplierError, setSupplierError] = useState('');
+  const feedbackRequest = useRef<AbortController | null>(null);
+  const supplierRequest = useRef<AbortController | null>(null);
 
   // Timeline view state
   const [sortOrder, setSortOrder] = useState<TimelineSortOrder>('desc');
@@ -180,14 +182,16 @@ export function AdminInquiryTimelineWorkspace({
     setItemEdits({ key: serverItemsKey, items: updated });
   }, [serverItemsKey]);
 
-  const loadFeedbacks = useCallback(async (signal?: { active: boolean }) => {
-    setFeedbackLoading(true);
-    setFeedbackError('');
-    try {
-      const res = await fetch(`/api/inquiries/${encodeURIComponent(inquiry.id)}/feedback`);
-      if (signal && !signal.active) return;
+  const loadFeedbacks = useCallback(() => {
+    feedbackRequest.current?.abort();
+    const controller = new AbortController();
+    feedbackRequest.current = controller;
+    const { signal } = controller;
+    return fetch(`/api/inquiries/${encodeURIComponent(inquiry.id)}/feedback`, { signal }).then(async (res) => {
+      if (signal.aborted) return;
       if (!res.ok) {
         const errBody = await res.json().catch(() => null) as { error?: unknown } | null;
+        if (signal.aborted) return;
         const msg = errBody && typeof errBody === 'object' && !Array.isArray(errBody) && typeof errBody.error === 'string'
           ? errBody.error
           : '加载客户反馈失败';
@@ -195,7 +199,7 @@ export function AdminInquiryTimelineWorkspace({
         return;
       }
       const data = await res.json().catch(() => null);
-      if (signal && !signal.active) return;
+      if (signal.aborted) return;
       if (Array.isArray(data)) {
         setFeedbacks([]);
         setFeedbackLoaded(true);
@@ -211,22 +215,17 @@ export function AdminInquiryTimelineWorkspace({
       }
       setFeedbacks([]);
       setFeedbackLoaded(true);
-    } catch {
-      if (signal && !signal.active) return;
-      setFeedbackError('网络异常，加载客户反馈失败');
-    } finally {
-      if (!signal || signal.active) setFeedbackLoading(false);
-    }
+    }).catch(() => {
+      if (!signal.aborted) setFeedbackError('网络异常，加载客户反馈失败');
+    }).finally(() => {
+      if (!signal.aborted) setFeedbackLoading(false);
+    });
   }, [inquiry.id]);
 
-  const loadSupplierEntries = useCallback(async (signal?: { active: boolean }) => {
-    setSupplierLoading(true);
-    setSupplierError('');
-    try {
-      const res = await fetch(`/api/inquiries/${encodeURIComponent(inquiry.id)}/supplier-quote`);
-      if (signal && !signal.active) return;
+  const loadSupplierEntries = useCallback((signal: AbortSignal) => {
+    return fetch(`/api/inquiries/${encodeURIComponent(inquiry.id)}/supplier-quote`, { signal }).then(async (res) => {
       const body = await res.json().catch(() => null);
-      if (signal && !signal.active) return;
+      if (signal.aborted) return;
       if (!res.ok) {
         const msg = body && typeof body === 'object' && !Array.isArray(body) && typeof (body as { error?: unknown }).error === 'string'
           ? (body as { error: string }).error
@@ -242,28 +241,44 @@ export function AdminInquiryTimelineWorkspace({
         return;
       }
       throw new Error('未取得有效的供应商询价记录，请刷新后重试');
-    } catch (err) {
-      if (signal && !signal.active) return;
-      setSupplierError(err instanceof Error ? err.message : '未能读取供应商询价记录');
-    } finally {
-      if (!signal || signal.active) setSupplierLoading(false);
-    }
+    }).catch((err) => {
+      if (!signal.aborted) setSupplierError(err instanceof Error ? err.message : '未能读取供应商询价记录');
+    }).finally(() => {
+      if (!signal.aborted) setSupplierLoading(false);
+    });
   }, [inquiry.id]);
 
   useEffect(() => {
-    const signal = { active: true };
-    void loadFeedbacks(signal);
-    void loadSupplierEntries(signal);
-    return () => { signal.active = false; };
+    const controller = new AbortController();
+    supplierRequest.current = controller;
+    void loadFeedbacks();
+    void loadSupplierEntries(controller.signal);
+    return () => {
+      feedbackRequest.current?.abort();
+      controller.abort();
+    };
   }, [loadFeedbacks, loadSupplierEntries]);
 
   const handleFeedbackUpdated = useCallback(async () => {
-    await loadFeedbacks();
-    await fetchData({ silent: true });
+    if (feedbackRequest.current?.signal.aborted) return;
+    setFeedbackLoading(true);
+    setFeedbackError('');
+    const loadingFeedback = loadFeedbacks();
+    const request = feedbackRequest.current;
+    await loadingFeedback;
+    if (!request?.signal.aborted) await fetchData({ silent: true });
   }, [loadFeedbacks, fetchData]);
 
+  function handleSupplierEntriesChange(entries: SupplierQuoteEntry[]) {
+    if (feedbackRequest.current?.signal.aborted) return;
+    supplierRequest.current?.abort();
+    setSupplierEntries(entries);
+    setSupplierLoading(false);
+    setSupplierError('');
+  }
+
   const handleSupplierRecorded = useCallback(async () => {
-    await fetchData({ silent: true });
+    if (!feedbackRequest.current?.signal.aborted) await fetchData({ silent: true });
   }, [fetchData]);
 
   const timelineEvents = useMemo(
@@ -897,7 +912,7 @@ export function AdminInquiryTimelineWorkspace({
             entries={supplierEntries}
             loading={supplierLoading}
             error={supplierError}
-            onEntriesChange={(next) => { setSupplierEntries(next); }}
+            onEntriesChange={handleSupplierEntriesChange}
             onRecorded={handleSupplierRecorded}
             compactWhenComplete
             compactLayout

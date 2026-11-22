@@ -41,7 +41,11 @@ function generateClientRequestId(inquiryId: string): string {
   return `fb-${inquiryId}-${randomPart}`;
 }
 
-export default function InquiryFeedbackSection({
+export default function InquiryFeedbackSection(props: InquiryFeedbackSectionProps) {
+  return <InquiryFeedbackContent key={props.inquiryId} {...props} />;
+}
+
+function InquiryFeedbackContent({
   inquiryId,
   inquiryStatus,
   activeQuote,
@@ -58,27 +62,32 @@ export default function InquiryFeedbackSection({
   const [submitError, setSubmitError] = useState('');
   const [submitSuccess, setSubmitSuccess] = useState('');
   const requestIdRef = useRef<string>(generateClientRequestId(inquiryId));
+  const loadRequest = useRef<AbortController | null>(null);
 
-  const fetchFeedbacks = useCallback(async () => {
-    setLoading(true);
-    setLoadError('');
-    try {
-      const res = await fetch(`/api/inquiries/${encodeURIComponent(inquiryId)}/feedback`);
+  const fetchFeedbacks = useCallback(() => {
+    loadRequest.current?.abort();
+    const controller = new AbortController();
+    loadRequest.current = controller;
+    const { signal } = controller;
+    return fetch(`/api/inquiries/${encodeURIComponent(inquiryId)}/feedback`, { signal }).then(async (res) => {
+      if (signal.aborted) return;
       if (!res.ok) {
         setLoadError('反馈记录加载失败');
         return;
       }
       const data = await res.json() as { feedbacks?: CustomerFeedbackView[] };
+      if (signal.aborted) return;
       setFeedbacks(Array.isArray(data.feedbacks) ? data.feedbacks : []);
-    } catch {
-      setLoadError('网络异常，反馈记录加载失败');
-    } finally {
-      setLoading(false);
-    }
+    }).catch(() => {
+      if (!signal.aborted) setLoadError('网络异常，反馈记录加载失败');
+    }).finally(() => {
+      if (!signal.aborted) setLoading(false);
+    });
   }, [inquiryId]);
 
   useEffect(() => {
     void fetchFeedbacks();
+    return () => loadRequest.current?.abort();
   }, [fetchFeedbacks]);
 
   const canSubmitFeedback = !quoteIsHistorical
@@ -120,6 +129,7 @@ export default function InquiryFeedbackSection({
         }),
       });
       const data = await res.json().catch(() => ({})) as { error?: string };
+      if (loadRequest.current?.signal.aborted) return;
       if (!res.ok) {
         setSubmitError(data.error || '提交失败，请稍后重试');
         return;
@@ -128,12 +138,14 @@ export default function InquiryFeedbackSection({
       setFormOpen(false);
       setSubmitSuccess('反馈已提交，客服将尽快跟进处理。');
       requestIdRef.current = generateClientRequestId(inquiryId);
+      setLoading(true);
+      setLoadError('');
       await fetchFeedbacks();
-      onSubmitted?.();
+      if (!loadRequest.current?.signal.aborted) onSubmitted?.();
     } catch {
-      setSubmitError('网络异常，请稍后重试');
+      if (!loadRequest.current?.signal.aborted) setSubmitError('网络异常，请稍后重试');
     } finally {
-      setSubmitting(false);
+      if (!loadRequest.current?.signal.aborted) setSubmitting(false);
     }
   }
 

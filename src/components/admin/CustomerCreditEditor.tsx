@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useId, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { Save, X } from 'lucide-react';
 import { adminPermissionErrorMessage } from '@/data/admin-permission-message';
 import { isAdminMfaStepUpResponse, useAdminMfaStepUp } from '@/components/admin/AdminMfaStepUpDialog';
@@ -30,7 +30,11 @@ function formatCurrency(value: number): string {
   return `¥${value.toLocaleString('zh-CN', { maximumFractionDigits: 2 })}`;
 }
 
-export default function CustomerCreditEditor({
+export default function CustomerCreditEditor(props: Props) {
+  return <CreditEditorForm key={props.userId} {...props} />;
+}
+
+function CreditEditorForm({
   userId,
   userName,
   tier,
@@ -43,29 +47,36 @@ export default function CustomerCreditEditor({
   onSwitchToFull,
 }: Props) {
   const idPrefix = useId();
-  const [creditOverride, setCreditOverride] = useState(summary.overrideLimit?.toString() ?? '');
-  const [temporaryLimit, setTemporaryLimit] = useState(summary.temporaryLimit.toString());
-  const [temporaryUntil, setTemporaryUntil] = useState(formatCreditDateForInput(summary.temporaryUntil));
-  const [paymentTermDays, setPaymentTermDays] = useState(summary.paymentTermDays.toString());
-  const [creditStatus, setCreditStatus] = useState(summary.status || 'active');
+  const savedFields = {
+    creditOverride: summary.overrideLimit?.toString() ?? '',
+    temporaryLimit: summary.temporaryLimit.toString(),
+    temporaryUntil: formatCreditDateForInput(summary.temporaryUntil),
+    paymentTermDays: summary.paymentTermDays.toString(),
+    creditStatus: summary.status || 'active',
+  };
+  const savedFieldsKey = JSON.stringify([
+    summary.overrideLimit, summary.temporaryLimit, summary.temporaryUntil, summary.paymentTermDays, summary.status,
+  ]);
+  const [draft, setDraft] = useState(() => ({ savedFieldsKey, fields: savedFields }));
+  const fields = draft.savedFieldsKey === savedFieldsKey ? draft.fields : savedFields;
+  const { creditOverride, temporaryLimit, temporaryUntil, paymentTermDays, creditStatus } = fields;
   const [reason, setReason] = useState(defaultReason || '');
   const [saving, setSaving] = useState(false);
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const { begin, dialog } = useAdminMfaStepUp();
+  const scope = useRef<AbortController | null>(null);
 
   useEffect(() => {
-    setCreditOverride(summary.overrideLimit?.toString() ?? '');
-    setTemporaryLimit(summary.temporaryLimit.toString());
-    setTemporaryUntil(formatCreditDateForInput(summary.temporaryUntil));
-    setPaymentTermDays(summary.paymentTermDays.toString());
-    setCreditStatus(summary.status || 'active');
-  }, [
-    summary.overrideLimit,
-    summary.temporaryLimit,
-    summary.temporaryUntil,
-    summary.paymentTermDays,
-    summary.status,
-  ]);
+    const controller = new AbortController();
+    scope.current = controller;
+    return () => controller.abort();
+  }, []);
+
+  if (draft.savedFieldsKey !== savedFieldsKey) setDraft({ savedFieldsKey, fields: savedFields });
+
+  function updateFields(changes: Partial<typeof fields>) {
+    setDraft((current) => ({ ...current, fields: { ...current.fields, ...changes } }));
+  }
 
   const baseForPreview = summary.hasAccount ? summary.baseLimit : summary.tierDefaultLimit;
   const previewLimit = previewEffectiveCreditLimit(baseForPreview, {
@@ -79,17 +90,13 @@ export default function CustomerCreditEditor({
     : null;
 
   async function submitCredit(stepUpToken?: string) {
+    const signal = scope.current?.signal;
+    if (signal?.aborted) return;
     if (!canWriteCredit) {
       setFeedback({ type: 'error', text: '修改授信需要财务权限。' });
       return;
     }
-    const validated = validateCreditDraftInput({
-      creditOverride,
-      temporaryLimit,
-      temporaryUntil,
-      paymentTermDays,
-      creditStatus,
-    });
+    const validated = validateCreditDraftInput(fields);
     if (!validated.ok) {
       setFeedback({ type: 'error', text: validated.error });
       return;
@@ -100,6 +107,7 @@ export default function CustomerCreditEditor({
     try {
       const response = await fetch(`/api/admin/users/${encodeURIComponent(userId)}/credit`, {
         method: 'PATCH',
+        signal,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           ...validated.payload,
@@ -108,6 +116,7 @@ export default function CustomerCreditEditor({
         }),
       });
       const data = await response.json().catch(() => ({})) as { error?: string; requiredPermission?: string };
+      if (signal?.aborted) return;
       if (!stepUpToken && isAdminMfaStepUpResponse(response.status, data.error)) {
         await begin(async (token) => {
           await submitCredit(token);
@@ -121,9 +130,9 @@ export default function CustomerCreditEditor({
       setFeedback({ type: 'success', text: '授信额度已保存' });
       await onSaved();
     } catch {
-      setFeedback({ type: 'error', text: '网络错误，请稍后重试。' });
+      if (!signal?.aborted) setFeedback({ type: 'error', text: '网络错误，请稍后重试。' });
     } finally {
-      setSaving(false);
+      if (!signal?.aborted) setSaving(false);
     }
   }
 
@@ -183,8 +192,7 @@ export default function CustomerCreditEditor({
               <button
                 type="button"
                 onClick={() => {
-                  setTemporaryLimit(String(neededShortfallForDraft));
-                  if (!temporaryUntil) setTemporaryUntil(addDaysToShanghaiDate(30));
+                  updateFields({ temporaryLimit: String(neededShortfallForDraft), temporaryUntil: temporaryUntil || addDaysToShanghaiDate(30) });
                   setFeedback(null);
                 }}
                 className="rounded border border-amber-300 bg-white px-2.5 py-1 font-medium text-amber-800 hover:bg-amber-100"
@@ -195,7 +203,7 @@ export default function CustomerCreditEditor({
             <button
               type="button"
               onClick={() => {
-                setCreditOverride(String(suggestedMinTotal));
+                updateFields({ creditOverride: String(suggestedMinTotal) });
                 setFeedback(null);
               }}
               className="rounded border border-brand-300 bg-white px-2.5 py-1 font-medium text-brand-700 hover:bg-brand-50"
@@ -217,7 +225,7 @@ export default function CustomerCreditEditor({
             min="0"
             step="0.01"
             value={creditOverride}
-            onChange={(e) => setCreditOverride(e.target.value)}
+            onChange={(e) => updateFields({ creditOverride: e.target.value })}
             disabled={!canWriteCredit}
             title={canWriteCredit ? undefined : '修改授信需要财务权限'}
             placeholder={`留空按等级默认 ${formatCurrency(summary.tierDefaultLimit)}`}
@@ -235,7 +243,7 @@ export default function CustomerCreditEditor({
             min="0"
             step="0.01"
             value={temporaryLimit}
-            onChange={(e) => setTemporaryLimit(e.target.value)}
+            onChange={(e) => updateFields({ temporaryLimit: e.target.value })}
             disabled={!canWriteCredit}
             title={canWriteCredit ? undefined : '修改授信需要财务权限'}
             className="mt-1 w-full rounded border border-gray-200 px-2 py-1.5 text-sm text-gray-900 disabled:bg-gray-50 disabled:text-gray-500"
@@ -251,14 +259,14 @@ export default function CustomerCreditEditor({
               <div className="flex items-center gap-1.5">
                 <button
                   type="button"
-                  onClick={() => setTemporaryUntil(addDaysToShanghaiDate(7))}
+                  onClick={() => updateFields({ temporaryUntil: addDaysToShanghaiDate(7) })}
                   className="rounded bg-gray-100 px-1.5 py-0.5 text-[11px] text-gray-700 hover:bg-gray-200"
                 >
                   +7天
                 </button>
                 <button
                   type="button"
-                  onClick={() => setTemporaryUntil(addDaysToShanghaiDate(30))}
+                  onClick={() => updateFields({ temporaryUntil: addDaysToShanghaiDate(30) })}
                   className="rounded bg-gray-100 px-1.5 py-0.5 text-[11px] text-gray-700 hover:bg-gray-200"
                 >
                   +30天
@@ -270,7 +278,7 @@ export default function CustomerCreditEditor({
             id={`${idPrefix}-until`}
             type="date"
             value={temporaryUntil}
-            onChange={(e) => setTemporaryUntil(e.target.value)}
+            onChange={(e) => updateFields({ temporaryUntil: e.target.value })}
             disabled={!canWriteCredit}
             title={canWriteCredit ? '到期日当天 23:59 前（北京时间）生效' : '修改授信需要财务权限'}
             className="mt-1 w-full rounded border border-gray-200 px-2 py-1.5 text-sm text-gray-900 disabled:bg-gray-50 disabled:text-gray-500"
@@ -287,7 +295,7 @@ export default function CustomerCreditEditor({
             min="1"
             max="365"
             value={paymentTermDays}
-            onChange={(e) => setPaymentTermDays(e.target.value)}
+            onChange={(e) => updateFields({ paymentTermDays: e.target.value })}
             disabled={!canWriteCredit}
             title={canWriteCredit ? undefined : '修改授信需要财务权限'}
             className="mt-1 w-full rounded border border-gray-200 px-2 py-1.5 text-sm text-gray-900 disabled:bg-gray-50 disabled:text-gray-500"
@@ -301,7 +309,7 @@ export default function CustomerCreditEditor({
           <select
             id={`${idPrefix}-status`}
             value={creditStatus}
-            onChange={(e) => setCreditStatus(e.target.value)}
+            onChange={(e) => updateFields({ creditStatus: e.target.value })}
             disabled={!canWriteCredit}
             title={canWriteCredit ? undefined : '修改授信需要财务权限'}
             className="mt-1 w-full rounded border border-gray-200 bg-white px-2 py-1.5 text-sm text-gray-900 disabled:bg-gray-50 disabled:text-gray-500"

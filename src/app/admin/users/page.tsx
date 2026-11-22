@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { useSession } from 'next-auth/react';
 import { notFound } from 'next/navigation';
 import { Search, Shield, Check, UserX, AlertTriangle, Plus, LockKeyhole } from 'lucide-react';
@@ -47,15 +47,41 @@ interface User {
   creditSummary?: CustomerCreditSummary | null;
 }
 
+const compactListQuery = '(max-width: 767px)';
+
+function subscribeToCompactList(onChange: () => void) {
+  const media = window.matchMedia?.(compactListQuery);
+  media?.addEventListener('change', onChange);
+  return () => media?.removeEventListener('change', onChange);
+}
+
+function userListQueryParam(name: string) {
+  return typeof window === 'undefined' ? '' : new URLSearchParams(window.location.search).get(name)?.trim() ?? '';
+}
+
+function UsersLoading() {
+  return (
+    <div className="flex items-center justify-center py-20">
+      <div className="animate-spin w-8 h-8 border-2 border-brand-500 border-t-transparent rounded-full" />
+    </div>
+  );
+}
+
 export default function AdminUsersPage() {
   const { data: session, status } = useSession();
+  const sessionUser = session?.user as User | undefined;
+  if (status === 'loading') return <UsersLoading />;
+  if (status === 'unauthenticated' || sessionUser?.role !== 'admin') notFound();
+  return <AdminUsersList key={sessionUser.id} />;
+}
+
+function AdminUsersList() {
   const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
   const [missing, setMissing] = useState(false);
-  const [search, setSearch] = useState('');
-  const [deepLinkCreditUserId, setDeepLinkCreditUserId] = useState<string | null>(null);
-  const deepLinkAppliedRef = useRef(false);
+  const [search, setSearch] = useState(() => userListQueryParam('q'));
+  const [deepLinkCreditUserId, setDeepLinkCreditUserId] = useState(() => userListQueryParam('creditUserId') || null);
   const [selectedUserIds, setSelectedUserIds] = useState<Set<string>>(new Set());
   const [templates, setTemplates] = useState<{ id: string; name: string }[]>([]);
   const [createOpen, setCreateOpen] = useState(false);
@@ -65,53 +91,19 @@ export default function AdminUsersPage() {
   const visibleSelectedIds = visibleSelectedUserIds(filteredUsers, selectedUserIds);
   const visibleSelectedUsers = filteredUsers.filter((user) => selectedUserIds.has(user.id));
   const allVisibleSelected = filteredUsers.length > 0 && visibleSelectedIds.length === filteredUsers.length;
-  const [useCompactList, setUseCompactList] = useState(false);
+  const useCompactList = useSyncExternalStore(subscribeToCompactList, () => window.matchMedia?.(compactListQuery).matches ?? false, () => false);
+  const listRequest = useRef<AbortController | null>(null);
 
-  useEffect(() => {
-    if (deepLinkAppliedRef.current || typeof window === 'undefined') return;
-    deepLinkAppliedRef.current = true;
-    const params = new URLSearchParams(window.location.search);
-    const initialSearch = params.get('q')?.trim();
-    const initialCreditUserId = params.get('creditUserId')?.trim();
-    if (initialSearch) setSearch(initialSearch);
-    if (initialCreditUserId) setDeepLinkCreditUserId(initialCreditUserId);
-  }, []);
-
-  useEffect(() => {
-    if (typeof window.matchMedia !== 'function') return;
-    const media = window.matchMedia('(max-width: 767px)');
-    const apply = () => setUseCompactList(media.matches);
-    apply();
-    media.addEventListener('change', apply);
-    return () => media.removeEventListener('change', apply);
-  }, []);
-
-  const sessionRole = (session?.user as User | undefined)?.role;
-
-  useEffect(() => {
-    if (status !== 'authenticated' || sessionRole !== 'admin') return;
-    fetchData();
-  }, [status, sessionRole]);
-
-  useEffect(() => {
-    let active = true;
-    fetch('/api/admin/access?view=current', { cache: 'no-store' })
-      .then((response) => response.ok ? response.json() : null)
-      .then((data: { permissions?: unknown } | null) => {
-        if (active) setPermissions(Array.isArray(data?.permissions) ? data.permissions.filter((item): item is string => typeof item === 'string') : []);
-      })
-      .catch(() => { if (active) setPermissions([]); });
-    return () => { active = false; };
-  }, []);
-
-  async function fetchData(silent = false) {
-    if (!silent) setLoading(true);
-    setLoadError('');
-    try {
-      const [usersRes, templatesRes] = await Promise.all([
-        fetch('/api/users'),
-        fetch('/api/admin/discount-templates'),
-      ]);
+  const loadData = useCallback(() => {
+    listRequest.current?.abort();
+    const controller = new AbortController();
+    listRequest.current = controller;
+    const { signal } = controller;
+    return Promise.all([
+      fetch('/api/users', { signal }),
+      fetch('/api/admin/discount-templates', { signal }),
+    ]).then(async ([usersRes, templatesRes]) => {
+      if (signal.aborted) return;
       if (usersRes.status === 401 || usersRes.status === 403) {
         setMissing(true);
         return;
@@ -125,19 +117,45 @@ export default function AdminUsersPage() {
       }
       const parsedUsers = parseAdminUsersResponse<User>(usersData);
       if (!parsedUsers) throw new Error('用户数据格式异常');
+      const tplData = templatesRes.ok ? await templatesRes.json() : null;
+      if (signal.aborted) return;
       setUsers(parsedUsers);
       if (templatesRes.ok) {
-        const tplData = await templatesRes.json();
         setTemplates(Array.isArray(tplData) ? tplData.map((t: { id: string; name: string }) => ({ id: t.id, name: t.name })) : []);
       }
-    } catch (e) {
+    }).catch((e) => {
+      if (signal.aborted) return;
       console.error(e);
       setUsers([]);
       setSelectedUserIds(new Set());
       setLoadError(e instanceof Error ? e.message : '用户数据读取失败');
-    } finally {
-      setLoading(false);
-    }
+    }).finally(() => {
+      if (!signal.aborted) setLoading(false);
+    });
+  }, []);
+
+  useEffect(() => {
+    void loadData();
+    return () => listRequest.current?.abort();
+  }, [loadData]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    const { signal } = controller;
+    fetch('/api/admin/access?view=current', { cache: 'no-store', signal })
+      .then((response) => response.ok ? response.json() : null)
+      .then((data: { permissions?: unknown } | null) => {
+        if (!signal.aborted) setPermissions(Array.isArray(data?.permissions) ? data.permissions.filter((item): item is string => typeof item === 'string') : []);
+      })
+      .catch(() => { if (!signal.aborted) setPermissions([]); });
+    return () => controller.abort();
+  }, []);
+
+  function fetchData(silent = false) {
+    if (listRequest.current?.signal.aborted) return;
+    if (!silent) setLoading(true);
+    setLoadError('');
+    void loadData();
   }
 
   async function deleteUsers(userIds: string[]) {
@@ -232,16 +250,8 @@ export default function AdminUsersPage() {
     }
   }
 
-  if (status === 'unauthenticated' || missing) notFound();
-  if (status === 'authenticated' && (session?.user as User)?.role !== 'admin') notFound();
-
-  if (status === 'loading' || loading) {
-    return (
-      <div className="flex items-center justify-center py-20">
-        <div className="animate-spin w-8 h-8 border-2 border-brand-500 border-t-transparent rounded-full" />
-      </div>
-    );
-  }
+  if (missing) notFound();
+  if (loading) return <UsersLoading />;
 
   if (loadError) {
     return (
