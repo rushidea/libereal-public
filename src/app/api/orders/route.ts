@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { customerShipmentFields } from '@/lib/fulfillment-legacy';
 import { prisma } from '@/lib/prisma';
 import { requireActiveSession, requireAdmin } from '@/lib/session';
 import { AMBIGUOUS_PRODUCT_CATALOG_NUMBER, CustomerUnavailableProductError, getVerifiedInventoryError, revalidateReferencePriceEvidence, verifyAndPriceItems, type PriceLookupItem } from '@/lib/pricing';
@@ -80,7 +81,7 @@ export async function GET(_req: NextRequest) {
         orderItems: { orderBy: { position: 'asc' } },
         addressSnapshot: true,
         adjustments: { orderBy: { createdAt: 'asc' } },
-        shipments: { orderBy: { createdAt: 'desc' }, include: { items: true } },
+        shipments: { orderBy: { createdAt: 'desc' }, select: customerShipmentFields },
         events: { where: { type: 'credit_review_required' }, take: 1, select: { id: true } },
         paymentAttempts: { where: { provider: 'alipay' }, orderBy: { createdAt: 'desc' }, take: 1 },
       },

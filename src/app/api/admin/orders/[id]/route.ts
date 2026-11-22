@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { requirePhysicalStatus } from '@/lib/fulfillment-legacy';
 import { prepareOrderPurchases } from '@/lib/purchase-orders';
 import { prisma } from '@/lib/prisma';
 import { assertOrderPricingResolved, closeOrderRepricing, jsonObject, pendingOrderRepricing } from '@/lib/order-catalog-repricing';
@@ -9,7 +10,6 @@ import {
   evaluatePostDeliveryCredit,
   releaseOrderReceivableOnCancellation,
   reserveOrderCredit,
-  settleOrderReceivable,
 } from '@/lib/customer-credit';
 import type { OrderCreditReviewSummary } from '@/lib/credit-summary';
 import { assertOrderTransition, isAutoCloseableOrderStatus, isInactiveOrderStatus, requiresPaidAlipayRefund } from '@/lib/order-domain';
@@ -156,6 +156,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     if (stepUpFailure) return stepUpFailure;
 
     const updated = await prisma.$transaction(async (tx) => {
+      await requirePhysicalStatus(tx, id, existing.status, status);
       if (accepting) await assertOrderPricingResolved(tx, id);
       const acceptance = accepting ? await verifyMerchantOrderAcceptance(tx, id, body.approvalVersion) : null;
       if (status === 'cancelled') {
@@ -210,7 +211,6 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
           reason: status === 'closed' ? '管理员关闭订单退回积分' : '管理员取消订单退回积分',
         }));
       }
-      if (status === 'completed' && existing.status !== 'completed' && isPostDeliveryPaymentMethod(existing.paymentMethod)) await settleOrderReceivable(tx, id, admin.id);
       if (status && status !== existing.status) await writeAuditLog({ actorId: admin.id, actorEmail: admin.email, action: 'order.status_changed', resource: 'orders', targetType: 'Order', targetId: id, before: { status: existing.status }, after: { status }, reason }, tx);
       return result;
     }, { isolationLevel: 'Serializable' });
@@ -221,6 +221,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     const approvalConflict = accepting && orderApprovalConflict(err);
     if (approvalConflict) return NextResponse.json(approvalConflict, { status: 409 });
     if ((err as { code?: string })?.code === 'P2025') return NextResponse.json({ error: '订单已变化，请重新查看。' }, { status: 409 });
+    if (message === 'FULFILLMENT_RECORDS_REQUIRED') return NextResponse.json({ error: '请先按发货明细登记实际运送和签收情况。' }, { status: 409 });
     if (message === POINTS_REFUND_FAILED) {
       return NextResponse.json({ error: POINTS_REFUND_FAILED }, { status: 409 });
     }

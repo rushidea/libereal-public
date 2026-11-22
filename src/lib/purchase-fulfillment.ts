@@ -26,7 +26,8 @@ function sameShipment(persisted: Target, current: Target) {
 
 export async function purchaseFulfillmentReview(tx: Db, order: SourceOrder, activities: PurchaseActivity[], purchases: Procurement[]) {
   const rows = await tx.shipmentItem.findMany({ where: { shipment: { orderId: order.id, shippedAt: { not: null },
-    status: { in: ['shipped', 'delivered', 'completed'] } } }, include: { shipment: true }, orderBy: [{ createdAt: 'asc' }, { id: 'asc' }] });
+    status: { in: ['shipped', 'delivered', 'completed'] } } }, include: { shipment: { include: { fulfillmentParcel: { select: { route: true, lines: { select: { orderItemId: true, purchaseOrderId: true, quantity: true } } } } } } },
+    orderBy: [{ createdAt: 'asc' }, { id: 'asc' }] });
   const actual: Target[] = rows.flatMap(row => {
     const item = order.orderItems.find(item => item.id === row.orderItemId);
     return item && row.shipment.shippedAt && positiveCents(row.quantity) ? [{ id: row.id, shipmentId: row.shipmentId,
@@ -43,6 +44,17 @@ export async function purchaseFulfillmentReview(tx: Db, order: SourceOrder, acti
   const usedHistory = new Map<string, number>();
   const usedShipments = new Set<string>();
   const delivered: Array<{ purchaseOrderId: string; orderItemId: string; quantity: number }> = [];
+  const historicalDelivered: typeof delivered = [];
+  for (const row of rows) {
+    const parcel = row.shipment.fulfillmentParcel;
+    if (!parcel || parcel.route === 'legacy_customer') continue;
+    const sources = parcel.lines.filter(line => line.orderItemId === row.orderItemId);
+    if (!sources.length || sources.reduce((sum, line) => sum + line.quantity, 0) !== row.quantity || sources.some(line => !line.purchaseOrderId)) {
+      throw new PurchaseError('采购包裹与客户发货行数量不一致，请核对原记录');
+    }
+    usedShipments.add(row.id);
+    for (const line of sources) delivered.push({ purchaseOrderId: line.purchaseOrderId!, orderItemId: row.orderItemId, quantity: line.quantity });
+  }
   for (const row of ledger) {
     const { target, sources } = row.operation;
     if (!target || !Array.isArray(sources) || inconsistent.includes(target.orderItemId)) continue;
@@ -55,8 +67,11 @@ export async function purchaseFulfillmentReview(tx: Db, order: SourceOrder, acti
       if (consumed + target.quantity > (historyBudget.get(target.orderItemId) ?? 0)) continue;
       addDelivery(usedHistory, target.orderItemId, target.quantity);
     }
-    for (const source of sources) if (source.purchaseOrderId) delivered.push({ purchaseOrderId: source.purchaseOrderId,
-      orderItemId: target.orderItemId, quantity: source.quantity });
+    for (const source of sources) if (source.purchaseOrderId) {
+      const line = { purchaseOrderId: source.purchaseOrderId, orderItemId: target.orderItemId, quantity: source.quantity };
+      delivered.push(line);
+      historicalDelivered.push(line);
+    }
   }
   const unassigned = actual.filter(row => !usedShipments.has(row.id) && !inconsistent.includes(row.orderItemId));
   for (const item of order.orderItems) {
@@ -73,7 +88,7 @@ export async function purchaseFulfillmentReview(tx: Db, order: SourceOrder, acti
     return quantity > 0 && (!orderedAt || !target.occurredAt || orderedAt <= target.occurredAt)
       ? [{ purchaseOrderId: po.id, quantity, orderedAt }] : [];
   }) }));
-  const state = { targets, delivered, inconsistent, ledger };
+  const state = { targets, delivered, historicalDelivered, inconsistent, ledger };
   return { ...state, version: pricingContentHash(state) };
 }
 

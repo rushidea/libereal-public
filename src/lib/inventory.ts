@@ -239,11 +239,11 @@ export async function releaseOrderInventory(tx: Tx, orderId: string, actorId?: s
     });
     if (claimed.count !== 1) continue;
     const current = await tx.inventoryReservation.findUniqueOrThrow({ where: { id: reservation.id } });
-    const remaining = Math.max(0, current.quantity - current.fulfilledQuantity);
+    const remaining = Math.max(0, current.quantity - current.fulfilledQuantity - current.releasedQuantity);
     const before = await tx.inventoryAccount.findUniqueOrThrow({ where: { id: reservation.inventoryAccountId } });
     const allocations = await tx.inventoryReservationBatch.findMany({ where: { reservationId: reservation.id } });
     for (const allocation of allocations) {
-      const allocatedRemaining = Math.max(0, allocation.quantity - allocation.fulfilledQuantity);
+      const allocatedRemaining = Math.max(0, allocation.quantity - allocation.fulfilledQuantity - allocation.releasedQuantity);
       if (!allocatedRemaining) continue;
       const released = await tx.inventoryBatch.updateMany({
         where: { id: allocation.batchId, reservedQuantity: { gte: allocatedRemaining } },
@@ -268,16 +268,16 @@ export async function shipOrderInventory(tx: Tx, orderId: string, orderItemId: s
     reservation = await tx.inventoryReservation.findUnique({ where: { orderItemId } });
   }
   if (!reservation || reservation.status !== 'active') throw new Error('INVENTORY_RESERVATION_NOT_ACTIVE');
-  const remaining = reservation.quantity - reservation.fulfilledQuantity;
+  const remaining = reservation.quantity - reservation.fulfilledQuantity - reservation.releasedQuantity;
   if (quantity > remaining) throw new Error('INVENTORY_RESERVATION_EXCEEDED');
   const before = await tx.inventoryAccount.findUniqueOrThrow({ where: { id: reservation.inventoryAccountId } });
   if (before.actualQuantity >= 0 && before.actualQuantity < quantity) throw new Error('INSUFFICIENT_ACTUAL_INVENTORY');
   const fulfilledQuantity = reservation.fulfilledQuantity + quantity;
   const claimed = await tx.inventoryReservation.updateMany({
-    where: { id: reservation.id, status: 'active', fulfilledQuantity: reservation.fulfilledQuantity },
+    where: { id: reservation.id, status: 'active', fulfilledQuantity: reservation.fulfilledQuantity, releasedQuantity: reservation.releasedQuantity },
     data: {
       fulfilledQuantity,
-      status: fulfilledQuantity >= reservation.quantity ? 'fulfilled' : 'active',
+      status: fulfilledQuantity + reservation.releasedQuantity >= reservation.quantity ? 'fulfilled' : 'active',
     },
   });
   if (claimed.count !== 1) throw new Error('INVENTORY_RESERVATION_EXCEEDED');
@@ -306,7 +306,7 @@ export async function shipOrderInventory(tx: Tx, orderId: string, orderItemId: s
   let batchRemaining = quantity;
   for (const allocation of allocations) {
     if (batchRemaining <= 0) break;
-    const allocationRemaining = allocation.quantity - allocation.fulfilledQuantity;
+    const allocationRemaining = allocation.quantity - allocation.fulfilledQuantity - allocation.releasedQuantity;
     const consumed = Math.min(allocationRemaining, batchRemaining);
     if (!consumed) continue;
     const consumedBatch = await tx.inventoryBatch.updateMany({
@@ -371,4 +371,68 @@ export async function setInboundInventory(tx: Tx, input: { productId: string; va
   const after = await tx.inventoryAccount.update({ where: { id: before.id }, data: { inboundQuantity: input.quantity } });
   await record(tx, before, after, { type: 'inbound_adjustment', quantity: input.quantity - before.inboundQuantity, reason: input.reason, actorId: input.actorId });
   return after;
+}
+
+// Release the customer's original warehouse hold when the supplier ships directly or a dedicated receipt takes its place.
+export async function releaseProcurementInventoryHold(tx: Tx, orderId: string, orderItemId: string, quantity: number, actorId: string) {
+  if (!Number.isSafeInteger(quantity) || quantity <= 0) throw new Error('INVALID_INVENTORY_QUANTITY');
+  const row = await tx.inventoryReservation.findUnique({ where: { orderItemId }, include: { batchAllocations: { orderBy: { id: 'asc' } } } });
+  if (!row || row.status !== 'active') return;
+  if (row.orderId !== orderId) throw new Error('ORDER_ITEM_NOT_FOUND');
+  const remaining = row.quantity - row.fulfilledQuantity - row.releasedQuantity;
+  const releasing = Math.min(remaining, quantity);
+  if (!releasing) return;
+  const claim = await tx.inventoryReservation.updateMany({
+    where: { id: row.id, status: 'active', releasedQuantity: row.releasedQuantity, fulfilledQuantity: row.fulfilledQuantity },
+    data: { releasedQuantity: { increment: releasing }, status: releasing === remaining ? 'released' : 'active' },
+  });
+  if (claim.count !== 1) throw new Error('INVENTORY_RELEASE_CONFLICT');
+  let pending = releasing;
+  for (const allocation of row.batchAllocations) {
+    const count = Math.min(pending, allocation.quantity - allocation.fulfilledQuantity - allocation.releasedQuantity);
+    if (count <= 0) continue;
+    const changed = await tx.inventoryBatch.updateMany({ where: { id: allocation.batchId, reservedQuantity: { gte: count } },
+      data: { reservedQuantity: { decrement: count } } });
+    if (changed.count !== 1) throw new Error('INVENTORY_RELEASE_CONFLICT');
+    await tx.inventoryReservationBatch.update({ where: { id: allocation.id }, data: { releasedQuantity: { increment: count } } });
+    pending -= count;
+    if (!pending) break;
+  }
+  const before = await tx.inventoryAccount.findUniqueOrThrow({ where: { id: row.inventoryAccountId } });
+  const after = await releaseReservedQuantity(tx, before, releasing);
+  await record(tx, before, after, { type: 'release', quantity: releasing, reason: '该行改由采购履约，释放原仓库预占', actorId, orderId, reservationId: row.id });
+  await syncProductMirror(tx, after);
+}
+
+export async function receiveProcurementBatch(tx: Tx, input: {
+  orderId: string; orderItemId: string; productId: string; variantId: string | null; batchNumber: string; quantity: number; actorId: string;
+}) {
+  await releaseProcurementInventoryHold(tx, input.orderId, input.orderItemId, input.quantity, input.actorId);
+  const { account, batch } = await receiveInventoryBatch(tx, input);
+  const after = await claimReservationQuantity(tx, account, input.quantity);
+  await tx.inventoryBatch.update({ where: { id: batch.id }, data: { reservedQuantity: { increment: input.quantity } } });
+  await record(tx, account, after, { type: 'reserve', quantity: input.quantity, reason: '采购实收批次留给原订单转发',
+    orderId: input.orderId, batchId: batch.id, actorId: input.actorId });
+  await syncProductMirror(tx, after);
+  return batch.id;
+}
+
+export async function shipProcurementBatch(tx: Tx, receiptId: string, orderId: string, quantity: number, actorId: string) {
+  const receipt = await tx.fulfillmentReceipt.findUniqueOrThrow({ where: { id: receiptId },
+    include: { inventoryBatch: { include: { account: true } }, parcelLine: { include: { parcel: true } } } });
+  if (receipt.parcelLine.parcel.orderId !== orderId || !Number.isSafeInteger(quantity) || quantity <= 0 || quantity > receipt.quantity - receipt.forwardedQuantity) {
+    throw new Error('实际转发数量超过本订单该批次剩余实收');
+  }
+  const used = await tx.fulfillmentReceipt.updateMany({ where: { id: receipt.id, forwardedQuantity: receipt.forwardedQuantity },
+    data: { forwardedQuantity: { increment: quantity } } });
+  const batch = receipt.inventoryBatch;
+  const before = batch.account;
+  const claimed = await tx.inventoryBatch.updateMany({ where: { id: batch.id, quantity: { gte: quantity }, reservedQuantity: { gte: quantity } },
+    data: { quantity: { decrement: quantity }, reservedQuantity: { decrement: quantity } } });
+  const decreased = await tx.inventoryAccount.updateMany({ where: { id: before.id, actualQuantity: { gte: quantity }, reservedQuantity: { gte: quantity } },
+    data: { actualQuantity: { decrement: quantity }, reservedQuantity: { decrement: quantity }, shippedQuantity: { increment: quantity } } });
+  if (used.count !== 1 || claimed.count !== 1 || decreased.count !== 1) throw new Error('该采购收货批次的可转发数量已变化');
+  const after = await tx.inventoryAccount.findUniqueOrThrow({ where: { id: before.id } });
+  await record(tx, before, after, { type: 'ship', quantity: -quantity, reason: '按本订单采购实收批次转发', actorId, orderId, batchId: batch.id });
+  await syncProductMirror(tx, after);
 }

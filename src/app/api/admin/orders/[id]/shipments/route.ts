@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { authorizeAdminOrderMutation, consumeAdminOrderStepUp, extractStepUpToken } from '@/lib/admin-order-step-up';
 import { assertOrderTransition, fulfillmentStatus, validateShipmentItems } from '@/lib/order-domain';
+import { ensureLocalStockShipment } from '@/lib/fulfillment-legacy';
 import { shipOrderInventory } from '@/lib/inventory';
 import { startOrderReceivableTerm } from '@/lib/customer-credit';
 import { isPostDeliveryPaymentMethod } from '@/data/payment-methods';
@@ -39,6 +40,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       if (!['confirmed', 'partially_shipped'].includes(order.status)) throw new Error('ORDER_NOT_SHIPPABLE');
 
       const shipmentItems = validateShipmentItems(order.orderItems, Array.isArray(body.items) ? body.items : []);
+      await ensureLocalStockShipment(tx, id, shipmentItems);
       const nextItems = order.orderItems.map((item) => ({
         ...item,
         shippedQty: item.shippedQty + (shipmentItems.find((line) => line.orderItemId === item.id)?.quantity || 0),
@@ -108,6 +110,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     return NextResponse.json({ shipment: result.shipment, orderStatus: result.status }, { status: 201 });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'INTERNAL_ERROR';
+    if (message === 'PROCUREMENT_FULFILLMENT_REQUIRED') return NextResponse.json({ error: '该数量已关联采购，请在订单的履约物流中登记发货。' }, { status: 409 });
     if (message === 'ORDER_NOT_FOUND') return NextResponse.json({ error: message }, { status: 404 });
     if (['ORDER_NOT_SHIPPABLE', 'INVALID_ORDER_TRANSITION'].includes(message)) return NextResponse.json({ error: message }, { status: 409 });
     if (['INVENTORY_RESERVATION_NOT_ACTIVE', 'INVENTORY_RESERVATION_EXCEEDED', 'INSUFFICIENT_ACTUAL_INVENTORY', 'INSUFFICIENT_AVAILABLE_INVENTORY'].includes(message)) return NextResponse.json({ error: message }, { status: 409 });

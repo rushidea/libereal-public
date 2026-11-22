@@ -6,7 +6,8 @@ import { requireActiveSession, requireAdmin } from '@/lib/session';
 import { authorizeAdminOrderMutation, consumeAdminOrderStepUp, extractStepUpToken } from '@/lib/admin-order-step-up';
 import type { Prisma } from '@prisma/client';
 import { orderItemView, toOrderItemCreates } from '@/lib/commerce-records';
-import { releaseOrderReceivableOnCancellation, reserveOrderCredit, settleOrderReceivable } from '@/lib/customer-credit';
+import { customerShipmentFields, requirePhysicalStatus } from '@/lib/fulfillment-legacy';
+import { releaseOrderReceivableOnCancellation, reserveOrderCredit } from '@/lib/customer-credit';
 import { orderStatusRequiresFinanceWrite, receivableOccupiesCredit } from '@/lib/order-finance-access';
 import { assertOrderTransition, calculateOrderAmounts, isAutoCloseableOrderStatus, isInactiveOrderStatus, ORDER_STATUS_LABELS, requiresPaidAlipayRefund } from '@/lib/order-domain';
 import { restoreRedeemedOrderCoupons } from '@/lib/coupon-service';
@@ -42,7 +43,7 @@ export async function GET(
       include: {
         ...ORDER_APPROVAL_INCLUDE,
         statusHistory: { orderBy: { createdAt: 'asc' } },
-        shipments: { orderBy: { createdAt: 'desc' }, include: { items: true } },
+        shipments: { orderBy: { createdAt: 'desc' }, select: customerShipmentFields },
         events: { orderBy: { createdAt: 'asc' } },
       },
     });
@@ -267,6 +268,7 @@ export async function PATCH(
         if (accepting && (body.items !== undefined || body.paymentMethod !== undefined)) {
           throw new Error('ORDER_APPROVAL_SAVE_CHANGES_FIRST');
         }
+        await requirePhysicalStatus(tx, id, order.status, body.status);
         const acceptance = accepting ? await verifyMerchantOrderAcceptance(tx, id, body.approvalVersion) : null;
         if (body.status === 'cancelled') {
           // Claim cancellation before any history or resource releases. The payment
@@ -347,9 +349,6 @@ export async function PATCH(
             reason: body.status === 'closed' ? '订单关闭退回积分' : '订单取消退回积分',
           }));
         }
-        if (body.status === 'completed' && order.status !== 'completed') {
-          if (isPostDeliveryPaymentMethod(effectivePaymentMethod)) await settleOrderReceivable(tx, id, user.id);
-        }
         return acceptance?.order.inquiryId ?? null;
       }, { isolationLevel: 'Serializable' });
     }
@@ -395,6 +394,7 @@ export async function PATCH(
     if (approvalConflict) return NextResponse.json(approvalConflict, { status: 409 });
     if ((err as { code?: string })?.code === 'P2025') return NextResponse.json({ error: '订单已变化，请重新查看。' }, { status: 409 });
     if (message === 'QUOTE_REPRICE_REQUIRED') return NextResponse.json({ error: '商品价格已变化，请先完成原订单价格复核', code: message }, { status: 409 });
+    if (message === 'FULFILLMENT_RECORDS_REQUIRED') return NextResponse.json({ error: '请先按发货明细登记实际运送和签收情况。' }, { status: 409 });
     if (message === POINTS_REFUND_FAILED) {
       return NextResponse.json({ error: POINTS_REFUND_FAILED }, { status: 409 });
     }
