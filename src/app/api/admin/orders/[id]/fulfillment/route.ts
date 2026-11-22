@@ -64,9 +64,10 @@ export async function POST(req: NextRequest, { params }: Context) {
     }
     if (action === 'record_event') {
       const shortfall = input.kind === 'confirm_shortfall';
-      const stock = input.kind === 'warehouse_receipt' || input.kind === 'dispose_receipt'
-        || (shortfall && Array.isArray(input.lines) && input.lines.some(line => line?.receiptId));
+      const stock = input.kind === 'warehouse_receipt' || input.kind === 'dispose_receipt' || (Array.isArray(input.lines)
+        && input.lines.some(line=>shortfall && line?.receiptId || input.kind==='review_dispatch_hold' && line?.outcome==='release_to_stock'));
       if (stock && !permissions.includes('inventory.write')) throw new PurchaseError('办理本仓实物须有库存经办权限',403);
+      if (input.kind==='review_dispatch_hold' && !permissions.includes('purchases.approve')) throw new PurchaseError('发运份额须由有采购审批权限的经办人核对',403);
       if (shortfall && !permissions.includes('purchases.approve')) throw new PurchaseError('确认可补发的实际短失或退回须有采购审批权限',403);
     }
     const parcelId = action === 'record_event' ? requiredText(input.parcelId,'包裹编号') : '';

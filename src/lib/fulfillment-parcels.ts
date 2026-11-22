@@ -2,6 +2,9 @@ import { randomUUID } from 'node:crypto';
 import { configuredCarrier, pendingForWaybill, reconcilePendingForParcel } from '@/lib/fulfillment-carrier';
 import { fulfillmentStatus, isInactiveOrderStatus, validateShipmentItems } from '@/lib/order-domain';
 import { releaseProcurementInventoryHold, shipProcurementBatch } from '@/lib/inventory';
+import { dispatchHoldFacts, forwardableHeldReceipt, readHoldAssignments, type HoldAssignment } from '@/lib/fulfillment-holds';
+import { locateHeldDispatch } from '@/lib/fulfillment-hold-locations';
+import { incidentQuantityKey, type IncidentSource } from '@/lib/purchase-incident-scope';
 import { purchaseWorkspace } from '@/lib/purchase-orders';
 import { heldIncidentQuantity, supplyIncidentsForDispatchAt } from '@/lib/purchase-incidents';
 import { documentSha256, PurchaseError, requiredText } from '@/lib/purchase-terms';
@@ -15,17 +18,22 @@ export { previewParcelEvent, recordParcelEvent } from '@/lib/fulfillment-events'
 
 const routes = ['supplier_to_customer', 'supplier_to_libereal', 'libereal_to_customer'] as const;
 type Route = typeof routes[number];
-type Goods = { purchaseOrderId: string; orderItemId: string; quantity: number; sourceReceiptId: string | null; resendApprovalId?: string };
+type Goods = { purchaseOrderId: string; orderItemId: string; quantity: number; sourceReceiptId: string | null; resendApprovalId?: string; holdAssignments?: HoldAssignment[] };
 const lineKey = (row: Pick<Goods, 'purchaseOrderId' | 'orderItemId'>) => JSON.stringify([row.purchaseOrderId, row.orderItemId]);
 
 function reviewLateDispatch(raw: unknown) {
   if (raw===undefined) return undefined;
   const data = inputObject(raw);
-  return {supplierReference:requiredText(data.supplierReference,'供方对实际发运的书面确认'),
-    customerReference:requiredText(data.customerReference,'客户对接续履约的书面回复'),
+  if (data.status!==undefined && data.status!=='pending' && data.status!=='confirmed') {
+    throw new PurchaseError('请选择发运偏差的核对状态',400);
+  }
+  if (data.status==='pending' && data.customerReference) throw new PurchaseError('商业处理待回复时请记录实际发运核对');
+  return {status:data.status as 'pending'|'confirmed'|undefined,
+    supplierReference:requiredText(data.supplierReference,'供方对实际发运的书面确认'),
+    customerReference:data.status==='pending'?undefined:requiredText(data.customerReference,'客户对接续履约的书面回复'),
     responsibility:requiredText(data.responsibility,'发运偏差的责任人'),
-    description:requiredText(data.description,'已核实的发运偏差与后续处理结果'),
-    sha256:documentSha256(data.sha256,'双方核对结论的书证摘要')};
+    description:requiredText(data.description,'实际发运核对情况与后续处理'),
+    sha256:documentSha256(data.sha256,'发运偏差核对书证摘要')};
 }
 
 function dispatchInput(raw: unknown) {
@@ -40,7 +48,7 @@ function dispatchInput(raw: unknown) {
     if ((route === 'libereal_to_customer') !== Boolean(sourceReceiptId)) throw new PurchaseError('本仓转发须选用实际收到的批次', 400);
     if (sourceReceiptId && resendApprovalId) throw new PurchaseError('转发按实收批次办理，免费重发批准须用于供方实际发货');
     return { purchaseOrderId: requiredText(row.purchaseOrderId, '采购单'), orderItemId: requiredText(row.orderItemId, '订单行'),
-      quantity: positiveQuantity(row.quantity, '发货数量'), sourceReceiptId, resendApprovalId };
+      quantity: positiveQuantity(row.quantity, '发货数量'), sourceReceiptId, resendApprovalId, holdAssignments:readHoldAssignments(row.holdAssignments) };
   }).sort((a,b) => lineKey(a).localeCompare(lineKey(b)) || (a.sourceReceiptId ?? '').localeCompare(b.sourceReceiptId ?? '')
     || (a.resendApprovalId ?? '').localeCompare(b.resendApprovalId ?? ''));
   if (new Set(lines.map(row => JSON.stringify([lineKey(row), row.sourceReceiptId,row.resendApprovalId]))).size !== lines.length) {
@@ -69,7 +77,7 @@ export async function fulfillmentWorkspace(tx: Db, orderId: string, dispatchedAt
     const key = lineKey(row); dispatched.set(key, (dispatched.get(key) ?? 0) + row.quantity);
   };
   for (const row of purchasing.fulfillment.supplierDispatched) add(row);
-  type HoldAllowance = { ordinarilyAvailable: number; historicalHoldIds: string[] };
+  type HoldAllowance = { ordinarilyAvailable: number; historicalHoldIds: string[]; assignable: Array<HoldAssignment & { reference: string; originalIncidentId: string }> };
   type Allowance = { available: number; holdAllowance?: HoldAllowance };
   const forwardLimits = new Map<string,Allowance>();
   const freeResends: Array<(typeof purchasing.fulfillment.freeResends)[number] & { holdAllowance?: HoldAllowance }> = [];
@@ -88,13 +96,24 @@ export async function fulfillmentWorkspace(tx: Db, orderId: string, dispatchedAt
       const supplied = dispatched.get(lineKey({ purchaseOrderId: po.id, orderItemId: line.orderItemId })) ?? 0;
       const purchaseOrderId = po.id;
       const orderItemId = line.orderItemId;
-      const allowance = (quantity: number, source: Parameters<typeof heldIncidentQuantity>[2], parcelLineId?: string): Allowance => {
-        const relevant = incidents.filter(issue=>!issue.outstanding || heldIncidentQuantity([issue],orderItemId,source)>0
-          || (parcelLineId && issue.outstanding.some(row=>row.source?.kind==='parcel' && row.source.id===parcelLineId)));
-        const parcelHeld = Boolean(parcelLineId && relevant.some(issue=>issue.outstanding?.some(row=>
-          row.source?.kind==='parcel' && row.source.id===parcelLineId)));
-        const ordinary = unknownHold || parcelHeld ? 0 : Math.max(0,quantity-heldIncidentQuantity(relevant,orderItemId,source));
-        return reviewHold ? {available:quantity,holdAllowance:{ordinarilyAvailable:ordinary,historicalHoldIds:relevant.map(row=>row.id)}}
+      const allowance = (quantity: number, source: IncidentSource, parcelLineId?: string, clearedOnLot: string[] = []): Allowance => {
+        const isUpstreamHold = (issue: typeof incidents[number]) => parcelLineId && !clearedOnLot.includes(issue.id)
+          && issue.outstanding?.some(row=>row.source?.kind==='parcel' && row.source.id===parcelLineId);
+        const relevant = incidents.filter(issue=>!issue.outstanding || heldIncidentQuantity([issue],orderItemId,source)>0 || isUpstreamHold(issue));
+        const parcelHeld = relevant.some(isUpstreamHold);
+        const unallocated=purchasing.fulfillment.dispatchHolds.some(row=>!row.assignments && row.purchaseOrderId===po.id && row.orderItemId===orderItemId
+          && row.incidentIds.some(id=>relevant.some(issue=>issue.id===id || issue.dispatchScopeId===id || issue.id===po.incidentHistory.find(row=>row.id===id)?.linkedTo))
+          && (source.kind==='receipt' ? row.sourceReceiptId===source.id : source.kind==='resend' ? row.resendApprovalId===source.id
+            : source.kind==='unshipped' && !row.resendApprovalId && !row.sourceReceiptId));
+        const ordinary = unknownHold || parcelHeld || unallocated ? 0 : Math.max(0,quantity-heldIncidentQuantity(relevant,orderItemId,source));
+        const key=incidentQuantityKey({orderItemId,quantity:0,source});
+        const assignable=unallocated ? [] : relevant.flatMap(issue=>{
+          const amount=(issue.outstanding ?? []).filter(part=>incidentQuantityKey(part)===key).reduce((sum,part)=>sum+part.quantity,0);
+          return amount>0 && quantity>0 ? [{
+            incidentId:issue.dispatchScopeId ?? issue.id,originalIncidentId:issue.id,quantity:Math.min(amount,quantity),reference:issue.reference,
+          }] : [];
+        });
+        return reviewHold ? {available:quantity,holdAllowance:{ordinarilyAvailable:ordinary,historicalHoldIds:relevant.map(row=>row.id),assignable}}
           : {available:ordinary};
       };
       const payableNotProved = po.payableReviewWindows.some(row=>row.orderItemId===orderItemId
@@ -104,7 +123,18 @@ export async function fulfillmentWorkspace(tx: Db, orderId: string, dispatchedAt
       let canForward = false;
       if (remaining > 0) for (const source of po.incidentSources) {
         if (source.orderItemId !== orderItemId || source.source.kind !== 'receipt') continue;
-        const permitted = allowance(source.quantity,source.source,source.parcelLineId);
+        const physical=parcels.find(parcel=>parcel.lines.some(row=>row.id===source.parcelLineId));
+        const receiptId=source.source.id;
+        const landed=physical?.lines.find(row=>row.id===source.parcelLineId)?.receipts.find(row=>row.id===receiptId);
+        const hold=purchasing.fulfillment.dispatchHolds.find(row=>row.parcelLineId===source.parcelLineId);
+        const eligible=landed ? forwardableHeldReceipt(hold,landed,dispatchedAt) : 0;
+        const clearedOnLot=hold?.decisions.filter(row=>row.outcome==='continue' && row.receiptId===receiptId && row.incidentId
+          && (dispatchedAt===undefined || row.recordedAt.getTime()<=dispatchedAt)).flatMap(row=>{
+            const id=row.incidentId!;
+            const linked=po.incidentHistory.find(issue=>issue.id===id)?.linkedTo;
+            return linked ? [id,linked] : [id];
+          }) ?? [];
+        const permitted=allowance(eligible,source.source,source.parcelLineId,clearedOnLot);
         if (permitted.available<=0) continue;
         forwardLimits.set(source.source.id,permitted);
         canForward = true;
@@ -166,9 +196,13 @@ export async function fulfillmentWorkspace(tx: Db, orderId: string, dispatchedAt
         carrier: parcel.carrier, trackingNumber: parcel.trackingNumber });
     }
   }
-  const workspaceParcels = parcels.map(parcel => ({ ...parcel, lines: parcel.lines.map(line => ({
-    ...line, balance: parcelLineBalance(line), receipts: line.receipts.map(receipt => ({ ...receipt, remaining: availableReceipt(receipt) })),
-  })) }));
+  const workspaceParcels=parcels.map(parcel=>{
+    const holdFacts=dispatchHoldFacts(parcel.events);
+    return {...parcel,holdFacts,lines:parcel.lines.map(line=>({...line,balance:parcelLineBalance(line),
+      receipts:line.receipts.map(receipt=>({...receipt,remaining:availableReceipt(receipt),
+        disposable:forwardableHeldReceipt(holdFacts.find(hold=>hold.parcelLineId===line.id),receipt)})),
+    }))};
+  });
   return { order, purchases, parcels: workspaceParcels, receipts, legacyShipments, legacyBackfill, legacyInventory, inventoryChoices, unmatched,
     freeResends, feedSource: configuredCarrier()?.source ?? null };
 }
@@ -199,9 +233,20 @@ async function dispatchPlan(tx: Db, orderId: string, raw: unknown, actor: Fulfil
       throw new PurchaseError(resend ? '发货数量超过本行免费重发核准数量' : '发货数量超过该采购行或实收批次可用数量。若原运单证明确已发出，请核对实际发运偏差');
     }
     const priorHold = capacity.holdAllowance;
-    const unreleased = priorHold && row.quantity>priorHold.ordinarilyAvailable && priorHold.historicalHoldIds.length
-      ? {quantity:row.quantity-priorHold.ordinarilyAvailable,incidentIds:priorHold.historicalHoldIds} : undefined;
-    return { ...row,unreleased, catalogNumber: purchased.catalogNumber, productId: receipt ? receipt.productId : purchased.productId,
+    if (row.holdAssignments && !priorHold) throw new PurchaseError('请使用实际发运偏差的核对入口');
+    const automatic = priorHold && priorHold.ordinarilyAvailable===0 && priorHold.assignable.length===1
+      && row.quantity<=priorHold.assignable[0].quantity ? [{incidentId:priorHold.assignable[0].incidentId,quantity:row.quantity}] : undefined;
+    const holdAssignments=row.holdAssignments ?? automatic;
+    const allocated=holdAssignments?.reduce((total,part)=>total+part.quantity,0) ?? 0;
+    if (allocated>row.quantity || holdAssignments?.some(part=>!priorHold?.assignable.some(allowed=>
+      allowed.incidentId===part.incidentId && allowed.quantity>=part.quantity))) throw new PurchaseError('指定的暂停份额超过原事项可核对数量');
+    if (priorHold && row.quantity-allocated>priorHold.ordinarilyAvailable) throw new PurchaseError('请凭原件核清并指定实际发出的暂停份额');
+    const assignedShares=holdAssignments?.map(part=>({...part,
+      originalIncidentId:priorHold!.assignable.find(item=>item.incidentId===part.incidentId)!.originalIncidentId,
+    }));
+    const unreleased=assignedShares ? {quantity:allocated,incidentIds:assignedShares.map(part=>part.originalIncidentId)} : undefined;
+    const source: IncidentSource=receipt ? {kind:'receipt',id:receipt.id} : resend ? {kind:'resend',id:resend.approvalId} : {kind:'unshipped'};
+    return { ...row,holdAssignments:assignedShares,unreleased,holdSource:unreleased?source:undefined, catalogNumber: purchased.catalogNumber, productId: receipt ? receipt.productId : purchased.productId,
       variantId: receipt ? receipt.variantId : purchased.variantId, inventoryAccountId: receipt?.inventoryAccountId, resend: resend ?? undefined,
       originalHoldAlreadyMoved: resend?.originalHoldAlreadyMoved ?? purchased.originalHoldAlreadyMoved,
       supplier: purchased.supplier, name: purchased.name, contractVersion: purchased.contractVersion, batchNumber: receipt?.batchNumber ?? null };
@@ -266,7 +311,12 @@ export async function dispatchParcel(tx: Db, orderId: string, raw: unknown, acto
       content: input.trackingNumber ? [input.carrier, input.trackingNumber].join(' · ') : '商品已交付运送', linkUrl: '/account/orders/'+orderId,
       metadata: JSON.stringify({ orderId, shipmentId }) } });
   }
-  const recordedLines = lines.map(line => ({ ...line, parcelLineId: randomUUID() }));
+  const recordedLines = lines.flatMap(line=>{
+    const actual=(line.holdAssignments ?? []).map(part=>({...line,quantity:part.quantity,holdAssignments:[part],
+      unreleased:{quantity:part.quantity,incidentIds:[part.originalIncidentId]},parcelLineId:randomUUID()}));
+    const ordinary=line.quantity-(line.unreleased?.quantity ?? 0);
+    return ordinary>0 ? [{...line,quantity:ordinary,holdAssignments:undefined,holdSource:undefined,unreleased:undefined,parcelLineId:randomUUID()},...actual] : actual;
+  });
   const parcel = await tx.fulfillmentParcel.create({ data: { orderId, shipmentId, route: input.route, carrier: input.carrier, trackingNumber: input.trackingNumber,
     feedSource: input.feedSource, status: 'dispatched', dispatchedAt: occurred, reference: input.reference, evidenceSha256: input.sha256,
     evidenceRow: input.documentRow, ...keys, actorId: actor.id,
@@ -276,6 +326,10 @@ export async function dispatchParcel(tx: Db, orderId: string, raw: unknown, acto
     lines: { create: recordedLines.map(r => ({ id: r.parcelLineId, purchaseOrderId: r.purchaseOrderId,
       orderItemId: r.orderItemId, quantity: r.quantity, sourceReceiptId: r.sourceReceiptId, productId: r.productId,
       variantId: r.variantId, catalogNumber: r.catalogNumber })) } }, include: parcelInclude });
+  await locateHeldDispatch(tx,orderId,recordedLines.flatMap(row=>row.holdSource && row.holdAssignments ? [{
+    purchaseOrderId:row.purchaseOrderId,orderItemId:row.orderItemId,parcelLineId:row.parcelLineId,
+    source:row.holdSource,assignments:row.holdAssignments,
+  }] : []),input,actor);
   await reconcilePendingForParcel(tx, parcel);
   return tx.fulfillmentParcel.findUniqueOrThrow({ where: { id: parcel.id }, include: parcelInclude });
 }

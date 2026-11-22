@@ -1,3 +1,4 @@
+import { dispatchHoldFacts } from '@/lib/fulfillment-holds';
 import { parcelLineBalance, type FulfillmentActor, type FulfillmentDb as Db, type FulfillmentParcelRecord } from '@/lib/fulfillment-records';
 import { jsonObject } from '@/lib/order-catalog-repricing';
 import { PurchaseError } from '@/lib/purchase-terms';
@@ -43,22 +44,24 @@ export async function customerShipmentRows(tx: Db, orderId: string) {
   const rows = await tx.shipmentItem.findMany({
     where: { shipment: { orderId, shippedAt: { not: null }, status: { in: ['shipped','delivered','completed'] } } },
     include: { shipment: { include: { fulfillmentParcel: { select: { route: true,
-      events: { where: { kind: 'backfill_legacy' }, select: { details: true } }, lines: { select: {
+      events: { where: { kind: {in:['backfill_legacy','dispatch','review_dispatch_hold']} }, select: {kind:true,status:true,details:true,createdAt:true} }, lines: { select: {
       id: true, orderItemId: true, purchaseOrderId: true, quantity: true, receivedQuantity: true, resolutions: true,
     } } } } } } }, orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
   });
   return rows.map(row => {
     const parcel = row.shipment.fulfillmentParcel;
     if (!parcel) return { ...row, effectiveQuantity: row.quantity, received: row.shipment.deliveredAt ? row.quantity : 0,
-      sources: [], historicalAttributionId: null };
+      sources: [], commercialPending:false, historicalAttributionId: null };
     const lines = parcel.lines.filter(line => line.orderItemId === row.orderItemId);
     if (lines.reduce((sum, line) => sum + line.quantity, 0) !== row.quantity) {
       throw new PurchaseError('采购包裹与客户发货行数量不一致，请核对原记录');
     }
     const sources = lines.map(line => ({ ...line, balance: parcelLineBalance(line) }));
-    const history = parcel.events[0] ? JSON.parse(parcel.events[0].details) as { lines?: { orderItemId: string; historicalAttributionId?: string }[] } : null;
+    const original=parcel.events.find(row=>row.kind==='backfill_legacy');
+    const history = original ? JSON.parse(original.details) as { lines?: { orderItemId: string; historicalAttributionId?: string }[] } : null;
     return { ...row, effectiveQuantity: sources.reduce((sum, source) => sum + source.balance.shipped, 0),
       received: sources.reduce((sum, source) => sum + source.balance.received, 0), sources,
+      commercialPending:dispatchHoldFacts(parcel.events).some(hold=>hold.pending>0 && lines.some(line=>line.id===hold.parcelLineId)),
       historicalAttributionId: history?.lines?.find(line => line.orderItemId === row.orderItemId)?.historicalAttributionId ?? null };
   });
 }
@@ -72,7 +75,7 @@ export async function confirmedCustomerDelivery(tx: Db, orderId: string) {
     if (!items.some(item => item.id === row.orderItemId) || row.quantity <= 0) return false;
     if (!row.effectiveQuantity) continue;
     const { shipment } = row;
-    if (row.received !== row.effectiveQuantity || shipment.status === 'shipped' || !shipment.shippedAt || !shipment.deliveredAt
+    if (row.commercialPending || row.received !== row.effectiveQuantity || shipment.status === 'shipped' || !shipment.shippedAt || !shipment.deliveredAt
       || shipment.deliveredAt < shipment.shippedAt || shipment.deliveredAt.getTime() > Date.now()) return false;
     quantities.set(row.orderItemId, (quantities.get(row.orderItemId) ?? 0) + row.received);
   }

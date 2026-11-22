@@ -12,8 +12,8 @@ import { pricingContentHash } from '@/lib/pricing-adjustment-approval';
 import { loadPurchaseOrderSource, loadPurchaseLines, type PurchaseSource, type SourceOrder } from '@/lib/purchase-source';
 import { creditExceptionMatches, paymentPlanAt, paymentPlanContent, paymentPlanFromReview, purchaseCreditVersion, purchaseStartReview, type PaymentPlan } from '@/lib/purchase-start';
 import { purchaseCreditAt } from '@/lib/purchase-credit-history';
-import { availableIncidentSources, clarifiedIncidentScope, incidentQuantities, incidentLink, resolveIncidentScope, supplyIncidentHistory, type IncidentReviewResult, type SupplyIncident } from '@/lib/purchase-incidents';
-import { incidentLineTotals, type IncidentCandidate, type IncidentQuantity } from '@/lib/purchase-incident-scope';
+import { availableIncidentSources, clarifiedIncidentScope, incidentQuantities, incidentLink, resolveIncidentScope, supplyIncidentHistory, type IncidentLocation, type IncidentReviewResult, type SupplyIncident } from '@/lib/purchase-incidents';
+import { incidentLineTotals, incidentQuantityKey, type IncidentCandidate, type IncidentQuantity } from '@/lib/purchase-incident-scope';
 import type { ContractDispatchSource, ShortfallDecision } from '@/lib/purchase-shortfalls';
 import {
   attestPurchaseTerms, documentSha256, initialPurchaseTerms, missingPurchaseTerms, missingWrittenTerms, normalizePurchaseTerms, positiveCents, PurchaseError,
@@ -473,6 +473,25 @@ function supplyFacts(view: Workspace, purchaseOrderId: string, quantities: Incid
   });
 }
 
+function verifiedLotLocations(po: PO, before: IncidentQuantity[], after: IncidentQuantity[]): IncidentLocation[] {
+  return before.flatMap(row=>{
+    if (row.source?.kind!=='parcel') return [];
+    const origin=row.source.id;
+    const lots=after.flatMap(item=>{
+      const key=incidentQuantityKey(item);
+      if (item.orderItemId!==row.orderItemId || item.source?.kind!=='receipt'
+        || !po.incidentSources.some(candidate=>incidentQuantityKey(candidate)===key && candidate.parcelLineId===origin)) return [];
+      const quantity=item.quantity-(before.find(part=>incidentQuantityKey(part)===key)?.quantity ?? 0);
+      return quantity>0 ? [{...item,quantity}] : [];
+    });
+    if (!lots.length) return [];
+    const assigned=lots.reduce((total,item)=>total+item.quantity,0);
+    const stillUnidentified=after.find(item=>incidentQuantityKey(item)===incidentQuantityKey(row))?.quantity ?? 0;
+    if (assigned+stillUnidentified!==row.quantity) throw new PurchaseError('实收批次归属与原包裹行待核数量不一致');
+    return lots.map(to=>({from:{...row,quantity:to.quantity},to}));
+  });
+}
+
 function selectedSupplyIncident(po: PO, incidentId: string | undefined): SupplyIncident {
   const match = incidentId === undefined ? po.incident : po.incidents.find(row=>row.id===incidentId);
   if (!match || po.status !== 'on_hold') throw new PurchaseError('请选择本单仍待办理的具体供货事项，或刷新后再核对');
@@ -854,6 +873,9 @@ function actionDetails(
     return { action };
   }
   if (action === 'record_payment') {
+    if (view.fulfillment.dispatchHolds.some(row=>row.purchaseOrderId===po.id && row.pending>0)) {
+      throw new PurchaseError('实际发运偏差仍待客户书面处理，须核对完成后再登记相关采购付款');
+    }
     if (po.approvedHash !== po.contentHash || !['approved', 'ordered'].includes(po.status) || po.incidents.length) conflict();
     if (po.needsLegacyReview) throw new PurchaseError('请先核对原批准、供货和已付款书证');
     if (!positiveCents(input.amountCents) || po.dueCents === null || input.amountCents > Math.min(po.dueCents, po.totalCents - po.paidCents)) {
@@ -902,8 +924,10 @@ function actionDetails(
     const outstanding = input.affectedLines === undefined ? incident.outstanding
       : readIncidentScope(view,po,input.affectedLines,incident.changeKind,incident.id,true);
     if (!outstanding?.length) throw new PurchaseError('请对照原凭据，填写本次仍受影响的实际货物来源和数量');
+    const lotLocations=verifiedLotLocations(po,incident.outstanding ?? [],outstanding);
+    if (lotLocations.length && !review.referenceSha256) throw new PurchaseError('核实原包裹所对应的批次须保留仓单或同等书证摘要');
     return {...review,scope:clarifiedIncidentScope(incident,outstanding),outstanding,previousOutstanding:incident.outstanding,
-      supplyFacts:supplyFacts(view,po.id,incidentLineTotals(outstanding))};
+      lotLocations:lotLocations.length ? lotLocations : undefined,supplyFacts:supplyFacts(view,po.id,incidentLineTotals(outstanding))};
   }
   if (action === 'resolve_change') {
     const incident = selectedSupplyIncident(po,input.incidentId);

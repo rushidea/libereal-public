@@ -9,6 +9,8 @@ type IncidentProgress = {
   scopeBasis: 'recorded' | 'reviewed' | 'reviewed_disposition' | 'entire_contract';
 };
 
+export type IncidentLocation = { from: IncidentQuantity; to: IncidentQuantity };
+
 export type IncidentReviewResult = 'scope_confirmed' | 'duplicate' | 'no_impact';
 
 export type SupplyIncident = {
@@ -24,15 +26,29 @@ export type SupplyIncident = {
   responsibility: string | null;
   scope: IncidentQuantity[] | null;
   originalScope?: IncidentQuantity[] | null;
+  dispatchScopeId?: string;
   outstanding: IncidentQuantity[] | null;
   lastReviewedBy: string | null;
   factReview: { reference: string; description: string; actorId: string } | null;
 };
 
+export function locateIncidentQuantity(scope: IncidentQuantity[], {from,to}: IncidentLocation) {
+  const fromKey=incidentQuantityKey(from), toKey=incidentQuantityKey(to);
+  const current=scope.find(row=>incidentQuantityKey(row)===fromKey);
+  if (!current || current.quantity<from.quantity || fromKey===toKey) return scope;
+  const next=scope.flatMap(row=>{
+    const key=incidentQuantityKey(row);
+    if (key===fromKey) return row.quantity>from.quantity ? [{...row,quantity:row.quantity-from.quantity}] : [];
+    return key===toKey ? [{...row,quantity:row.quantity+to.quantity}] : [row];
+  });
+  return scope.some(row=>incidentQuantityKey(row)===toKey) ? next : [...next,to];
+}
+
 export function supplyIncidentHistory(ledger: PurchaseActivity[]) {
   const history = new Map<string,SupplyIncident>();
   for (const row of ledger) {
-    if (row.action !== 'report_change' && row.action !== 'review_change_scope' && row.action !== 'resolve_change') continue;
+    if (row.action !== 'report_change' && row.action !== 'review_change_scope' && row.action !== 'resolve_change'
+      && row.action!=='locate_held_dispatch' && row.action!=='clear_held_dispatch') continue;
     const op = purchaseOperation(row.detail);
     const responsibility = typeof op.responsibility === 'string' ? op.responsibility : null;
     if (row.action === 'report_change') {
@@ -47,6 +63,18 @@ export function supplyIncidentHistory(ledger: PurchaseActivity[]) {
     const incident = typeof op.incidentId === 'string' ? history.get(op.incidentId) : undefined;
     if (!incident || incident.status !== 'open') continue;
     const reviewed = {...incident,responsibility:responsibility ?? incident.responsibility,lastReviewedBy:row.actorId};
+    if (row.action==='locate_held_dispatch' && incident.outstanding && incident.scope) {
+      const location=op.location as IncidentLocation;
+      history.set(incident.id,{...reviewed,scope:locateIncidentQuantity(incident.scope,location),
+        outstanding:locateIncidentQuantity(incident.outstanding,location)});
+    }
+    if (row.action==='clear_held_dispatch' && incident.outstanding) {
+      const location=op.location as IncidentLocation | undefined;
+      const scope=location && incident.scope ? locateIncidentQuantity(incident.scope,location) : incident.scope;
+      const outstanding=location ? locateIncidentQuantity(incident.outstanding,location)
+        : subtractQuantities(incident.outstanding,[op.quantity as IncidentQuantity]);
+      history.set(incident.id,{...reviewed,scope,status:outstanding.length?'open':'settled',outstanding});
+    }
     if (row.action === 'review_change_scope') {
       const factReview = {reference:String(op.reference),description:String(op.description),actorId:row.actorId};
       if (op.reviewResult === 'duplicate' || op.reviewResult === 'no_impact') {
@@ -58,7 +86,7 @@ export function supplyIncidentHistory(ledger: PurchaseActivity[]) {
       } else {
         history.set(incident.id,{...reviewed,scope:op.scope as IncidentQuantity[],originalScope:incident.originalScope ?? op.scope as IncidentQuantity[],outstanding:op.outstanding as IncidentQuantity[],factReview});
       }
-    } else {
+    } else if (row.action==='resolve_change') {
       const progress = purchaseObject(op.incidentProgress) as Partial<IncidentProgress>;
       history.set(incident.id,{...reviewed,scope:progress.scope ?? incident.scope,originalScope:incident.originalScope ?? progress.scope,
         status:progress.outstanding?.length ? 'open' : 'settled',outstanding:progress.outstanding ?? []});
@@ -78,56 +106,74 @@ export function supplyIncidentsForDispatchAt(ledger: PurchaseActivity[], at: num
   const links = new Map(ledger.flatMap(activity=>{
     if (activity.action!=='review_change_scope') return [];
     const op = purchaseOperation(activity.detail);
-    return op.reviewResult==='duplicate' && typeof op.incidentId==='string' && Array.isArray(op.previousOutstanding)
-      ? [[op.incidentId,op.previousOutstanding as IncidentQuantity[]] as const] : [];
+    return op.reviewResult==='duplicate' && typeof op.incidentId==='string' && typeof op.relatedIncidentId==='string'
+      ? [[op.incidentId,{id:op.relatedIncidentId,scope:op.previousOutstanding as IncidentQuantity[] | null}] as const] : [];
   }));
+  function historicalShares(id: string, visited=new Set<string>()): SupplyIncident[] {
+    const earlier=then.get(id), known=evidence.get(id);
+    const incident=earlier ?? known;
+    if (!incident || earlier?.status==='settled' || earlier?.status==='no_impact') return [];
+    if (visited.has(id)) return [{...incident,outstanding:null}];
+    const scope=earlier?.outstanding ?? known?.originalScope ?? null;
+    const link=links.get(id);
+    if (!link) return scope || known?.status!=='no_impact' ? [{...incident,outstanding:scope}] : [];
+    const linked=historicalShares(link.id,new Set([...visited,id]));
+    if (!scope || earlier?.status==='duplicate') return linked;
+    // Only the share matched at this review uses the linked history. Each other share retains its own dates.
+    const common=new Map((link.scope ?? []).map(row=>[incidentQuantityKey(row),row.quantity]));
+    const independent=scope.flatMap(row=>{
+      const quantity=row.quantity-(common.get(incidentQuantityKey(row)) ?? 0);
+      return quantity>0 ? [{...row,quantity}] : [];
+    });
+    const cap=new Map(scope.map(row=>[incidentQuantityKey(row),Math.min(row.quantity,common.get(incidentQuantityKey(row)) ?? 0)]));
+    const shared=linked.flatMap(entry=>{
+      if (!entry.outstanding) return [];
+      const outstanding=entry.outstanding.flatMap(row=>{
+        const key=incidentQuantityKey(row);
+        const quantity=Math.min(row.quantity,cap.get(key) ?? 0);
+        cap.set(key,(cap.get(key) ?? 0)-quantity);
+        return quantity>0 ? [{...row,quantity}] : [];
+      });
+      return outstanding.length ? [{...entry,outstanding}] : [];
+    });
+    const unresolvedMatch=linked.some(row=>!row.outstanding) ? scope.flatMap(row=>{
+      const quantity=cap.get(incidentQuantityKey(row)) ?? 0;
+      return quantity>0 ? [{...row,quantity}] : [];
+    }) : [];
+    return [{...incident,outstanding:[...independent,...unresolvedMatch]},...shared];
+  }
   const grouped = new Map<string,SupplyIncident>();
-  function add(key: string, incident: SupplyIncident, outstanding: IncidentQuantity[] | null) {
-    if (outstanding && !outstanding.length) return;
-    const previous = grouped.get(key);
-    if (!previous || !outstanding) {
-      grouped.set(key,{...incident,outstanding});
-    } else if (previous.outstanding) {
-      const covered = new Map(previous.outstanding.map(row=>[incidentQuantityKey(row),row]));
-      for (const row of outstanding) {
-        const source = incidentQuantityKey(row);
-        if (row.quantity>(covered.get(source)?.quantity ?? 0)) covered.set(source,row);
+  for (const earlier of then.values()) {
+    if (earlier.status!=='open') continue;
+    for (const share of historicalShares(earlier.id)) {
+      if (share.outstanding && !share.outstanding.length) continue;
+      const current=grouped.get(share.id);
+      if (!current || !share.outstanding) grouped.set(share.id,{
+        ...share,id:then.has(share.id) ? share.id : earlier.id,dispatchScopeId:share.id,
+      });
+      else if (current.outstanding) {
+        const quantities=new Map(current.outstanding.map(row=>[incidentQuantityKey(row),row]));
+        for (const row of share.outstanding) {
+          const key=incidentQuantityKey(row);
+          if (row.quantity>(quantities.get(key)?.quantity ?? 0)) quantities.set(key,row);
+        }
+        grouped.set(share.id,{...current,outstanding:[...quantities.values()]});
       }
-      grouped.set(key,{...previous,outstanding:[...covered.values()]});
     }
   }
-  for (const issue of then.values()) {
-    if (issue.status!=='open') continue;
-    const verified = evidence.get(issue.id);
-    const own = issue.outstanding ?? verified?.originalScope ?? null;
-    if (verified?.status!=='duplicate' || !verified.linkedTo) {
-      // Zero new impact cannot erase a known restriction while it was in effect.
-      add(issue.id,issue,own ?? (verified?.status==='no_impact' ? [] : null));
-      continue;
+  for (const row of ledger) {
+    if (row.action!=='review_change_scope' && row.action!=='locate_held_dispatch') continue;
+    const op=purchaseOperation(row.detail);
+    if (Date.parse(row.createdAt)<=at && (row.action==='review_change_scope' || op.incidentId)) continue;
+    // Exact physical shares already assigned to a parcel cannot be reused by an earlier-dated entry.
+    // Neither that assignment nor a warehouse lot identification changes the dates of the commercial decisions.
+    const located=row.action==='locate_held_dispatch' ? [op.historicalLocation as IncidentLocation]
+      : Array.isArray(op.lotLocations) ? op.lotLocations as IncidentLocation[] : [];
+    const id=row.action==='locate_held_dispatch' ? op.historicalIncidentId : op.incidentId;
+    for (const [key,issue] of grouped) {
+      if (key!==id && issue.id!==id && key!==op.incidentId) continue;
+      if (issue.outstanding) grouped.set(key,{...issue,outstanding:located.reduce(locateIncidentQuantity,issue.outstanding)});
     }
-    const root = verified.linkedTo;
-    const historicalRoot = then.get(root);
-    const remaining = historicalRoot && historicalRoot.status!=='open' ? []
-      : historicalRoot?.outstanding ?? evidence.get(root)?.originalScope ?? null;
-    if (!own) {
-      add(root,issue,remaining);
-      continue;
-    }
-    // The link proves only the part still outstanding when the notices were matched.
-    // A separate decision on the earlier part keeps its own effective time.
-    const common = new Map((links.get(issue.id) ?? []).map(row=>[incidentQuantityKey(row),row.quantity]));
-    const remainingBySource = new Map(remaining?.map(row=>[incidentQuantityKey(row),row.quantity]));
-    const identical: IncidentQuantity[] = [];
-    const independent: IncidentQuantity[] = [];
-    for (const row of own) {
-      const key = incidentQuantityKey(row);
-      const matched = Math.min(row.quantity,common.get(key) ?? 0);
-      const outstanding = remaining ? Math.min(matched,remainingBySource.get(key) ?? 0) : matched;
-      if (outstanding>0) identical.push({...row,quantity:outstanding});
-      if (row.quantity>matched) independent.push({...row,quantity:row.quantity-matched});
-    }
-    add(root,issue,identical);
-    add(issue.id,issue,independent);
   }
   return [...grouped.values()];
 }

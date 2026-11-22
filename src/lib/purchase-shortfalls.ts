@@ -1,3 +1,4 @@
+import { dispatchHoldFacts } from '@/lib/fulfillment-holds';
 import { purchaseOperation, type PurchaseActivity } from '@/lib/purchase-activity';
 import { jsonObject } from '@/lib/order-catalog-repricing';
 import { availableReceipt, parcelLineBalance, type FulfillmentDb as Db } from '@/lib/fulfillment-records';
@@ -34,7 +35,8 @@ export async function purchaseShortfalls(tx: Db, orderId: string, activities: Pu
       inventoryBatch:{select:{batchNumber:true}} } }, sourceReceipt: { select: { parcelLineId: true } }, resolutions: { include: {
       event: { select: { occurredAt: true, reference: true } },
     } } } },
-    events: { where: { kind: 'dispatch', status: 'applied' }, select: { details: true } },
+    events: { where: { kind: {in:['dispatch','review_dispatch_hold']}, status:'applied' },
+      select: {kind:true,status:true,details:true,createdAt:true} },
   }, orderBy: [{ dispatchedAt: 'asc' }, { id: 'asc' }] });
   const replacements = await tx.purchaseReplacementLine.findMany({ where: { orderId },
     select: { purchaseOrderId: true, orderItemId: true, fromPurchaseOrderId: true, authorizationId: true, quantity: true } });
@@ -79,7 +81,7 @@ export async function purchaseShortfalls(tx: Db, orderId: string, activities: Pu
   const diverted = new Map<string,number>();
   for (const {parcel,line,purchaseOrderId} of companyParcels) {
     if (parcel.route === 'libereal_to_customer') continue;
-    const { lines } = jsonObject(parcel.events[0]?.details);
+    const { lines } = jsonObject(parcel.events.find(row=>row.kind==='dispatch')?.details);
     const dispatch = Array.isArray(lines) ? lines.find(row => row?.purchaseOrderId === purchaseOrderId && row.orderItemId === line.orderItemId
       && (!row.parcelLineId || row.parcelLineId === line.id)) : undefined;
     if (dispatch?.resendApprovalId) {
@@ -225,6 +227,11 @@ export async function purchaseShortfalls(tx: Db, orderId: string, activities: Pu
     quantity:loss.available,source:{kind:'shortfall',id:loss.resolutionId},reference:loss.reference});
   for (const resend of freeResends) if (resend.available > 0) incidentSources.push({purchaseOrderId:resend.purchaseOrderId,orderItemId:resend.orderItemId,
     quantity:resend.available,source:{kind:'resend',id:resend.approvalId},reference:resend.approvalId});
-  return { supplierDispatched: [...supplierDispatched.values()], supplierReceived, warehouseReceived, warehouseTransit, shortfalls, freeResends, incidentSources,
+  const dispatchHolds=parcels.flatMap(parcel=>dispatchHoldFacts(parcel.events).flatMap(hold=>{
+    const line=parcel.lines.find(row=>row.id===hold.parcelLineId);
+    return line?.purchaseOrderId ? [{...hold,purchaseOrderId:line.purchaseOrderId,orderItemId:line.orderItemId,
+      parcelId:parcel.id,sourceReceiptId:line.sourceReceiptId}] : [];
+  }));
+  return { supplierDispatched: [...supplierDispatched.values()], supplierReceived, warehouseReceived, warehouseTransit, shortfalls, freeResends, incidentSources,dispatchHolds,
     parcelLinesWithPriorHoldTransfer, replacementsWithPriorHoldTransfer, parcelLinesWithUnverifiedStockSource, replacementsWithUnverifiedStockSource };
 }
