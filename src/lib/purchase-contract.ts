@@ -1,4 +1,5 @@
 import type { PurchaseActivity } from '@/lib/purchase-activity';
+import type { IncidentQuantity } from '@/lib/purchase-incidents';
 import type { ShortfallDecision } from '@/lib/purchase-shortfalls';
 import type { PurchaseSource } from '@/lib/purchase-source';
 import { pricingContentHash } from '@/lib/pricing-adjustment-approval';
@@ -20,6 +21,7 @@ type ArchiveSnapshot = {
   lines: ContractLine[];
   operation: {
     action?: string; occurredAt?: string; previousStatus?: PurchaseStatus; incidentId?: string; outcome?: string;
+    incidentProgress?: { outstanding: IncidentQuantity[] };
     reference?: string; amountCents?: number; conditionReference?: string;
     dispositions?: Array<{ orderItemId: string; quantity: number; forwardingLossId?: string; shortfallId?: string; shortfallDecision?: ShortfallDecision }>;
     scope?: RemainingScope;
@@ -73,7 +75,8 @@ export function approvalAt(ledger: PurchaseActivity[], at: number) {
     } else if (row.action === 'resolve_change') {
       const operation = purchaseSnapshot(row)?.operation;
       if (operation?.outcome === 'original_terms' || (operation?.dispositions?.length && operation.dispositions.every(entry => !changesOriginalPurchase(entry)))) {
-        suspended = operation.previousStatus !== 'approved' && operation.previousStatus !== 'ordered';
+        suspended = Boolean(operation.incidentProgress?.outstanding.length)
+          || (operation.previousStatus !== 'approved' && operation.previousStatus !== 'ordered');
       } else {
         approval = undefined;
       }

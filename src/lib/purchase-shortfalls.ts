@@ -1,6 +1,6 @@
 import { purchaseOperation, type PurchaseActivity } from '@/lib/purchase-activity';
 import { jsonObject } from '@/lib/order-catalog-repricing';
-import type { FulfillmentDb as Db } from '@/lib/fulfillment-records';
+import { parcelLineBalance, type FulfillmentDb as Db } from '@/lib/fulfillment-records';
 import { positiveCents, PurchaseError } from '@/lib/purchase-terms';
 
 export type ShortfallDecision = 'free_resend' | 'change_contract' | 'new_purchase';
@@ -176,6 +176,19 @@ export async function purchaseShortfalls(tx: Db, orderId: string, activities: Pu
     if (available < 0) throw new PurchaseError('已登记的免费重发或改办超过书面核准数量');
     return { ...row, dispatched, redirected, available, originalHoldAlreadyMoved: originalHoldAlreadyMoved({ shortfallId: row.shortfallId }) };
   });
-  return { supplierDispatched: [...supplierDispatched.values()], shortfalls, freeResends, parcelLinesWithPriorHoldTransfer,
-    replacementsWithPriorHoldTransfer, parcelLinesWithUnverifiedStockSource, replacementsWithUnverifiedStockSource };
+  const supplierReceived: SourceQuantity[] = [];
+  const warehouseReceived: SourceQuantity[] = [];
+  const warehouseTransit: SourceQuantity[] = [];
+  for (const {parcel,line,purchaseOrderId} of companyParcels) {
+    if (parcel.route === 'libereal_to_customer') continue;
+    const {received,pending} = parcelLineBalance(line);
+    const source = {purchaseOrderId,orderItemId:line.orderItemId};
+    if (received > 0) supplierReceived.push({...source,quantity:received});
+    if (parcel.route === 'supplier_to_libereal') {
+      if (received > 0) warehouseReceived.push({...source,quantity:received});
+      if (pending > 0) warehouseTransit.push({...source,quantity:pending});
+    }
+  }
+  return { supplierDispatched: [...supplierDispatched.values()], supplierReceived, warehouseReceived, warehouseTransit, shortfalls, freeResends,
+    parcelLinesWithPriorHoldTransfer, replacementsWithPriorHoldTransfer, parcelLinesWithUnverifiedStockSource, replacementsWithUnverifiedStockSource };
 }

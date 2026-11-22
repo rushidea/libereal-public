@@ -45,8 +45,9 @@ export async function purchaseFulfillmentReview(tx: Db, order: SourceOrder, acti
   const usedShipments = new Set<string>();
   const delivered: Array<{ purchaseOrderId: string; orderItemId: string; quantity: number }> = [];
   const historicalDelivered: typeof delivered = [];
+  const customerReceived: typeof delivered = [];
   const shortfallReview = await purchaseShortfalls(tx,order.id,activities);
-  const { supplierDispatched } = shortfallReview;
+  const { supplierDispatched, supplierReceived } = shortfallReview;
   for (const row of rows) {
     const parcel = row.shipment.fulfillmentParcel;
     if (!parcel || parcel.route === 'legacy_customer') continue;
@@ -57,20 +58,24 @@ export async function purchaseFulfillmentReview(tx: Db, order: SourceOrder, acti
     for (const line of row.sources) {
       const source = { purchaseOrderId: line.purchaseOrderId!, orderItemId: row.orderItemId, quantity: line.balance.shipped };
       if (source.quantity > 0) delivered.push(source);
+      if (line.balance.received > 0) customerReceived.push({ ...source,quantity:line.balance.received });
     }
   }
   for (const row of ledger) {
     const { target, sources } = row.operation;
     if (!target || !Array.isArray(sources) || inconsistent.includes(target.orderItemId)) continue;
+    let receipt: typeof rows[number] | undefined;
     if (target.shipmentId) {
       const shipment = actual.find(line => line.id === target.id);
       if (!shipment || usedShipments.has(target.id) || !sameShipment(target, shipment)) continue;
       usedShipments.add(target.id);
+      receipt = rows.find(line => line.id === target.id);
     } else {
       const reconstructed = rows.find(line => line.historicalAttributionId === row.id);
       if (reconstructed) {
         if (reconstructed.orderItemId !== target.orderItemId || reconstructed.quantity !== target.quantity || usedShipments.has(reconstructed.id)) continue;
         usedShipments.add(reconstructed.id);
+        receipt = reconstructed;
       } else {
         const consumed = usedHistory.get(target.orderItemId) ?? 0;
         if (consumed + target.quantity > (historyBudget.get(target.orderItemId) ?? 0)) continue;
@@ -82,6 +87,12 @@ export async function purchaseFulfillmentReview(tx: Db, order: SourceOrder, acti
       delivered.push(line);
       historicalDelivered.push(line);
       supplierDispatched.push(line);
+      if (receipt?.received === target.quantity && receipt.shipment.deliveredAt && receipt.shipment.status !== 'shipped'
+        && receipt.shipment.shippedAt && receipt.shipment.deliveredAt >= receipt.shipment.shippedAt
+        && receipt.shipment.deliveredAt.getTime() <= Date.now()) {
+        customerReceived.push(line);
+        supplierReceived.push(line);
+      }
     }
   }
   const unassigned = actual.filter(row => !usedShipments.has(row.id) && !inconsistent.includes(row.orderItemId));
@@ -99,7 +110,7 @@ export async function purchaseFulfillmentReview(tx: Db, order: SourceOrder, acti
     return quantity > 0 && (!orderedAt || !target.occurredAt || orderedAt <= target.occurredAt)
       ? [{ purchaseOrderId: po.id, quantity, orderedAt }] : [];
   }) }));
-  const state = { targets, delivered, historicalDelivered, ...shortfallReview, inconsistent, ledger };
+  const state = { targets, delivered, historicalDelivered, customerReceived, ...shortfallReview, inconsistent, ledger };
   return { ...state, version: pricingContentHash(state) };
 }
 
