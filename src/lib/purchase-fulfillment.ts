@@ -1,7 +1,7 @@
 import type { Prisma } from '@prisma/client';
 import { purchaseOperation, type PurchaseActivity, type PurchaseActor } from '@/lib/purchase-activity';
 import { customerShipmentRows } from '@/lib/fulfillment-accounting';
-import { parcelLineBalance } from '@/lib/fulfillment-records';
+import { purchaseShortfalls } from '@/lib/purchase-shortfalls';
 import { pricingContentHash } from '@/lib/pricing-adjustment-approval';
 import type { SourceOrder } from '@/lib/purchase-source';
 import { documentSha256, positiveCents, PurchaseError, purchaseTimestamp, requiredText } from '@/lib/purchase-terms';
@@ -45,8 +45,7 @@ export async function purchaseFulfillmentReview(tx: Db, order: SourceOrder, acti
   const usedShipments = new Set<string>();
   const delivered: Array<{ purchaseOrderId: string; orderItemId: string; quantity: number }> = [];
   const historicalDelivered: typeof delivered = [];
-  const supplierDispatched: typeof delivered = [];
-  const forwardingLosses: Array<{ resolutionId: string; purchaseOrderId: string; orderItemId: string; quantity: number }> = [];
+  const { supplierDispatched, shortfalls, freeResends } = await purchaseShortfalls(tx,order.id,activities);
   for (const row of rows) {
     const parcel = row.shipment.fulfillmentParcel;
     if (!parcel || parcel.route === 'legacy_customer') continue;
@@ -57,20 +56,7 @@ export async function purchaseFulfillmentReview(tx: Db, order: SourceOrder, acti
     for (const line of row.sources) {
       const source = { purchaseOrderId: line.purchaseOrderId!, orderItemId: row.orderItemId, quantity: line.balance.shipped };
       if (source.quantity > 0) delivered.push(source);
-      if (parcel.route === 'supplier_to_customer') {
-        if (source.quantity > 0) supplierDispatched.push(source);
-      } else if (parcel.route === 'libereal_to_customer') {
-        for (const resolution of line.resolutions) forwardingLosses.push({
-          resolutionId: resolution.id, purchaseOrderId: source.purchaseOrderId, orderItemId: row.orderItemId, quantity: resolution.quantity,
-        });
-      }
     }
-  }
-  const inbound = await tx.fulfillmentParcelLine.findMany({ where: { purchaseOrderId: { not: null },
-    parcel: { orderId: order.id, route: 'supplier_to_libereal' } }, include: { resolutions: true } });
-  for (const line of inbound) {
-    const { shipped } = parcelLineBalance(line);
-    if (shipped > 0) supplierDispatched.push({ purchaseOrderId: line.purchaseOrderId!, orderItemId: line.orderItemId, quantity: shipped });
   }
   for (const row of ledger) {
     const { target, sources } = row.operation;
@@ -112,15 +98,7 @@ export async function purchaseFulfillmentReview(tx: Db, order: SourceOrder, acti
     return quantity > 0 && (!orderedAt || !target.occurredAt || orderedAt <= target.occurredAt)
       ? [{ purchaseOrderId: po.id, quantity, orderedAt }] : [];
   }) }));
-  const assignedLosses = new Map<string, number>();
-  for (const activity of activities) {
-    if (activity.action !== 'resolve_change') continue;
-    const dispositions = purchaseOperation(activity.detail).dispositions as Array<{ forwardingLossId?: string; quantity: number }> | undefined;
-    for (const entry of dispositions ?? []) if (entry.forwardingLossId) addDelivery(assignedLosses, entry.forwardingLossId, entry.quantity);
-  }
-  const forwardingShortfalls = forwardingLosses.map(row => ({ ...row,
-    available: Math.max(0, row.quantity - (assignedLosses.get(row.resolutionId) ?? 0)) }));
-  const state = { targets, delivered, historicalDelivered, supplierDispatched, forwardingShortfalls, inconsistent, ledger };
+  const state = { targets, delivered, historicalDelivered, supplierDispatched, shortfalls, freeResends, inconsistent, ledger };
   return { ...state, version: pricingContentHash(state) };
 }
 

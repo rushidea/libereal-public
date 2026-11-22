@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { configuredCarrier, pendingForWaybill, reconcilePendingForParcel } from '@/lib/fulfillment-carrier';
 import { fulfillmentStatus, isInactiveOrderStatus, validateShipmentItems } from '@/lib/order-domain';
 import { releaseProcurementInventoryHold, shipProcurementBatch } from '@/lib/inventory';
@@ -13,7 +14,7 @@ export { previewParcelEvent, recordParcelEvent } from '@/lib/fulfillment-events'
 
 const routes = ['supplier_to_customer', 'supplier_to_libereal', 'libereal_to_customer'] as const;
 type Route = typeof routes[number];
-type Goods = { purchaseOrderId: string; orderItemId: string; quantity: number; sourceReceiptId: string | null };
+type Goods = { purchaseOrderId: string; orderItemId: string; quantity: number; sourceReceiptId: string | null; resendApprovalId?: string };
 const lineKey = (row: Pick<Goods, 'purchaseOrderId' | 'orderItemId'>) => JSON.stringify([row.purchaseOrderId, row.orderItemId]);
 
 function dispatchInput(raw: unknown) {
@@ -24,12 +25,15 @@ function dispatchInput(raw: unknown) {
   const lines = input.lines.map(entry => {
     const row = inputObject(entry);
     const sourceReceiptId = optionalText(row.sourceReceiptId, '采购实收批次');
+    const resendApprovalId = optionalText(row.resendApprovalId, '免费重发的采购批准') ?? undefined;
     if ((route === 'libereal_to_customer') !== Boolean(sourceReceiptId)) throw new PurchaseError('本仓转发须选用实际收到的批次', 400);
+    if (sourceReceiptId && resendApprovalId) throw new PurchaseError('转发按实收批次办理，免费重发批准须用于供方实际发货');
     return { purchaseOrderId: requiredText(row.purchaseOrderId, '采购单'), orderItemId: requiredText(row.orderItemId, '订单行'),
-      quantity: positiveQuantity(row.quantity, '发货数量'), sourceReceiptId };
-  }).sort((a,b) => lineKey(a).localeCompare(lineKey(b)) || (a.sourceReceiptId ?? '').localeCompare(b.sourceReceiptId ?? ''));
-  if (new Set(lines.map(row => JSON.stringify([lineKey(row), row.sourceReceiptId]))).size !== lines.length) {
-    throw new PurchaseError('请合并同一采购行、同一来源批次的数量', 400);
+      quantity: positiveQuantity(row.quantity, '发货数量'), sourceReceiptId, resendApprovalId };
+  }).sort((a,b) => lineKey(a).localeCompare(lineKey(b)) || (a.sourceReceiptId ?? '').localeCompare(b.sourceReceiptId ?? '')
+    || (a.resendApprovalId ?? '').localeCompare(b.resendApprovalId ?? ''));
+  if (new Set(lines.map(row => JSON.stringify([lineKey(row), row.sourceReceiptId,row.resendApprovalId]))).size !== lines.length) {
+    throw new PurchaseError('请合并同一采购行、来源批次或重发批准的同一项数量', 400);
   }
   const carrier = optionalText(input.carrier, '承运方');
   const trackingNumber = optionalText(input.trackingNumber, '运单号');
@@ -104,8 +108,10 @@ export async function fulfillmentWorkspace(tx: Db, orderId: string) {
   const workspaceParcels = parcels.map(parcel => ({ ...parcel, lines: parcel.lines.map(line => ({
     ...line, balance: parcelLineBalance(line), receipts: line.receipts.map(receipt => ({ ...receipt, remaining: availableReceipt(receipt) })),
   })) }));
+  const freeResends = purchasing.fulfillment.freeResends.filter(row => row.available > 0 && purchases.some(purchase =>
+    purchase.purchaseOrderId === row.purchaseOrderId && purchase.orderItemId === row.orderItemId));
   return { order, purchases, parcels: workspaceParcels, receipts, legacyShipments, legacyBackfill, legacyInventory, inventoryChoices, unmatched,
-    feedSource: configuredCarrier()?.source ?? null };
+    freeResends, feedSource: configuredCarrier()?.source ?? null };
 }
 
 async function dispatchPlan(tx: Db, orderId: string, raw: unknown, actor: FulfillmentActor) {
@@ -123,9 +129,14 @@ async function dispatchPlan(tx: Db, orderId: string, raw: unknown, actor: Fulfil
     if (!purchased || purchased.orderedAt > input.occurredAt) throw new PurchaseError('请核对该订单行在发货当时已经生效的供应商订购');
     const receipt = row.sourceReceiptId ? view.receipts.find(r => r.id === row.sourceReceiptId && r.purchaseOrderId === row.purchaseOrderId && r.orderItemId === row.orderItemId) : null;
     if (row.sourceReceiptId && (!receipt?.receivedAt || receipt.receivedAt > input.occurredAt)) throw new PurchaseError('须先核实本单此采购行实际收到的批次和时间');
-    if (row.quantity > (receipt?.available ?? purchased.available)) throw new PurchaseError('发货数量超过该采购行或实收批次可用数量');
+    const resend = row.resendApprovalId ? view.freeResends.find(item => item.approvalId === row.resendApprovalId
+      && item.purchaseOrderId === row.purchaseOrderId && item.orderItemId === row.orderItemId) : null;
+    if (row.resendApprovalId && (!resend || resend.authorizedAt > input.occurredAt)) throw new PurchaseError('发货须对应当时已经批准的本行免费重发数量');
+    if (row.quantity > (receipt?.available ?? resend?.available ?? purchased.available)) {
+      throw new PurchaseError(resend ? '发货数量超过本行免费重发核准数量' : '发货数量超过该采购行或实收批次可用数量');
+    }
     return { ...row, catalogNumber: purchased.catalogNumber, productId: receipt ? receipt.productId : purchased.productId,
-      variantId: receipt ? receipt.variantId : purchased.variantId, inventoryAccountId: receipt?.inventoryAccountId,
+      variantId: receipt ? receipt.variantId : purchased.variantId, inventoryAccountId: receipt?.inventoryAccountId, resend: resend ?? undefined,
       supplier: purchased.supplier, name: purchased.name, contractVersion: purchased.contractVersion, batchNumber: receipt?.batchNumber ?? null };
   });
   if (input.route !== 'libereal_to_customer' && new Set(lines.map(line => line.supplier)).size !== 1) {
@@ -187,12 +198,14 @@ export async function dispatchParcel(tx: Db, orderId: string, raw: unknown, acto
       content: input.trackingNumber ? [input.carrier, input.trackingNumber].join(' · ') : '商品已交付运送', linkUrl: '/account/orders/'+orderId,
       metadata: JSON.stringify({ orderId, shipmentId }) } });
   }
+  const recordedLines = lines.map(line => ({ ...line, parcelLineId: randomUUID() }));
   const parcel = await tx.fulfillmentParcel.create({ data: { orderId, shipmentId, route: input.route, carrier: input.carrier, trackingNumber: input.trackingNumber,
     feedSource: input.feedSource, status: 'dispatched', dispatchedAt: occurred, reference: input.reference, evidenceSha256: input.sha256,
     evidenceRow: input.documentRow, ...keys, actorId: actor.id,
     events: { create: { ...parcelKeys('dispatch_evidence', orderId, plan.snapshot.requestId, { parcel: keys.businessKey }, plan.snapshot),
       source: 'staff', kind: 'dispatch', status: 'applied', occurredAt: occurred, reference: input.reference,
-      evidenceSha256: input.sha256, evidenceRow: input.documentRow, actorId: actor.id, details: JSON.stringify(plan.snapshot) } }, lines: { create: lines.map(r => ({ purchaseOrderId: r.purchaseOrderId,
+      evidenceSha256: input.sha256, evidenceRow: input.documentRow, actorId: actor.id, details: JSON.stringify({ ...plan.snapshot, lines: recordedLines }) } },
+    lines: { create: recordedLines.map(r => ({ id: r.parcelLineId, purchaseOrderId: r.purchaseOrderId,
       orderItemId: r.orderItemId, quantity: r.quantity, sourceReceiptId: r.sourceReceiptId, productId: r.productId,
       variantId: r.variantId, catalogNumber: r.catalogNumber })) } }, include: parcelInclude });
   await reconcilePendingForParcel(tx, parcel);

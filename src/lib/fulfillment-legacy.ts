@@ -35,9 +35,9 @@ export async function ensureLocalStockShipment(tx: Db, orderId: string, requeste
       const ordered = purchase.remaining.find(line => line.orderItemId === row.orderItemId)?.quantity ?? 0;
       const sent = view.fulfillment.delivered.filter(line => line.purchaseOrderId === purchase.id && line.orderItemId === row.orderItemId)
         .reduce((count, line) => count + line.quantity, 0);
-      const outboundLoss = view.fulfillment.forwardingShortfalls.filter(line => line.purchaseOrderId === purchase.id && line.orderItemId === row.orderItemId)
-        .reduce((count, line) => count + line.quantity, 0);
-      return sum + Math.max(0, ordered - sent - outboundLoss);
+      const separate = view.fulfillment.shortfalls.filter(line => line.purchaseOrderId === purchase.id && line.orderItemId === row.orderItemId)
+        .reduce((count, line) => count + line.independentlyReplaced, 0);
+      return sum + Math.max(0, ordered - sent - separate);
     }, 0);
     const item = await tx.orderItem.findFirstOrThrow({ where: { orderId, id: row.orderItemId }, select: { quantity: true, shippedQty: true } });
     if (open + row.quantity > item.quantity - item.shippedQty) throw new Error('PROCUREMENT_FULFILLMENT_REQUIRED');

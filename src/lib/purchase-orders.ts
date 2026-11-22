@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { Prisma } from '@prisma/client';
 import { addPurchaseActivity, findPurchaseActivityByRequest, purchaseObject, purchaseOperation, readPurchaseActivities, type PurchaseActor, type PurchaseActivity, type PurchaseAuthorization } from '@/lib/purchase-activity';
 import {
-  approvalAt, contractContent, dispositionSummary, isPurchaseApproval, legacyApproval, legacyApprovalReview, legacyArchiveEvidence, purchaseSnapshot as snapshot, remainingApproval,
+  approvalAt, changesOriginalPurchase, contractContent, dispositionSummary, isPurchaseApproval, legacyApproval, legacyApprovalReview, legacyArchiveEvidence, purchaseSnapshot as snapshot, remainingApproval,
   type PurchaseLineSource as LineSource, type PurchaseStatus as Status, type RemainingScope,
 } from '@/lib/purchase-contract';
 import { previewShipmentAttribution, purchaseFulfillmentReview, type ShipmentAttributionInput } from '@/lib/purchase-fulfillment';
@@ -11,6 +11,7 @@ import { pricingContentHash } from '@/lib/pricing-adjustment-approval';
 import { loadPurchaseOrderSource, loadPurchaseLines, type PurchaseSource, type SourceOrder } from '@/lib/purchase-source';
 import { creditExceptionMatches, paymentPlanAt, paymentPlanContent, paymentPlanFromReview, purchaseCreditVersion, purchaseStartReview, type PaymentPlan } from '@/lib/purchase-start';
 import { purchaseCreditAt } from '@/lib/purchase-credit-history';
+import type { ShortfallDecision } from '@/lib/purchase-shortfalls';
 import {
   attestPurchaseTerms, documentSha256, initialPurchaseTerms, missingPurchaseTerms, missingWrittenTerms, normalizePurchaseTerms, positiveCents, PurchaseError,
   purchaseTimestamp, requireNewDocumentsForChangedTerms, requiredText, type PurchaseTerms,
@@ -24,7 +25,8 @@ type RequirementRow = {
 type OrderRow = { id: string; status: Status; revision: number; approvedHash: string | null };
 type LineEdit = { orderItemId: string; terms: PurchaseTerms };
 type ReplacementInput = { name?: unknown; brand?: unknown; catalogNumber?: unknown; spec?: unknown; unit?: unknown; terms?: unknown };
-type DispositionInput = { orderItemId: string; quantity: number; outcome: 'cancel' | 'replace'; replacement?: ReplacementInput; forwardingLossId?: string };
+type DispositionInput = { orderItemId: string; quantity: number; outcome: 'cancel' | 'replace'; replacement?: ReplacementInput;
+  forwardingLossId?: string; shortfallId?: string; shortfallDecision?: ShortfallDecision };
 export type PurchaseActionInput = {
   orderId: string; purchaseOrderId: string;
   action: 'approve' | 'approve_lead_time' | 'register_order' | 'record_payment' | 'report_change' | 'resolve_change'
@@ -32,7 +34,7 @@ export type PurchaseActionInput = {
   version: string; requestId: string; actionHash?: string; reference?: string; amountCents?: number; conditionReference?: string;
   occurredAt?: string; referenceSha256?: string; description?: string;
   changeKind?: 'delay' | 'price' | 'unavailable' | 'other';
-  outcome?: 'original_terms' | 'revised_terms' | 'declined' | 'replacement';
+  outcome?: 'original_terms' | 'revised_terms' | 'declined' | 'replacement' | 'shortfall';
   supplierReference?: string; supplierSha256?: string; customerReference?: string; customerSha256?: string;
   revisedTerms?: LineEdit[]; dispositions?: DispositionInput[]; refundFollowup?: string;
   paymentReference?: string; paymentSha256?: string; leadTimeReference?: string; leadTimeSha256?: string;
@@ -348,9 +350,9 @@ type Workspace = Awaited<ReturnType<typeof purchaseWorkspace>>;
 type PO = Workspace['orders'][number];
 
 type Disposition = {
-  orderItemId: string; quantity: number; outcome: 'cancel' | 'replace';
+  orderItemId: string; quantity: number; outcome: 'cancel' | 'replace' | 'resend';
   replacement: { terms: PurchaseTerms; source: LineSource } | null;
-  forwardingLossId?: string;
+  shortfallId?: string; shortfallDecision?: ShortfallDecision;
 };
 
 function checkedEdits(po: PO, input: PurchaseActionInput) {
@@ -382,9 +384,9 @@ function pendingReplacementQuantity(view: Workspace, purchase: PO, orderItemId: 
   if (purchase.status === 'superseded' || purchase.commitmentState === 'supplier_cancelled'
     || !purchase.lines.some(line => line.orderItemId === orderItemId && line.fromPurchaseOrderId)) return 0;
   const quantity = purchase.remaining.find(line => line.orderItemId === orderItemId)?.quantity ?? 0;
-  const forwardedLoss = view.fulfillment.forwardingShortfalls.filter(row => row.purchaseOrderId === purchase.id && row.orderItemId === orderItemId)
-    .reduce((sum, row) => sum + row.quantity, 0);
-  return Math.max(0, quantity - attributedQuantity(view, purchase.id, orderItemId) - forwardedLoss);
+  const separate = view.fulfillment.shortfalls.filter(row => row.purchaseOrderId === purchase.id && row.orderItemId === orderItemId)
+    .reduce((sum, row) => sum + row.independentlyReplaced, 0);
+  return Math.max(0, quantity - attributedQuantity(view, purchase.id, orderItemId) - separate);
 }
 
 function activeReplacementQuantity(view: Workspace, orderItemId: string) {
@@ -400,23 +402,40 @@ function committedDispositions(
     throw new PurchaseError('须逐行填写替代或取消数量', 400);
   }
   const prior = dispositionSummary(po.ledger).quantities;
-  const dispositions = entries.map(({ orderItemId, quantity, outcome, replacement, forwardingLossId }) => {
+  const dispositions = entries.map((entry): Disposition => {
+    const { orderItemId, quantity, outcome, replacement, forwardingLossId } = entry;
+    const shortfallId = entry.shortfallId ?? forwardingLossId;
+    const shortfallDecision = entry.shortfallDecision ?? (forwardingLossId ? 'new_purchase' : undefined);
     const line = po.lines.find(row => row.orderItemId === orderItemId);
     const original = customerLines.find(row => row.orderItemId === orderItemId);
     if (!line || !original || !positiveCents(quantity)) throw new PurchaseError('须核对本单采购行和实际处理数量');
-    if (forwardingLossId) {
-      const loss = view.fulfillment.forwardingShortfalls.find(row => row.resolutionId === forwardingLossId && row.purchaseOrderId === po.id && row.orderItemId === orderItemId);
-      if (outcome !== 'replace' || !loss || quantity > loss.available) throw new PurchaseError('补发采购须对应本行尚未使用的转发短失书证');
+    if (input.outcome === 'shortfall' || shortfallId || shortfallDecision) {
+      if (!po.orderedBefore || po.commitmentState === 'supplier_cancelled'
+        || (input.outcome !== 'shortfall' && !(forwardingLossId && shortfallDecision === 'new_purchase'))
+        || !shortfallId || !shortfallDecision || !['free_resend','change_contract','new_purchase'].includes(shortfallDecision)) {
+        throw new PurchaseError('请逐行选择已核实短失及双方书面处理决定');
+      }
+      const loss = view.fulfillment.shortfalls.find(row => row.resolutionId === shortfallId && row.purchaseOrderId === po.id && row.orderItemId === orderItemId);
+      if (!loss || quantity > loss.available || (forwardingLossId && loss.route !== 'libereal_to_customer')) {
+        throw new PurchaseError('短失处理须对应本行尚未使用的实际物流书证数量');
+      }
+      if (shortfallDecision === 'free_resend') return { orderItemId, quantity, outcome: 'resend', replacement: null, shortfallId, shortfallDecision };
+      if (shortfallDecision === 'change_contract' && (!loss.originalContract || quantity + (prior.get(orderItemId) ?? 0) > line.source.quantity)) {
+        throw new PurchaseError('原合同变动须对应其中尚可核准的商品份额');
+      }
+      if (shortfallDecision === 'new_purchase' && outcome !== 'replace') throw new PurchaseError('保留原应付时须独立填报另购商品和条款');
     } else if (quantity + (prior.get(orderItemId) ?? 0) + supplierDispatchQuantity(view, po.id, orderItemId) > line.source.quantity) {
       throw new PurchaseError('替代或取消的累计数量不得超过原采购行尚未发出的数量，有短失或退回须先据实核对');
     }
-    if (outcome === 'cancel') return { orderItemId, quantity, outcome, replacement: null };
+    if (outcome === 'cancel') return { orderItemId, quantity, outcome, replacement: null, shortfallId, shortfallDecision };
     const active = activeReplacementQuantity(view, orderItemId);
-    const retained = forwardingLossId ? active : active - Math.min(quantity, pendingReplacementQuantity(view, po, orderItemId));
+    const retained = active - Math.min(quantity, pendingReplacementQuantity(view, po, orderItemId));
     if (retained + quantity > (remainingQuantities.get(orderItemId) ?? 0)) {
       throw new PurchaseError('累计有效替代采购不得超过客户订单行未发货数量');
     }
-    if (outcome !== 'replace' || !replacement || input.outcome !== 'replacement') throw new PurchaseError('请核对每行的替代或取消结果', 400);
+    if (outcome !== 'replace' || !replacement || (input.outcome !== 'replacement' && input.outcome !== 'shortfall')) {
+      throw new PurchaseError('请核对每行的替代或取消结果', 400);
+    }
     const source: LineSource = {
       ...original, productId: null, variantId: null, written: null, quantity, customerLineVersion: pricingContentHash(original),
       name: requiredText(replacement.name, '替代商品名称'), brand: requiredText(replacement.brand, '替代商品品牌'),
@@ -426,7 +445,7 @@ function committedDispositions(
     const terms = normalizePurchaseTerms(replacement.terms);
     requireNewDocumentsForChangedTerms(line.terms, terms, line.source.quantity !== quantity);
     if (missingWrittenTerms(terms, source).length) throw new PurchaseError('替代行须具备当前有效的供货、收款和付款书证');
-    return { orderItemId, quantity, outcome, replacement: { terms, source }, forwardingLossId };
+    return { orderItemId, quantity, outcome, replacement: { terms, source }, shortfallId, shortfallDecision };
   });
   if (input.outcome === 'replacement' && !dispositions.some(line => line.outcome === 'replace')) {
     throw new PurchaseError('请填写至少一条待独立批准的替代采购行', 400);
@@ -697,17 +716,18 @@ function actionDetails(
     const incident = po.ledger.find(row => row.id === po.openIncidentId);
     const previousStatus = snapshot(incident)?.operation.previousStatus;
     if (po.status !== 'on_hold' || !incident || !previousStatus || !input.outcome
-      || !['original_terms', 'revised_terms', 'declined', 'replacement'].includes(input.outcome)) conflict();
+      || !['original_terms', 'revised_terms', 'declined', 'replacement', 'shortfall'].includes(input.outcome)) conflict();
     const committed = po.orderedBefore || po.paidCents > 0 || po.commitmentExceptions.length > 0;
     const disposedBefore = dispositionSummary(po.ledger).ids.length > 0;
     if (input.outcome === 'replacement' && !committed) throw new PurchaseError('尚未订购或付款的采购单应按修订条款重新批准');
+    if (input.outcome === 'shortfall' && !po.orderedBefore) throw new PurchaseError('短失办理须对应原实际订购');
     if (input.outcome === 'original_terms' && po.commitmentState === 'supplier_cancelled') {
       throw new PurchaseError('供方已整笔取消。尚需订购的商品须另建采购并独立批准');
     }
     if (input.outcome === 'original_terms' && disposedBefore && (!po.remainingScope || !['approved', 'ordered'].includes(previousStatus))) {
       throw new PurchaseError('已经取消或交给替代单的数量不能恢复原单，请核对剩余商品');
     }
-    const dispositions = committed && (input.outcome === 'declined' || input.outcome === 'replacement')
+    const dispositions = committed && (input.outcome === 'declined' || input.outcome === 'replacement' || input.outcome === 'shortfall')
       ? committedDispositions(view, po, input, customerLines, remainingQuantities) : undefined;
     if (dispositions?.some(line => line.replacement) && !view.eligibility.eligible) {
       throw new PurchaseError('另建替代采购前须先核实客户订单仍符合采购启动条件');
@@ -720,7 +740,7 @@ function actionDetails(
         customerSha256: documentSha256(input.customerSha256, '客户书面回复摘要'),
       } : {}),
       description: requiredText(input.description, '双方确认的具体结果'), dispositions,
-      refund: dispositions?.some(line => !line.forwardingLossId) && po.paidCents > 0 ? {
+      refund: dispositions?.some(changesOriginalPurchase) && po.paidCents > 0 ? {
         status: 'pending_review', paidCents: po.paidCents, responsibleActor: actor.id,
         followup: requiredText(input.refundFollowup, '原付款与未决退款的后续核对安排'),
       } : null,
@@ -854,7 +874,7 @@ export async function applyPurchaseAction(tx: Db, input: PurchaseActionInput, ac
       ? 'ordered' : op.previousStatus!;
   }
   if (op.action === 'resolve_change' && op.outcome === 'declined' && !op.dispositions) status = 'superseded';
-  if (op.action === 'resolve_change' && op.dispositions?.length && op.dispositions.every(line => line.forwardingLossId)) status = op.previousStatus;
+  if (op.action === 'resolve_change' && op.dispositions?.length && op.dispositions.every(line => !changesOriginalPurchase(line))) status = op.previousStatus;
   if (op.action === 'resolve_change' && op.revisedTerms) {
     groupKey = pricingContentHash({ revisedPurchase: po.id, group: group(op.revisedTerms[0].terms) });
     await applyLineEdits(tx, po, actor, op.revisedTerms);

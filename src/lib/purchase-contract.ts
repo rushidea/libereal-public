@@ -1,4 +1,5 @@
 import type { PurchaseActivity } from '@/lib/purchase-activity';
+import type { ShortfallDecision } from '@/lib/purchase-shortfalls';
 import type { PurchaseSource } from '@/lib/purchase-source';
 import { pricingContentHash } from '@/lib/pricing-adjustment-approval';
 import { positiveCents, PurchaseError, type PurchaseTerms } from '@/lib/purchase-terms';
@@ -20,7 +21,7 @@ type ArchiveSnapshot = {
   operation: {
     action?: string; occurredAt?: string; previousStatus?: PurchaseStatus; incidentId?: string; outcome?: string;
     reference?: string; amountCents?: number; conditionReference?: string;
-    dispositions?: Array<{ orderItemId: string; quantity: number; forwardingLossId?: string }>;
+    dispositions?: Array<{ orderItemId: string; quantity: number; forwardingLossId?: string; shortfallId?: string; shortfallDecision?: ShortfallDecision }>;
     scope?: RemainingScope;
     legacyApprovalId?: string;
     checkedTerms?: Array<{ orderItemId: string; terms: PurchaseTerms }>;
@@ -37,12 +38,16 @@ export function contractContent(orderId: string, purchaseOrderId: string, totalC
   return { orderId, purchaseOrderId, totalCents, lines: lines.map(({ orderItemId, source, terms, revision }) => ({ orderItemId, source, terms, revision })) };
 }
 
+export function changesOriginalPurchase(entry: { forwardingLossId?: string; shortfallId?: string; shortfallDecision?: ShortfallDecision }) {
+  return !entry.forwardingLossId && (!entry.shortfallId || entry.shortfallDecision === 'change_contract');
+}
+
 export function dispositionSummary(ledger: PurchaseActivity[]) {
   const ids: string[] = [];
   const quantities = new Map<string, number>();
   for (const row of ledger) {
     if (row.action !== 'resolve_change') continue;
-    const entries = purchaseSnapshot(row)?.operation.dispositions?.filter(entry => !entry.forwardingLossId);
+    const entries = purchaseSnapshot(row)?.operation.dispositions?.filter(changesOriginalPurchase);
     if (!entries?.length) continue;
     ids.push(row.id);
     for (const { orderItemId, quantity } of entries) quantities.set(orderItemId, (quantities.get(orderItemId) ?? 0) + quantity);
@@ -67,7 +72,7 @@ export function approvalAt(ledger: PurchaseActivity[], at: number) {
       suspended = true;
     } else if (row.action === 'resolve_change') {
       const operation = purchaseSnapshot(row)?.operation;
-      if (operation?.outcome === 'original_terms') {
+      if (operation?.outcome === 'original_terms' || (operation?.dispositions?.length && operation.dispositions.every(entry => !changesOriginalPurchase(entry)))) {
         suspended = operation.previousStatus !== 'approved' && operation.previousStatus !== 'ordered';
       } else {
         approval = undefined;
