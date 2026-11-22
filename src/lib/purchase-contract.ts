@@ -20,7 +20,7 @@ type ArchiveSnapshot = {
   operation: {
     action?: string; occurredAt?: string; previousStatus?: PurchaseStatus; incidentId?: string; outcome?: string;
     reference?: string; amountCents?: number; conditionReference?: string;
-    dispositions?: Array<{ orderItemId: string; quantity: number }>;
+    dispositions?: Array<{ orderItemId: string; quantity: number; forwardingLossId?: string }>;
     scope?: RemainingScope;
     legacyApprovalId?: string;
     checkedTerms?: Array<{ orderItemId: string; terms: PurchaseTerms }>;
@@ -42,7 +42,7 @@ export function dispositionSummary(ledger: PurchaseActivity[]) {
   const quantities = new Map<string, number>();
   for (const row of ledger) {
     if (row.action !== 'resolve_change') continue;
-    const entries = purchaseSnapshot(row)?.operation.dispositions;
+    const entries = purchaseSnapshot(row)?.operation.dispositions?.filter(entry => !entry.forwardingLossId);
     if (!entries?.length) continue;
     ids.push(row.id);
     for (const { orderItemId, quantity } of entries) quantities.set(orderItemId, (quantities.get(orderItemId) ?? 0) + quantity);

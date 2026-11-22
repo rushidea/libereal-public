@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prepareOrderPurchases } from '@/lib/purchase-orders';
+import { purchaseObject } from '@/lib/purchase-activity';
 import { prisma } from '@/lib/prisma';
-import { assertOrderPricingResolved, closeOrderRepricing } from '@/lib/order-catalog-repricing';
+import { assertOrderPricingResolved, closeOrderRepricing, jsonObject } from '@/lib/order-catalog-repricing';
 import { requireActiveSession, requireAdmin } from '@/lib/session';
 import { authorizeAdminOrderMutation, consumeAdminOrderStepUp, extractStepUpToken } from '@/lib/admin-order-step-up';
 import type { Prisma } from '@prisma/client';
@@ -23,6 +24,30 @@ import { commerceLineRefFromRecord, reviewCommerceLinesWithCatalog } from '@/lib
 import { decideCommerceLineReview, type CommerceLineFinding } from '@/lib/commerce-line-review';
 import { ownerPrepaySettlementViews } from '@/lib/order-prepay-settlement';
 import { customerOrderStatusMetadata, getLatestAlipayAttempt, merchantOrderApprovalPreview, ORDER_APPROVAL_INCLUDE, orderApprovalConflict, verifyMerchantOrderAcceptance } from '@/lib/order-approval';
+
+const customerEventLabels: Record<string,string> = {
+  order_created: '订单已提交', items_updated: '订单商品已更新', status_changed: '订单状态已更新',
+  shipment_created: '商品已发出', customer_delivery_confirmed: '商品已按实际收货确认交付',
+  shipment_shortfall_confirmed: '包裹已核实短少或退回，正在办理后续交付', organization_order_approved: '组织已审核订单',
+};
+
+function customerEvents(events: { id: string; type: string; createdAt: Date; metadata: string | null }[]) {
+  return events.flatMap(({ id, type, createdAt, metadata }) => {
+    if (!Object.hasOwn(customerEventLabels, type)) return [];
+    const event = { id, type, createdAt, message: customerEventLabels[type] };
+    if (type !== 'organization_order_approved') return [event];
+    const details = jsonObject(metadata);
+    const snapshot = purchaseObject(details.snapshot);
+    const lines = Array.isArray(snapshot.lines) ? snapshot.lines.map(line => {
+      const { name, brand, catalogNumber, spec, unit, quantity, unitPrice, leadTime, conditions } = purchaseObject(line);
+      return { name, brand, catalogNumber, spec, unit, quantity, unitPrice, leadTime, conditions };
+    }) : [];
+    const { total, subtotal, paymentMethod, payee, pointsDiscount, adjustmentTotal } = snapshot;
+    return [{ ...event, metadata: JSON.stringify({ version: details.version, snapshot: {
+      total, subtotal, paymentMethod, payee, pointsDiscount, adjustmentTotal, lines,
+    } }) }];
+  });
+}
 
 export async function GET(
   _req: NextRequest,
@@ -75,7 +100,7 @@ export async function GET(
       });
     }
 
-    const { orderItems, statusHistory, paymentAttempts, ...rest } = order;
+    const { orderItems, statusHistory, events, paymentAttempts, ...rest } = order;
     const settlementViews = await ownerPrepaySettlementViews(prisma, [order]);
     const creditReviewPending = order.status === 'pending'
       && isPostDeliveryPaymentMethod(order.paymentMethod)
@@ -85,8 +110,10 @@ export async function GET(
       receivable: undefined,
       items: orderItems.map(orderItemView),
       inquiry,
-      statusHistory: isAdmin ? statusHistory : statusHistory.map((entry) => ({
-        ...entry, metadata: customerOrderStatusMetadata(entry.metadata),
+      events: isAdmin ? events : customerEvents(events),
+      statusHistory: isAdmin ? statusHistory : statusHistory.map(({ id, fromStatus, toStatus, createdAt, metadata }) => ({
+        id, fromStatus, toStatus, createdAt, metadata: jsonObject(metadata).action === 'accept_order'
+          && jsonObject(metadata).version === 2 ? customerOrderStatusMetadata(metadata) : null,
       })),
       ...(isAdmin ? { approvalPreview: await merchantOrderApprovalPreview(prisma, order) } : {}),
       payment: getAlipayPaymentSummary(order, getLatestAlipayAttempt(paymentAttempts)),

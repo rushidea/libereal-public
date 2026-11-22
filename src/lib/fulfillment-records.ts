@@ -5,9 +5,44 @@ import { documentSha256, positiveCents, PurchaseError, purchaseTimestamp, requir
 export type FulfillmentDb = Prisma.TransactionClient;
 export type FulfillmentActor = { id: string; email: string };
 export const parcelInclude = {
-  lines: { orderBy: { id: 'asc' }, include: { receipts: { orderBy: { id: 'asc' }, include: { inventoryBatch: { select: { batchNumber: true, inventoryAccountId: true } } } } } },
+  lines: { orderBy: { id: 'asc' }, include: { resolutions: true,
+    receipts: { orderBy: { id: 'asc' }, include: { inventoryBatch: { select: { batchNumber: true, inventoryAccountId: true,
+      account: { select: { productId: true, variantId: true } } } } } } } },
   events: { orderBy: [{ occurredAt: 'asc' }, { id: 'asc' }] },
 } satisfies Prisma.FulfillmentParcelInclude;
+
+export type FulfillmentParcelRecord = Prisma.FulfillmentParcelGetPayload<{ include: typeof parcelInclude }>;
+
+export function availableReceipt(receipt: { quantity: number; forwardedQuantity: number; releasedQuantity: number }) {
+  return Math.max(0, receipt.quantity - receipt.forwardedQuantity - receipt.releasedQuantity);
+}
+
+export function parcelLineBalance(line: {
+  quantity: number; receivedQuantity: number; resolutions: { kind: string; quantity: number }[];
+}) {
+  let missing = 0;
+  let returned = 0;
+  for (const resolution of line.resolutions) {
+    if (resolution.kind === 'return') returned += resolution.quantity;
+    else missing += resolution.quantity;
+  }
+  if (returned > line.receivedQuantity || line.receivedQuantity + missing > line.quantity) {
+    throw new PurchaseError('包裹实收与已核实的短少、退回数量不一致');
+  }
+  return { shipped: line.quantity - missing - returned, received: line.receivedQuantity - returned,
+    pending: line.quantity - line.receivedQuantity - missing };
+}
+
+export function parcelProgress(parcel: Pick<FulfillmentParcelRecord, 'lines' | 'events'>) {
+  const unresolved = parcel.events.some(e => (e.kind === 'exception' && e.status === 'applied')
+    || (e.kind === 'carrier_exception' && e.status === 'awaiting_resolution'));
+  if (unresolved) return 'exception';
+  const balances = parcel.lines.map(parcelLineBalance);
+  if (balances.length && balances.every(row => !row.pending)) return parcel.lines.some(line => line.resolutions.length) ? 'shortfall' : 'delivered';
+  if (balances.some(row => row.received > 0)) return 'partially_received';
+  return parcel.events.some(e => (e.kind === 'tracking' && e.status === 'applied')
+    || (e.source.startsWith('carrier/') && ['linked', 'awaiting_resolution', 'resolved'].includes(e.status))) ? 'in_transit' : 'dispatched';
+}
 
 export function inputObject(raw: unknown): Record<string, unknown> {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new PurchaseError('请提交完整的物流记录', 400);

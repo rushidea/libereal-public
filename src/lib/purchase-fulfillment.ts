@@ -1,5 +1,7 @@
 import type { Prisma } from '@prisma/client';
 import { purchaseOperation, type PurchaseActivity, type PurchaseActor } from '@/lib/purchase-activity';
+import { customerShipmentRows } from '@/lib/fulfillment-accounting';
+import { parcelLineBalance } from '@/lib/fulfillment-records';
 import { pricingContentHash } from '@/lib/pricing-adjustment-approval';
 import type { SourceOrder } from '@/lib/purchase-source';
 import { documentSha256, positiveCents, PurchaseError, purchaseTimestamp, requiredText } from '@/lib/purchase-terms';
@@ -25,13 +27,11 @@ function sameShipment(persisted: Target, current: Target) {
 }
 
 export async function purchaseFulfillmentReview(tx: Db, order: SourceOrder, activities: PurchaseActivity[], purchases: Procurement[]) {
-  const rows = await tx.shipmentItem.findMany({ where: { shipment: { orderId: order.id, shippedAt: { not: null },
-    status: { in: ['shipped', 'delivered', 'completed'] } } }, include: { shipment: { include: { fulfillmentParcel: { select: { route: true, lines: { select: { orderItemId: true, purchaseOrderId: true, quantity: true } } } } } } },
-    orderBy: [{ createdAt: 'asc' }, { id: 'asc' }] });
+  const rows = await customerShipmentRows(tx, order.id);
   const actual: Target[] = rows.flatMap(row => {
     const item = order.orderItems.find(item => item.id === row.orderItemId);
-    return item && row.shipment.shippedAt && positiveCents(row.quantity) ? [{ id: row.id, shipmentId: row.shipmentId,
-      orderItemId: item.id, name: item.name, quantity: row.quantity, occurredAt: row.shipment.shippedAt.toISOString(),
+    return item && row.shipment.shippedAt && positiveCents(row.effectiveQuantity) ? [{ id: row.id, shipmentId: row.shipmentId,
+      orderItemId: item.id, name: item.name, quantity: row.effectiveQuantity, occurredAt: row.shipment.shippedAt.toISOString(),
       reference: row.shipment.trackingNumber }] : [];
   });
   const sums = new Map<string, number>();
@@ -45,15 +45,32 @@ export async function purchaseFulfillmentReview(tx: Db, order: SourceOrder, acti
   const usedShipments = new Set<string>();
   const delivered: Array<{ purchaseOrderId: string; orderItemId: string; quantity: number }> = [];
   const historicalDelivered: typeof delivered = [];
+  const supplierDispatched: typeof delivered = [];
+  const forwardingLosses: Array<{ resolutionId: string; purchaseOrderId: string; orderItemId: string; quantity: number }> = [];
   for (const row of rows) {
     const parcel = row.shipment.fulfillmentParcel;
     if (!parcel || parcel.route === 'legacy_customer') continue;
-    const sources = parcel.lines.filter(line => line.orderItemId === row.orderItemId);
-    if (!sources.length || sources.reduce((sum, line) => sum + line.quantity, 0) !== row.quantity || sources.some(line => !line.purchaseOrderId)) {
+    if (!row.sources.length || row.sources.some(line => !line.purchaseOrderId)) {
       throw new PurchaseError('采购包裹与客户发货行数量不一致，请核对原记录');
     }
     usedShipments.add(row.id);
-    for (const line of sources) delivered.push({ purchaseOrderId: line.purchaseOrderId!, orderItemId: row.orderItemId, quantity: line.quantity });
+    for (const line of row.sources) {
+      const source = { purchaseOrderId: line.purchaseOrderId!, orderItemId: row.orderItemId, quantity: line.balance.shipped };
+      if (source.quantity > 0) delivered.push(source);
+      if (parcel.route === 'supplier_to_customer') {
+        if (source.quantity > 0) supplierDispatched.push(source);
+      } else if (parcel.route === 'libereal_to_customer') {
+        for (const resolution of line.resolutions) forwardingLosses.push({
+          resolutionId: resolution.id, purchaseOrderId: source.purchaseOrderId, orderItemId: row.orderItemId, quantity: resolution.quantity,
+        });
+      }
+    }
+  }
+  const inbound = await tx.fulfillmentParcelLine.findMany({ where: { purchaseOrderId: { not: null },
+    parcel: { orderId: order.id, route: 'supplier_to_libereal' } }, include: { resolutions: true } });
+  for (const line of inbound) {
+    const { shipped } = parcelLineBalance(line);
+    if (shipped > 0) supplierDispatched.push({ purchaseOrderId: line.purchaseOrderId!, orderItemId: line.orderItemId, quantity: shipped });
   }
   for (const row of ledger) {
     const { target, sources } = row.operation;
@@ -63,14 +80,21 @@ export async function purchaseFulfillmentReview(tx: Db, order: SourceOrder, acti
       if (!shipment || usedShipments.has(target.id) || !sameShipment(target, shipment)) continue;
       usedShipments.add(target.id);
     } else {
-      const consumed = usedHistory.get(target.orderItemId) ?? 0;
-      if (consumed + target.quantity > (historyBudget.get(target.orderItemId) ?? 0)) continue;
-      addDelivery(usedHistory, target.orderItemId, target.quantity);
+      const reconstructed = rows.find(line => line.historicalAttributionId === row.id);
+      if (reconstructed) {
+        if (reconstructed.orderItemId !== target.orderItemId || reconstructed.quantity !== target.quantity || usedShipments.has(reconstructed.id)) continue;
+        usedShipments.add(reconstructed.id);
+      } else {
+        const consumed = usedHistory.get(target.orderItemId) ?? 0;
+        if (consumed + target.quantity > (historyBudget.get(target.orderItemId) ?? 0)) continue;
+        addDelivery(usedHistory, target.orderItemId, target.quantity);
+      }
     }
     for (const source of sources) if (source.purchaseOrderId) {
       const line = { purchaseOrderId: source.purchaseOrderId, orderItemId: target.orderItemId, quantity: source.quantity };
       delivered.push(line);
       historicalDelivered.push(line);
+      supplierDispatched.push(line);
     }
   }
   const unassigned = actual.filter(row => !usedShipments.has(row.id) && !inconsistent.includes(row.orderItemId));
@@ -82,13 +106,21 @@ export async function purchaseFulfillmentReview(tx: Db, order: SourceOrder, acti
   const targets = unassigned.map(target => ({ ...target, purchaseSources: purchases.flatMap(po => {
     const ordered = po.orderReceipt?.lines.find(row => row.orderItemId === target.orderItemId);
     const remains = po.remaining.find(row => row.orderItemId === target.orderItemId);
-    const counted = delivered.reduce((sum, row) => sum + (row.purchaseOrderId === po.id && row.orderItemId === target.orderItemId ? row.quantity : 0), 0);
+    const counted = supplierDispatched.reduce((sum, row) => sum + (row.purchaseOrderId === po.id && row.orderItemId === target.orderItemId ? row.quantity : 0), 0);
     const quantity = Math.min(ordered?.quantity ?? 0, remains?.quantity ?? 0) - counted;
     const orderedAt = po.orderReceipt?.occurredAt ?? null;
     return quantity > 0 && (!orderedAt || !target.occurredAt || orderedAt <= target.occurredAt)
       ? [{ purchaseOrderId: po.id, quantity, orderedAt }] : [];
   }) }));
-  const state = { targets, delivered, historicalDelivered, inconsistent, ledger };
+  const assignedLosses = new Map<string, number>();
+  for (const activity of activities) {
+    if (activity.action !== 'resolve_change') continue;
+    const dispositions = purchaseOperation(activity.detail).dispositions as Array<{ forwardingLossId?: string; quantity: number }> | undefined;
+    for (const entry of dispositions ?? []) if (entry.forwardingLossId) addDelivery(assignedLosses, entry.forwardingLossId, entry.quantity);
+  }
+  const forwardingShortfalls = forwardingLosses.map(row => ({ ...row,
+    available: Math.max(0, row.quantity - (assignedLosses.get(row.resolutionId) ?? 0)) }));
+  const state = { targets, delivered, historicalDelivered, supplierDispatched, forwardingShortfalls, inconsistent, ledger };
   return { ...state, version: pricingContentHash(state) };
 }
 

@@ -24,7 +24,7 @@ type RequirementRow = {
 type OrderRow = { id: string; status: Status; revision: number; approvedHash: string | null };
 type LineEdit = { orderItemId: string; terms: PurchaseTerms };
 type ReplacementInput = { name?: unknown; brand?: unknown; catalogNumber?: unknown; spec?: unknown; unit?: unknown; terms?: unknown };
-type DispositionInput = { orderItemId: string; quantity: number; outcome: 'cancel' | 'replace'; replacement?: ReplacementInput };
+type DispositionInput = { orderItemId: string; quantity: number; outcome: 'cancel' | 'replace'; replacement?: ReplacementInput; forwardingLossId?: string };
 export type PurchaseActionInput = {
   orderId: string; purchaseOrderId: string;
   action: 'approve' | 'approve_lead_time' | 'register_order' | 'record_payment' | 'report_change' | 'resolve_change'
@@ -350,6 +350,7 @@ type PO = Workspace['orders'][number];
 type Disposition = {
   orderItemId: string; quantity: number; outcome: 'cancel' | 'replace';
   replacement: { terms: PurchaseTerms; source: LineSource } | null;
+  forwardingLossId?: string;
 };
 
 function checkedEdits(po: PO, input: PurchaseActionInput) {
@@ -372,11 +373,18 @@ function attributedQuantity(view: Workspace, purchaseOrderId: string, orderItemI
   return view.fulfillment.delivered.reduce((sum, row) => sum + (row.purchaseOrderId === purchaseOrderId && row.orderItemId === orderItemId ? row.quantity : 0), 0);
 }
 
+function supplierDispatchQuantity(view: Workspace, purchaseOrderId: string, orderItemId: string) {
+  return view.fulfillment.supplierDispatched.reduce((sum, row) =>
+    sum + (row.purchaseOrderId === purchaseOrderId && row.orderItemId === orderItemId ? row.quantity : 0), 0);
+}
+
 function pendingReplacementQuantity(view: Workspace, purchase: PO, orderItemId: string) {
   if (purchase.status === 'superseded' || purchase.commitmentState === 'supplier_cancelled'
     || !purchase.lines.some(line => line.orderItemId === orderItemId && line.fromPurchaseOrderId)) return 0;
   const quantity = purchase.remaining.find(line => line.orderItemId === orderItemId)?.quantity ?? 0;
-  return Math.max(0, quantity - attributedQuantity(view, purchase.id, orderItemId));
+  const forwardedLoss = view.fulfillment.forwardingShortfalls.filter(row => row.purchaseOrderId === purchase.id && row.orderItemId === orderItemId)
+    .reduce((sum, row) => sum + row.quantity, 0);
+  return Math.max(0, quantity - attributedQuantity(view, purchase.id, orderItemId) - forwardedLoss);
 }
 
 function activeReplacementQuantity(view: Workspace, orderItemId: string) {
@@ -392,16 +400,19 @@ function committedDispositions(
     throw new PurchaseError('须逐行填写替代或取消数量', 400);
   }
   const prior = dispositionSummary(po.ledger).quantities;
-  const dispositions = entries.map(({ orderItemId, quantity, outcome, replacement }) => {
+  const dispositions = entries.map(({ orderItemId, quantity, outcome, replacement, forwardingLossId }) => {
     const line = po.lines.find(row => row.orderItemId === orderItemId);
     const original = customerLines.find(row => row.orderItemId === orderItemId);
-    if (!line || !original || !positiveCents(quantity) || quantity + (prior.get(orderItemId) ?? 0)
-      + attributedQuantity(view, po.id, orderItemId) > line.source.quantity) {
-      throw new PurchaseError('替代或取消的累计数量不得超过原采购行尚未发出的数量');
+    if (!line || !original || !positiveCents(quantity)) throw new PurchaseError('须核对本单采购行和实际处理数量');
+    if (forwardingLossId) {
+      const loss = view.fulfillment.forwardingShortfalls.find(row => row.resolutionId === forwardingLossId && row.purchaseOrderId === po.id && row.orderItemId === orderItemId);
+      if (outcome !== 'replace' || !loss || quantity > loss.available) throw new PurchaseError('补发采购须对应本行尚未使用的转发短失书证');
+    } else if (quantity + (prior.get(orderItemId) ?? 0) + supplierDispatchQuantity(view, po.id, orderItemId) > line.source.quantity) {
+      throw new PurchaseError('替代或取消的累计数量不得超过原采购行尚未发出的数量，有短失或退回须先据实核对');
     }
     if (outcome === 'cancel') return { orderItemId, quantity, outcome, replacement: null };
     const active = activeReplacementQuantity(view, orderItemId);
-    const retained = active - Math.min(quantity, pendingReplacementQuantity(view, po, orderItemId));
+    const retained = forwardingLossId ? active : active - Math.min(quantity, pendingReplacementQuantity(view, po, orderItemId));
     if (retained + quantity > (remainingQuantities.get(orderItemId) ?? 0)) {
       throw new PurchaseError('累计有效替代采购不得超过客户订单行未发货数量');
     }
@@ -415,7 +426,7 @@ function committedDispositions(
     const terms = normalizePurchaseTerms(replacement.terms);
     requireNewDocumentsForChangedTerms(line.terms, terms, line.source.quantity !== quantity);
     if (missingWrittenTerms(terms, source).length) throw new PurchaseError('替代行须具备当前有效的供货、收款和付款书证');
-    return { orderItemId, quantity, outcome, replacement: { terms, source } };
+    return { orderItemId, quantity, outcome, replacement: { terms, source }, forwardingLossId };
   });
   if (input.outcome === 'replacement' && !dispositions.some(line => line.outcome === 'replace')) {
     throw new PurchaseError('请填写至少一条待独立批准的替代采购行', 400);
@@ -688,7 +699,7 @@ function actionDetails(
     if (po.status !== 'on_hold' || !incident || !previousStatus || !input.outcome
       || !['original_terms', 'revised_terms', 'declined', 'replacement'].includes(input.outcome)) conflict();
     const committed = po.orderedBefore || po.paidCents > 0 || po.commitmentExceptions.length > 0;
-    const disposedBefore = po.ledger.some(row => row.action === 'resolve_change' && snapshot(row)?.operation.dispositions?.length);
+    const disposedBefore = dispositionSummary(po.ledger).ids.length > 0;
     if (input.outcome === 'replacement' && !committed) throw new PurchaseError('尚未订购或付款的采购单应按修订条款重新批准');
     if (input.outcome === 'original_terms' && po.commitmentState === 'supplier_cancelled') {
       throw new PurchaseError('供方已整笔取消。尚需订购的商品须另建采购并独立批准');
@@ -709,7 +720,7 @@ function actionDetails(
         customerSha256: documentSha256(input.customerSha256, '客户书面回复摘要'),
       } : {}),
       description: requiredText(input.description, '双方确认的具体结果'), dispositions,
-      refund: dispositions && po.paidCents > 0 ? {
+      refund: dispositions?.some(line => !line.forwardingLossId) && po.paidCents > 0 ? {
         status: 'pending_review', paidCents: po.paidCents, responsibleActor: actor.id,
         followup: requiredText(input.refundFollowup, '原付款与未决退款的后续核对安排'),
       } : null,
@@ -765,6 +776,7 @@ export async function previewPurchaseAction(tx: Db, input: PurchaseActionInput, 
   }
   const demand = validateDemand || input.action === 'resolve_change' ? [...remaining].map(([orderItemId, unshipped]) => ({
     orderItemId, unshipped, activeReplacements: activeReplacementQuantity(view, orderItemId), attributed: attributedQuantity(view, po.id, orderItemId),
+    supplierDispatched: supplierDispatchQuantity(view, po.id, orderItemId),
   })) : undefined;
   const preview = { actorId: actor.id, actorEmail: actor.email, requestId: input.requestId, orderId: view.orderId, purchaseOrderId: po.id,
     version: po.version, totalCents: po.totalCents, paidCents: po.paidCents, lines: po.lines.map(line => ({
@@ -842,6 +854,7 @@ export async function applyPurchaseAction(tx: Db, input: PurchaseActionInput, ac
       ? 'ordered' : op.previousStatus!;
   }
   if (op.action === 'resolve_change' && op.outcome === 'declined' && !op.dispositions) status = 'superseded';
+  if (op.action === 'resolve_change' && op.dispositions?.length && op.dispositions.every(line => line.forwardingLossId)) status = op.previousStatus;
   if (op.action === 'resolve_change' && op.revisedTerms) {
     groupKey = pricingContentHash({ revisedPurchase: po.id, group: group(op.revisedTerms[0].terms) });
     await applyLineEdits(tx, po, actor, op.revisedTerms);

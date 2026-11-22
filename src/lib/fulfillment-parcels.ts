@@ -1,10 +1,13 @@
 import { configuredCarrier, pendingForWaybill, reconcilePendingForParcel } from '@/lib/fulfillment-carrier';
-import { fulfillmentStatus, validateShipmentItems } from '@/lib/order-domain';
+import { fulfillmentStatus, isInactiveOrderStatus, validateShipmentItems } from '@/lib/order-domain';
 import { releaseProcurementInventoryHold, shipProcurementBatch } from '@/lib/inventory';
 import { purchaseWorkspace } from '@/lib/purchase-orders';
 import { PurchaseError, requiredText } from '@/lib/purchase-terms';
-import { confirmPreview, inputObject, optionalText, parcelInclude, parcelKeys, positiveQuantity,
+import { availableReceipt, confirmPreview, inputObject, optionalText, parcelInclude, parcelKeys, parcelLineBalance, positiveQuantity,
   shipmentEvidence, verifyRepeat, type FulfillmentActor, type FulfillmentDb as Db } from '@/lib/fulfillment-records';
+import { receiptInventoryOptions } from '@/lib/fulfillment-stock';
+import { historicalShipmentWorkspace } from '@/lib/fulfillment-legacy';
+import { pendingLegacyInventory } from '@/lib/fulfillment-legacy-stock';
 
 export { previewParcelEvent, recordParcelEvent } from '@/lib/fulfillment-events';
 
@@ -49,10 +52,7 @@ export async function fulfillmentWorkspace(tx: Db, orderId: string) {
   const add = (row: { purchaseOrderId: string; orderItemId: string; quantity: number }) => {
     const key = lineKey(row); dispatched.set(key, (dispatched.get(key) ?? 0) + row.quantity);
   };
-  for (const row of purchasing.fulfillment.historicalDelivered) add(row);
-  for (const parcel of parcels) if (parcel.route.startsWith('supplier_to_')) {
-    for (const line of parcel.lines) if (line.purchaseOrderId) add({ ...line, purchaseOrderId: line.purchaseOrderId });
-  }
+  for (const row of purchasing.fulfillment.supplierDispatched) add(row);
   const purchases = purchasing.orders.flatMap(po => {
     const receipt = po.orderReceipt;
     if (!receipt?.occurredAt || po.openIncidentId || po.status === 'on_hold' || po.commitmentState === 'supplier_cancelled') return [];
@@ -66,10 +66,24 @@ export async function fulfillmentWorkspace(tx: Db, orderId: string) {
         orderedAt: receipt.occurredAt!, available, contractVersion: po.version }];
     });
   });
-  const receipts = parcels.flatMap(parcel => parcel.route !== 'supplier_to_libereal' || parcel.status === 'exception' ? [] : parcel.lines.flatMap(line =>
-    line.receipts.filter(r => r.forwardedQuantity < r.quantity).map(r => ({ id: r.id, purchaseOrderId: line.purchaseOrderId,
-      orderItemId: line.orderItemId, batchNumber: r.inventoryBatch.batchNumber, available: r.quantity - r.forwardedQuantity,
-      receivedAt: parcel.events.find(event => event.id === r.eventId)?.occurredAt.toISOString() ?? null }))));
+  const receipts = isInactiveOrderStatus(order.status) ? [] : parcels.flatMap(parcel =>
+    parcel.route !== 'supplier_to_libereal' || parcel.status === 'exception' ? [] : parcel.lines.flatMap(line =>
+      line.receipts.filter(r => availableReceipt(r) > 0).map(r => ({ id: r.id, purchaseOrderId: line.purchaseOrderId,
+        orderItemId: line.orderItemId, batchNumber: r.inventoryBatch.batchNumber, available: availableReceipt(r),
+        inventoryAccountId: r.inventoryBatch.inventoryAccountId, ...r.inventoryBatch.account,
+        receivedAt: parcel.events.find(event => event.id === r.eventId)?.occurredAt.toISOString() ?? null }))));
+  const inventoryChoices = [];
+  for (const parcel of parcels) {
+    if (parcel.route !== 'supplier_to_libereal') continue;
+    for (const line of parcel.lines) {
+      if (!parcelLineBalance(line).pending) continue;
+      const purchase = purchasing.orders.find(po => po.id === line.purchaseOrderId);
+      const source = purchase?.lines.find(row => row.orderItemId === line.orderItemId)?.source;
+      if (purchase && source) inventoryChoices.push({ parcelLineId: line.id, ...(await receiptInventoryOptions(tx, source, purchase.version)) });
+    }
+  }
+  const legacyBackfill = await historicalShipmentWorkspace(tx, orderId);
+  const legacyInventory = await pendingLegacyInventory(tx, orderId, parcels);
   const legacyShipments = await tx.shipment.findMany({ where: { orderId, fulfillmentParcel: null, shippedAt: { not: null } },
     select: { id: true, shippedAt: true, status: true, carrier: true, trackingNumber: true, deliveredAt: true, items: { select: { id: true, orderItemId: true, quantity: true } } },
     orderBy: { shippedAt: 'asc' } });
@@ -81,10 +95,17 @@ export async function fulfillmentWorkspace(tx: Db, orderId: string) {
     if (waybills.has(key)) continue;
     waybills.add(key);
     const notices = await pendingForWaybill(tx, parcel.feedSource, parcel.carrier, parcel.trackingNumber);
-    for (const notice of notices) unmatched.push({ id: notice.id, source: notice.source, kind: notice.kind, occurredAt: notice.occurredAt,
-      carrier: parcel.carrier, trackingNumber: parcel.trackingNumber, reference: notice.reference });
+    for (const notice of notices) if (parcels.some(candidate => candidate.feedSource === parcel.feedSource
+      && candidate.carrier === parcel.carrier && candidate.trackingNumber === parcel.trackingNumber && candidate.dispatchedAt <= notice.occurredAt)) {
+      unmatched.push({ id: notice.id, source: notice.source, kind: notice.kind, occurredAt: notice.occurredAt,
+        carrier: parcel.carrier, trackingNumber: parcel.trackingNumber });
+    }
   }
-  return { order, purchases, parcels, receipts, legacyShipments, unmatched, feedSource: configuredCarrier()?.source ?? null };
+  const workspaceParcels = parcels.map(parcel => ({ ...parcel, lines: parcel.lines.map(line => ({
+    ...line, balance: parcelLineBalance(line), receipts: line.receipts.map(receipt => ({ ...receipt, remaining: availableReceipt(receipt) })),
+  })) }));
+  return { order, purchases, parcels: workspaceParcels, receipts, legacyShipments, legacyBackfill, legacyInventory, inventoryChoices, unmatched,
+    feedSource: configuredCarrier()?.source ?? null };
 }
 
 async function dispatchPlan(tx: Db, orderId: string, raw: unknown, actor: FulfillmentActor) {
@@ -103,7 +124,8 @@ async function dispatchPlan(tx: Db, orderId: string, raw: unknown, actor: Fulfil
     const receipt = row.sourceReceiptId ? view.receipts.find(r => r.id === row.sourceReceiptId && r.purchaseOrderId === row.purchaseOrderId && r.orderItemId === row.orderItemId) : null;
     if (row.sourceReceiptId && (!receipt?.receivedAt || receipt.receivedAt > input.occurredAt)) throw new PurchaseError('须先核实本单此采购行实际收到的批次和时间');
     if (row.quantity > (receipt?.available ?? purchased.available)) throw new PurchaseError('发货数量超过该采购行或实收批次可用数量');
-    return { ...row, catalogNumber: purchased.catalogNumber, productId: purchased.productId, variantId: purchased.variantId,
+    return { ...row, catalogNumber: purchased.catalogNumber, productId: receipt ? receipt.productId : purchased.productId,
+      variantId: receipt ? receipt.variantId : purchased.variantId, inventoryAccountId: receipt?.inventoryAccountId,
       supplier: purchased.supplier, name: purchased.name, contractVersion: purchased.contractVersion, batchNumber: receipt?.batchNumber ?? null };
   });
   if (input.route !== 'libereal_to_customer' && new Set(lines.map(line => line.supplier)).size !== 1) {
@@ -114,8 +136,8 @@ async function dispatchPlan(tx: Db, orderId: string, raw: unknown, actor: Fulfil
     for (const parcel of view.parcels) {
       if (parcel.route !== 'supplier_to_libereal') continue;
       for (const row of parcel.lines) {
-        const forwarded = row.receipts.reduce((sum, receipt) => sum + receipt.forwardedQuantity, 0);
-        unforwarded.set(row.orderItemId, (unforwarded.get(row.orderItemId) ?? 0) + row.quantity - forwarded);
+        const held = row.receipts.reduce((sum, receipt) => sum + receipt.remaining, 0);
+        unforwarded.set(row.orderItemId, (unforwarded.get(row.orderItemId) ?? 0) + row.balance.pending + held);
       }
     }
   }

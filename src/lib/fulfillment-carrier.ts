@@ -1,6 +1,7 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
+import { pricingContentHash } from '@/lib/pricing-adjustment-approval';
 import { PurchaseError, requiredText } from '@/lib/purchase-terms';
-import { confirmPreview, inputObject, parcelKeys, shipmentEvidence, verifyRepeat,
+import { confirmPreview, inputObject, parcelInclude, parcelKeys, parcelProgress, shipmentEvidence, verifyRepeat,
   type FulfillmentActor, type FulfillmentDb as Db } from '@/lib/fulfillment-records';
 
 export function configuredCarrier() {
@@ -40,19 +41,50 @@ function matches(notice: Notice, parcel: Parcel) {
 
 async function attach(tx: Db, notice: Notice, parcel: Parcel) {
   if (!matches(notice, parcel)) throw new PurchaseError('物流来源、运单、承运方或实际发货时间不符');
-  const openException = notice.kind === 'carrier_exception' && parcel.status !== 'delivered';
+  const openException = notice.kind === 'carrier_exception' && !['delivered','shortfall'].includes(parcel.status);
   const changed = await tx.fulfillmentEvent.updateMany({ where: { id: notice.id, parcelId: null, status: 'pending' },
     data: { parcelId: parcel.id, status: openException ? 'awaiting_resolution' : 'linked' } });
   if (changed.count !== 1) throw new PurchaseError('物流通知已经处理，请刷新');
-  if (openException || parcel.status === 'dispatched') {
-    await tx.fulfillmentParcel.update({ where: { id: parcel.id }, data: { status: openException ? 'exception' : 'in_transit' } });
-  }
+  await refreshProgress(tx, parcel.id);
 }
 
-async function matchAutomatically(tx: Db, notice: Notice, source: string, carrier: string, trackingNumber: string) {
-  const possible = await tx.fulfillmentParcel.findMany({ where: { feedSource: source, carrier, trackingNumber,
-    dispatchedAt: { lte: notice.occurredAt } }, take: 2 });
-  if (possible.length === 1) await attach(tx, notice, possible[0]);
+async function refreshProgress(tx: Db, parcelId: string) {
+  const parcel = await tx.fulfillmentParcel.findUniqueOrThrow({ where: { id: parcelId }, include: parcelInclude });
+  const status = parcelProgress(parcel);
+  if (status !== parcel.status) await tx.fulfillmentParcel.update({ where: { id: parcelId }, data: { status } });
+}
+
+function waybillCandidates(tx: Db, notice: Notice, source: string, carrier: string, trackingNumber: string) {
+  return tx.fulfillmentParcel.findMany({ where: { feedSource: source, carrier, trackingNumber,
+    dispatchedAt: { lte: notice.occurredAt } }, orderBy: { id: 'asc' } });
+}
+
+async function auditMatch(tx: Db, notice: Notice, parcelId: string, kind: 'carrier_auto_match' | 'carrier_match_withdrawn') {
+  const original = await tx.fulfillmentEvent.findUniqueOrThrow({ where: { id: notice.id },
+    select: { evidenceSha256: true, evidenceRow: true, contentHash: true } });
+  const detail = { eventId: notice.id, originalContent: original.contentHash,
+    description: kind === 'carrier_auto_match' ? '按当时唯一可核对的运单归属临时匹配' : '同一承运方运单出现多个可能归属，原自动匹配待人工核对' };
+  await tx.fulfillmentEvent.create({ data: { ...parcelKeys(kind, parcelId, notice.id, { parcelId, noticeId: notice.id }, detail),
+    parcelId, kind, source: 'system', status: 'applied', occurredAt: new Date(), reference: notice.id,
+    evidenceSha256: original.evidenceSha256, evidenceRow: original.evidenceRow, details: JSON.stringify(detail) } });
+}
+
+async function reviewAutomaticMatch(tx: Db, notice: Notice, source: string, carrier: string, trackingNumber: string) {
+  const possible = await waybillCandidates(tx, notice, source, carrier, trackingNumber);
+  if (!notice.parcelId && notice.status === 'pending' && possible.length === 1) {
+    await attach(tx, notice, possible[0]);
+    await auditMatch(tx, notice, possible[0].id, 'carrier_auto_match');
+  } else if (notice.parcelId && possible.length > 1) {
+    const manual = await tx.$queryRaw<{ id: string }[]>`SELECT id FROM FulfillmentEvent
+      WHERE parcelId=${notice.parcelId} AND kind='match_carrier' AND status='applied' AND json_extract(details,'$.eventId')=${notice.id} LIMIT 1`;
+    if (manual.length) return;
+    const changed = await tx.fulfillmentEvent.updateMany({ where: { id: notice.id, parcelId: notice.parcelId, status: notice.status },
+      data: { parcelId: null, status: 'pending' } });
+    if (changed.count === 1) {
+      await auditMatch(tx, notice, notice.parcelId, 'carrier_match_withdrawn');
+      await refreshProgress(tx, notice.parcelId);
+    }
+  }
 }
 
 export async function receiveCarrierNotice(tx: Db, source: string, raw: unknown) {
@@ -64,7 +96,7 @@ export async function receiveCarrierNotice(tx: Db, source: string, raw: unknown)
   if (!notice) notice = await tx.fulfillmentEvent.create({ data: { ...keys, source: owner, kind: input.kind === 'exception' ? 'carrier_exception' : input.kind,
     status: 'pending', occurredAt: new Date(input.occurredAt), reference: input.reference, evidenceSha256: input.sha256, evidenceRow: input.documentRow,
     details: JSON.stringify({ eventId, carrier: input.carrier, trackingNumber: input.trackingNumber, description: input.description }) } });
-  if (notice.status === 'pending') await matchAutomatically(tx, notice, source, input.carrier, input.trackingNumber);
+  await reviewAutomaticMatch(tx, notice, source, input.carrier, input.trackingNumber);
   return tx.fulfillmentEvent.findUniqueOrThrow({ where: { id: notice.id }, select: { id: true, status: true } });
 }
 
@@ -78,8 +110,10 @@ export async function pendingForWaybill(tx: Db, source: string, carrier: string,
 
 export async function reconcilePendingForParcel(tx: Db, parcel: Parcel) {
   if (!parcel.feedSource || !parcel.carrier || !parcel.trackingNumber) return;
-  const pending = await pendingForWaybill(tx, parcel.feedSource, parcel.carrier, parcel.trackingNumber);
-  for (const notice of pending) await matchAutomatically(tx, notice, parcel.feedSource, parcel.carrier, parcel.trackingNumber);
+  const rows = await tx.$queryRaw<Array<{ id: string }>>`SELECT id FROM FulfillmentEvent WHERE source=${'carrier/'+parcel.feedSource}
+    AND json_extract(details,'$.carrier')=${parcel.carrier} AND json_extract(details,'$.trackingNumber')=${parcel.trackingNumber}`;
+  const notices = await tx.fulfillmentEvent.findMany({ where: { id: { in: rows.map(row => row.id) } }, orderBy: { occurredAt: 'asc' } });
+  for (const notice of notices) await reviewAutomaticMatch(tx, notice, parcel.feedSource, parcel.carrier, parcel.trackingNumber);
 }
 
 export async function reviewCarrierMatch(tx: Db, orderId: string, raw: unknown, actor: FulfillmentActor, approved?: string) {
@@ -97,11 +131,15 @@ export async function reviewCarrierMatch(tx: Db, orderId: string, raw: unknown, 
     carrier: parcel.carrier, trackingNumber: parcel.trackingNumber, description, ...evidence };
   const keys = parcelKeys('match_carrier', orderId, requestId, { eventId }, snapshot);
   const previous = verifyRepeat(await tx.fulfillmentEvent.findMany({ where: { OR: [{ requestKey: keys.requestKey }, { businessKey: keys.businessKey }] } }), keys);
-  const preview = confirmPreview(approved, snapshot);
-  if (previous || approved === undefined) return preview;
+  if (previous) return confirmPreview(undefined, snapshot);
+  if (event.parcelId || event.status !== 'pending') throw new PurchaseError('物流通知已匹配，请核对原记录');
+  const candidates = await waybillCandidates(tx, event, parcel.feedSource!, parcel.carrier!, parcel.trackingNumber!);
+  const candidateVersion = pricingContentHash(candidates.map(row => row.id));
+  const preview = confirmPreview(approved, { ...snapshot, candidateVersion });
+  if (approved === undefined) return preview;
   await attach(tx,event,parcel);
   await tx.fulfillmentEvent.create({ data: { ...keys, parcelId, source: 'staff', kind: 'match_carrier', status: 'applied',
     occurredAt: new Date(evidence.occurredAt), reference: evidence.reference, evidenceSha256: evidence.sha256, evidenceRow: evidence.documentRow,
-    actorId: actor.id, details: JSON.stringify({ eventId, description }) } });
+    actorId: actor.id, details: JSON.stringify({ eventId, description, candidateVersion, actionHash: approved }) } });
   return preview;
 }
