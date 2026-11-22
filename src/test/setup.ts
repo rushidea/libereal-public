@@ -14,7 +14,8 @@ async function disconnectTestPrisma() {
 await disconnectTestPrisma();
 const previousDatabasePath = process.env.DATABASE_PATH;
 const previousTestDirectory = process.env.LIBEREAL_TEST_DB_DIR;
-const cacheDirectory = resolve('.tmp-ci-cache', 'vitest');
+const configuredRoot = process.env.LIBEREAL_TEST_DB_ROOT?.trim();
+const cacheDirectory = configuredRoot ? resolve(configuredRoot) : resolve('.tmp-ci-cache', 'vitest');
 mkdirSync(cacheDirectory, { recursive: true, mode: 0o700 });
 const suiteDirectory = mkdtempSync(join(cacheDirectory, 'suite-'));
 process.env.LIBEREAL_TEST_DB_DIR = suiteDirectory;

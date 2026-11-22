@@ -8,6 +8,7 @@ import { prisma } from '@/lib/prisma';
 import { verifyAndPriceItems } from '@/lib/pricing';
 import { prepareSupplierQuoteReview, recordSupplierQuoteReply } from '@/lib/supplier-quote-review';
 import { applyPurchaseAction, prepareOrderPurchases, previewPurchaseAction, purchaseWorkspace, savePurchaseLine } from '@/lib/purchase-orders';
+import { applyPurchaseStartAction, previewPurchaseStartAction, type PurchaseStartInput } from '@/lib/purchase-start';
 import type { PurchaseTerms } from '@/lib/purchase-terms';
 import { clearAllTables, closeTestDb, getTestDb, seedAdmin, seedUser } from './db-helpers';
 
@@ -30,12 +31,15 @@ type PurchaseAction = Parameters<typeof applyPurchaseAction>[1];
 type ActionRequest = Omit<Parameters<typeof previewPurchaseAction>[1], 'orderId' | 'purchaseOrderId' | 'version'>;
 
 function terms(quantity: number, overrides: Partial<PurchaseTerms> = {}): PurchaseTerms {
+  const supplier = overrides.supplier ?? '合成供应商甲';
   return {
-    supplier: '合成供应商甲', payee: '合成收款方甲', paymentTerms: '对公转账，供货方书面确认后按约分两次支付',
+    supplier, writtenSupplier: supplier, payee: '合成收款方甲', paymentTerms: '对公转账，供货方书面确认后按约分两次支付',
     unitPriceCents: 1375, linePayableCents: quantity * 1375, currency: 'CNY', taxBasis: 'included',
     freightTerms: '含运费，无另计金额', leadTime: '3个工作日',
     validUntil: new Date(Date.now() + 7 * 86400000).toISOString(),
-    sourceReference: 'TEST-SUPPLIER-REPLY-01', coordinationReference: 'TEST-DELIVERY-CHECK-01',
+    sourceReference: 'TEST-SUPPLIER-REPLY-01', sourceSha256: 'a'.repeat(64), supplierConditions: '合成供货条款',
+    settlementReference: 'TEST-BANK-TERMS', settlementSha256: 'b'.repeat(64),
+    coordinationReference: 'TEST-DELIVERY-CHECK-01', leadTimeAssessment: 'within_agreement',
     ...overrides,
   };
 }
@@ -100,7 +104,7 @@ function readWorkspace(orderId: string) {
 function saveLine(workspace: Workspace, lineIndex: number, input: PurchaseTerms) {
   const { orderItemId, revision } = workspace.lines[lineIndex];
   return prisma.$transaction((tx) => savePurchaseLine(tx, {
-    orderId: workspace.orderId, orderItemId, revision, terms: input,
+    orderId: workspace.orderId, orderItemId, revision, terms: input, checkedEvidence: true,
   }, preparer));
 }
 
@@ -117,6 +121,20 @@ function apply(input: PurchaseAction) {
 async function submit(orderId: string, purchase: Workspace['orders'][number], request: ActionRequest) {
   return apply(await previewAction(orderId, purchase, request));
 }
+
+async function startReview(orderId: string, request: Omit<PurchaseStartInput, 'orderId' | 'version' | 'actionHash'>) {
+  const workspace = await readWorkspace(orderId);
+  const input = { ...request, orderId, version: workspace.startReview.version };
+  const preview = await prisma.$transaction(tx => previewPurchaseStartAction(tx, input, approver));
+  return { input: { ...input, actionHash: preview.actionHash }, preview };
+}
+
+function applyStart(input: PurchaseStartInput) {
+  return prisma.$transaction(tx => applyPurchaseStartAction(tx, input, approver));
+}
+
+const reviewEvidence = { reference: 'TEST-ARCHIVED-DOCUMENT', sha256: 'c'.repeat(64), description: '合成书面凭证已核对' };
+const registrationEvidence = () => ({ occurredAt: new Date().toISOString(), referenceSha256: 'd'.repeat(64) });
 
 function activities(purchaseOrderId: string, action: string) {
   return getTestDb().prepare(
@@ -278,14 +296,24 @@ describe('purchase preparation from an accepted customer order', () => {
     expect(requirement.terms).toMatchObject({ unitPriceCents: 1375, sourceReference: reply.reference });
     expect(workspace.orders).toEqual([]);
 
-    const completed = { ...terms(2), supplier: reply.supplier, sourceReference: reply.reference, validUntil: reply.validUntil };
+    const completed = { ...terms(2, { supplier: reply.supplier }), sourceReference: reply.reference,
+      validUntil: reply.validUntil, supplierConditions: reply.conditions, sourceSha256: written.replyHash,
+      settlementReference: undefined, settlementSha256: undefined };
     await saveLine(workspace, 0, completed);
     const pendingSettlementTerms = await readWorkspace(order.id);
     expect(pendingSettlementTerms.orders).toEqual([]);
-    expect(pendingSettlementTerms.lines[0].missing).toContain('收款方及付款条件的补充依据');
+    expect(pendingSettlementTerms.lines[0].missing).toContain('收款方及付款条件的书面依据');
 
-    const verified = await saveLine(pendingSettlementTerms, 0, { ...completed, settlementReference: 'TEST-SUPPLIER-SETTLEMENT-ADDENDUM' });
+    const alias = { ...completed, supplier: '合成法人供货有限公司', settlementReference: 'TEST-SUPPLIER-SETTLEMENT-ADDENDUM',
+      settlementSha256: 'e'.repeat(64) };
+    const noMapping = await saveLine(pendingSettlementTerms, 0, alias);
+    expect(noMapping.orders).toEqual([]);
+    expect(noMapping.lines[0].missing).toContain('原供货方名称对应实际法人主体的书面核对');
+    const wrongSource = await saveLine(noMapping, 0, { ...alias, writtenSupplier: alias.supplier });
+    expect(wrongSource.lines[0].missing).toContain('与原函供货方及版本一致的书面依据');
+    const verified = await saveLine(wrongSource, 0, { ...alias, identityReference: 'TEST-LEGAL-NAME-ARCHIVE', identitySha256: 'f'.repeat(64) });
     expect(verified.orders).toEqual([expect.objectContaining({ status: 'draft', totalCents: 2750 })]);
+    expect(verified.lines[0].terms.verification).toMatchObject({ actorId: preparer.id, version: expect.stringMatching(/^[a-f0-9]{64}$/) });
   });
 
   it('blocks a customer-accepted quote awaiting platform acceptance', async () => {
@@ -398,7 +426,7 @@ describe('purchase preparation from an accepted customer order', () => {
 
 describe('purchase order approval and execution records', () => {
   it('requires a current independent approval, records a supplier order and partial payment once, and holds on a supply change', async () => {
-    const order = await seedOrder('test-order-actions');
+    const order = await seedOrder('test-order-actions', { quantities: [2, 1] });
     await acceptAsMerchant(order.id);
     const workspace = await prepare(order.id);
     const supplierTerms = terms(2);
@@ -427,7 +455,7 @@ describe('purchase order approval and execution records', () => {
     expect(activities(current.id, 'approve')).toEqual([{ actorId: approver.id, amountCents: null }]);
 
     const registration = await previewAction(order.id, approved, {
-      action: 'register_order', requestId: 'test-register-once', reference: 'TEST-SUPPLIER-ORDER-01',
+      action: 'register_order', requestId: 'test-register-once', reference: 'TEST-SUPPLIER-ORDER-01', ...registrationEvidence(),
     });
     await apply(registration);
     await apply(registration);
@@ -470,6 +498,7 @@ describe('purchase order approval and execution records', () => {
     await submit(order.id, held, {
       action: 'resolve_change', requestId: 'test-resolve-original', outcome: 'original_terms',
       supplierReference: 'TEST-SUPPLIER-ORIGINAL-TERMS', customerReference: 'TEST-CUSTOMER-ORIGINAL-TERMS',
+      supplierSha256: 'a'.repeat(64), customerSha256: 'b'.repeat(64),
       description: '合成双方确认恢复原约定。',
     });
     const [resolved] = (await readWorkspace(order.id)).orders;
@@ -483,31 +512,224 @@ describe('purchase order approval and execution records', () => {
       reference: 'TEST-SUPPLIER-PRICE-CHANGE', description: '合成供货价格调整，待核对新条款。',
     });
     const [priceHold] = (await readWorkspace(order.id)).orders;
-    await submit(order.id, priceHold, {
-      action: 'resolve_change', requestId: 'test-resolve-new-price', outcome: 'revised_terms',
-      supplierReference: 'TEST-SUPPLIER-REVISED-TERMS', customerReference: 'TEST-CUSTOMER-REVISED-TERMS',
-      description: '合成双方确认调整采购价格。',
-      revisedTerms: [{
-        orderItemId: order.orderItems[0].id,
-        terms: { ...supplierTerms, unitPriceCents: 1750, linePayableCents: 3500, sourceReference: 'TEST-PRICE-REPLY-02' },
-      }],
-    });
-    const [revised] = (await readWorkspace(order.id)).orders;
-    expect(revised).toMatchObject({ id: current.id, status: 'draft', approvedHash: null, totalCents: 3500, paidCents: 900 });
-    await expect(submit(order.id, revised, {
+    const written = { supplierReference: 'TEST-SUPPLIER-REVISED-TERMS', customerReference: 'TEST-CUSTOMER-REVISED-TERMS',
+      supplierSha256: 'a'.repeat(64), customerSha256: 'b'.repeat(64), description: '合成双方书面同意另行替代采购。' };
+    await expect(submit(order.id, priceHold, {
+      action: 'resolve_change', requestId: 'test-disallow-in-place', outcome: 'revised_terms', ...written,
+      revisedTerms: [{ orderItemId: order.orderItems[0].id, terms: terms(2, { unitPriceCents: 1750, linePayableCents: 3500 }) }],
+    })).rejects.toThrow(/另建替代采购/);
+    const replacement = {
+      name: '合成替代品', brand: '合成替代品牌', catalogNumber: 'TEST-ALTERNATE', spec: '合成规格', unit: '件',
+      terms: terms(1, { unitPriceCents: 1750, linePayableCents: 1750, sourceReference: 'TEST-PRICE-REPLY-02' }),
+    };
+    const direction = { action: 'resolve_change', requestId: 'test-new-replacement', outcome: 'replacement', ...written,
+      refundFollowup: '原付款留在原单，由财务核对退回凭据。',
+      dispositions: [{ orderItemId: order.orderItems[0].id, quantity: 1, outcome: 'replace', replacement }],
+    } as const;
+    await expect(submit(order.id, priceHold, {
+      ...direction, requestId: 'test-no-excess-replacement',
+      dispositions: [{ ...direction.dispositions[0], quantity: 3 }],
+    })).rejects.toThrow(/累计数量/);
+    await prisma.orderItem.update({ where: { id: order.orderItems[0].id }, data: { shippedQty: 1 } });
+    await expect(submit(order.id, priceHold, { ...direction, requestId: 'test-respect-shipped-quantity',
+      dispositions: [{ ...direction.dispositions[0], quantity: 2 }] })).rejects.toThrow(/未发货数量/);
+    const authorized = await previewAction(order.id, priceHold, { ...direction, dispositions: [...direction.dispositions] });
+    await apply(authorized);
+    await apply(authorized);
+
+    const after = await readWorkspace(order.id);
+    const original = after.orders.find(row => row.id === current.id)!;
+    const derived = after.orders.find(row => row.id !== current.id)!;
+    expect(original).toMatchObject({ status: 'on_hold', totalCents: 3000, paidCents: 900, orderedBefore: true });
+    expect(original.lines).toHaveLength(1);
+    expect(original.ledger.at(-1)?.detail).toMatchObject({ snapshot: { operation: { refund: { status: 'pending_review', paidCents: 900 } } } });
+    expect(derived).toMatchObject({ status: 'draft', approvedHash: null, totalCents: 1750, paidCents: 0, orderedBefore: false,
+      lines: [{ orderItemId: order.orderItems[0].id, fromPurchaseOrderId: original.id, source: { quantity: 1, name: '合成替代品' } }] });
+    await expect(submit(order.id, derived, {
       action: 'record_payment', requestId: 'test-pay-before-reapproval', reference: 'TEST-PAY-REAPPROVAL',
       amountCents: 100, conditionReference: 'TEST-DUE-SUPPLIER-BALANCE',
     })).rejects.toThrow();
 
-    await submit(order.id, revised, { action: 'approve', requestId: 'test-approve-new-price' });
-    const [reapproved] = (await readWorkspace(order.id)).orders;
-    expect(reapproved).toMatchObject({ id: current.id, totalCents: 3500, paidCents: 900, orderedBefore: true });
-    await expect(submit(order.id, reapproved, {
-      action: 'register_order', requestId: 'test-register-again', reference: 'TEST-SECOND-SUPPLIER-ORDER',
+    const withLaterLine = await saveLine(after, 1, terms(1));
+    const later = withLaterLine.orders.find(row => row.id !== original.id && row.id !== derived.id)!;
+    expect(later).toMatchObject({ status: 'draft', lines: [{ orderItemId: order.orderItems[1].id }] });
+    expect(withLaterLine.orders.find(row => row.id === original.id)).toEqual(original);
+    expect(withLaterLine.orders.find(row => row.id === derived.id)).toEqual(derived);
+    await submit(order.id, derived, { action: 'approve', requestId: 'test-independent-replacement-approval' });
+    await expect(submit(order.id, original, {
+      action: 'register_order', requestId: 'test-register-again', reference: 'TEST-SECOND-SUPPLIER-ORDER', ...registrationEvidence(),
     })).rejects.toThrow();
-    expect(activities(current.id, 'register_order')).toHaveLength(1);
-    expect(activities(current.id, 'approve')).toHaveLength(2);
-    expect((await prepare(order.id)).orders).toEqual([reapproved]);
+    expect(activities(original.id, 'register_order')).toHaveLength(1);
+    expect(activities(original.id, 'approve')).toHaveLength(1);
+    expect(activities(derived.id, 'approve')).toHaveLength(1);
     expect(await prisma.backgroundTask.count({ where: { type: 'email.send' } })).toBe(0);
+  });
+});
+
+describe('recorded customer acceptance and per-order funding', () => {
+  it.each([
+    { scope: 'personal', adminAudit: true, expected: 'legacy_admin_patch' },
+    { scope: 'personal', adminAudit: false, expected: 'legacy_personal_patch' },
+    { scope: 'organization', adminAudit: true, expected: 'legacy_admin_patch' },
+    { scope: 'organization', adminAudit: false, expected: null },
+  ])('recognizes only the supported legacy PATCH evidence $scope / $adminAudit', async ({ scope, adminAudit, expected }) => {
+    const order = await seedOrder('test-old-patch', { status: 'confirmed' });
+    await prisma.order.update({ where: { id: order.id }, data: { ownerScope: scope } });
+    await prisma.orderStatusHistory.create({ data: {
+      orderId: order.id, fromStatus: 'pending', toStatus: 'confirmed', actorId: merchant.id, actorEmail: merchant.email,
+    } });
+    await prisma.orderEvent.create({ data: {
+      orderId: order.id, type: 'status_changed', actorId: merchant.id, actorEmail: merchant.email,
+      metadata: JSON.stringify({ fromStatus: 'pending', toStatus: 'confirmed', reason: null }),
+    } });
+    if (adminAudit) {
+      await prisma.auditLog.create({ data: {
+        actorId: merchant.id, actorEmail: merchant.email, action: 'order.status_changed', resource: 'orders',
+        targetType: 'Order', targetId: order.id, beforeData: '{"status":"pending"}', afterData: '{"status":"confirmed"}',
+      } });
+    }
+    await prisma.$transaction(tx => reserveOrderCredit(tx, order.id, merchant.id));
+    const workspace = await prepare(order.id);
+    expect(workspace.eligibility.eligible).toBe(Boolean(expected));
+    expect(workspace.startReview.acceptance?.origin ?? null).toBe(expected);
+    expect(workspace.lines).toHaveLength(expected ? 1 : 0);
+  });
+
+  it('records a manual review of previously accepted terms without replaying acceptance and credit', async () => {
+    const order = await seedOrder('test-archived-acceptance', { status: 'confirmed' });
+    await prisma.$transaction(tx => reserveOrderCredit(tx, order.id, merchant.id));
+    expect((await prepare(order.id)).startReview).toMatchObject({ canVerifyAcceptance: true, acceptance: null });
+    const request = { ...reviewEvidence, action: 'verify_acceptance', requestId: 'manual-history-1',
+      originalActor: merchant.id, authorityReference: 'TEST-ORIGINAL-PLATFORM-DELEGATION',
+      occurredAt: order.createdAt.toISOString() } as const;
+    await expect(startReview(order.id, { ...request, originalActor: buyer.id })).rejects.toThrow(/平台接单人/);
+    const { input, preview } = await startReview(order.id, request);
+    expect(preview.snapshot.review.orderTerms).toMatchObject({ orderId: order.id, total: 200, lines: [{ quantity: 2, unitPrice: 100 }] });
+    await applyStart(input);
+    await applyStart(input);
+    const eligible = await prepare(order.id);
+    expect(eligible.startReview.acceptance).toMatchObject({ origin: 'reviewed_archive', actor: merchant.id });
+    expect(eligible.lines).toHaveLength(1);
+    expect(eligible.activities.filter(row => row.action === 'verify_acceptance')).toHaveLength(1);
+    const database = getTestDb();
+    expect(database.prepare('SELECT COUNT(*) AS count FROM OrderStatusHistory WHERE orderId = ?').get(order.id)).toEqual({ count: 0 });
+    expect(await prisma.creditTransaction.count({ where: { orderId: order.id, type: 'reserve' } })).toBe(1);
+    expect(await prisma.accountReceivable.findUnique({ where: { orderId: order.id } })).toMatchObject({ status: 'open', amount: 200 });
+    await prisma.orderItem.update({ where: { id: order.orderItems[0].id }, data: { unitPrice: 101 } });
+    expect((await prepare(order.id)).eligibility.eligible).toBe(false);
+  });
+
+  it('uses actual cash allocations and verifies residual credit for each partially prepaid order', async () => {
+    const first = await seedOrder('test-split-customer-first');
+    const second = await seedOrder('test-split-customer-second');
+    await acceptAsMerchant(first.id);
+    await acceptAsMerchant(second.id);
+    for (const order of [first, second]) {
+      const review = await startReview(order.id, {
+        ...reviewEvidence, action: 'review_customer_terms', requestId: 'test-split-terms',
+        paymentMode: 'partial_prepay', requiredPrepayCents: 15000, balanceTerms: '合成约定，余款按账期。',
+      });
+      await applyStart(review.input);
+      expect((await prepare(order.id)).eligibility.eligible).toBe(false);
+    }
+
+    const cash = {
+      ...reviewEvidence, action: 'record_customer_receipt', transactionReference: 'TEST-BANK-TRANSACTION-1',
+      occurredAt: new Date().toISOString(), receiptTotalCents: 20000,
+    } as const;
+    await expect(startReview(first.id, { ...cash, requestId: 'test-invoice-not-receipt', receiptKind: 'invoice',
+      allocationReference: 'TEST-INVOICE', amountCents: 15000 })).rejects.toThrow(/实际到账凭证/);
+    const firstShare = await startReview(first.id, { ...cash, receiptKind: 'bank_receipt', requestId: 'test-first-share',
+      allocationReference: 'TEST-ALLOC-1', amountCents: 15000 });
+    await applyStart(firstShare.input);
+    await applyStart(firstShare.input);
+    expect((await readWorkspace(first.id)).eligibility).toMatchObject({ eligible: true, basis: {
+      mode: 'partial_prepay', payment: { receivedCents: 15000 }, credit: { owedCents: 5000 },
+    } });
+    const secondShare = await startReview(second.id, { ...cash, receiptKind: 'bank_receipt', requestId: 'test-second-share',
+      allocationReference: 'TEST-ALLOC-2', amountCents: 5000 });
+    await applyStart(secondShare.input);
+    expect((await readWorkspace(second.id)).startReview.payment.receivedCents).toBe(5000);
+    expect((await readWorkspace(second.id)).eligibility.eligible).toBe(false);
+    await expect(startReview(second.id, { ...cash, receiptKind: 'bank_receipt', requestId: 'test-improper-overallocation',
+      allocationReference: 'TEST-ALLOC-3', amountCents: 1 })).rejects.toThrow(/可用分配金额/);
+
+    const duplicate = await startReview(second.id, { ...cash, receiptKind: 'bank_receipt', requestId: 'test-duplicate-allocation',
+      transactionReference: 'TEST-BANK-TRANSACTION-2', sha256: 'f'.repeat(64), allocationReference: 'TEST-ALLOC-2', amountCents: 10000 });
+    await expect(applyStart(duplicate.input)).rejects.toThrow();
+    const newShare = await startReview(second.id, { ...cash, receiptKind: 'bank_receipt', requestId: 'test-new-actual-cash',
+      transactionReference: 'TEST-BANK-TRANSACTION-2', sha256: 'f'.repeat(64), allocationReference: 'TEST-ALLOC-4', amountCents: 10000 });
+    await applyStart(newShare.input);
+    expect((await readWorkspace(second.id)).eligibility).toMatchObject({ eligible: true, basis: {
+      mode: 'partial_prepay', payment: { receivedCents: 15000 }, credit: { owedCents: 5000 },
+    } });
+    expect(await prisma.creditTransaction.count({ where: { type: 'reserve' } })).toBe(2);
+  });
+
+  it('requires distinct current over-credit and extended lead-time approvals', async () => {
+    const order = await seedOrder('test-exceptions');
+    await acceptAsMerchant(order.id);
+    await prisma.creditAccount.update({ where: { userId: buyer.id }, data: { baseLimit: 199 } });
+    expect((await readWorkspace(order.id)).startReview.creditExceptionRequired).toBe(true);
+    const funding = await startReview(order.id, { ...reviewEvidence, action: 'approve_credit_exception', requestId: 'credit-exception-1' });
+    await applyStart(funding.input);
+    expect((await readWorkspace(order.id)).eligibility).toMatchObject({ eligible: true, basis: { exceptionId: expect.any(String) } });
+    await prisma.creditAccount.update({ where: { userId: buyer.id }, data: { baseLimit: 198 } });
+    expect((await readWorkspace(order.id)).eligibility.eligible).toBe(false);
+    await applyStart((await startReview(order.id, { ...reviewEvidence, action: 'approve_credit_exception', requestId: 'credit-exception-2' })).input);
+
+    const [draft] = (await saveLine(await prepare(order.id), 0, terms(2, { leadTimeAssessment: 'exception_required' }))).orders;
+    await expect(submit(order.id, draft, { action: 'approve', requestId: 'cannot-skip-lead-approval' })).rejects.toThrow(/单独批准例外/);
+    const [reviewed] = (await submit(order.id, draft, { action: 'approve_lead_time', requestId: 'lead-review',
+      reference: 'TEST-TERMS-EXTENSION', referenceSha256: 'e'.repeat(64), description: '合成逐单交期例外核准。' })).orders;
+    expect(reviewed).toMatchObject({ status: 'draft', leadTimeApproved: true });
+    const [approved] = (await submit(order.id, reviewed, { action: 'approve', requestId: 'procurement-review' })).orders;
+    expect(approved.status).toBe('approved');
+    expect(activities(approved.id, 'approve_lead_time')).toHaveLength(1);
+    expect(activities(approved.id, 'approve')).toHaveLength(1);
+  });
+
+  it('registers only a documented order within its approval and written term dates', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      vi.setSystemTime(new Date('2031-04-01T08:00:00.000Z'));
+      const order = await seedOrder('test-bounded-registration', { quantities: [2, 1] });
+      await acceptAsMerchant(order.id);
+      const expiry = '2031-04-02T08:00:00.000Z';
+      const firstDraft = await saveLine(await prepare(order.id), 0, terms(2, { validUntil: expiry }));
+      const allDrafts = await saveLine(firstDraft, 1, terms(1, { supplier: '另一合成供方', validUntil: expiry }));
+      const first = allDrafts.orders.find(row => row.lines[0].orderItemId === order.orderItems[0].id)!;
+      const withApproval = await submit(order.id, first, { action: 'approve', requestId: 'test-active-authority' });
+      vi.setSystemTime(new Date('2031-04-01T09:00:00.000Z'));
+      const withHold = await submit(order.id, withApproval.orders.find(row => row.id === first.id)!, {
+        action: 'report_change', requestId: 'test-supplier-hold', changeKind: 'delay', reference: 'TEST-DELAY', description: '待核对原供方履约。',
+      });
+      vi.setSystemTime(new Date('2031-04-01T10:30:00.000Z'));
+      await submit(order.id, withHold.orders.find(row => row.id === first.id)!, {
+        action: 'resolve_change', requestId: 'test-supplier-hold-release', outcome: 'original_terms',
+        supplierReference: 'TEST-ORIGINAL-SUPPLIER-REPLY', customerReference: 'TEST-ORIGINAL-CUSTOMER-REPLY',
+        description: '双方确认按原条款继续。',
+      });
+
+      vi.setSystemTime(new Date('2031-04-03T12:00:00.000Z'));
+      const afterExpiry = await readWorkspace(order.id);
+      const approved = afterExpiry.orders.find(row => row.id === first.id)!;
+      const other = afterExpiry.orders.find(row => row.id !== first.id)!;
+      await expect(submit(order.id, other, { action: 'approve', requestId: 'test-expired-new-authority' })).rejects.toThrow(/有效期/);
+      const receipt = { action: 'register_order', reference: 'TEST-DATED-SUPPLIER-RECEIPT', referenceSha256: 'b'.repeat(64) } as const;
+      await expect(submit(order.id, approved, { ...receipt, requestId: 'before-approved', occurredAt: '2031-03-31T08:00:00.000Z' })).rejects.toThrow(/批准后/);
+      await expect(submit(order.id, approved, { ...receipt, requestId: 'after-expired', occurredAt: '2031-04-02T09:00:00.000Z' })).rejects.toThrow(/有效期间/);
+      await expect(submit(order.id, approved, { ...receipt, requestId: 'during-hold', occurredAt: '2031-04-01T09:30:00.000Z' })).rejects.toThrow();
+      const actual = await previewAction(order.id, approved, { ...receipt, requestId: 'test-delayed-registration',
+        occurredAt: '2031-04-01T12:00:00.000Z' });
+      await apply(actual);
+      await apply(actual);
+      const registered = (await readWorkspace(order.id)).orders.find(row => row.id === first.id);
+      expect(registered).toMatchObject({ status: 'ordered', orderReceipt: { occurredAt: actual.occurredAt,
+        registeredAt: '2031-04-03T12:00:00.000Z', reference: receipt.reference } });
+      expect(activities(first.id, 'register_order')).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

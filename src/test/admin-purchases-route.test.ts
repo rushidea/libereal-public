@@ -44,7 +44,9 @@ const procurementTerms = {
   supplier: '合成内部供方', payee: '合成独立收款方', paymentTerms: '收到合成确认后分两次付清',
   unitPriceCents: 3673, linePayableCents: 7346, currency: 'CNY', taxBasis: 'included',
   freightTerms: '含运费', leadTime: '3个工作日', validUntil: '2031-05-08T00:00:00.000Z',
-  sourceReference: 'TEST-WRITTEN-PURCHASE-QUOTE', coordinationReference: 'TEST-ORDER-DELIVERY-CHECK',
+  writtenSupplier: '合成内部供方', supplierConditions: '合成书面供货条件', sourceSha256: 'a'.repeat(64),
+  sourceReference: 'TEST-WRITTEN-PURCHASE-QUOTE', settlementReference: 'TEST-SETTLEMENT-WRITING', settlementSha256: 'b'.repeat(64),
+  coordinationReference: 'TEST-ORDER-DELIVERY-CHECK', leadTimeAssessment: 'within_agreement',
 };
 type ActionRequest = Omit<PurchaseActionInput, 'orderId' | 'purchaseOrderId' | 'version' | 'actionHash'>;
 type Previewed = PurchaseActionInput & { actionHash: string };
@@ -160,7 +162,7 @@ async function updateTerms(overrides: object = {}) {
   const { workspace } = await expectJson(await readPurchases(orderId), 200);
   const [line] = workspace.lines;
   return expectJson(await post({
-    action: 'save_line', orderId, orderItemId, revision: line.revision,
+    action: 'save_line', orderId, orderItemId, revision: line.revision, checkedEvidence: true,
     terms: { ...procurementTerms, ...overrides },
   }), 200);
 }
@@ -300,13 +302,54 @@ describe('admin purchase endpoint', () => {
     expect(activity('approve')).toHaveLength(1);
   });
 
+  it('requires both actual order authority and one-use MFA for historical provenance without replaying order acceptance', async () => {
+    const id = 'test-legacy-merchant-order';
+    const original = await prisma.$transaction(async tx => {
+      const order = await tx.order.create({ data: {
+        id, customerId: buyer, email: email(buyer), subtotal: 125, total: 125, status: 'confirmed', paymentMethod: 'bank_transfer',
+        orderItems: { create: { id: 'test-legacy-merchant-line', position: 0, name: '合成历史商品', quantity: 1, unitPrice: 125 } },
+      } });
+      await reserveOrderCredit(tx, id, staff.merchant);
+      return order;
+    });
+
+    signIn(staff.operator);
+    const before = await expectJson(await readPurchases(id), 200);
+    expect(before.workspace.startReview.canVerifyAcceptance).toBe(true);
+    const request = { action: 'verify_acceptance', orderId: id, version: before.workspace.startReview.version,
+      requestId: 'history-proof', reference: 'TEST-MERCHANT-ARCHIVE', sha256: 'b'.repeat(64), originalActor: staff.merchant,
+      authorityReference: 'TEST-DATED-HISTORIC-ROLE', occurredAt: original.createdAt.toISOString(), description: '核对原接单书面记录' };
+    const denied = await expectJson(await post({ ...request, stage: 'preview', permissions: ['orders.write'] }), 403);
+    expect(denied.requiredPermission).toBe('orders.write');
+
+    getTestDb().prepare('INSERT INTO AdminRolePermission (roleId,permissionId) VALUES (?,?)').run(staffRole[staff.merchant], 'purchases.read');
+    signIn(staff.merchant);
+    const { preview } = await expectJson(await post({ ...request, stage: 'preview' }), 200);
+    expect(preview.snapshot.review.orderTerms).toMatchObject({ orderId: id, total: 125, lines: [{ quantity: 1, unitPrice: 125 }] });
+    const apply = { ...request, stage: 'confirm', actionHash: preview.actionHash };
+    await expectJson(await post(apply), 403);
+    const token = await grant(staff.merchant);
+    const approved = await expectJson(await post({ ...apply, stepUpToken: token }), 200);
+    expect(approved.workspace.lines).toHaveLength(1);
+    expect(approved.workspace.startReview.acceptance.origin).toBe('reviewed_archive');
+    expect(approved.workspace.activities.find((row: { action: string }) => row.action === 'verify_acceptance').detail.authorization)
+      .toMatchObject({ action: 'admin_sensitive', permission: 'orders.write', sessionFingerprint: expect.stringMatching(/^[a-f0-9]{64}$/) });
+    await expectJson(await post({ ...apply, stepUpToken: token }), 403);
+    await expectJson(await post({ ...apply, stepUpToken: await grant(staff.merchant) }), 200);
+    expect(await prisma.orderStatusHistory.count({ where: { orderId: id } })).toBe(0);
+    expect(await prisma.creditTransaction.count({ where: { orderId: id } })).toBe(1);
+    expect(getTestDb().prepare("SELECT COUNT(*) AS count FROM PurchaseActivity WHERE orderId = ? AND action = 'verify_acceptance'").get(id))
+      .toEqual({ count: 1 });
+  });
+
   it('binds the payment amount to its preview and deduplicates the same supplier receipt', async () => {
     signIn(staff.approver);
     const approval = await previewAction({ action: 'approve', requestId: 'test-payment-approval' });
     await expectJson(await confirm(approval, await grant(staff.approver)), 200);
 
     signIn(staff.operator);
-    const placement = await previewAction({ action: 'register_order', requestId: 'test-placement', reference: 'TEST-SUPPLIER-ORDER' });
+    const placement = await previewAction({ action: 'register_order', requestId: 'test-placement', reference: 'TEST-SUPPLIER-ORDER',
+      occurredAt: new Date().toISOString(), referenceSha256: 'd'.repeat(64) });
     await expectJson(await confirm(placement, await grant(staff.operator)), 200);
 
     signIn(staff.finance);
@@ -327,5 +370,28 @@ describe('admin purchase endpoint', () => {
     await expectJson(await confirm(matchingReceipt, await grant(staff.finance)), 409);
     expect(activity('record_payment')).toEqual([{ actorId: staff.finance, amountCents: 3100 }]);
     expect(await currentPurchase()).toMatchObject({ totalCents: 7346, paidCents: 3100, status: 'ordered' });
+
+    signIn(staff.operator);
+    const shortage = await previewAction({ action: 'report_change', requestId: 'test-supplier-shortage',
+      changeKind: 'unavailable', reference: 'TEST-SUPPLIER-SHORTAGE', description: '合成原供方书面确认无法供应。' });
+    await expectJson(await confirm(shortage, await grant(staff.operator)), 200);
+    const held = await currentPurchase();
+    const cancellation: ActionRequest = {
+      action: 'resolve_change', requestId: 'test-cancel-paid-unavailable', outcome: 'declined',
+      supplierReference: 'TEST-SUPPLIER-CANCELLATION', supplierSha256: 'a'.repeat(64),
+      customerReference: 'TEST-CUSTOMER-CANCELLATION', customerSha256: 'b'.repeat(64),
+      description: '合成双方取消订单行的供应。', refundFollowup: '采购财务核对原款退回凭据。',
+      dispositions: [{ orderItemId, quantity: 2, outcome: 'cancel' }],
+    };
+    await expectJson(await post({ ...cancellation, stage: 'preview', orderId, purchaseOrderId: held.id, version: held.version,
+      permissions: ['purchases.approve'] }), 403);
+    signIn(staff.approver);
+    const resolution = await previewAction(cancellation);
+    const cancelled = await expectJson(await confirm(resolution, await grant(staff.approver)), 200);
+    expect(cancelled.workspace.orders).toHaveLength(1);
+    expect(cancelled.workspace.orders[0]).toMatchObject({ id: held.id, totalCents: 7346, paidCents: 3100, orderedBefore: true });
+    expect(activity('record_payment')).toHaveLength(1);
+    expect(activity('resolve_change')).toEqual([{ actorId: staff.approver, amountCents: null }]);
+    expect(cancelled.workspace.orders[0].ledger.at(-1).detail.snapshot.operation.refund.status).toBe('pending_review');
   });
 });

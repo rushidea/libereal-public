@@ -1,8 +1,10 @@
+import { createHash, webcrypto } from 'node:crypto';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import PurchaseManager from '@/components/admin/purchases/PurchaseManager';
 import type { Line, Purchase, Workspace } from '@/components/admin/purchases/PurchaseLineForm';
 import type { PurchaseTerms } from '@/lib/purchase-terms';
+import DocumentDigestField from '@/components/admin/purchases/DocumentDigestField';
 
 const orderId = 'TEST-CUSTOMER-ORDER';
 const purchaseId = 'PO-TEST-01';
@@ -39,7 +41,7 @@ function makeWorkspace(status?: Purchase['status'], lineChanges: Partial<Line> =
       unitPriceCents: terms.unitPriceCents, currency: 'CNY', taxBasis: 'included', sourceReference: terms.sourceReference,
       leadTime: terms.leadTime, validUntil: terms.validUntil,
     },
-    revision: 3, purchaseOrderId: status ? purchaseId : null,
+    revision: 3, purchaseOrderId: status ? purchaseId : null, replacementId: null, fromPurchaseOrderId: null,
     missing: status ? [] : ['收款方', '供应商付款条件'],
     ...lineChanges,
   };
@@ -47,10 +49,25 @@ function makeWorkspace(status?: Purchase['status'], lineChanges: Partial<Line> =
     id: purchaseId, status, version, revision: 4, contentHash: 'd'.repeat(64),
     approvedHash: status === 'draft' ? null : 'd'.repeat(64),
     totalCents: 8642, paidCents: 0, lines: [line], ledger: [], orderedBefore: status === 'ordered',
+    openIncidentId: status === 'on_hold' ? 'TEST-INCIDENT' : null, orderReceipt: null, leadTimeApproved: false,
   } : null;
+  const payment = { receivedCents: 0, allocatedCents: 0, receipts: [], paymentAttemptId: null, settledReceivableId: null };
+  const startReview: Workspace['startReview'] = {
+    orderTerms: { orderId, inquiryId: null, organizationId: null, ownerScope: 'personal', customerId: 'test-buyer',
+      customerEmail: 'synthetic@example.test', payee: 'Libereal', total: 250, subtotal: 250, pointsDiscount: 0,
+      adjustmentTotal: 0, paymentMethod: 'bank_transfer', recipient: null, adjustments: [],
+      lines: [{ id: orderItemId, productId: source.productId, variantId: source.variantId, name: source.name, brand: source.brand,
+        catalogNumber: source.catalogNumber, spec: source.spec, unit: source.unit, quantity: 2, unitPrice: 125, leadTime: null, conditions: null }] },
+    orderCreatedAt: '2031-04-01T00:00:00.000Z', termsVersion: version,
+    acceptance: { id: 'test-acceptance', actor: 'test-merchant', at: '2031-04-02T00:00:00.000Z', origin: 'merchant_history' },
+    history: [], canVerifyAcceptance: false, active: true, principal: 25000,
+    plan: { mode: 'credit', requiredPrepayCents: 0, balanceTerms: null, evidenceId: null },
+    payment, outstandingCents: 25000, credit: null, creditVersion: null, overCredit: false, creditExceptionRequired: false, version,
+  };
   return {
-    orderId, orderStatus: 'confirmed',
-    eligibility: { eligible: true, reason: null, basis: { acceptanceId: 'test-acceptance', receivableId: 'test-receivable', reserveId: 'test-credit-reserve', amount: 250 } },
+    orderId, orderStatus: 'confirmed', startReview,
+    eligibility: { eligible: true, reason: null, basis: { acceptanceId: 'test-acceptance', receivableId: 'test-receivable',
+      reserveId: 'test-credit-reserve', amount: 250, mode: 'credit', payment, planEvidenceId: null } },
     lines: [line], orders: purchase ? [purchase] : [], activities: [],
   };
 }
@@ -59,7 +76,7 @@ function preview(body: RequestBody, workspace: Workspace) {
   const [purchase] = workspace.orders;
   const {
     action, reference, description, conditionReference, amountCents, changeKind,
-    outcome, supplierReference, customerReference, revisedTerms,
+    outcome, supplierReference, customerReference, revisedTerms, occurredAt, referenceSha256,
   } = body;
   return {
     preview: {
@@ -70,7 +87,7 @@ function preview(body: RequestBody, workspace: Workspace) {
         lines: purchase.lines.map(({ orderItemId, source, terms, revision }) => ({ orderItemId, source, terms, revision })),
         eligibility: workspace.eligibility,
         operation: { action, reference, description, conditionReference, amountCents, changeKind,
-          outcome, supplierReference, customerReference, revisedTerms },
+          outcome, supplierReference, customerReference, revisedTerms, occurredAt, referenceSha256 },
       },
     },
   };
@@ -147,7 +164,7 @@ describe('supplier purchasing page', () => {
     fireEvent.click(screen.getByRole('button', { name: '保存本行资料' }));
     expect(await screen.findByText('待补 供应商付款条件')).toBeInTheDocument();
     expect(requests).toEqual([{
-      action: 'save_line', orderId, orderItemId, revision: 3,
+      action: 'save_line', orderId, orderItemId, revision: 3, checkedEvidence: false,
       terms: { ...workspace.lines[0].terms, payee: terms.payee },
     }]);
     expect(fetchMock.mock.calls.map(([input]) => String(input))).toEqual(expect.arrayContaining([
@@ -190,8 +207,10 @@ describe('supplier purchasing page', () => {
     },
     {
       action: 'register_order', label: '登记供应商订购结果', status: 'approved', next: 'ordered', permission: 'purchases.write',
-      fields: [['供应商已接受订购的单据或书面确认编号', 'TEST-SUPPLIER-ORDER-NO']],
-      expected: { reference: 'TEST-SUPPLIER-ORDER-NO' }, absent: ['批准采购单', '登记实际付款'],
+      fields: [['供应商已接受订购的单据或书面确认编号', 'TEST-SUPPLIER-ORDER-NO'],
+        ['供应商实际确认订购时间（本地时间）', '2031-04-05T12:30:00'], ['实际订购凭据摘要', 'e'.repeat(64)]],
+      expected: { reference: 'TEST-SUPPLIER-ORDER-NO', occurredAt: new Date('2031-04-05T12:30:00').toISOString(),
+        referenceSha256: 'e'.repeat(64) }, absent: ['批准采购单', '登记实际付款'],
     },
     {
       action: 'report_change', label: '登记供货变化', status: 'ordered', next: 'on_hold', permission: 'purchases.write',
@@ -312,4 +331,50 @@ describe('supplier purchasing page', () => {
     ]);
     expect(screen.queryByRole('region', { name: '操作预览' })).not.toBeInTheDocument();
   });
+});
+
+it('calculates the evidence digest from a local file without uploading the file', async () => {
+  vi.stubGlobal('crypto', webcrypto);
+  const bytes = new TextEncoder().encode('synthetic archived receipt');
+  const file = new File([bytes], 'synthetic-receipt.txt');
+  Object.defineProperty(file, 'arrayBuffer', { value: async () => bytes.buffer });
+  const fetchMock = vi.fn();
+  vi.stubGlobal('fetch', fetchMock);
+  render(<DocumentDigestField name="proof" label="书证摘要" required/>);
+
+  fireEvent.change(screen.getByLabelText('从手头文件生成书证摘要'), { target: { files: [file] } });
+  await waitFor(() => expect(screen.getByLabelText('书证摘要')).toHaveValue(createHash('sha256').update(bytes).digest('hex')));
+  expect(fetchMock).not.toHaveBeenCalled();
+});
+
+it('requires an exact historical acceptance preview before submitting the verification', async () => {
+  const workspace = makeWorkspace();
+  workspace.eligibility = { eligible: false, reason: '平台接单依据需核对', basis: null };
+  const review = workspace.startReview;
+  review.canVerifyAcceptance = true;
+  review.acceptance = null;
+  workspace.lines = [];
+  const posts = mockWorkspace(workspace, ['purchases.read', 'orders.write'], body => {
+    if (body.stage === 'preview') return Response.json({ preview: { actionHash, snapshot: {
+      orderId, requestId: body.requestId, action: body.action, actor: { id: 'test-merchant', email: 'merchant@example.test' },
+      review, operation: { reference: body.reference, description: body.description, originalActor: body.originalActor },
+    } } });
+    return Response.json({ workspace: makeWorkspace() });
+  });
+  render(<PurchaseManager initialOrder={orderId}/>);
+  fireEvent.click(await screen.findByRole('button', { name: '核验历史平台接单' }));
+  fill('原平台接单人', 'test-authorized-historical-merchant');
+  fill('原经办人当时的平台授权依据', 'TEST-PLATFORM-ROLE-HISTORY');
+  fill('原平台接单时间（本地时间）', '2031-04-05T12:30:00');
+  fill('可回查的书面原件或档案出处', 'TEST-ARCHIVED-HISTORY');
+  fill('书证摘要', 'a'.repeat(64));
+  fill('本次核对的事实与结论', '依据原平台记录核过订单与总价');
+  expect(posts).toEqual([]);
+  fireEvent.click(screen.getByRole('button', { name: '查看核对预览' }));
+  const preview = await screen.findByRole('region', { name: '采购启动核对预览' });
+  expect(preview).toHaveTextContent('合成采购商品');
+  expect(preview).toHaveTextContent('TEST-ARCHIVED-HISTORY');
+  expect(posts[0]).toMatchObject({ action: 'verify_acceptance', stage: 'preview', version, originalActor: 'test-authorized-historical-merchant' });
+  fireEvent.click(within(preview).getByRole('button', { name: '确认核验历史平台接单' }));
+  await waitFor(() => expect(posts[1]).toEqual({ ...posts[0], stage: 'confirm', actionHash }));
 });
