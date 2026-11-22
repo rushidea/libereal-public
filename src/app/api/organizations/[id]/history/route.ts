@@ -4,6 +4,7 @@ import { requireActiveSession } from '@/lib/session';
 import { CREDIT_REVIEW_POLICY, creditRestrictionForOverdueDays, overdueDaysFromDueAt } from '@/lib/customer-credit';
 import { QUOTE_EXPIRED_INQUIRY_STATUS } from '@/lib/quote-expiry';
 import { settleExpiredQuotes } from '@/lib/quote-expiry-settle';
+import { ORGANIZATION_ORDER_APPROVAL } from '@/lib/organization-order-review';
 import {
   hasOrganizationPermission,
   organizationRbacErrorStatus,
@@ -41,6 +42,7 @@ export async function GET(_request: Request, { params }: RouteParams) {
           pointsRefundedGroup: true,
           createdAt: true,
           archivedAt: true,
+          events: { where: { type: ORGANIZATION_ORDER_APPROVAL }, take: 1, select: { id: true } },
           researchGroup: { select: { id: true, name: true } },
           receivable: {
             select: { id: true, amount: true, status: true, dueAt: true, paidAt: true },
@@ -97,9 +99,10 @@ export async function GET(_request: Request, { params }: RouteParams) {
         policy: CREDIT_REVIEW_POLICY,
         checkedAt: now,
       },
-      orders: orders.map((order) => ({
+      orders: orders.map(({ events, ...order }) => ({
         ...order,
-        canReview: canReviewOrders && order.status === 'pending' && order.customerId !== user.id,
+        hasOrganizationReview: events.length > 0,
+        canReview: canReviewOrders && !order.archivedAt && order.status === 'pending' && order.customerId !== user.id,
       })),
       inquiries: visibleInquiries,
       payables,

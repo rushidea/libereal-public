@@ -23,18 +23,18 @@ function jsonResponse(body: unknown, status = 200): Response {
 function makeOrder(overrides: Partial<Record<string, unknown>> = {}) {
   return {
     id: 'ORD-MFA-1',
-    name: 'Realgent',
-    email: '61216888@qq.com',
-    phone: '18602536320',
-    institution: '南京测试机构',
-    subtotal: 13230,
-    total: 13230,
+    name: '合成客户',
+    email: 'buyer@example.test',
+    phone: '00000000000',
+    institution: '合成机构',
+    subtotal: 120,
+    total: 120,
     status: 'pending',
     paymentMethod: 'rjmart',
     quoteSent: false,
     createdAt: '2026-11-22T01:00:00.000Z',
     items: [
-      { id: 'item-1', productId: 'p1', name: '测试试剂盒', brand: 'Cytiva', catalogNumber: 'CAT-1', price: 13230, quantity: 1, leadTime: '' },
+      { id: 'item-1', productId: 'p1', name: '测试试剂盒', brand: '合成品牌', catalogNumber: 'CAT-1', price: 120, quantity: 1, leadTime: '' },
     ],
     events: [],
     shipments: [],
@@ -46,7 +46,7 @@ function makeOrder(overrides: Partial<Record<string, unknown>> = {}) {
   };
 }
 
-async function completeStagingStepUpDialog(code = '503219') {
+async function completeStagingStepUpDialog(code = '123456') {
   expect(await screen.findByRole('dialog')).toBeInTheDocument();
   fireEvent.click(await screen.findByRole('button', { name: '开始验证' }));
   const input = await screen.findByLabelText('固定测试口令');
@@ -62,7 +62,7 @@ describe('Admin orders MFA step-up flow', () => {
   });
 
   it('opens AdminMfaStepUpDialog on 已确认 403, retries with stepUpToken, and surfaces post-MFA business errors', async () => {
-    const order = makeOrder();
+    const order = makeOrder({ ownerScope: 'organization', organizationId: 'test-organization' });
     let patchAttempts = 0;
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
@@ -81,13 +81,13 @@ describe('Admin orders MFA step-up flow', () => {
       if (url === '/api/auth/security/step-up' && init?.method === 'POST') {
         const body = JSON.parse(String(init.body || '{}')) as { challengeId?: string; code?: string };
         if (!body.challengeId) return jsonResponse({ challengeId: 'chg-1', method: 'staging_test' });
-        expect(body.code).toBe('503219');
+        expect(body.code).toBe('123456');
         return jsonResponse({ grantToken: 'grant-confirm-1', verifiedAt: Date.now() });
       }
       if (url === `/api/orders/${order.id}` && init?.method === 'PATCH') {
         patchAttempts += 1;
-        const body = JSON.parse(String(init.body || '{}')) as { status?: string; stepUpToken?: string };
-        expect(body.status).toBe('confirmed');
+        const body = JSON.parse(String(init.body || '{}')) as { status?: string; action?: string; stepUpToken?: string };
+        expect(body).toMatchObject({ status: 'confirmed', action: 'accept_order' });
         if (!body.stepUpToken) return jsonResponse({ error: 'Admin MFA required' }, 403);
         expect(body.stepUpToken).toBe('grant-confirm-1');
         return jsonResponse({ error: 'CREDIT_LIMIT_EXCEEDED' }, 409);

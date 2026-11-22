@@ -26,6 +26,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import { isAdminMfaScenarioEnabled, requiresAdminMfaForPermission } from '@/lib/admin-mfa-settings';
 import { getTestDb, closeTestDb, seedAdmin, seedUser, clearAllTables } from './db-helpers';
 
+beforeAll(() => { getTestDb(); });
+afterAll(() => { closeTestDb(); });
+
 function seedOrder(db: ReturnType<typeof getTestDb>, order: {
   id: string;
   email: string;
@@ -56,8 +59,6 @@ function seedOrder(db: ReturnType<typeof getTestDb>, order: {
 }
 
 describe('GET /api/admin/orders/[id]', () => {
-  beforeAll(() => { getTestDb(); });
-  afterAll(() => { closeTestDb(); });
   beforeEach(() => {
     const db = getTestDb();
     clearAllTables(db);
@@ -89,8 +90,6 @@ describe('GET /api/admin/orders/[id]', () => {
 });
 
 describe('PATCH /api/admin/orders/[id]', () => {
-  beforeAll(() => { getTestDb(); });
-  afterAll(() => { closeTestDb(); });
   beforeEach(() => {
     const db = getTestDb();
     clearAllTables(db);
@@ -194,8 +193,6 @@ describe('PATCH /api/admin/orders/[id]', () => {
 });
 
 describe('PATCH /api/admin/orders/archive', () => {
-  beforeAll(() => { getTestDb(); });
-  afterAll(() => { closeTestDb(); });
   beforeEach(() => {
     const db = getTestDb();
     clearAllTables(db);
@@ -445,8 +442,6 @@ describe('PATCH /api/admin/orders/archive', () => {
 });
 
 describe('GET /api/admin/orders/archived', () => {
-  beforeAll(() => { getTestDb(); });
-  afterAll(() => { closeTestDb(); });
   beforeEach(() => {
     const db = getTestDb();
     clearAllTables(db);
@@ -475,8 +470,6 @@ describe('finance.write MFA scenario gating', () => {
     });
   }
 
-  beforeAll(() => { getTestDb(); });
-  afterAll(() => { closeTestDb(); });
   beforeEach(() => {
     const db = getTestDb();
     clearAllTables(db);
@@ -528,6 +521,22 @@ describe('finance.write MFA scenario gating', () => {
     expect(res.status).toBe(200);
   });
 
+  it('denies merchant acceptance without orders.write and leaves no acceptance history', async () => {
+    const db = getTestDb();
+    db.prepare(`UPDATE "Order" SET paymentMethod = 'alipay', paidAt = datetime('now') WHERE id = 'o1'`).run();
+    db.prepare("UPDATE AdminRole SET key = 'test_order_reader' WHERE key = 'super_admin'").run();
+    db.prepare("DELETE FROM AdminRolePermission WHERE permissionId = 'perm_orders_write'").run();
+
+    const res = await orderPATCH(makePatch('o1', { status: 'confirmed' }), {
+      params: Promise.resolve({ id: 'o1' }),
+    });
+
+    expect(res.status).toBe(403);
+    await expect(res.json()).resolves.toMatchObject({ requiredPermission: 'orders.write' });
+    expect(db.prepare('SELECT status FROM "Order" WHERE id = ?').get('o1')).toEqual({ status: 'pending' });
+    expect(db.prepare('SELECT id FROM OrderStatusHistory WHERE orderId = ?').all('o1')).toEqual([]);
+  });
+
   it('does not apply finance step-up to a confirming transition even when enabled', async () => {
     vi.mocked(requiresAdminMfaForPermission).mockImplementation(async (permission) => permission === 'finance.write');
     getTestDb().prepare(`UPDATE "Order" SET paymentMethod = 'alipay', paidAt = datetime('now') WHERE id = 'o1'`).run();
@@ -538,6 +547,8 @@ describe('finance.write MFA scenario gating', () => {
 
     expect(sessionMocks.requireAdminStepUp).not.toHaveBeenCalled();
     expect(res.status).toBe(200);
+    expect(getTestDb().prepare('SELECT actorId, metadata FROM OrderStatusHistory WHERE orderId = ? AND toStatus = ?').get('o1', 'confirmed'))
+      .toEqual({ actorId: 'admin_test_id', metadata: JSON.stringify({ action: 'accept_order', actorType: 'libereal_admin', version: 1 }) });
   });
 
   it('requires admin step-up for points refund with finance.write enabled', async () => {

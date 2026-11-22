@@ -437,7 +437,7 @@ function OrdersPanel() {
     const response = await fetch(`/api/orders/${orderId}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ status: newStatus, ...(stepUpToken ? { stepUpToken } : {}) }),
+      body: JSON.stringify({ status: newStatus, ...(newStatus === 'confirmed' ? { action: 'accept_order' } : {}), ...(stepUpToken ? { stepUpToken } : {}) }),
     });
     const data = await response.json().catch(() => ({})) as { error?: string; requiredPermission?: string };
     if (!response.ok) {

@@ -9,6 +9,7 @@ import { isPostDeliveryPaymentMethod, normalizeOrderPaymentMethod } from '@/data
 import {
   assertOrderTransition,
   canEnterOrderQuoteFlow,
+  MERCHANT_ACCEPTANCE_METADATA,
   orderQuoteStatusRejectionMessage,
   UNPAID_ORDER_QUOTE_CONFIRM_REJECTION,
 } from '@/lib/order-domain';
@@ -63,7 +64,7 @@ export async function POST(
     await prisma.$transaction(async (tx) => {
       await assertOrderPricingResolved(tx, id);
       const claimed = await tx.order.updateMany({
-        where: { id, status: order.status },
+        where: { id, status: order.status, archivedAt: null },
         data: {
           quoteSent: true,
           quoteSentAt: new Date(),
@@ -80,6 +81,7 @@ export async function POST(
             toStatus: 'confirmed',
             actorId: user.id,
             reason: 'quote_sent',
+            metadata: MERCHANT_ACCEPTANCE_METADATA,
           },
         });
         // 与 PATCH /api/orders/:id、PATCH /api/admin/orders/:id 确认路径相同：

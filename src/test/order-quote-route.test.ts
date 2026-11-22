@@ -128,6 +128,8 @@ describe('POST /api/orders/[id]/quote', () => {
       fromStatus: 'pending',
       toStatus: 'confirmed',
       reason: 'quote_sent',
+      actorId: 'admin_test_id',
+      metadata: JSON.stringify({ action: 'accept_order', actorType: 'libereal_admin', version: 1 }),
     });
     expect(await prisma.inventoryAccount.findFirst()).toMatchObject({
       variantId: null,

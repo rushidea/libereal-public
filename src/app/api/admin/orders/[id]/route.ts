@@ -11,7 +11,7 @@ import {
   settleOrderReceivable,
 } from '@/lib/customer-credit';
 import type { OrderCreditReviewSummary } from '@/lib/credit-summary';
-import { assertOrderTransition, isAutoCloseableOrderStatus, isInactiveOrderStatus, requiresPaidAlipayRefund } from '@/lib/order-domain';
+import { assertOrderTransition, isAutoCloseableOrderStatus, isInactiveOrderStatus, MERCHANT_ACCEPTANCE_METADATA, requiresPaidAlipayRefund } from '@/lib/order-domain';
 import { restoreRedeemedOrderCoupons } from '@/lib/coupon-service';
 import { releaseOrderInventory, reserveOrderInventory } from '@/lib/inventory';
 import { orderStatusRequiresFinanceWrite, receivableOccupiesCredit } from '@/lib/order-finance-access';
@@ -161,7 +161,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
         });
         if (cancelled.count !== 1) throw new Error('ORDER_CANCELLATION_CONFLICT');
       }
-      const result = await tx.order.update({ where: { id }, data: {
+      const result = await tx.order.update({ where: { id, ...(status === 'confirmed' ? { status: existing.status, archivedAt: null } : {}) }, data: {
         ...updateData,
         ...(status && status !== existing.status ? {
           statusHistory: {
@@ -171,6 +171,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
               actorId: admin.id,
               actorEmail: admin.email,
               reason: reason || 'admin_status_update',
+              ...(status === 'confirmed' ? { metadata: MERCHANT_ACCEPTANCE_METADATA } : {}),
             },
           },
           events: {
@@ -208,6 +209,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   } catch (err) {
     console.error('[admin/orders/[id] PATCH] error:', err);
     const message = err instanceof Error ? err.message : '';
+    if ((err as { code?: string })?.code === 'P2025') return NextResponse.json({ error: '订单已变化，请重新查看。' }, { status: 409 });
     if (message === POINTS_REFUND_FAILED) {
       return NextResponse.json({ error: POINTS_REFUND_FAILED }, { status: 409 });
     }

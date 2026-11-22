@@ -7,7 +7,7 @@ import type { Prisma } from '@prisma/client';
 import { orderItemView, toOrderItemCreates } from '@/lib/commerce-records';
 import { releaseOrderReceivableOnCancellation, reserveOrderCredit, settleOrderReceivable } from '@/lib/customer-credit';
 import { orderStatusRequiresFinanceWrite, receivableOccupiesCredit } from '@/lib/order-finance-access';
-import { assertOrderTransition, calculateOrderAmounts, isAutoCloseableOrderStatus, isInactiveOrderStatus, ORDER_STATUS_LABELS, requiresPaidAlipayRefund } from '@/lib/order-domain';
+import { assertOrderTransition, calculateOrderAmounts, isAutoCloseableOrderStatus, isInactiveOrderStatus, MERCHANT_ACCEPTANCE_METADATA, ORDER_STATUS_LABELS, requiresPaidAlipayRefund } from '@/lib/order-domain';
 import { restoreRedeemedOrderCoupons } from '@/lib/coupon-service';
 import { releaseOrderInventory, reserveOrderInventory } from '@/lib/inventory';
 import { isPostDeliveryPaymentMethod, normalizeOrderPaymentMethod } from '@/data/payment-methods';
@@ -137,6 +137,9 @@ export async function PATCH(
       }) ? 'finance.write' : 'orders.write', stepUpToken);
       if (admin instanceof NextResponse) return admin;
       user = admin;
+      if (body.status === 'confirmed' && order.ownerScope === 'organization' && body.action !== 'accept_order') {
+        return NextResponse.json({ error: '请从管理后台确认 Libereal 接单。' }, { status: 409 });
+      }
     }
 
     if (!isPlatformAdmin) {
@@ -151,6 +154,9 @@ export async function PATCH(
         }
         if (order.customerId === user.id) {
           return NextResponse.json({ error: '订单创建者不能审核本人订单' }, { status: 403 });
+        }
+        if (body.status === 'confirmed') {
+          return NextResponse.json({ error: '请在组织采购页面查看订单明细后提交组织审核。', code: 'ORG_ORDER_REVIEW_PREVIEW_REQUIRED' }, { status: 409 });
         }
       } else {
         const ownsPersonalOrder = order.ownerScope === 'personal'
@@ -276,7 +282,7 @@ export async function PATCH(
               : null,
           }] : []),
         ];
-        await tx.order.update({ where: { id }, data: {
+        await tx.order.update({ where: { id, ...(body.status === 'confirmed' ? { status: order.status, archivedAt: null } : {}) }, data: {
           ...updateData,
           ...(body.status && body.status !== order.status ? {
             statusHistory: {
@@ -286,6 +292,7 @@ export async function PATCH(
                 actorId: user.id,
                 actorEmail: user.email,
                 reason: body.reason || null,
+                ...(body.status === 'confirmed' ? { metadata: MERCHANT_ACCEPTANCE_METADATA } : {}),
               },
             },
           } : {}),
@@ -364,6 +371,7 @@ export async function PATCH(
   } catch (err) {
     console.error('[order PATCH] error:', err);
     const message = err instanceof Error ? err.message : '';
+    if ((err as { code?: string })?.code === 'P2025') return NextResponse.json({ error: '订单已变化，请重新查看。' }, { status: 409 });
     if (message === 'QUOTE_REPRICE_REQUIRED') return NextResponse.json({ error: '商品价格已变化，请先完成原订单价格复核', code: message }, { status: 409 });
     if (message === POINTS_REFUND_FAILED) {
       return NextResponse.json({ error: POINTS_REFUND_FAILED }, { status: 409 });
