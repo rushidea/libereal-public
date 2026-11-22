@@ -45,3 +45,19 @@ CREATE TABLE "PurchaseActivity" (
 CREATE UNIQUE INDEX "PurchaseActivity_requestKey_key" ON "PurchaseActivity"("requestKey");
 CREATE UNIQUE INDEX "PurchaseActivity_referenceKey_key" ON "PurchaseActivity"("referenceKey");
 CREATE INDEX "PurchaseActivity_orderId_createdAt_idx" ON "PurchaseActivity"("orderId","createdAt");
+
+-- Define assignable roles; assigning any of them to a person is a separate existing admin action.
+INSERT INTO AdminPermission (id,key,resource,action,name) VALUES
+ ('perm_purchases_read','purchases.read','purchases','read','查看采购单'),
+ ('perm_purchases_write','purchases.write','purchases','write','采购准备与订购登记'),
+ ('perm_purchases_approve','purchases.approve','purchases','approve','独立批准采购单'),
+ ('perm_purchases_pay','purchases.pay','purchases','pay','核实供应商实际付款');
+INSERT INTO AdminRole (id,key,name,description,updatedAt) VALUES
+ ('role_purchase_operator','purchase_operator','采购经办','采购资料、订购结果和供应商协调',CURRENT_TIMESTAMP),
+ ('role_purchase_approver','purchase_approver','采购审批','按具体版本审核供应商采购单',CURRENT_TIMESTAMP),
+ ('role_purchase_finance','purchase_finance','采购财务','核实供应商付款条件与实际凭证',CURRENT_TIMESTAMP);
+INSERT INTO AdminRolePermission (roleId,permissionId)
+ SELECT r.id,p.id FROM AdminRole r CROSS JOIN AdminPermission p
+ WHERE r.key IN ('purchase_operator','purchase_approver','purchase_finance') AND
+ (p.key IN ('admin.access','purchases.read') OR (r.key='purchase_operator' AND p.key='purchases.write')
+ OR (r.key='purchase_approver' AND p.key='purchases.approve') OR (r.key='purchase_finance' AND p.key='purchases.pay'));
