@@ -3,6 +3,8 @@
 // vitest `env` 在 worker 启动时设 DATABASE_PATH；这个 module 只需读它
 
 import Database from 'better-sqlite3';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 
 let _db: Database.Database | null = null;
 
@@ -875,6 +877,9 @@ export function getTestDb(): Database.Database {
   ensureColumn(_db, 'Order', 'inquiry_order_seq', 'inquiry_order_seq INTEGER');
   _db.exec('CREATE UNIQUE INDEX IF NOT EXISTS Order_inquiryId_inquiryOrderSeq_key ON "Order"(inquiryId, inquiry_order_seq)');
   ensureColumn(_db, 'PointsRedemption', 'pointsReturned', 'pointsReturned INTEGER NOT NULL DEFAULT 0');
+  if (!_db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='PurchaseOrder'").get()) {
+    _db.exec(readFileSync(resolve('prisma/migrations/20261122010000_purchase_orders/migration.sql'), 'utf8'));
+  }
   return _db;
 }
 
@@ -991,6 +996,9 @@ export function seedAdmin(db: Database.Database, id = 'admin_test_id', email = '
 export function clearAllTables(db: Database.Database) {
   // 清表顺序：先子表后父表（外键依赖）
   db.exec(`
+    DELETE FROM PurchaseActivity;
+    DELETE FROM PurchaseRequirement;
+    DELETE FROM PurchaseOrder;
     DELETE FROM CouponInstance;
     DELETE FROM Coupon;
     DELETE FROM WechatMiniLoginChallenge;
