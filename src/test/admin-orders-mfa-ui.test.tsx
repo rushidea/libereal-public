@@ -56,6 +56,7 @@ function makeOrder(overrides: Partial<Record<string, unknown>> = {}) {
     status: 'pending',
     paymentMethod: 'rjmart',
     quoteSent: false,
+    acceptedAt: null as string | null,
     approvalPreview: overrides.status === 'confirmed' ? null : makeApproval(),
     createdAt: '2026-11-22T01:00:00.000Z',
     items: [
@@ -69,6 +70,19 @@ function makeOrder(overrides: Partial<Record<string, unknown>> = {}) {
     pointsApplied: true,
     ...overrides,
   };
+}
+
+async function renderOrderDetail(order: ReturnType<typeof makeOrder>) {
+  vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url === '/api/admin/access?view=current') return jsonResponse({ permissions: ['orders.read', 'orders.write'] });
+    if (url.startsWith('/api/admin/orders?')) return jsonResponse({ orders: [order], total: 1, statusCounts: {} });
+    if (url === `/api/admin/orders/${order.id}`) return jsonResponse({ order });
+    throw new Error(`Unexpected fetch: ${url}`);
+  }));
+
+  render(<AdminOrdersPage />);
+  fireEvent.click((await screen.findAllByText(order.id))[0]);
 }
 
 async function completeStagingStepUpDialog(code = '123456') {
@@ -165,6 +179,7 @@ describe('Admin orders MFA step-up flow', () => {
         expect(body.stepUpToken).toBe('grant-quote-1');
         order.quoteSent = true;
         order.status = 'confirmed';
+        order.acceptedAt = '2026-11-22T01:15:00.000Z';
         order.approvalPreview = null;
         return jsonResponse({ success: true });
       }
@@ -185,7 +200,7 @@ describe('Admin orders MFA step-up flow', () => {
     });
     const patchCalls = fetchMock.mock.calls.filter(([url, init]) => String(url) === `/api/orders/${order.id}` && init?.method === 'PATCH');
     expect(patchCalls).toHaveLength(0);
-    expect((await screen.findAllByText('订单已确认')).length).toBeGreaterThan(0);
+    expect((await screen.findAllByText('Libereal 已接单')).length).toBeGreaterThan(0);
   });
 
   it('requires a fresh preview after inline saving and after the displayed version changes during MFA', async () => {
@@ -256,18 +271,28 @@ describe('Admin orders MFA step-up flow', () => {
 
   it.each(['unpaid', 'pending'])('shows a sent quote as a quote while the order is %s', async (status) => {
     const order = makeOrder({ status, paymentMethod: 'alipay', quoteSent: true, approvalPreview: makeApproval('a'.repeat(64), 'send_quote') });
-    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
-      const url = String(input);
-      if (url === '/api/admin/access?view=current') return jsonResponse({ permissions: ['orders.read', 'orders.write'] });
-      if (url.startsWith('/api/admin/orders?')) return jsonResponse({ orders: [order], total: 1, statusCounts: {} });
-      if (url === `/api/admin/orders/${order.id}`) return jsonResponse({ order });
-      throw new Error(`Unexpected fetch: ${url}`);
-    }));
-
-    render(<AdminOrdersPage />);
-    fireEvent.click((await screen.findAllByText(order.id))[0]);
+    await renderOrderDetail(order);
     expect((await screen.findAllByText('报价已发送')).length).toBeGreaterThan(0);
+    expect(screen.queryByText('Libereal 已接单')).not.toBeInTheDocument();
+  });
+
+  it('shows a legacy confirmed status without claiming platform acceptance', async () => {
+    await renderOrderDetail(makeOrder({ status: 'confirmed', acceptedAt: null, quoteSent: false }));
+
+    expect((await screen.findAllByText('平台接单记录待核实')).length).toBeGreaterThan(0);
+    expect(screen.getAllByText('当前订单状态 已确认').length).toBeGreaterThan(0);
+    expect(screen.queryByText('Libereal 已接单')).not.toBeInTheDocument();
     expect(screen.queryByText('订单已确认')).not.toBeInTheDocument();
+  });
+
+  it('retains proven platform acceptance after cancellation', async () => {
+    const acceptedAt = '2026-11-22T01:15:00.000Z';
+    await renderOrderDetail(makeOrder({ status: 'cancelled', acceptedAt, quoteSent: true, approvalPreview: null }));
+
+    expect((await screen.findAllByText('Libereal 已接单')).length).toBeGreaterThan(0);
+    expect(screen.getAllByText('当前订单状态 已取消').length).toBeGreaterThan(0);
+    expect(screen.getAllByText(`接单时间 ${new Date(acceptedAt).toLocaleString('zh-CN')}`).length).toBeGreaterThan(0);
+    expect(screen.queryByText('平台接单记录待核实')).not.toBeInTheDocument();
   });
 
   it('triggers MFA step-up and retries for paymentMethod change, shipment create, points refund, withdraw, and unarchive', async () => {
