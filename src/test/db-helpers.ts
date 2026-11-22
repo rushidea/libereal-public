@@ -882,6 +882,9 @@ export function getTestDb(): Database.Database {
   if (!_db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='PurchaseReplacementLine'").get()) {
     _db.exec(readFileSync(resolve('prisma/migrations/20261122020000_purchase_replacement_lines/migration.sql'), 'utf8'));
   }
+  if (!_db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='FulfillmentParcel'").get()) {
+    _db.exec(readFileSync(resolve('prisma/migrations/20261123010000_fulfillment_parcels/migration.sql'), 'utf8'));
+  }
   return _db;
 }
 
@@ -996,6 +999,11 @@ export function seedAdmin(db: Database.Database, id = 'admin_test_id', email = '
 export function clearAllTables(db: Database.Database) {
   // 清表顺序：先子表后父表（外键依赖）
   db.exec(`
+    DELETE FROM FulfillmentParcelLine WHERE sourceReceiptId IS NOT NULL;
+    DELETE FROM FulfillmentReceipt;
+    DELETE FROM FulfillmentEvent;
+    DELETE FROM FulfillmentParcelLine;
+    DELETE FROM FulfillmentParcel;
     DELETE FROM PurchaseReplacementLine;
     DELETE FROM PurchaseActivity;
     DELETE FROM PurchaseRequirement;

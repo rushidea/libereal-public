@@ -1,0 +1,329 @@
+// @vitest-environment node
+
+import { randomBytes } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { NextRequest } from 'next/server';
+import { GET as noticesGET } from '@/app/api/admin/fulfillment/notices/route';
+import { GET as fulfillmentGET, POST as fulfillmentPOST } from '@/app/api/admin/orders/[id]/fulfillment/route';
+import { GET as orderGET } from '@/app/api/orders/[id]/route';
+import { GET as ordersGET } from '@/app/api/orders/route';
+import { ADMIN_ROLE_DEFINITIONS, type AdminRoleKey } from '@/lib/admin-permissions';
+import { resetEphemeralStoreForTests } from '@/lib/ephemeral-store';
+import { receiveCarrierNotice } from '@/lib/fulfillment-carrier';
+import { pricingContentHash } from '@/lib/pricing-adjustment-approval';
+import { prisma } from '@/lib/prisma';
+import { createMfaKeyRing, encryptMfaSecret } from '@/lib/security/mfa-crypto';
+import { generateTotpSecret, totpCodeAt } from '@/lib/security/mfa-totp';
+import { completeSecurityStepUp, startSecurityStepUp, type SecurityStepUpAction } from '@/lib/security/security-step-up';
+import { clearAllTables, closeTestDb, getTestDb, seedUser } from './db-helpers';
+
+const { auth } = vi.hoisted(() => ({ auth: vi.fn() }));
+vi.mock('@/lib/auth', () => ({ auth }));
+
+const orderId = 'test-fulfillment-order';
+const otherOrderId = 'test-fulfillment-other-order';
+const buyer = 'test-fulfillment-buyer';
+const otherBuyer = 'test-fulfillment-other-buyer';
+const operator = 'test-fulfillment-operator';
+const reader = 'test-fulfillment-reader';
+const blocked = 'test-fulfillment-no-order-permission';
+const key = randomBytes(32);
+const keyRing = createMfaKeyRing({ currentVersion: 1, keys: { 1: key } });
+const secrets = new Map<string, string>();
+const carrier = '合成承运方';
+const source = 'TEST-FULFILLMENT-SOURCE';
+const publicTracking = 'TEST-PUBLIC-WAYBILL';
+const inboundTracking = 'TEST-INBOUND-PRIVATE-WAYBILL';
+
+const email = (id: string) => `${id}@example.test`;
+const sessionId = (id: string) => `test-session-${id}`;
+const endpoint = (id: string) => `http://localhost/api/admin/orders/${id}/fulfillment`;
+const params = (id: string) => ({ params: Promise.resolve({ id }) });
+
+function signIn(id: string, role = 'admin', session = sessionId(id)) {
+  auth.mockResolvedValue({ user: { id, role, email: email(id), sessionId: session } });
+}
+
+function seedStaff(id: string, roleKey: AdminRoleKey) {
+  const db = getTestDb();
+  const role = ADMIN_ROLE_DEFINITIONS[roleKey];
+  seedUser(db, { id, role: 'admin', email: email(id) });
+  db.prepare('INSERT INTO AdminRole (id,key,name,updatedAt) VALUES (?, ?, ?, CURRENT_TIMESTAMP)').run(roleKey, roleKey, role.name);
+  for (const permission of role.permissions) {
+    const [resource, action] = permission.split('.');
+    db.prepare('INSERT OR IGNORE INTO AdminPermission (id,key,resource,action,name) VALUES (?, ?, ?, ?, ?)').run(
+      permission, permission, resource, action, permission,
+    );
+    db.prepare('INSERT INTO AdminRolePermission (roleId,permissionId) VALUES (?, ?)').run(roleKey, permission);
+  }
+  db.prepare('INSERT INTO AdminUserRole (userId,roleId) VALUES (?, ?)').run(id, roleKey);
+
+  const secret = generateTotpSecret();
+  secrets.set(id, secret);
+  db.prepare('INSERT INTO MfaSetting (id,userId,enabled,encryptedSecret) VALUES (?, ?, 1, ?)').run(
+    `mfa-${id}`, id, encryptMfaSecret(secret, keyRing),
+  );
+}
+
+async function grant(userId: string, action: SecurityStepUpAction = 'admin_sensitive') {
+  // Advance past the authenticator's last accepted time step.
+  vi.setSystemTime(Date.now() + 31_000);
+  const context = { userId, action, sessionId: sessionId(userId), method: 'totp' as const };
+  const challenge = await startSecurityStepUp(context);
+  const secret = secrets.get(userId);
+  if (!secret) throw new Error('Missing synthetic authenticator');
+  const result = await completeSecurityStepUp({
+    ...context, challengeId: challenge.challengeId, totpToken: challenge.challengeToken,
+    code: totpCodeAt(secret, Date.now()),
+  });
+  if (!('grantToken' in result)) throw new Error(`Synthetic MFA grant failed: ${result.error}`);
+  return result.grantToken;
+}
+
+function evidence(requestId: string) {
+  return {
+    requestId, occurredAt: new Date().toISOString(), reference: `TEST-PRIVATE-EVIDENCE-${requestId}`,
+    sha256: pricingContentHash({ evidence: requestId }), documentRow: 1,
+  };
+}
+
+function legacyProof() {
+  return {
+    shipmentId: `${orderId}-shipment`, description: '已核对合成原运单和出库明细', ...evidence('test-legacy-link'),
+  };
+}
+
+function read(id = orderId) {
+  return fulfillmentGET(new NextRequest(endpoint(id)), params(id));
+}
+
+function queue() {
+  return noticesGET(new NextRequest('http://localhost/api/admin/fulfillment/notices'));
+}
+
+function post(body: object, id = orderId) {
+  return fulfillmentPOST(new NextRequest(endpoint(id), {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
+  }), params(id));
+}
+
+async function expectJson(response: Response, status: number) {
+  const body = await response.json();
+  expect(response.status, JSON.stringify(body)).toBe(status);
+  return body;
+}
+
+async function preview(action: string, input: object) {
+  const result = await expectJson(await post({ stage: 'preview', action, input }), 200);
+  expect(result.preview.actionHash).toMatch(/^[0-9a-f]{64}$/);
+  return result.preview as { actionHash: string; snapshot: object };
+}
+
+function confirm(action: string, input: object, actionHash: string, stepUpToken?: string, id = orderId) {
+  return post({ action, input, actionHash, stepUpToken, stage: 'confirm' }, id);
+}
+
+function history() {
+  return prisma.fulfillmentEvent.findMany({ where: { parcel: { orderId } }, orderBy: { occurredAt: 'asc' } });
+}
+
+async function seedHistoricalShipment(id: string, userId: string, trackingNumber: string) {
+  const orderItemId = `${id}-line`;
+  await prisma.order.create({
+    data: {
+      id, customerId: userId, email: email(userId), status: 'shipped', paymentMethod: 'bank_transfer', subtotal: 200, total: 200,
+      orderItems: { create: { id: orderItemId, position: 0, name: '合成商品', unitPrice: 100, quantity: 2, shippedQty: 2, status: 'shipped' } },
+    },
+  });
+  await prisma.shipment.create({ data: {
+    id: `${id}-shipment`, orderId: id, shippedAt: new Date(Date.now() - 60_000), status: 'shipped', carrier, trackingNumber,
+    note: 'TEST-PRIVATE-LEGACY-NOTE', createdBy: operator, items: { create: { orderItemId, quantity: 2 } },
+  } });
+}
+
+async function seedInboundParcel(id: string) {
+  return prisma.fulfillmentParcel.create({ data: {
+    orderId: id, route: 'supplier_to_libereal', carrier, trackingNumber: inboundTracking, feedSource: source,
+    status: 'dispatched', dispatchedAt: new Date(Date.now() - 30_000), reference: 'TEST-PRIVATE-INBOUND-REFERENCE',
+    evidenceSha256: pricingContentHash({ id, field: 'inbound-proof' }), evidenceRow: 1,
+    requestKey: pricingContentHash({ id, field: 'inbound-request' }), businessKey: pricingContentHash({ id, field: 'inbound-business' }),
+    contentHash: pricingContentHash({ id, field: 'inbound-content' }), actorId: operator,
+    lines: { create: [{ orderItemId: `${id}-line`, quantity: 1 }] },
+  } });
+}
+
+beforeAll(() => {
+  const db = getTestDb();
+  db.exec(readFileSync('prisma/migrations/20260806090000_add_mfa_security_tables/migration.sql', 'utf8'));
+  // The shared fixture already creates organizations; the customer list also queries memberships.
+  const rbac = readFileSync('prisma/migrations/20260808090000_add_organization_rbac_tables/migration.sql', 'utf8');
+  db.exec(rbac.replace('CREATE TABLE "organizations"', 'CREATE TABLE IF NOT EXISTS "organizations"'));
+  db.exec(readFileSync('prisma/migrations/20260808110000_update_organization_membership_lifecycle/migration.sql', 'utf8'));
+  db.exec(readFileSync('prisma/migrations/20260809130000_add_member_permission_overrides/migration.sql', 'utf8'));
+});
+afterAll(() => { closeTestDb(); });
+
+beforeEach(async () => {
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime(new Date('2031-05-01T03:00:00Z'));
+  vi.stubEnv('REDIS_REST_URL', undefined);
+  vi.stubEnv('REDIS_REST_TOKEN', undefined);
+  vi.stubEnv('MFA_PHASE1_ENABLED', 'true');
+  vi.stubEnv('MFA_KEY_CURRENT', '1');
+  vi.stubEnv('MFA_KEY_V1', key.toString('base64'));
+  vi.stubEnv('STAGING_MFA_TEST_ENABLED', 'false');
+  resetEphemeralStoreForTests();
+  secrets.clear();
+  const db = getTestDb();
+  db.exec('DELETE FROM SecurityEvent; DELETE FROM MfaChallenge; DELETE FROM MfaSetting;');
+  clearAllTables(db);
+  for (const id of [buyer, otherBuyer]) seedUser(db, { id, email: email(id) });
+  seedStaff(operator, 'order_admin');
+  seedStaff(reader, 'finance_staff');
+  seedStaff(blocked, 'customer_admin');
+  await seedHistoricalShipment(orderId, buyer, publicTracking);
+  await seedHistoricalShipment(otherOrderId, otherBuyer, 'TEST-OTHER-CUSTOMER-WAYBILL');
+  signIn(operator);
+});
+
+afterEach(() => {
+  auth.mockReset();
+  resetEphemeralStoreForTests();
+  vi.unstubAllEnvs();
+  vi.useRealTimers();
+});
+
+describe('admin fulfillment HTTP and customer shipment views', () => {
+  it('uses server-side read and write assignments for order details, actions, and the notice queue', async () => {
+    signIn(blocked);
+    await expectJson(await read(), 403);
+    await expectJson(await queue(), 403);
+
+    signIn(buyer, 'customer');
+    await expectJson(await read(), 403);
+    await expectJson(await queue(), 403);
+
+    signIn(reader);
+    const response = await read();
+    expect(response.headers.get('Cache-Control')).toBe('private, no-store');
+    const result = await expectJson(response, 200);
+    expect(result.workspace.legacyShipments).toMatchObject([{ id: `${orderId}-shipment`, trackingNumber: publicTracking }]);
+    await expectJson(await queue(), 200);
+    await expectJson(await post({
+      action: 'link_legacy', stage: 'preview', role: 'admin', actorId: operator, permissions: ['orders.write'],
+      input: { ...legacyProof(), actorId: operator },
+    }), 403);
+
+    signIn(operator);
+    await preview('link_legacy', legacyProof());
+    expect(await prisma.fulfillmentParcel.count()).toBe(0);
+    expect(await prisma.fulfillmentEvent.count()).toBe(0);
+  });
+
+  it('requires a fresh one-use grant from the same authenticated session and deduplicates the same native waybill proof', async () => {
+    const input = { ...legacyProof(), actorId: reader };
+    const confirmation = await preview('link_legacy', input);
+    expect(confirmation.snapshot).toMatchObject({ orderId, shipmentId: input.shipmentId, actorId: operator, reference: input.reference });
+    expect(await prisma.fulfillmentParcel.count()).toBe(0);
+    expect(await history()).toEqual([]);
+    await expectJson(await post({ action: 'link_legacy', stage: 'confirm', input }), 409);
+    await expectJson(await confirm('link_legacy', input, confirmation.actionHash), 403);
+    await expectJson(await confirm('link_legacy', input, confirmation.actionHash, 'fake-grant'), 403);
+    await expectJson(await confirm('link_legacy', input, confirmation.actionHash, await grant(operator, 'password_change')), 403);
+    await expectJson(await confirm('link_legacy', input, confirmation.actionHash, await grant(reader)), 403);
+
+    const token = await grant(operator);
+    signIn(operator, 'admin', 'test-different-session');
+    await expectJson(await confirm('link_legacy', input, confirmation.actionHash, token), 403);
+    expect(await prisma.fulfillmentParcel.count()).toBe(0);
+
+    signIn(operator);
+    await expectJson(await confirm('link_legacy', input, confirmation.actionHash, token), 200);
+    await expectJson(await confirm('link_legacy', input, confirmation.actionHash, token), 403);
+    await expectJson(await confirm('link_legacy', input, confirmation.actionHash, await grant(operator)), 200);
+    const retry = { ...input, requestId: 'test-retry-same-waybill-proof' };
+    const retryPreview = await preview('link_legacy', retry);
+    await expectJson(await confirm('link_legacy', retry, retryPreview.actionHash, await grant(operator)), 200);
+    expect(await history()).toMatchObject([{ kind: 'link_legacy', actorId: operator, reference: input.reference }]);
+    expect(await prisma.fulfillmentParcel.count()).toBe(1);
+    expect(await prisma.shipment.count({ where: { orderId } })).toBe(1);
+  });
+
+  it('refuses cross-order waybills and stale previews after native waybill data changes', async () => {
+    const input = legacyProof();
+    const confirmation = await preview('link_legacy', input);
+    await expectJson(await post({ stage: 'preview', action: 'link_legacy', input }, otherOrderId), 409);
+    await expectJson(await confirm('link_legacy', input, confirmation.actionHash, await grant(operator), otherOrderId), 409);
+
+    const trackingNumber = 'TEST-CORRECTED-WAYBILL';
+    await prisma.shipment.update({ where: { id: input.shipmentId }, data: { trackingNumber } });
+    const staleToken = await grant(operator);
+    const rejected = await expectJson(await confirm('link_legacy', input, confirmation.actionHash, staleToken), 409);
+    expect(rejected.error).toMatch(/重新预览/);
+    expect(await prisma.fulfillmentParcel.count()).toBe(0);
+    expect(await history()).toEqual([]);
+
+    const refreshed = await preview('link_legacy', input);
+    expect(refreshed.actionHash).not.toBe(confirmation.actionHash);
+    expect(refreshed.snapshot).toMatchObject({ trackingNumber });
+    await expectJson(await confirm('link_legacy', input, refreshed.actionHash, staleToken), 403);
+    await expectJson(await confirm('link_legacy', input, refreshed.actionHash, await grant(operator)), 200);
+    expect(await prisma.fulfillmentParcel.findFirstOrThrow({ where: { orderId } })).toMatchObject({ trackingNumber });
+  });
+
+  it('removes a matched notice from the staff queue and keeps internal transport and evidence out of both customer views', async () => {
+    const inbound = await seedInboundParcel(orderId);
+    await seedInboundParcel(otherOrderId);
+    const report = {
+      ...evidence('unmatched-notice'), eventId: 'test-queued-notice', kind: 'in_transit' as const, carrier,
+      trackingNumber: inboundTracking, description: '合成承运进展',
+    };
+    const notice = await prisma.$transaction(tx => receiveCarrierNotice(tx, source, report));
+    expect(notice.status).toBe('pending');
+    const pending = await queue();
+    expect(pending.headers.get('Cache-Control')).toBe('private, no-store');
+    expect(await expectJson(pending, 200)).toEqual({
+      notices: [{ id: notice.id, source: `carrier/${source}`, kind: 'in_transit', occurredAt: report.occurredAt,
+        reference: report.reference, carrier, trackingNumber: inboundTracking, description: report.description }],
+      next: null,
+    });
+
+    const match = { parcelId: inbound.id, eventId: notice.id, description: '已用合成凭据核对归属', ...evidence('match-original-waybill') };
+    const matching = await preview('match_notice', match);
+    expect((await expectJson(await queue(), 200)).notices).toHaveLength(1);
+    await expectJson(await confirm('match_notice', match, matching.actionHash, await grant(operator)), 200);
+    expect(await expectJson(await queue(), 200)).toEqual({ notices: [], next: null });
+
+    const input = legacyProof();
+    const linking = await preview('link_legacy', input);
+    await expectJson(await confirm('link_legacy', input, linking.actionHash, await grant(operator)), 200);
+    const outward = await prisma.fulfillmentParcel.findUniqueOrThrow({
+      where: { shipmentId: input.shipmentId }, include: { lines: true },
+    });
+    const receipt = {
+      parcelId: outward.id, kind: 'customer_delivery', description: '已按合成签收联核对客户实收',
+      lines: [{ parcelLineId: outward.lines[0].id, quantity: 2 }], ...evidence('confirmed-customer-receipt'),
+    };
+    const delivery = await preview('record_event', receipt);
+    expect((await prisma.shipment.findUniqueOrThrow({ where: { id: input.shipmentId } })).deliveredAt).toBeNull();
+    await expectJson(await confirm('record_event', receipt, delivery.actionHash, await grant(operator)), 200);
+
+    signIn(buyer, 'customer');
+    const detail = await expectJson(await orderGET(new NextRequest(`http://localhost/api/orders/${orderId}`), params(orderId)), 200);
+    const orders = await expectJson(await ordersGET(new NextRequest('http://localhost/api/orders')), 200);
+    expect(orders.map((order: { id: string }) => order.id)).toEqual([orderId]);
+    for (const order of [detail, orders[0]]) {
+      expect(order.shipments).toMatchObject([{
+        id: input.shipmentId, carrier, trackingNumber: publicTracking, status: 'delivered', deliveredAt: receipt.occurredAt,
+        fulfillmentParcel: { status: 'delivered' }, items: [{ orderItemId: `${orderId}-line`, quantity: 2 }],
+      }]);
+      expect(order.shipments[0].fulfillmentParcel).toEqual({ status: 'delivered' });
+      const serialized = JSON.stringify(order);
+      for (const privateValue of [inboundTracking, source, report.reference, input.reference, receipt.reference, 'TEST-PRIVATE-LEGACY-NOTE']) {
+        expect(serialized).not.toContain(privateValue);
+      }
+    }
+    await expectJson(await orderGET(new NextRequest(`http://localhost/api/orders/${otherOrderId}`), params(otherOrderId)), 403);
+  });
+});
