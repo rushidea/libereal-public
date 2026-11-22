@@ -65,14 +65,14 @@ function findEvent(id: string) {
   return prisma.fulfillmentEvent.findUniqueOrThrow({ where: { id } });
 }
 
-async function orderedPurchase(orderId: string) {
+async function orderedPurchase(orderId: string, quantity = 1) {
   const orderItemId = `${orderId}-line`;
   await prisma.$transaction(async tx => {
     const order = await tx.order.create({
       data: {
         id: orderId, email: buyer.email, customerId: buyer.id, status: 'pending',
-        paymentMethod: 'bank_transfer', subtotal: 100, total: 100,
-        orderItems: { create: { id: orderItemId, position: 0, productId, catalogNumber, name: '合成商品', unitPrice: 100, quantity: 1 } },
+        paymentMethod: 'bank_transfer', subtotal: 100 * quantity, total: 100 * quantity,
+        orderItems: { create: { id: orderItemId, position: 0, productId, catalogNumber, name: '合成商品', unitPrice: 100, quantity } },
       },
       include: ORDER_APPROVAL_INCLUDE,
     });
@@ -91,7 +91,7 @@ async function orderedPurchase(orderId: string) {
 
   const terms: PurchaseTerms = {
     supplier: '合成供应商', writtenSupplier: '合成供应商', payee: '合成收款方', paymentTerms: '订购后按书面条款结算',
-    unitPriceCents: 2500, linePayableCents: 2500, currency: 'CNY', taxBasis: 'included',
+    unitPriceCents: 2500, linePayableCents: 2500 * quantity, currency: 'CNY', taxBasis: 'included',
     freightTerms: '含运费', supplierConditions: '按合成逐单供货条款供货', leadTime: '3 个工作日',
     validUntil: new Date(Date.now() + 7 * 86400000).toISOString(),
     sourceReference: `${orderId}-quote`, sourceSha256: pricingContentHash({ orderId, proof: 'quote' }),
@@ -128,11 +128,12 @@ function dispatch(
   trackingNumber: string,
   route: 'supplier_to_customer' | 'supplier_to_libereal' = 'supplier_to_customer',
   proof = evidence(`dispatch-${purchase.orderId}`),
+  quantity = 1,
 ) {
   const { orderId, orderItemId, purchaseOrderId } = purchase;
   const input = {
     requestId: `dispatch-${orderId}`, route, carrier, trackingNumber, feedSource: source,
-    lines: [{ purchaseOrderId, orderItemId, quantity: 1 }], ...proof,
+    lines: [{ purchaseOrderId, orderItemId, quantity }], ...proof,
   };
   return prisma.$transaction(tx => dispatchParcel(tx, orderId, input, operator));
 }
@@ -246,6 +247,44 @@ describe('authenticated carrier notices', () => {
     }]);
   });
 
+  it('observes a true partial receipt when the last carrier exception is withdrawn', async () => {
+    await seedParticipants();
+    const first=await orderedPurchase('test-carrier-final-first',2);
+    const second=await orderedPurchase('test-carrier-final-second');
+    const tracking='TEST-PARTIAL-RECEIPT-ONE-WAYBILL';
+    const a=await dispatch(first,tracking,'supplier_to_customer',evidence('original-first-dispatch'),2);
+    const secondDispatch=evidence('second-actually-departed-earlier');
+    const event=(input:object)=>prisma.$transaction(tx=>recordParcelEvent(tx,first.orderId,a.id,input,operator));
+    const signed={ requestId:'one-original-true-receipt',kind:'customer_delivery',...evidence('original-signature'),
+      description:'合成实际签收一件',lines:[{parcelLineId:a.lines[0].id,quantity:1}] };
+    await event(signed);
+    const held=await event({requestId:'staff-inquiry',kind:'exception',...evidence('staff-open'),description:'合成实际待核短少'});
+    const own=held.events.find(row=>row.kind==='exception')!;
+    const report=notice('one-verified-provisional-carrier-exception',tracking,'exception');
+    const provisional=await send(report);
+    const raw=await findEvent(provisional.id);
+    expect(raw).toMatchObject({parcelId:a.id,status:'awaiting_resolution'});
+    await event({requestId:'staff-one-lost',kind:'confirm_shortfall',...evidence('confirmed-loss'),exceptionId:own.id,
+      description:'双方确认原运单另一件实际丢失',supplierReference:'TEST-SELLER-LOSS',supplierSha256:'a'.repeat(64),
+      customerReference:'TEST-BUYER-LOSS',customerSha256:'b'.repeat(64),
+      lines:[{parcelLineId:a.lines[0].id,quantity:1,outcome:'loss'}]});
+    const before=await prisma.shipment.findUniqueOrThrow({where:{id:a.shipmentId!}});
+    expect(before).toMatchObject({status:'shipped',deliveredAt:null});
+    const receivables=await prisma.accountReceivable.findMany({orderBy:{orderId:'asc'}});
+    const b=await dispatch(second,tracking,'supplier_to_customer',secondDispatch);
+    const state=await prisma.fulfillmentParcel.findUniqueOrThrow({where:{id:a.id}});
+    expect(state.status).toBe('shortfall');
+    const original=await findEvent(provisional.id);
+    expect(original).toMatchObject({parcelId:null,status:'pending',details:raw.details,contentHash:raw.contentHash});
+    const result=await prisma.shipment.findUniqueOrThrow({where:{id:a.shipmentId!}});
+    expect(result).toMatchObject({status:'delivered',deliveredAt:new Date(signed.occurredAt)});
+    expect(await prisma.shipment.findUnique({where:{id:b.shipmentId!}})).toMatchObject({status:'shipped',deliveredAt:null});
+    expect(await prisma.order.findUnique({where:{id:first.orderId}})).toMatchObject({status:'partially_shipped'});
+    expect(await prisma.accountReceivable.findMany({orderBy:{orderId:'asc'}})).toEqual(receivables);
+    await send(report);
+    expect(await prisma.fulfillmentEvent.count({where:{parcelId:a.id,kind:'carrier_match_withdrawn'}})).toBe(1);
+  });
+
   it('withdraws an earlier provisional match when a second matching parcel is recorded late', async () => {
     await seedParticipants();
     const first = await orderedPurchase('test-carrier-late-first');
@@ -261,6 +300,7 @@ describe('authenticated carrier notices', () => {
     const b = await dispatch(second,tracking,'supplier_to_customer',secondDispatch);
     expect(await findEvent(original.id)).toMatchObject({parcelId:null,status:'pending',details:signed.details,
       reference:signed.reference,evidenceSha256:signed.evidenceSha256,contentHash:signed.contentHash});
+    expect(await prisma.shipment.findUnique({where:{id:a.shipmentId!}})).toMatchObject({status:'shipped',deliveredAt:null});
     const firstView = await prisma.$transaction(tx=>fulfillmentWorkspace(tx,first.orderId));
     expect(firstView.parcels[0]).toMatchObject({id:a.id,status:'dispatched',events:[
       expect.objectContaining({kind:'dispatch'}),expect.objectContaining({kind:'carrier_auto_match'}),expect.objectContaining({kind:'carrier_match_withdrawn'}),

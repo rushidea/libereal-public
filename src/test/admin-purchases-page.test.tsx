@@ -72,7 +72,7 @@ function makeWorkspace(status?: Purchase['status'], lineChanges: Partial<Line> =
     eligibility: { eligible: true, reason: null, basis: { acceptanceId: 'test-acceptance', receivableId: 'test-receivable',
       reserveId: 'test-credit-reserve', amount: 250, mode: 'credit', payment, planEvidenceId: null } },
     lines: [line], orders: purchase ? [purchase] : [], activities: [],
-    fulfillment: { version, targets: [], delivered: [], historicalDelivered: [], supplierDispatched: [], shortfalls: [], freeResends: [], inconsistent: [], ledger: [] },
+    fulfillment: { version, targets: [], delivered: [], historicalDelivered: [], supplierDispatched: [], shortfalls: [], freeResends: [], parcelLinesWithPriorHoldTransfer: [], replacementsWithPriorHoldTransfer: [], inconsistent: [], ledger: [] },
   };
 }
 
@@ -163,6 +163,48 @@ describe('supplier purchasing page', () => {
     expect(posts[0]).toMatchObject({action:'resolve_change',outcome:'shortfall',dispositions:[{
       orderItemId,quantity:1,shortfallId:loss.resolutionId,shortfallDecision:'free_resend',
     }]});
+  });
+
+  it('offers only the unused part of an existing free resend and identifies its approval in the preview', async () => {
+    const workspace = makeWorkspace('on_hold');
+    workspace.orders[0].orderedBefore = true;
+    const shortfallId = 'TEST-LOSS-ALREADY-ASSIGNED';
+    const approvalId = 'TEST-ORIGINAL-FREE-APPROVAL';
+    const authorizedAt = '2031-04-15T00:00:00.000Z';
+    workspace.fulfillment.shortfalls = [{resolutionId:shortfallId,purchaseOrderId:purchaseId,orderItemId,route:'supplier_to_customer',
+      originalContract:true,quantity:2,available:0,reference:'TEST-ORIGINAL-LOST-WAYBILL',occurredAt:authorizedAt,independentlyReplaced:0}];
+    workspace.fulfillment.freeResends = [{approvalId,purchaseOrderId:purchaseId,orderItemId,shortfallId,authorizedAt,kind:'free_resend',
+      quantity:2,dispatched:1,redirected:0,available:1,originalHoldAlreadyMoved:true,revisesResendApprovalId:undefined}];
+    const posts = mockWorkspace(workspace,['purchases.read','purchases.approve'],body=>{
+      const result = preview(body,workspace);
+      const operation = {...result.preview.snapshot.operation,dispositions:[{orderItemId,quantity:1,outcome:'cancel',shortfallId,
+        shortfallDecision:'change_contract',revisesResendApprovalId:approvalId,
+        priorResend:{authorized:2,dispatched:1,redirected:0,available:1}}]};
+      return body.stage === 'confirm' ? Response.json({workspace})
+        : Response.json({preview:{...result.preview,snapshot:{...result.preview.snapshot,operation}}});
+    });
+    render(<PurchaseManager initialOrder={orderId}/>);
+    fireEvent.click(await screen.findByRole('button',{name:'回填协调结果'}));
+    fill('协调结果','shortfall');
+    expect(screen.getByRole('option',{name:/免费补发已发 1.*可改办 1/})).toBeInTheDocument();
+    fill('已核实的物流短失',approvalId);
+    expect(screen.queryByRole('option',{name:/供方同意免费重发/})).not.toBeInTheDocument();
+    expect(screen.getByLabelText('本次受影响数量')).toHaveAttribute('max','1');
+    fill('双方书面决定','change_contract');
+    fill('本次受影响数量','1');
+    fill('人工与供应商协调的书面依据','TEST-NEW-SUPPLIER-DECISION');
+    fill('客户对方案的回复依据','TEST-NEW-CUSTOMER-CONSENT');
+    fill('供方书面回复摘要','e'.repeat(64));
+    fill('客户书面回复摘要','f'.repeat(64));
+    fill('双方确认的具体结果','双方同意变更未发的一件。');
+    fireEvent.click(screen.getByRole('button',{name:'查看完整预览'}));
+    const panel = await screen.findByRole('region',{name:'操作预览'});
+    expect(panel).toHaveTextContent(/原免费批准.*核准 2.*本次改办 1/);
+    expect(posts[0]).toMatchObject({stage:'preview',dispositions:[{orderItemId,shortfallId,
+      revisesResendApprovalId:approvalId,quantity:1,shortfallDecision:'change_contract'}]});
+    fireEvent.click(within(panel).getByRole('button',{name:/确认/}));
+    await waitFor(()=>expect(posts[1]).toMatchObject({stage:'confirm',version,actionHash,
+      requestId:posts[0].requestId,dispositions:posts[0].dispositions}));
   });
 
   it('finds the customer order, preserves missing terms, and keeps customer conditions out of supplier fields', async () => {
