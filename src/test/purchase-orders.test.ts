@@ -260,43 +260,79 @@ describe('supplier commitments and customer fulfilment stay bound to actual evid
     await expect(startReview(recipient.id, bankProof(tradeNo))).rejects.toThrow(/原生流水.*归属原订单/);
   });
 
-  it('requires new customer consent before materially revising an existing replacement draft', async () => {
+  it.each([false,true])('reapproves separate and repeat draft revisions by row, with an unnumbered first approval = %s', async historicalFirst => {
     const order = await seedOrder('test-reverify-substitute-customer', { quantities:[2] });
     const [item] = order.orderItems;
     await acceptAsMerchant(order.id);
     const [draft] = (await saveLine(await readWorkspace(order.id),0,terms(2))).orders;
     const [approved] = (await submit(order.id,draft,{action:'approve',requestId:'material-original-approve'})).orders;
     const [ordered] = (await register(order.id,approved,'material-original-register')).orders;
-    const [held] = (await hold(order.id,ordered,'material-original-review')).orders;
-    const origin = await submit(order.id,held,{
-      ...written,action:'resolve_change',requestId:'approve-old-customer-alternate',outcome:'replacement',
-      dispositions:[{orderItemId:item.id,quantity:1,outcome:'replace',replacement:{
-        name:'合成替代商品',brand:'合成替代品牌',catalogNumber:'TEST-MATERIAL-ORIGINAL-ALTERNATE',spec:'合成规格',unit:'件',
-        terms:terms(1,{sourceReference:'TEST-MATERIAL-ORIGINAL-ALTERNATE-QUOTE',sourceSha256:pricingContentHash('original-replacement-quote')}),
-      }}],
-    });
-    const alternate = origin.orders.find(row=>row.lines.some(line=>line.fromPurchaseOrderId===ordered.id))!;
-    const review = (await hold(order.id,alternate,'new-supplier-terms')).orders.find(row=>row.id===alternate.id)!;
-    const line = review.lines[0];
-    const changed = {...line.terms,unitPriceCents:2000,linePayableCents:2000,sourceReference:'TEST-NEW-REPLACEMENT-QUOTE',
-      sourceSha256:pricingContentHash('new-replacement-price')};
-    const request = {
-      orderId:order.id,purchaseOrderId:alternate.id,version:review.version,action:'resolve_change' as const,
-      requestId:'accept-new-replacement-price',outcome:'revised_terms' as const,supplierReference:'TEST-REPLACEMENT-NEW-SUPPLIER-TERMS',
-      customerReference:'TEST-REPLACEMENT-NEW-CUSTOMER-DECISION',description:'新价格只经新书面同意后提交重新批准。',
-      revisedTerms:[{orderItemId:item.id,terms:changed}],
-    };
-    await expect(prisma.$transaction(tx=>previewPurchaseAction(tx,request,preparer))).rejects.toThrow(/替代条件变更后客户同意/);
-    await expect(prisma.$transaction(tx=>previewPurchaseAction(tx,{...request,customerSha256:written.customerSha256},preparer)))
-      .rejects.toThrow(/客户新的书面同意/);
+    const alternates = [];
+    for (const tag of ['A','B']) {
+      const original = (await readWorkspace(order.id)).orders.find(row=>row.id===ordered.id)!;
+      const held = (await hold(order.id,original,'material-original-review-'+tag)).orders.find(row=>row.id===ordered.id)!;
+      const state = await submit(order.id,held,{
+        ...written,action:'resolve_change',requestId:'approve-original-alternate-'+tag,outcome:'replacement',
+        supplierSha256:pricingContentHash({tag,role:'original supplier'}),customerSha256:pricingContentHash({tag,role:'original customer'}),
+        dispositions:[{orderItemId:item.id,quantity:1,outcome:'replace',replacement:{
+          name:'合成替代商品 '+tag,brand:'合成替代品牌',catalogNumber:'TEST-MATERIAL-ORIGINAL-ALTERNATE-'+tag,spec:'合成规格',unit:'件',
+          terms:terms(1,{sourceReference:'TEST-MATERIAL-ORIGINAL-ALTERNATE-QUOTE-'+tag,sourceSha256:pricingContentHash({tag,proof:'original replacement quote'})}),
+        }}],
+      });
+      alternates.push(state.orders.find(row=>row.lines[0].source.catalogNumber==='TEST-MATERIAL-ORIGINAL-ALTERNATE-'+tag)!);
+    }
 
-    const actual = {...request,customerSha256:pricingContentHash('actual-customer-reacceptance-of-alternative')};
-    const preview = await prisma.$transaction(tx=>previewPurchaseAction(tx,actual,preparer));
-    const amended = await prisma.$transaction(tx=>applyPurchaseAction(tx,{...actual,actionHash:preview.actionHash},preparer));
-    const after = amended.orders.find(row=>row.id===alternate.id)!;
-    expect(after).toMatchObject({status:'draft',approvedHash:null,totalCents:2000});
-    expect(amended.activities.at(-1)?.detail.snapshot).toMatchObject({operation:{customerSha256:actual.customerSha256}});
-    await submit(order.id,after,{action:'approve',requestId:'independent-reapprove-new-price'});
+    const customerSha256 = pricingContentHash('customer-signed-three-revised-alternative-rows');
+    let old: { id: string; detail: string } | undefined;
+    for (const [index,alternate] of [alternates[0],alternates[1],alternates[0]].entries()) {
+      const current = (await readWorkspace(order.id)).orders.find(row=>row.id===alternate.id)!;
+      const review = (await hold(order.id,current,'new-supplier-terms-'+index)).orders.find(row=>row.id===alternate.id)!;
+      const line = review.lines[0];
+      const amount = 2000+index*100;
+      const changed = {...line.terms,unitPriceCents:amount,linePayableCents:amount,sourceReference:'TEST-NEW-REPLACEMENT-QUOTE-'+index,
+        sourceSha256:pricingContentHash({index,proof:'new replacement price'})};
+      const request = {
+        orderId:order.id,purchaseOrderId:alternate.id,version:review.version,action:'resolve_change' as const,
+        requestId:'accept-new-replacement-price-'+index,outcome:'revised_terms' as const,supplierReference:'TEST-REPLACEMENT-NEW-SUPPLIER-TERMS-'+index,
+        customerReference:'TEST-REPLACEMENT-NEW-CUSTOMER-DECISION',description:'按客户各行新的书面决定重新确认价格。',
+        revisedTerms:[{orderItemId:item.id,terms:changed}],
+      };
+      await expect(prisma.$transaction(tx=>previewPurchaseAction(tx,request,preparer))).rejects.toThrow(/替代条件变更后客户同意/);
+      if (index===0) {
+        await expect(prisma.$transaction(tx=>previewPurchaseAction(tx,{...request,
+          customerSha256:pricingContentHash({tag:'A',role:'original customer'})},preparer))).rejects.toThrow(/客户新的书面同意/);
+      }
+      const legacy = old && index===1 ? {customerLegacyLocations:[{activityId:old.id,orderItemId:item.id,row:5,quantity:1}]} : {};
+      if (index>0) {
+        await expect(prisma.$transaction(tx=>previewPurchaseAction(tx,{...request,customerSha256,
+          decisionDocumentLines:[{orderItemId:item.id,customerDocumentRow:5,...legacy}]},preparer))).rejects.toThrow(/商业决定、供方或实质条件已变化/);
+      }
+      const row = 5+index;
+      const actual = {...request,customerSha256,decisionDocumentLines:[{orderItemId:item.id,customerDocumentRow:row,...legacy}]};
+      if (old && index===1) {
+        await expect(prisma.$transaction(tx=>previewPurchaseAction(tx,{...actual,
+          decisionDocumentLines:[{orderItemId:item.id,customerDocumentRow:row}]},preparer))).rejects.toThrow(/未定位的旧批准/);
+      }
+      const preview = await prisma.$transaction(tx=>previewPurchaseAction(tx,actual,preparer));
+      const amended = await prisma.$transaction(tx=>applyPurchaseAction(tx,{...actual,actionHash:preview.actionHash},preparer));
+      const after = amended.orders.find(row=>row.id===alternate.id)!;
+      expect(after).toMatchObject({status:'draft',approvedHash:null,totalCents:amount});
+      expect(amended.activities.at(-1)?.detail.snapshot).toMatchObject({operation:{customerSha256,decisionDocuments:[
+        {row,role:'customer',authority:{purpose:'reconfirm_terms',alternate:{unitPriceCents:amount}},
+          allocations:[{orderId:order.id,purchaseOrderId:after.id,orderItemId:item.id,quantity:1}]},
+      ]}});
+      const signed = await submit(order.id,after,{action:'approve',requestId:'independent-reapprove-new-price-'+index});
+      expect(signed.orders.find(row=>row.id===alternate.id)).toMatchObject({status:'approved',totalCents:amount});
+      if (historicalFirst && index===0) {
+        const stored = await prisma.purchaseActivity.findUniqueOrThrow({where:{id:amended.activities.at(-1)!.id}});
+        const legacyDetail = JSON.parse(stored.detail);
+        delete legacyDetail.snapshot.operation.decisionDocuments; // A version that did not store the row for draft revisions.
+        old = {id:stored.id,detail:JSON.stringify(legacyDetail)};
+        await prisma.purchaseActivity.update({where:{id:old.id},data:{detail:old.detail}});
+      } else if (old) {
+        expect(await prisma.purchaseActivity.findUnique({where:{id:old.id},select:{id:true,detail:true}})).toEqual(old);
+      }
+    }
   });
 
   it('counts live sibling and nested replacement quantities together and rechecks new shipments before confirmation', async () => {
@@ -1146,7 +1182,8 @@ describe('purchase order approval and execution records', () => {
     });
     const [priceHold] = (await readWorkspace(order.id)).orders;
     const written = { supplierReference: 'TEST-SUPPLIER-REVISED-TERMS', customerReference: 'TEST-CUSTOMER-REVISED-TERMS',
-      supplierSha256: 'a'.repeat(64), customerSha256: 'b'.repeat(64), description: '合成双方书面同意另行替代采购。' };
+      supplierSha256: pricingContentHash('supplier-agrees-to-new-alternate'), customerSha256: pricingContentHash('customer-agrees-to-new-alternate'),
+      description: '合成双方书面同意另行替代采购。' };
     await expect(submit(order.id, priceHold, {
       action: 'resolve_change', requestId: 'test-disallow-in-place', outcome: 'revised_terms', ...written,
       revisedTerms: [{ orderItemId: order.orderItems[0].id, terms: terms(2, { unitPriceCents: 1750, linePayableCents: 3500 }) }],
@@ -1670,6 +1707,8 @@ describe('recorded customer acceptance and per-order funding', () => {
       await submit(order.id, withHold.orders.find(row => row.id === first.id)!, {
         action: 'resolve_change', requestId: 'test-supplier-hold-release', outcome: 'original_terms',
         supplierReference: 'TEST-ORIGINAL-SUPPLIER-REPLY', customerReference: 'TEST-ORIGINAL-CUSTOMER-REPLY',
+        supplierSha256: pricingContentHash('supplier-confirmed-continuing-this-approved-order'),
+        customerSha256: pricingContentHash('customer-confirmed-continuing-this-approved-order'),
         description: '双方确认按原条款继续。',
       });
 

@@ -313,6 +313,34 @@ describe('admin purchase endpoint', () => {
     ]}}}});
   });
 
+  it('keeps numbered continuation evidence bound to its documented purpose and normal approval permission', async () => {
+    await startActualSupply(orderId,'numbered-continue-original');
+    await noteChange(orderId,'numbered-continuation-review');
+    signIn(staff.approver);
+    const digest = {supplierSha256:pricingContentHash('original-continue-supplier-only'),
+      customerSha256:pricingContentHash('original-continue-customer-only')};
+    const common = {action:'resolve_change' as const,supplierReference:'TEST-ORIGINAL-SUPPLIER-CONTINUE',
+      customerReference:'TEST-ORIGINAL-CUSTOMER-CONTINUE',description:'两件原商品按书面约定继续。',...digest};
+    const lines = {orderItemId,supplierDocumentRow:8,customerDocumentRow:12};
+    const consent = await previewAction({...common,outcome:'original_terms',requestId:'continue-with-form-rows',decisionDocumentLines:[lines]});
+    await expectJson(await confirm(consent),403);
+    const {workspace} = await expectJson(await confirm(consent,await grant(staff.approver)),200);
+    expect(workspace.activities.at(-1)).toMatchObject({actorId:staff.approver,detail:{authorization:{permission:'purchases.approve'},
+      snapshot:{operation:{decisionDocuments:[
+        {role:'supplier',row:8,authority:{purpose:'continue_contract'},allocations:[{orderItemId,quantity:2}]},
+        {role:'customer',row:12,authority:{purpose:'continue_contract'}},
+      ]}}}});
+    await noteChange(orderId,'do-not-reuse-original-purpose');
+    const po = await currentPurchase();
+    const wrong = {...common,outcome:'declined',requestId:'reuse-continue-as-cancel',orderId,purchaseOrderId:po.id,version:po.version,
+      dispositions:[{...lines,outcome:'cancel',quantity:1}],stage:'preview'};
+    await expectJson(await post(wrong),403);
+    signIn(staff.approver);
+    const rejected = await expectJson(await post(wrong),409);
+    expect(rejected.error).toMatch(/商业决定、供方或实质条件已变化/);
+    expect(await prisma.purchaseActivity.count({where:{orderId,action:'resolve_change'}})).toBe(1);
+  });
+
   it('locates the prior use from an older unnumbered approval without treating a confirmed whole-file use as unlocated', async () => {
     await startActualSupply(orderId,'old-location');
     await noteChange(orderId,'old-commercial-change');

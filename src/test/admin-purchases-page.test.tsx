@@ -222,6 +222,40 @@ describe('supplier purchasing page', () => {
       requestId:posts[0].requestId,dispositions:posts[0].dispositions}));
   });
 
+  it('uses numbered document scopes when the purchase page records agreement to continue an original contract', async () => {
+    const workspace = makeWorkspace('on_hold');
+    workspace.orders[0].orderedBefore = true;
+    const posts = mockWorkspace(workspace,['purchases.read','purchases.approve'],body=>Response.json(preview(body,workspace)));
+    render(<PurchaseManager initialOrder={orderId}/>);
+    fireEvent.click(await screen.findByRole('button',{name:'回填协调结果'}));
+    expect(screen.getByLabelText('协调结果')).toHaveValue('original_terms');
+    fill('人工与供应商协调的书面依据','TEST-SUPPLIER-CONTINUATION-FILE');
+    fill('客户对方案的回复依据','TEST-CUSTOMER-CONTINUATION-FILE');
+    fill('供方书面回复摘要','d'.repeat(64));
+    fill('客户书面回复摘要','e'.repeat(64));
+    fill('双方确认的具体结果','续办原采购合同的两件商品。');
+    fill('供方决定原件行号','8');
+    fill('客户同意原件行号','12');
+    fireEvent.click(screen.getByRole('button',{name:'查看完整预览'}));
+    await screen.findByRole('region',{name:'操作预览'});
+    expect(posts[0]).toMatchObject({outcome:'original_terms',decisionDocumentLines:[{
+      orderItemId,supplierDocumentRow:8,customerDocumentRow:12,
+    }]});
+  });
+
+  it('offers customer document row and coverage on the existing replacement revision form', async () => {
+    const workspace = makeWorkspace('on_hold',{fromPurchaseOrderId:'TEST-OLD-ORIGINAL-PURCHASE'});
+    mockWorkspace(workspace,['purchases.read','purchases.write']);
+    render(<PurchaseManager initialOrder={orderId}/>);
+    fireEvent.click(await screen.findByRole('button',{name:'回填协调结果'}));
+    fill('协调结果','revised_terms');
+    expect(screen.getByLabelText('替代条件变更后客户同意的书证摘要')).toBeInTheDocument();
+    fill('客户同意原件行号','6');
+    fireEvent.click(screen.getByText('核对客户书证覆盖范围'));
+    fireEvent.click(screen.getByRole('button',{name:'填写客户书证覆盖的采购行及总量'}));
+    expect(screen.getByLabelText('客户书证核准总量')).toHaveAttribute('max','2');
+  });
+
   it('adds only the two evidenced shortfalls across purchase lines to the document scope', async () => {
     const workspace = makeWorkspace('on_hold');
     const [first] = workspace.orders;
