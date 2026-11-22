@@ -5,6 +5,7 @@ export const ADMIN_PERMISSION_KEYS = [
   'inventory.read', 'inventory.write',
   'inquiries.read', 'inquiries.write',
   'orders.read', 'orders.write',
+  'purchases.read', 'purchases.write', 'purchases.approve', 'purchases.pay',
   'customers.read', 'customers.write',
   'organizations.read', 'organizations.write',
   'content.read', 'content.write',
@@ -28,6 +29,7 @@ export const ADMIN_MFA_REQUIRED_PERMISSIONS = new Set<AdminPermissionKey>([
   'pricing.write',
   'inventory.write',
   'orders.write',
+  'purchases.approve', 'purchases.pay',
   'points.write',
   'finance.write',
   'roles.manage',
@@ -38,6 +40,18 @@ export function requiresAdminMfa(permission?: AdminPermissionKey): boolean {
 }
 
 export const ADMIN_ROLE_DEFINITIONS = {
+  purchase_operator: {
+    name: '采购经办', description: '采购资料、订购结果和供应商协调',
+    permissions: ['admin.access','purchases.read','purchases.write'],
+  },
+  purchase_approver: {
+    name: '采购审批', description: '按具体版本审核供应商采购单',
+    permissions: ['admin.access','purchases.read','purchases.approve'],
+  },
+  purchase_finance: {
+    name: '采购财务', description: '核实供应商付款条件与实际凭证',
+    permissions: ['admin.access','purchases.read','purchases.pay'],
+  },
   super_admin: {
     name: '超级管理员',
     description: '全部管理能力',

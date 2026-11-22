@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { prepareOrderPurchases } from '@/lib/purchase-orders';
 import { prisma } from '@/lib/prisma';
 import { assertOrderPricingResolved, closeOrderRepricing } from '@/lib/order-catalog-repricing';
 import { requireActiveSession, requireAdmin } from '@/lib/session';
@@ -323,6 +324,7 @@ export async function PATCH(
         if (acceptance) {
           if (isPostDeliveryPaymentMethod(acceptance.order.paymentMethod)) await reserveOrderCredit(tx, id, user.id);
           await reserveOrderInventory(tx, id, user.id);
+          await prepareOrderPurchases(tx, id, user);
           await tx.notification.create({
             data: {
               email: acceptance.order.email, role: 'customer', type: 'order_status_changed',

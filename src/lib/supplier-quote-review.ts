@@ -130,7 +130,7 @@ export type SupplierQuoteReply = {
   customerUnitPrice: number; currency: 'CNY'; taxBasis: 'included' | 'excluded';
   leadTime: string; validUntil: string; conditions: string; customerConditions: string;
 };
-export function validateSupplierQuoteReply(value: unknown): SupplierQuoteReply {
+export function validateSupplierQuoteReply(value: unknown, asOf = new Date()): SupplierQuoteReply {
   if (!value || typeof value !== 'object' || Array.isArray(value)) fail('SUPPLIER_QUOTE_REPLY_INVALID');
   const raw = value as Record<string, unknown>;
   const reply = Object.fromEntries(['supplier', 'channel', 'reference', 'leadTime', 'conditions', 'customerConditions', 'validUntil']
@@ -143,7 +143,7 @@ export function validateSupplierQuoteReply(value: unknown): SupplierQuoteReply {
       || Math.abs(Math.round(amount * 100) - amount * 100) > 0.000001) fail('SUPPLIER_QUOTE_REPLY_INVALID');
   }
   const validUntil = new Date(reply.validUntil);
-  if (!Number.isFinite(validUntil.getTime()) || validUntil <= new Date()) fail('SUPPLIER_QUOTE_REPLY_EXPIRED');
+  if (!Number.isFinite(asOf.getTime()) || !Number.isFinite(validUntil.getTime()) || validUntil <= asOf) fail('SUPPLIER_QUOTE_REPLY_EXPIRED');
   return { ...reply, validUntil: validUntil.toISOString(), currency: 'CNY', taxBasis: raw.taxBasis as SupplierQuoteReply['taxBasis'],
     supplierUnitPrice: raw.supplierUnitPrice as number, customerUnitPrice: raw.customerUnitPrice as number };
 }

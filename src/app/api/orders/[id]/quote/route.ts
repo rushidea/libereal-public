@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { prepareOrderPurchases } from '@/lib/purchase-orders';
 import { prisma } from '@/lib/prisma';
 import { assertOrderPricingResolved } from '@/lib/order-catalog-repricing';
 import { authorizeAdminOrderMutation, consumeAdminOrderStepUp, extractStepUpToken } from '@/lib/admin-order-step-up';
@@ -82,6 +83,7 @@ export async function POST(
         });
         if (isPostDeliveryPaymentMethod(current.paymentMethod)) await reserveOrderCredit(tx, id, user.id);
         await reserveOrderInventory(tx, id, user.id);
+        await prepareOrderPurchases(tx, id, user);
       }
       const title = shouldConfirm ? '订单确认' : '报价通知';
       const message = shouldConfirm ? '订单已确认，请查看订单详情。' : '报价已发送，请在订单详情中完成支付宝付款。';

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { prepareOrderPurchases } from '@/lib/purchase-orders';
 import { prisma } from '@/lib/prisma';
 import { assertOrderPricingResolved, closeOrderRepricing, jsonObject, pendingOrderRepricing } from '@/lib/order-catalog-repricing';
 import type { Prisma } from '@prisma/client';
@@ -193,6 +194,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       if (acceptance) {
         if (isPostDeliveryPaymentMethod(acceptance.order.paymentMethod)) await reserveOrderCredit(tx, id, admin.id);
         await reserveOrderInventory(tx, id, admin.id);
+        await prepareOrderPurchases(tx, id, admin);
       }
       if (isInactiveOrderStatus(status) && !isInactiveOrderStatus(existing.status)) {
         await closeOrderRepricing(tx, id, { id: admin.id, email: admin.email });
