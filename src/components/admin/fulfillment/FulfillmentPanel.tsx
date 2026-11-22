@@ -19,7 +19,7 @@ const labels: Record<string,string> = {
   inventory:'入仓归属', identity:'核对依据', approved:'已批准的商品', decisions:'双方确认', resolutions:'实物短失或退回', disposition:'本次实物处置',
   receivedAt:'实际入仓时间', history:'历史状态记录', priorShippedQty:'此前记录的已发数量', historicalAttributionId:'原核对记录',
   holdReview:'发运偏差核对',unreleased:'发运时未放行的数量',incidentIds:'当时相关供货事项',incidentId:'原暂停事项',
-  status:'办理状态',originalIncidentId:'发运时的原事项',resolutionId:'实际退回记录',holdAssignments:'实发暂停份额',holdDecisions:'逐项处理结果',holdResponsibility:'处理责任人',outcome:'实际处理结果',holdSource:'实际货物来源',
+  status:'办理状态',originalIncidentId:'发运时的原事项',resolutionId:'实际短失或退回记录',shortfallEvidence:'原短失凭据',holdAssignments:'实发暂停份额',holdDecisions:'逐项处理结果',holdResponsibility:'处理责任人',outcome:'实际处理结果',holdSource:'实际货物来源',
   responsibility:'责任人',supplierReference:'供方书面核对',customerReference:'客户书面回复',
   resendApprovalId:'免费重发批准', resend:'原免费重发依据', allocation:'原出库流水归属', shipmentItemId:'原运单商品行',
 };
@@ -42,7 +42,11 @@ function reviewedHold(raw: string) {
   } catch { return null; }
 }
 function progressDetail(raw: string) {
-  try { const data = JSON.parse(raw); return typeof data.description === 'string' ? data.description : ''; } catch { return ''; }
+  try {
+    const data=JSON.parse(raw);
+    return [typeof data.description==='string' ? data.description : '',
+      typeof data.holdResponsibility==='string' ? '责任人 '+data.holdResponsibility : ''].filter(Boolean).join(' · ');
+  } catch { return ''; }
 }
 
 export default function FulfillmentPanel({ orderId, canWrite, stepUp, onUpdated }: {

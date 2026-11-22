@@ -277,22 +277,33 @@ export function HoldReviewForm({ parcel,hold,view,capabilities,submit,busy }: {
 }) {
   const line=parcel.lines.find(row=>row.id===hold.parcelLineId);
   const inbound=parcel.route==='supplier_to_libereal';
-  const attempts=line?.resolutions.filter(row=>row.kind==='return' && row.quantity>hold.decisions.filter(result=>result.resolutionId===row.id)
-    .reduce((sum,result)=>sum+result.quantity,0)) ?? [];
+  const resolutions=line?.resolutions.flatMap(row=>{
+    const recorded=parcel.events.find(event=>event.id===row.eventId && event.kind==='confirm_shortfall' && event.status==='applied');
+    const available=row.quantity-hold.decisions.filter(result=>result.resolutionId===row.id).reduce((sum,result)=>sum+result.quantity,0);
+    return recorded && available>0 ? [{...row,available,reference:recorded.reference ?? row.id}] : [];
+  }) ?? [];
+  const returns=resolutions.filter(row=>row.kind==='return');
+  const shortfalls=resolutions.filter(row=>row.kind==='loss' || row.kind==='shortage');
   const lots=line?.receipts.filter(row=>row.remaining>0) ?? [];
   const inactive=['cancelled','closed'].includes(view.order.status);
+  const continued=hold.decisions.filter(row=>row.outcome==='continue').reduce((sum,row)=>sum+row.quantity,0);
+  const canContinue=inbound ? !inactive && lots.length>0 : (line?.balance.shipped ?? 0)>continued;
+  const outcomeLabels: Record<string,string>={...statusLabels,return:'核对已实际退回的份额',shortfall:'核对已登记的实际短少或丢失'};
   const options=hold.assignments ? [
-    ...(!inbound || (!inactive && lots.length) ? ['continue'] : []),
+    ...(canContinue ? ['continue'] : []),
     ...(inbound && inactive && capabilities.warehouse && lots.length ? ['release_to_stock'] : []),
-    ...(attempts.length ? ['return'] : []),
+    ...(returns.length ? ['return'] : []),
+    ...(shortfalls.length ? ['shortfall'] : []),
   ] : ['identify'];
   const [selected,setSelected]=useState(options[0]);
   if (!line || hold.assignments && !hold.pending) return null;
   const kind=options.includes(selected) ? selected : options[0];
   const label=view.order.orderItems.find(row=>row.id===line.orderItemId)?.name ?? line.orderItemId;
+  const sourceRecords=kind==='return' ? returns : kind==='shortfall' ? shortfalls : [];
+  const writtenTreatment=kind==='continue' || kind==='return' || kind==='release_to_stock';
   return <details className="rounded border border-amber-300 p-2">
     <summary className="cursor-pointer text-sm font-medium text-amber-900">{label} · {hold.assignments ? `误发待处理 ${hold.pending} 件` : '原暂停份额待核实'}</summary>
-    {!kind ? <p className="mt-2 text-sm">请先登记实际入仓批次或退回凭据，再核对书面处理结果。</p> : <form className="mt-2 space-y-3" onSubmit={event=>{
+    {!kind ? <p className="mt-2 text-sm">请先登记实际入仓、短失或退回，再核对本次误发的处理结果。</p> : <form className="mt-2 space-y-3" onSubmit={event=>{
       event.preventDefault();
       const form=new FormData(event.currentTarget);
       const identification=kind==='identify';
@@ -301,13 +312,13 @@ export function HoldReviewForm({ parcel,hold,view,capabilities,submit,busy }: {
       submit('record_event',{...evidence(form),parcelId:parcel.id,kind:'review_dispatch_hold',description:read(form,'description'),
         holdResponsibility:read(form,'holdResponsibility'),lines:[{parcelLineId:line.id,outcome:kind,
           quantity:identification ? hold.quantity : Number(read(form,'quantity')),incidentId:read(form,'incidentId') || undefined,
-          receiptId:read(form,'decisionReceipt') || undefined,resolutionId:read(form,'decisionReturn') || undefined,holdAssignments}],
-        ...(!identification ? {supplierReference:read(form,'supplierReference'),supplierSha256:read(form,'supplierSha256'),
+          receiptId:read(form,'decisionReceipt') || undefined,resolutionId:read(form,'decisionResolution') || undefined,holdAssignments}],
+        ...(writtenTreatment ? {supplierReference:read(form,'supplierReference'),supplierSha256:read(form,'supplierSha256'),
           customerReference:read(form,'customerReference'),customerSha256:read(form,'customerSha256')} : {}),
       });
     }}>
       <Label title="误发实物处理结果"><select className={inputStyle} value={kind} onChange={e=>setSelected(e.target.value)}>
-        {options.map(value=><option key={value} value={value}>{value==='return' ? '核对已实际退回的份额' : statusLabels[value]}</option>)}
+        {options.map(value=><option key={value} value={value}>{outcomeLabels[value]}</option>)}
       </select></Label>
       {kind==='identify' ? hold.incidentIds.map(id=><Label key={id} title={'原事项所对应的实发数量 · '+id}>
         <input name={'assign-'+id} type="number" min={0} max={hold.quantity} defaultValue={0} className={inputStyle}/>
@@ -316,15 +327,20 @@ export function HoldReviewForm({ parcel,hold,view,capabilities,submit,busy }: {
           {hold.pendingAssignments?.map(part=><option key={part.incidentId} value={part.incidentId}>{part.incidentId} · 待处理 {part.quantity} 件</option>)}
         </select></Label>
         <Label title="本次实际处理数量"><input name="quantity" type="number" min={1} max={hold.pending} className={inputStyle} required/></Label>
-        {kind==='return' ? <Label title="已登记的实际退回"><select name="decisionReturn" className={inputStyle} required>
-          {attempts.map(row=><option key={row.id} value={row.id}>{parcel.events.find(event=>event.id===row.eventId)?.reference ?? row.id} · {row.quantity} 件</option>)}
-        </select></Label> : inbound && <Label title="书证对应的实收批次"><select name="decisionReceipt" className={inputStyle} required>
+        {sourceRecords.length>0 ? <Label title={kind==='return' ? '已登记的实际退回' : '已登记的实际短少或丢失'}>
+          <select name="decisionResolution" className={inputStyle} required>
+            {sourceRecords.map(row=><option key={row.id} value={row.id}>{row.reference} · {statusLabels[row.kind]} · 待核对 {row.available} 件</option>)}
+          </select>
+        </Label> : inbound && <Label title="书证对应的实收批次"><select name="decisionReceipt" className={inputStyle} required>
           {lots.map(row=><option key={row.id} value={row.id}>{row.inventoryBatch.batchNumber} · 实物 {row.remaining} 件</option>)}
         </select></Label>}
-        <Label title="供方书面处理决定"><input name="supplierReference" className={inputStyle} required/></Label>
-        <DocumentDigestField name="supplierSha256" label="供方处理书证摘要" required/>
-        <Label title="客户书面处理决定"><input name="customerReference" className={inputStyle} required/></Label>
-        <DocumentDigestField name="customerSha256" label="客户处理书证摘要" required/>
+        {kind==='shortfall' && <p className="text-sm">本次按原短失记录核对实际数量。仍待决定的采购责任和应付，交由所填责任人按书证继续办理。</p>}
+        {writtenTreatment && <>
+          <Label title="供方书面处理决定"><input name="supplierReference" className={inputStyle} required/></Label>
+          <DocumentDigestField name="supplierSha256" label="供方处理书证摘要" required/>
+          <Label title="客户书面处理决定"><input name="customerReference" className={inputStyle} required/></Label>
+          <DocumentDigestField name="customerSha256" label="客户处理书证摘要" required/>
+        </>}
       </>}
       <Label title="本次核对的责任人"><input name="holdResponsibility" className={inputStyle} required/></Label>
       <Proof explanation="填写原件核对经过和实际结果"/>

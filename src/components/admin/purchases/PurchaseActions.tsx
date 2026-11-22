@@ -422,6 +422,9 @@ export default function PurchaseActions({ orderId, orderStatus, cancellation, po
       {issue.responsibility && <p>待核对环节 {issue.responsibility}</p>}
       {issue.lastReviewedBy && <p>上次核对人 {issue.lastReviewedBy}</p>}
       {issue.factReview && <p>已核对事实 {issue.factReview.reference} · {issue.factReview.description}</p>}
+      {issue.shortfallFollowups?.map(result=><p key={result.activityId}>
+        已核对误发短失 {result.quantity} 件 · {result.reference} · 后续责任人 {result.responsibility} · {result.description}
+      </p>)}
       {issue.outstanding ? <ul className="pl-4">{issue.outstanding.map(row => <li key={incidentQuantityKey(row)}>
         {incidentLineName(row)} · 仍待办理 {row.quantity}
       </li>)}</ul> : <p>原影响范围待具名核对。</p>}
