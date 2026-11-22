@@ -1,6 +1,6 @@
 import { Prisma } from '@prisma/client';
 import { purchaseObject, purchaseOperation } from '@/lib/purchase-activity';
-import { positiveCents, PurchaseError, requiredText } from '@/lib/purchase-terms';
+import { positiveCents, PurchaseError, requiredText, type PurchaseTerms } from '@/lib/purchase-terms';
 import { pricingContentHash } from '@/lib/pricing-adjustment-approval';
 
 type Db = Prisma.TransactionClient;
@@ -9,24 +9,60 @@ type Party = typeof parties[number];
 
 type Subject = { orderId: string; purchaseOrderId: string; orderItemId: string; shortfallId?: string };
 export type DecisionCoverage = Subject & { quantity: number };
+export type LegacyDecisionLocation = { activityId: string; orderItemId: string; row: number; quantity: number };
 export type DecisionDocumentInput = {
   supplierDocumentRow?: number; customerDocumentRow?: number;
   supplierDocumentScope?: DecisionCoverage[]; customerDocumentScope?: DecisionCoverage[];
   supplierRestoreScope?: boolean; customerRestoreScope?: boolean;
+  supplierLegacyLocations?: LegacyDecisionLocation[]; customerLegacyLocations?: LegacyDecisionLocation[];
 };
+type Purpose = 'free_resend' | 'supplier_facts' | 'new_purchase' | 'amend_contract' | 'amend_and_replace' | 'cancel_unshipped' | 'replace_unshipped' | 'reconfirm_terms';
+type DecisionEffect = {
+  orderItemId: string; quantity: number; shortfallId?: string; shortfallDecision?: string; forwardingLossId?: string; outcome: string;
+  replacement?: { terms: PurchaseTerms; source: { brand?: string | null; catalogNumber?: string | null; spec?: string | null; unit?: string | null; quantity: number } } | null;
+};
+
+export function decisionMaterialTerms(replacement: NonNullable<DecisionEffect['replacement']>) {
+  const { source, terms } = replacement;
+  const { supplier,writtenSupplier,payee,unitPriceCents,currency,taxBasis,freightTerms,paymentTerms,leadTime,validUntil,supplierConditions } = terms;
+  let adjustment;
+  if (positiveCents(terms.linePayableCents) && positiveCents(source.quantity) && terms.linePayableCents !== (unitPriceCents ?? 0)*source.quantity) {
+    let a = terms.linePayableCents;
+    let b = source.quantity;
+    while (b) [a,b] = [b,a % b];
+    adjustment = { total: terms.linePayableCents/a, units: source.quantity/a, basis: terms.amountBreakdown };
+  }
+  return { brand: source.brand, catalogNumber: source.catalogNumber, spec: source.spec, unit: source.unit,
+    supplier,writtenSupplier,payee,unitPriceCents,currency,taxBasis,freightTerms,paymentTerms,leadTime,validUntil,supplierConditions,adjustment };
+}
+
+type Authority = { purpose: Purpose; alternate?: ReturnType<typeof decisionMaterialTerms> };
+function commercialAuthority(role: Party, line: DecisionEffect): Authority {
+  let purpose: Purpose;
+  switch (line.shortfallDecision ?? (line.forwardingLossId ? 'new_purchase' : undefined)) {
+    case 'free_resend': purpose = 'free_resend'; break;
+    case 'new_purchase': purpose = role === 'supplier' ? 'supplier_facts' : 'new_purchase'; break;
+    case 'change_contract': purpose = line.replacement ? 'amend_and_replace' : 'amend_contract'; break;
+    default: purpose = line.outcome === 'replace' ? 'replace_unshipped' : 'cancel_unshipped';
+  }
+  return role === 'customer' && line.replacement ? { purpose, alternate: decisionMaterialTerms(line.replacement) } : { purpose };
+}
 type DocumentUse = { role: Party; sha256: string; row?: number; coverage: DecisionCoverage[]; allocations: DecisionCoverage[];
-  scopeConfirmed: boolean };
+  scopeConfirmed: boolean; authority: Authority; legacyLocations?: LegacyDecisionLocation[] };
 type PriorUse = {
   role: Party; sha256: string; row?: number; coverage?: DecisionCoverage[];
-  allocations: DecisionCoverage[]; activityId: string;
+  allocations: DecisionCoverage[]; activityId: string; authority?: Authority; unlocated?: boolean; legacyLocations?: LegacyDecisionLocation[];
 };
-type RequestedUse = Omit<DocumentUse,'coverage' | 'scopeConfirmed'> & { coverage?: DecisionCoverage[]; restore: boolean };
+type RequestedUse = Omit<DocumentUse,'coverage' | 'scopeConfirmed' | 'legacyLocations'>
+  & { coverage?: DecisionCoverage[]; restore: boolean; legacyLocations: LegacyDecisionLocation[] };
 
 const label = (role: Party) => role === 'supplier' ? '供方书证' : '客户书证';
 const digestField = (role: Party) => role === 'supplier' ? 'supplierSha256' : 'customerSha256';
 const rowField = (role: Party) => role === 'supplier' ? 'supplierDocumentRow' : 'customerDocumentRow';
 const scopeField = (role: Party) => role === 'supplier' ? 'supplierDocumentScope' : 'customerDocumentScope';
 const restoreField = (role: Party) => role === 'supplier' ? 'supplierRestoreScope' : 'customerRestoreScope';
+const legacyField = (role: Party) => role === 'supplier' ? 'supplierLegacyLocations' : 'customerLegacyLocations';
+const locationKey = ({activityId,orderItemId}: Pick<LegacyDecisionLocation,'activityId' | 'orderItemId'>) => JSON.stringify([activityId,orderItemId]);
 const subjectKey = ({orderId,purchaseOrderId,orderItemId,shortfallId}: Subject) =>
   JSON.stringify([orderId,purchaseOrderId,orderItemId,shortfallId ?? null]);
 const documentKey = ({role,sha256,row}: Pick<DocumentUse,'role' | 'sha256' | 'row'>) => JSON.stringify([role,sha256,row ?? null]);
@@ -58,8 +94,20 @@ function normalizeCoverage(value: unknown) {
   return coverage;
 }
 
-function sameCoverage(a: DecisionCoverage[], b: DecisionCoverage[]) {
+function sameVersion(a: object, b: object) {
   return pricingContentHash(a) === pricingContentHash(b);
+}
+
+function readLocations(value: unknown): LegacyDecisionLocation[] {
+  if (value === undefined) return [];
+  if (!Array.isArray(value) || !value.length) throw new PurchaseError('请填写旧批准实际对应的原件行',400);
+  return value.map(raw => {
+    const entry = purchaseObject(raw);
+    const row = decisionDocumentRow(entry.row);
+    if (!row || !positiveCents(entry.quantity)) throw new PurchaseError('请核对旧批准实际占用的原件行和数量',400);
+    return { activityId: requiredText(entry.activityId,'旧批准编号'), orderItemId: requiredText(entry.orderItemId,'旧批准的商品行'),
+      row, quantity: entry.quantity };
+  });
 }
 
 async function priorUses(tx: Db, digests: string[]) {
@@ -69,10 +117,20 @@ async function priorUses(tx: Db, digests: string[]) {
         OR json_extract(detail,'$.snapshot.operation.customerSha256') IN (${Prisma.join(digests)})) ORDER BY rowid`;
   return rows.flatMap(record => {
     const operation = purchaseOperation(JSON.parse(record.detail));
-    if (Array.isArray(operation.decisionDocuments)) return (operation.decisionDocuments as DocumentUse[])
-      .map(document => ({ ...document, coverage: document.scopeConfirmed ? document.coverage : undefined, activityId: record.id }));
-    const dispositions = operation.dispositions;
-    if (!Array.isArray(dispositions)) return [];
+    if (!Array.isArray(operation.dispositions)) {
+      return operation.outcome === 'revised_terms' && typeof operation.customerSha256 === 'string'
+        ? [{ role:'customer' as const, sha256:operation.customerSha256, activityId:record.id,
+          authority:{ purpose:'reconfirm_terms' as const }, allocations:[] }]
+        : [];
+    }
+    const dispositions = operation.dispositions as DecisionEffect[];
+    if (Array.isArray(operation.decisionDocuments)) return (operation.decisionDocuments as DocumentUse[]).map(document => {
+      const effects = document.allocations.map(allocation => dispositions.find(line => line.orderItemId === allocation.orderItemId));
+      const first = effects[0] && commercialAuthority(document.role,effects[0]);
+      const inferred = first && effects.every(line => line && sameVersion(first,commercialAuthority(document.role,line))) ? first : undefined;
+      return { ...document, authority: document.authority ?? inferred,
+        coverage: document.scopeConfirmed ? document.coverage : undefined, activityId: record.id };
+    });
     return parties.flatMap(role => {
       const sha256 = operation[digestField(role)];
       if (typeof sha256 !== 'string' || !digests.includes(sha256)) return [];
@@ -81,12 +139,47 @@ async function priorUses(tx: Db, digests: string[]) {
         if (!positiveCents(action.quantity) || typeof action.orderItemId !== 'string') return [];
         const shortfallId = action.shortfallId ?? action.forwardingLossId;
         const row = action[rowField(role)];
-        return [{ role, sha256, ...(positiveCents(row) ? { row } : {}), activityId: record.id,
+        return [{ role, sha256, ...(positiveCents(row) ? { row } : { unlocated: true }), activityId: record.id,
+          authority: commercialAuthority(role,raw as DecisionEffect),
           allocations: [{ orderId: record.orderId, purchaseOrderId: record.purchaseOrderId, orderItemId: action.orderItemId,
             ...(typeof shortfallId === 'string' ? { shortfallId } : {}), quantity: action.quantity }] }];
       });
     });
   }) as PriorUse[];
+}
+
+function locatePriorUses(history: PriorUse[], locations: LegacyDecisionLocation[]) {
+  const found = new Map<string,LegacyDecisionLocation[]>();
+  const add = (entry: LegacyDecisionLocation) => {
+    const key = locationKey(entry);
+    found.set(key,[...(found.get(key) ?? []),entry]);
+  };
+  for (const use of history) for (const entry of use.legacyLocations ?? []) add(entry);
+
+  const recorded = new Map(history.filter(row => row.unlocated).flatMap(use => use.allocations.map(allocation => [
+    locationKey({activityId:use.activityId,orderItemId:allocation.orderItemId}),allocation,
+  ] as const)));
+  const added = new Map<string,LegacyDecisionLocation[]>();
+  for (const entry of locations) {
+    const key = locationKey(entry);
+    const current = added.get(key) ?? [];
+    if (!recorded.has(key) || found.has(key) || current.some(row => row.row === entry.row)) {
+      throw new PurchaseError('该旧批准或商品行已核对，或无法对应这份原件');
+    }
+    added.set(key,[...current,entry]);
+  }
+  for (const [key,entries] of added) {
+    if (entries.reduce((sum,row) => sum+row.quantity,0) !== recorded.get(key)!.quantity) {
+      throw new PurchaseError('补记的原件行数量须与旧批准实际占用量一致');
+    }
+    found.set(key,entries);
+  }
+  return history.flatMap(use => !use.unlocated ? [use] : use.allocations.flatMap(allocation => {
+    const resolved = found.get(locationKey({activityId:use.activityId,orderItemId:allocation.orderItemId}));
+    return resolved ? resolved.map(entry => ({ ...use, row: entry.row, unlocated:false,
+      allocations:[{ ...allocation, quantity:entry.quantity }] }))
+      : [{ ...use, allocations:[allocation] }];
+  }));
 }
 
 async function verifyCoverage(tx: Db, coverage: DecisionCoverage[]) {
@@ -115,7 +208,7 @@ async function verifyCoverage(tx: Db, coverage: DecisionCoverage[]) {
 
 export async function previewDecisionDocuments(tx: Db, input: {
   orderId: string; purchaseOrderId: string; supplierSha256: string; customerSha256: string;
-  dispositions: Array<{ orderItemId: string; shortfallId?: string; quantity: number }>;
+  dispositions: DecisionEffect[];
   documents: Array<DecisionDocumentInput & { orderItemId: string }>;
 }) {
   const requested = new Map<string,RequestedUse>();
@@ -127,17 +220,23 @@ export async function previewDecisionDocuments(tx: Db, input: {
       const row = decisionDocumentRow(selected[rowField(role)]);
       const coverage = normalizeCoverage(selected[scopeField(role)]);
       const restore = selected[restoreField(role)] === true;
-      if ((coverage && !row) || (restore && !coverage)) throw new PurchaseError('分次使用或补录范围时，须核对原件行号与明确的覆盖数量',400);
-      const current = { role, sha256: input[digestField(role)], row, coverage, restore, allocations: [allocation] };
+      const legacyLocations = readLocations(selected[legacyField(role)]);
+      if (((coverage || legacyLocations.length) && !row) || (restore && !coverage)) {
+        throw new PurchaseError('分次使用或补录范围时，须核对原件行号与明确的覆盖数量',400);
+      }
+      const current = { role, sha256: input[digestField(role)], row, coverage, restore, legacyLocations,
+        authority: commercialAuthority(role,use), allocations: [allocation] };
       const key = documentKey(current);
       const previous = requested.get(key);
       if (!previous) requested.set(key,current);
       else {
-        if (previous.coverage && coverage && !sameCoverage(previous.coverage,coverage)) {
+        if (!sameVersion(previous.authority,current.authority)) throw new PurchaseError('同一原件行的商业决定或适用条件不一致，请重新核证');
+        if (previous.coverage && coverage && !sameVersion(previous.coverage,coverage)) {
           throw new PurchaseError('同一原件行须使用同一份经核对的覆盖范围');
         }
         previous.coverage ??= coverage;
         previous.restore ||= restore;
+        previous.legacyLocations.push(...legacyLocations);
         previous.allocations.push(allocation);
       }
     }
@@ -145,14 +244,23 @@ export async function previewDecisionDocuments(tx: Db, input: {
   const history = await priorUses(tx,[...new Set([...requested.values()].map(row => row.sha256))]);
   const result = [];
   for (const current of requested.values()) {
-    const existing = history.filter(row => row.role === current.role && row.sha256 === current.sha256);
     const sameFile = (row: Pick<DocumentUse,'role' | 'sha256' | 'row'>) => row.role === current.role && row.sha256 === current.sha256;
-    const currentOverlap = [...requested.values()].some(row => row !== current && sameFile(row) && (row.row === undefined || current.row === undefined));
-    const historicalOverlap = existing.some(row => row.row !== current.row && (row.row === undefined || current.row === undefined));
-    if (currentOverlap || historicalOverlap) throw new PurchaseError(label(current.role)+'整份已占用，请核对原件中尚未使用的独立行');
+    const currentDocuments = [...requested.values()].filter(sameFile);
+    const added = currentDocuments.flatMap(row => row.legacyLocations);
+    const existing = locatePriorUses(history.filter(sameFile),added);
+    const currentOverlap = currentDocuments.some(row => row !== current && (row.row === undefined || current.row === undefined));
+    const historicalOverlap = existing.filter(row => row.row !== current.row && (row.row === undefined || current.row === undefined));
+    if (currentOverlap || historicalOverlap.some(row => !row.unlocated)) {
+      throw new PurchaseError(label(current.role)+'整份已占用，请核对原件中尚未使用的独立行');
+    }
+    if (historicalOverlap.length) throw new PurchaseError(label(current.role)+'有未定位的旧批准，请先核对该批准实际占用的原件行和数量');
     const matched = existing.filter(row => row.row === current.row);
+    if (matched.some(row => !row.authority || !sameVersion(row.authority,current.authority))) {
+      const fresh = current.role === 'supplier' ? '新的供应商书面决定' : '客户新的书面同意';
+      throw new PurchaseError(label(current.role)+'的商业决定、供方或实质条件已变化，请核对'+fresh+'或尚未使用的独立行');
+    }
     const verified = matched.find(row => row.coverage)?.coverage;
-    if (verified && current.coverage && !sameCoverage(verified,current.coverage)) {
+    if (verified && current.coverage && !sameVersion(verified,current.coverage)) {
       throw new PurchaseError(label(current.role)+'已核准的覆盖范围发生冲突，请核对原件及既有批准');
     }
     const restoring = !verified && matched.length > 0;
@@ -175,7 +283,8 @@ export async function previewDecisionDocuments(tx: Db, input: {
       return { ...scope, usedBefore, using, remaining };
     });
     result.push({ role: current.role, sha256: current.sha256, row: current.row, coverage, allocations: current.allocations, balances,
-      scopeConfirmed: Boolean(verified || current.coverage),
+      scopeConfirmed: Boolean(verified || current.coverage), authority: current.authority,
+      ...(current.legacyLocations.length ? { legacyLocations: current.legacyLocations } : {}),
       ...(restoring ? { restoredActivityIds: [...new Set(matched.map(row => row.activityId))] } : {}) });
   }
   return result;

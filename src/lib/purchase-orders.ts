@@ -7,7 +7,7 @@ import {
 } from '@/lib/purchase-contract';
 import { previewShipmentAttribution, purchaseFulfillmentReview, type ShipmentAttributionInput } from '@/lib/purchase-fulfillment';
 import { agreedDocumentTerms, assertSupplierDocumentScopes, missingDocumentScopes, restoreDocumentScopes } from '@/lib/purchase-document-scope';
-import { decisionDocumentRow, previewDecisionDocuments, type DecisionDocumentInput } from '@/lib/purchase-decision-documents';
+import { decisionDocumentRow, decisionMaterialTerms, previewDecisionDocuments, type DecisionDocumentInput } from '@/lib/purchase-decision-documents';
 import { pricingContentHash } from '@/lib/pricing-adjustment-approval';
 import { loadPurchaseOrderSource, loadPurchaseLines, type PurchaseSource, type SourceOrder } from '@/lib/purchase-source';
 import { creditExceptionMatches, paymentPlanAt, paymentPlanContent, paymentPlanFromReview, purchaseCreditVersion, purchaseStartReview, type PaymentPlan } from '@/lib/purchase-start';
@@ -803,6 +803,17 @@ export async function previewPurchaseAction(tx: Db, input: PurchaseActionInput, 
   const currentLines = original ? await loadPurchaseLines(tx, original) : [];
   const remaining = original ? remainingDemand(original) : new Map<string, number>();
   const details = commitment ? await previewCommitment(tx, original!, view, po, input, actor) : actionDetails(view, po, input, currentLines, remaining, actor);
+  if (details.action === 'resolve_change' && details.revisedTerms?.some(edit => {
+    const prior = po.lines.find(row => row.orderItemId === edit.orderItemId);
+    return prior?.replacementId && pricingContentHash(decisionMaterialTerms({source:prior.source,terms:prior.terms}))
+      !== pricingContentHash(decisionMaterialTerms({source:prior.source,terms:edit.terms}));
+  })) {
+    const customerSha256 = documentSha256(input.customerSha256,'替代条件变更后客户同意的书证摘要');
+    const used = await tx.$queryRaw<{ id: string }[]>`SELECT id FROM PurchaseActivity WHERE action='resolve_change'
+      AND json_extract(detail,'$.snapshot.operation.customerSha256')=${customerSha256} LIMIT 1`;
+    if (used.length) throw new PurchaseError('替代采购的供方或实质条件已变更，须核对客户新的书面同意');
+    details.customerSha256 = customerSha256;
+  }
   const operation = details.action === 'resolve_change' && details.dispositions && details.supplierSha256 && details.customerSha256
     ? { ...details, decisionDocuments: await previewDecisionDocuments(tx, { orderId: view.orderId, purchaseOrderId: po.id,
       supplierSha256: details.supplierSha256, customerSha256: details.customerSha256, dispositions: details.dispositions, documents: input.dispositions!,
