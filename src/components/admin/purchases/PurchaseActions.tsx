@@ -254,6 +254,7 @@ export default function PurchaseActions({ orderId, orderStatus, cancellation, po
   const [affected, setAffected] = useState<QuantityDraft>({});
   const [handling, setHandling] = useState<QuantityDraft>({});
   const [incidentId, setIncidentId] = useState<string | undefined>();
+  const [shortfallHandoffKey,setShortfallHandoffKey]=useState<string>();
   const [verifiedScopeMatchesResult, setVerifiedScopeMatchesResult] = useState(false);
   const [changeKind, setChangeKind] = useState<PurchaseActionInput['changeKind']>('unavailable');
   const [fileKinds, setFileKinds] = useState<Record<string, string>>({});
@@ -325,13 +326,15 @@ export default function PurchaseActions({ orderId, orderStatus, cancellation, po
   if (po.canRegisterOrder && permit('write')) choices.push('register_order');
   if (po.canRecordCommitmentException && permit('approve')) choices.push('record_late_order_exception');
   if (openExceptions.length && permit('approve')) choices.push('resolve_order_exception');
+  const unlinkedShortfalls=fulfillment.unlinkedDispatchShortfalls.filter(row=>row.purchaseOrderId===po.id);
+  const recovery=unlinkedShortfalls.find(row=>row.key===shortfallHandoffKey);
   const waitingForDeliveryDecision=fulfillment.dispatchHolds.some(row=>row.purchaseOrderId===po.id && row.pending>0);
-  if (!waitingForDeliveryDecision && ['approved', 'ordered'].includes(po.status) && !po.needsLegacyReview && !po.needsFundingReapproval && (!closed || po.orderedBefore)
+  if (!waitingForDeliveryDecision && !unlinkedShortfalls.length && ['approved', 'ordered'].includes(po.status) && !po.needsLegacyReview && !po.needsFundingReapproval && (!closed || po.orderedBefore)
     && po.dueCents !== null && Math.min(po.dueCents, po.totalCents - po.paidCents) > 0 && permit('pay')) choices.push('record_payment');
   if (po.lines.length && permit('write')) choices.push('report_change');
 
   function choose(next: Action, selectedIncident?: string) {
-    setIncidentId(selectedIncident); setAction(next); setOutcome(canContinueOriginal ? 'original_terms' : 'declined');
+    setIncidentId(selectedIncident);setShortfallHandoffKey(undefined); setAction(next); setOutcome(canContinueOriginal ? 'original_terms' : 'declined');
     setRevisions({}); setDispositions({}); setCoordinationDocuments({}); setFileKinds({});
     setAffected({}); setHandling({}); setVerifiedScopeMatchesResult(false); setChangeKind('unavailable');
     setReviewResult('scope_confirmed');setRelatedIncidentId('');setRetainedTerms({});setRetainedDocuments({});setRetainedBuyerFiles({});
@@ -360,7 +363,8 @@ export default function PurchaseActions({ orderId, orderStatus, cancellation, po
         incidentId: action === 'resolve_change' || action === 'review_change_scope' ? incidentId : undefined,
         reviewResult: action==='review_change_scope' ? reviewResult : undefined,
         relatedIncidentId: action==='review_change_scope' && reviewResult==='duplicate' ? relatedIncidentId : undefined,
-        affectedLines: declared.length && scopeAction ? declared : undefined,
+        affectedLines: !recovery && declared.length && scopeAction ? declared : undefined,
+        shortfallHandoffKey:action==='report_change' ? recovery?.key : undefined,
         coordinationLines: selectsHandling && selected.length ? selected : undefined,
         confirmsFullIncidentScope: action === 'resolve_change' && legacyScope && outcome!=='original_terms' && !withdrawingDraft && verifiedScopeMatchesResult ? true : undefined,
         retainedDraftTerms: action==='resolve_change' && split.length ? split.map(({line})=>({orderItemId:line.orderItemId,
@@ -412,6 +416,12 @@ export default function PurchaseActions({ orderId, orderStatus, cancellation, po
     <p className="text-sm">{po.remainingScope || po.dueCents === null ? '原合同应付' : '本单应付'} <strong>{money(po.totalCents)}</strong>　已登记实际付款 {money(po.paidCents)}</p>
     {po.remainingScope && <p className="text-sm">核准的剩余商品应付 {money(po.remainingScope.totalCents)} · 经核实冲抵 {money(po.remainingScope.appliedPaidCents)} · 尚未付 {money(po.dueCents ?? undefined)}</p>}
     {waitingForDeliveryDecision && <p className="text-sm text-amber-900">相关实发份额待客户书面处理。请在原包裹核对结果后继续付款办理。</p>}
+    {unlinkedShortfalls.map(row=><div key={row.key} className="space-y-1 rounded bg-amber-50 p-2 text-sm text-amber-900">
+      <p>已核实误发短失待采购接续 · {row.reference} · {row.quantity} 件</p>
+      {!pending && permit('write') && <button type="button" className={button} disabled={busy} onClick={()=>{
+        choose('report_change');setShortfallHandoffKey(row.key);setChangeKind('other');
+      }}>接续已核实的误发短失</button>}
+    </div>)}
     {po.needsRemainingReview && <p className="text-sm text-amber-900">{openExceptions.length
       ? '核对实际承诺后，再逐行核准原单剩余应付。'
       : '原单剩余应付待独立核准。供货协调结果可据实登记。'}</p>}
@@ -422,6 +432,8 @@ export default function PurchaseActions({ orderId, orderStatus, cancellation, po
       {issue.responsibility && <p>待核对环节 {issue.responsibility}</p>}
       {issue.lastReviewedBy && <p>上次核对人 {issue.lastReviewedBy}</p>}
       {issue.factReview && <p>已核对事实 {issue.factReview.reference} · {issue.factReview.description}</p>}
+      {issue.shortfallOrigin && <p>原事项 {po.incidentHistory.find(row=>row.id===issue.shortfallOrigin?.incidentId)?.reference ?? issue.shortfallOrigin.incidentId}
+        {' · 原包裹 '+issue.shortfallOrigin.parcelId}</p>}
       {issue.shortfallFollowups?.map(result=><p key={result.activityId}>
         已核对误发短失 {result.quantity} 件 · {result.reference} · 后续责任人 {result.responsibility} · {result.description}
       </p>)}
@@ -557,7 +569,15 @@ export default function PurchaseActions({ orderId, orderStatus, cancellation, po
         {inputField('conditionReference', '本次付款条件已满足的依据')}
         {inputField('reference', '实际付款流水或银行凭证编号')}
       </>}
-      {action === 'report_change' && <>
+      {action === 'report_change' && (recovery ? <fieldset className="space-y-2">
+        <legend className="font-medium">接续已核实的误发短失</legend>
+        <p className="text-sm">{recovery.reference} · {recovery.quantity} 件 · 原包裹 {recovery.parcelId}</p>
+        <p className="text-sm">原事项 {po.incidentHistory.find(row=>row.id===(recovery.originalIncidentId ?? recovery.incidentId))?.reference
+          ?? recovery.originalIncidentId ?? recovery.incidentId}</p>
+        {inputField('reference','短失接续的档案出处')}
+        {inputField('description','已核实的接续经过和结果')}
+        {inputField('responsibility','采购后续责任人')}
+      </fieldset> : <>
         <label className="grid gap-1 text-sm">变更类别<select className={field} value={changeKind}
           onChange={event => {setChangeKind(event.target.value as PurchaseActionInput['changeKind']);setAffected({});}}>
           <option value="unavailable">缺货</option><option value="delay">延期</option><option value="price">涨价或调价</option><option value="other">其他</option>
@@ -568,7 +588,7 @@ export default function PurchaseActions({ orderId, orderStatus, cancellation, po
           lineName={incidentLineName} onChange={setAffected}/>
         <p className="text-sm">单纯承运延期请在对应运单登记物流异常。涉及采购条件时，按实际货物来源登记供货事项。</p>
         {!declared.length && <p className="text-sm">影响数量暂未核全时，可先登记，再凭原件核对范围。</p>}
-      </>}
+      </>)}
       {action === 'review_change_scope' && <>
         <label className="grid gap-1 text-sm">通知核对结果<select className={field} value={reviewResult}
           onChange={event=>{setReviewResult(event.target.value as typeof reviewResult);setAffected({});setRelatedIncidentId('');}}>
@@ -747,6 +767,14 @@ export default function PurchaseActions({ orderId, orderStatus, cancellation, po
       {op.action === 'record_payment' && <p>本次实际付款　<strong>{money(op.amountCents)}</strong> · 收款方 {po.lines[0].terms.payee} · 条件依据 {op.conditionReference}</p>}
       {op.action === 'report_change' && <>
         <p>供货变化　{op.description}</p>
+        {'shortfallRecovery' in op && op.shortfallRecovery && <div className="space-y-1">
+          <p>原短失核对 {op.shortfallRecovery.reviewReference} · 责任人 {op.responsibility}</p>
+          <p>原包裹 {op.shortfallRecovery.purchaseFollowup.target.parcelId}
+            {' · 已有合同决定覆盖 '+op.shortfallRecovery.purchaseFollowup.decisionLinks.reduce((sum,row)=>sum+row.quantity,0)+' 件'}
+            {' · 新建待办 '+op.shortfallRecovery.purchaseFollowup.reportQuantity+' 件'}</p>
+          {op.shortfallRecovery.purchaseFollowup.transfers.length>0 && <p>沿用已有采购事项 · {op.shortfallRecovery.purchaseFollowup.transfers
+            .map(row=>row.incidentId+' · '+row.from.quantity+' 件').join('、')}</p>}
+        </div>}
         {op.affectedLines?.map(row => <p key={row.orderItemId}>{lineFor(row.orderItemId)?.source.name} · 涉及 {row.quantity}</p>)}
       </>}
       {(op.action === 'report_change' || op.action === 'review_change_scope' || op.action === 'resolve_change') && op.supplyFacts?.map(row => <p key={row.orderItemId}>

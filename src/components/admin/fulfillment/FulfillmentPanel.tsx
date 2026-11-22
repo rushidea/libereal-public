@@ -18,6 +18,7 @@ const labels: Record<string,string> = {
   orderStatus:'原订单状态', receiptId:'原实收记录', inventoryAccountId:'库存账户', spec:'规格', unit:'单位', packageType:'包装', baseQuantity:'包装数量',
   inventory:'入仓归属', identity:'核对依据', approved:'已批准的商品', decisions:'双方确认', resolutions:'实物短失或退回', disposition:'本次实物处置',
   receivedAt:'实际入仓时间', history:'历史状态记录', priorShippedQty:'此前记录的已发数量', historicalAttributionId:'原核对记录',
+  purchaseFollowup:'采购后续',decisionLinks:'已核实的原合同决定',transfers:'接入已有采购事项',reportQuantity:'新建待办数量',activityId:'原采购办理记录',target:'短失实物',
   holdReview:'发运偏差核对',unreleased:'发运时未放行的数量',incidentIds:'当时相关供货事项',incidentId:'原暂停事项',
   status:'办理状态',originalIncidentId:'发运时的原事项',resolutionId:'实际短失或退回记录',shortfallEvidence:'原短失凭据',holdAssignments:'实发暂停份额',holdDecisions:'逐项处理结果',holdResponsibility:'处理责任人',outcome:'实际处理结果',holdSource:'实际货物来源',
   responsibility:'责任人',supplierReference:'供方书面核对',customerReference:'客户书面回复',

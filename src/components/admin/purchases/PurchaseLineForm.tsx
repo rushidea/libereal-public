@@ -17,7 +17,7 @@ export const actionNames = { approve:'批准采购单',approve_lead_time:'单独
   report_change:'登记供货变化',review_change_scope:'核对供货事项范围',resolve_change:'回填协调结果',prepare:'准备采购',save_line:'保存采购资料',
   review_legacy_approval:'复核旧采购批准',approve_remaining:'核准原单剩余应付',record_late_order_exception:'登记实际订购异常',
   resolve_order_exception:'核对订购异常处理结果',
-  reapprove_purchase:'重新核准本单后续动作' };
+  reapprove_purchase:'重新核准本单后续动作',link_dispatch_shortfall:'关联已核实短失的采购依据' };
 
 const textFields = {
   supplier:'供货方全称',payee:'收款方全称',paymentTerms:'供应商付款条件',
