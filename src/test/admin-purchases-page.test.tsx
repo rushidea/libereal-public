@@ -341,6 +341,9 @@ describe('supplier purchasing page', () => {
     fireEvent.change(quote.getByLabelText('供应商书面报价依据'),{target:{value:'TEST-KEPT-ONE-ACTUAL-QUOTE'}});
     fireEvent.change(quote.getByLabelText('供货书证摘要'),{target:{value:'a'.repeat(64)}});
     fireEvent.change(quote.getByLabelText('客户同意原件行号'),{target:{value:'9'}});
+    fireEvent.click(quote.getByLabelText('留存份额另有客户书证'));
+    fireEvent.change(quote.getByLabelText('客户同意留存份额的书证出处'),{target:{value:'TEST-RETAINED-FILE-SPECIFIC'}});
+    fireEvent.change(quote.getByLabelText('客户同意留存份额的书证摘要'),{target:{value:'b'.repeat(64)}});
     fill('人工与供应商协调的书面依据','TEST-SUPPLIER-REPLY');
     fill('客户对方案的回复依据','TEST-ACTUAL-BUYER-CHOICE');
     fill('客户书面撤回依据摘要','e'.repeat(64));
@@ -349,6 +352,7 @@ describe('supplier purchasing page', () => {
     const panel=await screen.findByRole('region',{name:'操作预览'});
     expect(panel).toHaveTextContent('原组留存 1 件 · 新报价');
     expect(posts[0]).toMatchObject({outcome:'declined',retainedDraftTerms:[{orderItemId,customerDocumentRow:9,
+      customerDecision:{reference:'TEST-RETAINED-FILE-SPECIFIC',sha256:'b'.repeat(64)},
       terms:{sourceReference:'TEST-KEPT-ONE-ACTUAL-QUOTE',sourceSha256:'a'.repeat(64),linePayableCents:4550}}]});
   });
 

@@ -1,7 +1,7 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { NextRequest } from 'next/server';
 import { GET as orderGET, PATCH as orderPATCH } from '@/app/api/admin/orders/[id]/route';
-import { dispatchParcel, fulfillmentWorkspace, recordParcelEvent } from '@/lib/fulfillment-parcels';
+import { dispatchParcel, fulfillmentWorkspace, previewDispatchParcel, recordParcelEvent } from '@/lib/fulfillment-parcels';
 import { receiveCarrierNotice } from '@/lib/fulfillment-carrier';
 import { linkLegacyShipment } from '@/lib/fulfillment-legacy';
 import { receiveInventoryBatch, reserveOrderInventory } from '@/lib/inventory';
@@ -1735,5 +1735,133 @@ describe('actual scope of a supply incident', () => {
     expect(finished.orders.find(po=>po.id===branch.id)).toMatchObject({status:'draft',remaining:[line(relayLineId,1)],paidCents:0});
     expect(finished.fulfillment.replacementsWithUnverifiedStockSource).toEqual([]);
     expect(finished.activities.filter(row=>row.purchaseOrderId===original && row.action==='resolve_change')).toHaveLength(1);
+  });
+
+  it('links the early B notice without releasing it early, records the authorised A, and tracks a reviewed B dispatch to real arrival',async()=>{
+    await acceptCustomerOrder();
+    const id=await groupedOrder();
+    await purchaseAction(id,{action:'record_payment',requestId:'original-deposit-for-timed-deviation',
+      reference:'TEST-ORIGINAL-STANDING-DEPOSIT',conditionReference:'TEST-DEPOSIT-CLAUSES',amountCents:900});
+    await report(id,'early-unknown-notice-about-b','原通知实际只涉及 B，第一份记录待核清。');
+    const earlyA=dispatchInput('early-actually-unaffected-a','supplier_to_customer',[goods(id,directLineId)]);
+    const earlyB=dispatchInput('early-b-physically-moved-without-release','supplier_to_customer',[goods(id,relayLineId)]);
+    nextOccurrence();
+    await report(id,'canonical-two-b-under-stop','双方当时仍限制 B 两件。',[waiting(relayLineId,2)]);
+    const [early,original]=(await current(id)).incidents;
+    await purchaseAction(id,{action:'review_change_scope',reviewResult:'duplicate',requestId:'old-unknown-is-only-b',
+      incidentId:early.id,relatedIncidentId:original.id,reference:'TEST-VERIFIED-ORIGINAL-B-NOTICE',
+      description:'这一转述与原 B 通知一致，A 并不在该通知里。'});
+    nextOccurrence();
+    await purchaseAction(id,{action:'resolve_change',outcome:'original_terms',requestId:'one-b-released-later',
+      incidentId:original.id,coordinationLines:[waiting(relayLineId,1)],...agreement('release-only-b-one')});
+    const later=dispatchInput('b-later-when-only-one-released','supplier_to_customer',[goods(id,relayLineId,2)]);
+    const check=(input:object)=>prisma.$transaction(tx=>previewDispatchParcel(tx,orderId,input,operator));
+    await expect(check(earlyB)).rejects.toThrow(/发货数量/);
+    await expect(check(later)).rejects.toThrow(/发货数量/);
+    expect((await prisma.$transaction(tx=>fulfillmentWorkspace(tx,orderId,Date.parse(later.occurredAt))))
+      .purchases.find(row=>row.orderItemId===relayLineId)?.available).toBe(1);
+    nextOccurrence();
+    await purchaseAction(id,{action:'resolve_change',outcome:'original_terms',requestId:'last-b-resolved-even-later',
+      incidentId:original.id,...agreement('actual-last-b-release')});
+    await expect(check(earlyB)).rejects.toThrow(/发货数量/);
+    const a=await dispatch(earlyA);
+    expect(a.dispatchedAt.toISOString()).toBe(earlyA.occurredAt);
+    const actual={...earlyB,holdReview:{supplierReference:'TEST-SUPPLIER-DISPATCH-WITHOUT-RELEASE',
+      customerReference:'TEST-CUSTOMER-CONFIRMS-TRACKING-CONTINUES',responsibility:'合成采购经办人',
+      description:'原运单确证暂停期已发，已分别与供方及客户核对继续跟踪到实收。',
+      sha256:pricingContentHash('actual documented deviation proof')}};
+    const reviewed=await check(actual);
+    expect(reviewed.snapshot).toMatchObject({occurredAt:earlyB.occurredAt,actorId:operator.id,holdReview:actual.holdReview,
+      lines:[{purchaseOrderId:id,orderItemId:relayLineId,quantity:1,unreleased:{quantity:1,incidentIds:[early.id]}}]});
+    await expect(prisma.$transaction(tx=>dispatchParcel(tx,orderId,{...actual,holdReview:{...actual.holdReview,
+      description:'修改预览后的核对结果'}},operator,reviewed.actionHash))).rejects.toThrow(/重新预览/);
+    const persist=()=>prisma.$transaction(tx=>dispatchParcel(tx,orderId,actual,operator,reviewed.actionHash));
+    const physical=await persist();
+    expect((await persist()).id).toBe(physical.id);
+    expect(physical.dispatchedAt.toISOString()).toBe(earlyB.occurredAt);
+    const actualDelivery=eventInput('actual-b-arrival-after-hold-review','customer_delivery',[{parcelLineId:physical.lines[0].id,quantity:1}]);
+    const delivered=await event(physical.id,actualDelivery);
+    expect(delivered).toMatchObject({status:'delivered',lines:[{receivedQuantity:1}]});
+    expect(await prisma.shipment.findUniqueOrThrow({where:{id:physical.shipmentId!}})).toMatchObject({
+      shippedAt:new Date(earlyB.occurredAt),deliveredAt:new Date(actualDelivery.occurredAt),status:'delivered',
+    });
+    expect(JSON.parse(delivered.events.find(row=>row.kind==='dispatch')!.details)).toMatchObject({
+      holdReview:actual.holdReview,lines:[{unreleased:{quantity:1,incidentIds:[early.id]}}],
+    });
+    expect(await current(id)).toMatchObject({paidCents:900,dueCents:6600,incidents:[]});
+  });
+
+  it('keeps distinct valid partial decisions at their dates when the unresolved remainder is linked',async()=>{
+    await acceptCustomerOrder();
+    const id=await groupedOrder();
+    await report(id,'known-original-mixed','原 A 和两件 B 分别在等各自商业决议。',[waiting(directLineId,1),waiting(relayLineId,2)]);
+    const [early]=(await current(id)).incidents;
+    const beforeA=nextOccurrence();
+    nextOccurrence();
+    await purchaseAction(id,{action:'resolve_change',outcome:'original_terms',requestId:'actual-a-only-continues',
+      incidentId:early.id,coordinationLines:[waiting(directLineId,1)],...agreement('a-agreement-before-b')});
+    const between=nextOccurrence();
+    nextOccurrence();
+    await purchaseAction(id,{action:'resolve_change',outcome:'original_terms',requestId:'one-b-independently-released',
+      incidentId:early.id,coordinationLines:[waiting(relayLineId,1)],...agreement('one-b-separate-decision')});
+    const afterOneB=nextOccurrence();
+    // Check the remaining one without double-counting the already linked source in the live hold.
+    const original=await purchaseAction(id,{action:'report_change',changeKind:'delay',requestId:'matching-late-notice',
+      reference:'TEST-MATCHING-LATE-B',description:'原未处理的一件 B 同一事项的后续通知。'},operator);
+    const newNotice=original.orders.find(po=>po.id===id)!.incidents[1];
+    await purchaseAction(id,{action:'review_change_scope',reviewResult:'duplicate',requestId:'link-late-b-to-original',
+      incidentId:newNotice.id,relatedIncidentId:early.id,reference:'TEST-B-REMAINING-NOTICE-MATCH',description:'只补充原 B 尚待处理的一件。'});
+    const capacity = async (at:string) => (await prisma.$transaction(tx=>fulfillmentWorkspace(tx,orderId,Date.parse(at))))
+      .purchases.map(row=>[row.orderItemId,row.available]);
+    expect(await capacity(beforeA)).toEqual([[directLineId,0],[relayLineId,0]]);
+    expect(await capacity(between)).toEqual([[directLineId,1],[relayLineId,0]]);
+    expect(await capacity(afterOneB)).toEqual([[directLineId,1],[relayLineId,1]]);
+  });
+
+  it('keeps a known historical hold before a later verification of no continuing impact',async()=>{
+    await acceptCustomerOrder();
+    const {relay:id}=await orderFromSuppliers();
+    const held=await report(id,'known-two-stopped-then-no-further-change','已知两件在当期停发。',[waiting(relayLineId,2)]);
+    const incident=held.orders.find(po=>po.id===id)!.incidents[0];
+    const earlier=dispatchInput('while-the-old-stop-was-active','supplier_to_customer',[goods(id,relayLineId)]);
+    nextOccurrence();
+    await purchaseAction(id,{action:'review_change_scope',reviewResult:'no_impact',requestId:'fact-closed-after-the-pause',
+      incidentId:incident.id,reference:'TEST-FACT-REVIEW-OF-NO-NEW-SUPPLY-CHANGE',
+      description:'核对后此通知无需继续待办，原暂停期间留下审计。'});
+    await expect(prisma.$transaction(tx=>previewDispatchParcel(tx,orderId,earlier,operator))).rejects.toThrow(/发货数量/);
+    expect((await workspace()).purchases.find(row=>row.purchaseOrderId===id)?.available).toBe(2);
+  });
+
+  it('holds an overlapping unknown notice before creating a new payable draft and preserves the separable retained share once identified', async()=>{
+    await acceptCustomerOrder();
+    const id=await groupedOrder();
+    await report(id,'original-two-proposal','原 B 两件按实物范围待替代。',[waiting(relayLineId,2)]);
+    const prepared=await purchaseAction(id,{action:'resolve_change',outcome:'replacement',requestId:'replacement-two-before-facts',
+      ...agreement('one-shared-proposal'),dispositions:[{...line(relayLineId,2),outcome:'replace',replacement:{
+        name:'合成可分替代商品',brand:'合成品牌',catalogNumber:'TEST-CLEAR-SHARES',spec:'合成规格',unit:'件',terms:purchaseTerms(2,'TEST-OTHER-PARTY-WHO-KEEPS-ONE'),
+      }}]});
+    const draft=prepared.orders.find(po=>po.lines.some(row=>row.fromPurchaseOrderId===id))!;
+    const one=waiting(relayLineId,1);
+    await report(draft.id,'confirmed-one-owner-change','这一件已有明确客户决定。',[one]);
+    await report(draft.id,'different-notice-no-range','第二份独立通知尚不清楚影响几件。');
+    const before=await current(draft.id);
+    const move={action:'resolve_change' as const,outcome:'revised_terms' as const,incidentId:before.incidents[0].id,
+      requestId:'move-the-authorised-one-share',...agreement('first-independent-one'),
+      coordinationLines:[one],revisedTerms:[{orderItemId:relayLineId,terms:purchaseTerms(1,'TEST-NEW-SUPPLIER-FOR-SHARE')}],
+      retainedDraftTerms:[{orderItemId:relayLineId,terms:purchaseTerms(1,'TEST-OTHER-PARTY-WHO-KEEPS-ONE')}]};
+    await expect(purchaseAction(draft.id,move,operator)).rejects.toThrow(/另有待核事项/);
+    expect(await current(draft.id)).toMatchObject({remaining:[line(relayLineId,2)],version:before.version});
+    const allBefore=await prisma.purchaseOrder.count({where:{orderId}});
+    await purchaseAction(draft.id,{action:'review_change_scope',requestId:'identify-different-retained-share',
+      incidentId:before.incidents[1].id,affectedLines:[one],reference:'TEST-SEPARATE-RETAINED-SHARE',
+      description:'该供方凭据仅约束留在原付款组的一件，已书面同意改办的一件可单独采购。'},operator);
+    const outcome=await purchaseAction(draft.id,move,operator);
+    expect(await prisma.purchaseOrder.count({where:{orderId}})).toBe(allBefore+1);
+    const after=outcome.orders.find(po=>po.id===draft.id)!;
+    expect(after).toMatchObject({status:'on_hold',remaining:[line(relayLineId,1)],incidents:[{id:before.incidents[1].id,outstanding:[one]}]});
+    const moved=outcome.orders.find(po=>po.lines.some(item=>item.authorizationId===outcome.activities.at(-1)?.id))!;
+    await expect(purchaseAction(draft.id,{action:'approve',requestId:'cannot-use-pending-retained-shares'})).rejects.toThrow();
+    const approved=await purchaseAction(moved.id,{action:'approve',requestId:'independently-approve-moved-clear-share'});
+    expect(approved.orders.find(po=>po.id===moved.id)).toMatchObject({status:'approved',remaining:[line(relayLineId,1)],paidCents:0});
   });
 });

@@ -1,6 +1,6 @@
 // @vitest-environment node
 
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { NextRequest } from 'next/server';
@@ -346,6 +346,71 @@ describe('admin purchase endpoint', () => {
     expect(linked.orders[0]).toMatchObject({status:'on_hold',incidents:[{id:incident.id,outstanding:request.affectedLines}],
       incidentHistory:[{id:incident.id,status:'open'},{id:late.id,status:'duplicate',linkedTo:incident.id}]});
     expect(activity('resolve_change')).toEqual([]);
+  });
+
+  it('binds distinct buyer originals for a one-unit withdrawal and the independent retained quote under the actual MFA confirmation', async () => {
+    await startActualSupply(orderId,'real-original-before-split');
+    await noteChange(orderId,'supplier-initially-cannot-supply-two');
+    const digest=(content:string)=>createHash('sha256').update(Buffer.from(content,'utf8')).digest('hex');
+    signIn(staff.approver);
+    const party='合成替代原供方';
+    const draftTerms={...procurementTerms,currency:'CNY' as const,taxBasis:'included' as const,leadTimeAssessment:'within_agreement' as const,
+      supplier:party,writtenSupplier:party,payee:'合成替代收款人',
+      sourceReference:'TEST-ORIGINAL-TWO-QUOTE',sourceSha256:digest('原供方报价两件，每件 36.73，总额 73.46'),
+      settlementSha256:digest('合成结算书证，合成替代收款人，按上述实际条件')};
+    const proposal=await previewAction({action:'resolve_change',outcome:'replacement',requestId:'actual-two-item-alternative',
+      supplierReference:'TEST-ORIGINAL-SUPPLIER-WITHDRAWAL',supplierSha256:digest('原供方撤回2件'),
+      customerReference:'TEST-ORIGINAL-BUYER-CONFIRMS-TWO',customerSha256:digest('客户原件同意两件旧报价'),
+      description:'两个均已有原替代书证。',dispositions:[{orderItemId,quantity:2,outcome:'replace',replacement:{
+        name:'合成替代草稿',brand:'合成品牌',catalogNumber:'TEST-DUAL-BUYER-QUOTE',spec:'合成规格',unit:'件',terms:draftTerms,
+      }}]});
+    const {workspace:prepared}=await expectJson(await confirm(proposal,await grant(staff.approver)),200);
+    let draft=prepared.orders.find((row:{id:string})=>row.id!==proposal.purchaseOrderId);
+    async function previewDraft(input:ActionRequest) {
+      const payload={...input,orderId,purchaseOrderId:draft.id,version:draft.version};
+      const {preview}=await expectJson(await post({...payload,stage:'preview'}),200);
+      return {...payload,actionHash:preview.actionHash};
+    }
+    signIn(staff.operator);
+    const scope=[{orderItemId,quantity:1,source:{kind:'unshipped' as const}}];
+    const notice=await previewDraft({action:'report_change',changeKind:'other',requestId:'only-one-now-withdrawn',
+      reference:'TEST-ONE-ONLY-CUSTOMER-NOTICE',description:'一件撤回。另一件的新价格另有客户文件。',affectedLines:scope});
+    const {workspace:held}=await expectJson(await confirm(notice,await grant(staff.operator)),200);
+    draft=held.orders.find((row:{id:string})=>row.id===draft.id);
+    const buyerWithdrawal=digest('合成客户书面决定，撤回原第二件。此文件只授权撤回这一件。');
+    const buyerKept={reference:'TEST-INDEPENDENT-ACCEPTANCE-OF-KEPT-ONE',
+      sha256:digest('另一份合成客户书面原件，留存另一件，实际报价 41.20。')};
+    const oneQuote={...draftTerms,sourceReference:'TEST-ACTUAL-ONE-SUPPLIER-QUOTE',
+      sourceSha256:digest('另发合成供方报价原件一份，仅一件，单价及合计 41.20'),unitPriceCents:4120,linePayableCents:4120};
+    const action={action:'resolve_change' as const,outcome:'declined' as const,incidentId:draft.incidents[0].id,
+      requestId:'confirm-two-provably-distinct-files',supplierReference:'TEST-ONLY-ONE-DRAFT-RETAINED',
+      customerReference:'TEST-ACTUAL-DISTINCT-WITHDRAWAL',customerSha256:buyerWithdrawal,
+      description:'双方各自证实撤回一件和留存一件的新报价。',coordinationLines:scope,
+      decisionDocumentLines:[{orderItemId,customerDocumentRow:1}],
+      retainedDraftTerms:[{orderItemId,terms:oneQuote,customerDocumentRow:1,customerDecision:buyerKept}]};
+    await expectJson(await post({...action,stage:'preview',orderId,purchaseOrderId:draft.id,version:draft.version,
+      retainedDraftTerms:[{...action.retainedDraftTerms[0],customerDecision:{...buyerKept,sha256:buyerWithdrawal}}]}),409);
+    const confirmed=await previewDraft(action);
+    await expectJson(await confirm(confirmed),403);
+    await expectJson(await confirm({...confirmed,retainedDraftTerms:[{...confirmed.retainedDraftTerms![0],
+      customerDecision:{...buyerKept,sha256:digest('预览之后加入的另一份文件')}}]},await grant(staff.operator)),409);
+    const {workspace:applied}=await expectJson(await confirm(confirmed,await grant(staff.operator)),200);
+    expect(applied.orders.find((row:{id:string})=>row.id===draft.id)).toMatchObject({status:'draft',paidCents:0,totalCents:4120,
+      remaining:[{orderItemId,quantity:1}]});
+    expect(applied.activities.at(-1).detail.snapshot.operation.decisionDocuments).toMatchObject([
+      {role:'customer',sha256:buyerWithdrawal,row:1,authority:{purpose:'decline_preparation'},allocations:[{orderItemId,quantity:1}]},
+      {role:'customer',sha256:buyerKept.sha256,reference:buyerKept.reference,row:1,authority:{purpose:'reconfirm_terms'},
+        allocations:[{orderItemId,quantity:1}]},
+    ]);
+    expect(applied.activities.at(-1).detail.snapshot.operation.draftAllocations[0].retained.terms.sourceSha256).toBe(oneQuote.sourceSha256);
+    draft=applied.orders.find((row:{id:string})=>row.id===draft.id);
+    vi.setSystemTime(Date.now()+10*60*1000);
+    const another=await previewDraft({...notice,requestId:'review-another-factual-change'});
+    const {workspace:anotherHold}=await expectJson(await confirm(another,await grant(staff.operator)),200);
+    draft=anotherHold.orders.find((row:{id:string})=>row.id===draft.id);
+    const reuse=await expectJson(await post({...action,orderId,purchaseOrderId:draft.id,version:draft.version,stage:'preview',
+      requestId:'cannot-use-retained-paper-to-withdraw',incidentId:draft.incidents[0].id,retainedDraftTerms:undefined,customerSha256:buyerKept.sha256}),409);
+    expect(reuse.error).toMatch(/商业决定、供方或实质条件已变化/);
   });
 
   it('records and resolves only the selected supply scope through the authorized preview and confirmation', async () => {

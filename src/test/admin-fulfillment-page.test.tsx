@@ -110,9 +110,11 @@ function mockAdmin(permissions: string[] | Promise<string[]>, startingInbound = 
     if (url === '/api/admin/fulfillment/notices') return Response.json({ notices: [notice], next: null });
     if ((url === fulfillmentPath || url.startsWith(fulfillmentPath+'?dispatchAt=')) && !init?.method) {
       reads.workspace += 1;
-      return Response.json({ capabilities: { warehouse: Array.isArray(permissions) && permissions.includes('inventory.write'), shortfall: false }, workspace: {
+      return Response.json({ capabilities: { warehouse: Array.isArray(permissions) && permissions.includes('inventory.write'),
+        shortfall:Array.isArray(permissions) && permissions.includes('purchases.approve') }, workspace: {
         order: { id: orderId, status: 'confirmed', orderItems: [item] },
-        purchases: [purchase], receipts: [], legacyShipments: [], legacyBackfill: { history: [], lines: [] },
+        purchases: [url.includes('reviewHold=1') ? {...purchase,holdAllowance:{ordinarilyAvailable:0,historicalHoldIds:['TEST-PRIOR-HOLD']}} : purchase],
+        receipts: [], legacyShipments: [], legacyBackfill: { history: [], lines: [] },
         legacyInventory: [], inventoryChoices: [], unmatched: [], freeResends: [], feedSource: source,
         parcels: startingInbound ? [parcel('supplier_to_libereal', operationApplied ? 2 : 0)] :
           operationApplied ? [parcel('supplier_to_customer')] : [],
@@ -230,6 +232,32 @@ describe('fulfillment in the existing order pages', () => {
     await screen.findByRole('region',{name:'物流操作预览'});
     expect(operations[0]).toMatchObject({action:'dispatch',stage:'preview',input:{occurredAt:new Date(localTime).toISOString(),
       reference:'TEST-LATE-ORIGINAL-WAYBILL',lines:[{purchaseOrderId,quantity:1}]}});
+  });
+
+  it('lets an authorised reviewer keep the real departure date and the named result of a hold deviation',async()=>{
+    const {operations} = mockAdmin(['orders.read','orders.write','purchases.approve']);
+    const panel=await openAdminFulfillment();
+    fireEvent.click(await panel.findByText('登记采购发货或转发',{selector:'summary'}));
+    fireEvent.click(panel.getByLabelText('补录已实际发运的包裹'));
+    fireEvent.click(panel.getByLabelText('核对当时未放行的实际发运'));
+    fill(panel,'要查询的实际发运时间',localTime);
+    fireEvent.click(panel.getByRole('button',{name:'核对当时可用的货物'}));
+    await panel.findByLabelText(/当时正常可发 0 · 可核对实发 3/);
+    fill(panel,/当时正常可发 0 · 可核对实发 3/,'1');
+    fill(panel,'物流凭据出处','TEST-ORIGINAL-UNRELEASED-WAYBILL');
+    fill(panel,'物流凭据摘要',digest);
+    fill(panel,'供方对实际发运的书面确认','TEST-SUPPLIER-PROVES-PHYSICAL');
+    fill(panel,'客户对接续履约的书面回复','TEST-CUSTOMER-CONFIRMS-CONTINUATION');
+    fill(panel,'发运偏差的责任人','合成审批经办人');
+    fill(panel,'已核实的偏差与后续处理结果','实际发运早于放行，双方确认继续按原运单跟踪。');
+    fill(panel,'双方核对结论的书证摘要',digest);
+    fireEvent.click(panel.getByRole('button',{name:'预览发货'}));
+    await screen.findByRole('region',{name:'物流操作预览'});
+    expect(operations[0]).toMatchObject({action:'dispatch',stage:'preview',input:{occurredAt:new Date(localTime).toISOString(),
+      holdReview:{supplierReference:'TEST-SUPPLIER-PROVES-PHYSICAL',customerReference:'TEST-CUSTOMER-CONFIRMS-CONTINUATION',
+        responsibility:'合成审批经办人',sha256:digest}}});
+    await verifyWithDialog(operations);
+    await waitFor(()=>expect(operations[1]).toMatchObject({stage:'confirm',input:operations[0].input,actionHash}));
   });
 
   it('shows the source, recipient, SKU, quantity and proof before dispatch, then rereads the confirmed waybill', async () => {

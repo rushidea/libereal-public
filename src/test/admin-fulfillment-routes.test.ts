@@ -320,6 +320,15 @@ describe('admin fulfillment HTTP and customer shipment views', () => {
     expect(await prisma.fulfillmentEvent.count()).toBe(0);
   });
 
+  it('requires existing purchase approval authority for both hold-deviation lookup and review',async()=>{
+    signIn(operator);
+    await expectJson(await fulfillmentGET(new NextRequest(endpoint(orderId)+'?dispatchAt='+encodeURIComponent(new Date().toISOString())+'&reviewHold=1'),
+      params(orderId)),403);
+    await expectJson(await post({action:'dispatch',stage:'preview',input:{...evidence('hold-without-approved-role'),
+      holdReview:{supplierReference:'TEST-PROOF',customerReference:'TEST-CUSTOMER-PROOF'}}}),403);
+    expect(await prisma.fulfillmentParcel.count({where:{orderId,reference:{contains:'hold-without-approved-role'}}})).toBe(0);
+  });
+
   it('requires a fresh one-use grant from the same authenticated session and deduplicates the same native waybill proof', async () => {
     const input = { ...legacyProof(), actorId: reader };
     const confirmation = await preview('link_legacy', input);
