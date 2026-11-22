@@ -147,7 +147,7 @@ function organizationSummary(user: UserType): string {
 }
 
 export const userTableColumn = {
-  dates: 'hidden xl:table-cell',
+  dates: '',
 } as const;
 
 function StatusBadges({ user }: { user: UserType }) {
@@ -565,7 +565,7 @@ export default function UserRow({ user, onUpdate, selected, onSelectChange, show
   const roleBadge = (
     <span className="inline-flex min-w-0 max-w-[45%] shrink-0">
       <span
-        title={user.role}
+        title={roleDisplayLabel(user.role)}
         className={`max-w-full truncate rounded-full px-1.5 py-0.5 text-[11px] font-medium leading-none ${
           user.role === 'admin'
             ? 'bg-purple-100 text-purple-700'
@@ -582,10 +582,10 @@ export default function UserRow({ user, onUpdate, selected, onSelectChange, show
       type="button"
       onClick={(e) => { e.stopPropagation(); toggleMode('credit'); }}
       className="inline-flex items-center gap-1 rounded border border-brand-200 bg-brand-50 px-2 py-0.5 text-xs font-medium text-brand-700 hover:bg-brand-100"
-      title="调整授信额度"
+      title={editing && editMode === 'credit' ? '收起授信' : '调整授信额度'}
     >
       <CreditCard className="h-3.5 w-3.5" />
-      <span>{editing && editMode === 'credit' ? '收起授信' : '授信'}</span>
+      <span>{editing && editMode === 'credit' ? '收起' : '授信'}</span>
     </button>
   ) : null;
 
@@ -617,12 +617,12 @@ export default function UserRow({ user, onUpdate, selected, onSelectChange, show
   const tableActions = user.role !== 'admin' ? (
     <div className="space-y-1.5">
       {showEditButton && (
-        <div className="flex items-center gap-2 whitespace-nowrap">
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
           {creditActionButton}
           {fullEditActionButton}
         </div>
       )}
-      <div className="flex items-center gap-2 whitespace-nowrap">
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
         {freezeActionButton}
       </div>
     </div>

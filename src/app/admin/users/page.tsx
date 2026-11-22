@@ -370,7 +370,7 @@ export default function AdminUsersPage() {
       ) : (
       <div className="min-w-0 overflow-hidden rounded-2xl border border-white/70 bg-white">
         <div className="min-w-0 overflow-x-auto">
-          <table className="w-full table-fixed border-separate border-spacing-0 text-sm">
+          <table className="w-full min-w-[760px] table-fixed border-separate border-spacing-0 text-sm">
             <thead>
               <tr>
                 <th className="w-9 border-b border-gray-200 bg-gray-50 px-2.5 py-3 text-left font-semibold text-gray-700">
@@ -384,10 +384,10 @@ export default function AdminUsersPage() {
                 </th>
                 <th className="border-b border-gray-200 bg-gray-50 px-3 py-3 text-left font-semibold text-gray-700 whitespace-nowrap">用户 / 邮箱</th>
                 <th className="border-b border-gray-200 bg-gray-50 px-3 py-3 text-left font-semibold text-gray-700 whitespace-nowrap">机构 / 电话</th>
-                <th className="w-[96px] border-b border-gray-200 bg-gray-50 px-2.5 py-3 text-left font-semibold text-gray-700 whitespace-nowrap">状态 / 等级</th>
-                <th className="w-[128px] border-b border-gray-200 bg-gray-50 px-2.5 py-3 text-left font-semibold text-gray-700 whitespace-nowrap">授信额度</th>
-                <th className={`w-[132px] border-b border-gray-200 bg-gray-50 px-2.5 py-3 text-left font-semibold text-gray-700 whitespace-nowrap ${userTableColumn.dates}`}>登录 / 注册</th>
-                <th className="w-[132px] border-b border-gray-200 bg-gray-50 px-2.5 py-3 text-left font-semibold text-gray-700 whitespace-nowrap">操作</th>
+                <th className="w-[88px] border-b border-gray-200 bg-gray-50 px-2.5 py-3 text-left font-semibold text-gray-700 whitespace-nowrap">状态 / 等级</th>
+                <th className="w-[120px] border-b border-gray-200 bg-gray-50 px-2.5 py-3 text-left font-semibold text-gray-700 whitespace-nowrap">授信额度</th>
+                <th className={`w-[124px] border-b border-gray-200 bg-gray-50 px-2.5 py-3 text-left font-semibold text-gray-700 whitespace-nowrap ${userTableColumn.dates}`}>登录 / 注册</th>
+                <th className="w-[128px] border-b border-gray-200 bg-gray-50 px-2.5 py-3 text-left font-semibold text-gray-700 whitespace-nowrap">操作</th>
               </tr>
             </thead>
             <tbody>
