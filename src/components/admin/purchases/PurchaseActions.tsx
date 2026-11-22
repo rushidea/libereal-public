@@ -10,15 +10,16 @@ import { actionNames, button, cents, field, LineDetails, money, primary, Purchas
 type Action = PurchaseActionInput['action'];
 type Preview = Awaited<ReturnType<typeof previewPurchaseAction>>;
 type Alternative = { name: string; brand: string; catalogNumber: string; spec: string; unit: string; terms: PurchaseTerms };
-type Intervention = { quantity: number; outcome: 'cancel' | 'replace'; replacement?: Alternative };
+type Intervention = { quantity: number; outcome: 'cancel' | 'replace'; replacement?: Alternative; forwardingLossId?: string };
 type Pending = { input: PurchaseActionInput; preview: Preview };
 
 function inputField(name: string, label: string) {
   return <label className="grid gap-1 text-sm">{label}<input className={field} name={name} required maxLength={2000}/></label>;
 }
 
-function DispositionFields({ line, quantity, value, allowReplacement, onChange }: {
-  line: Pick<Line, 'source'>; quantity: number; value: Intervention; allowReplacement: boolean; onChange: (value: Intervention) => void;
+function DispositionFields({ line, quantity, losses, value, allowReplacement, onChange }: {
+  line: Pick<Line, 'source'>; quantity: number; losses: Workspace['fulfillment']['forwardingShortfalls'];
+  value: Intervention; allowReplacement: boolean; onChange: (value: Intervention) => void;
 }) {
   const source = line.source;
   const alternative = value.replacement ?? {
@@ -27,14 +28,24 @@ function DispositionFields({ line, quantity, value, allowReplacement, onChange }
   };
   const alternativeFields = { name: '替代商品名称', brand: '替代商品品牌', catalogNumber: '替代商品货号', spec: '替代商品规格', unit: '替代计量单位' } as const;
   const replacing = allowReplacement && value.outcome === 'replace';
+  const selectedLoss = losses.find(row => row.resolutionId === value.forwardingLossId);
+  const limit = selectedLoss?.available ?? quantity;
 
   return <fieldset className="grid gap-2 rounded border p-3">
-    <legend>{source.name} · 原数量 {source.quantity} · 尚未处置 {quantity}</legend>
+    <legend>{source.name} · 原数量 {source.quantity} · 尚未供货 {quantity}</legend>
+    {!!losses.length && allowReplacement && <label className="grid gap-1 text-sm">本次另购依据
+      <select className={field} value={value.forwardingLossId ?? ''}
+        onChange={event => onChange({ ...value, quantity: 0, outcome: event.target.value ? 'replace' : 'cancel',
+          forwardingLossId: event.target.value || undefined, replacement: alternative })}>
+        <option value="">原采购尚未供货</option>
+        {losses.map(row => <option value={row.resolutionId} key={row.resolutionId}>核实转发短失 · 可补 {row.available} · {row.resolutionId}</option>)}
+      </select>
+    </label>}
     <label className="grid gap-1 text-sm">本次受影响数量
-      <input className={field} type="number" min={0} max={quantity} step={1} value={value.quantity || ''}
+      <input className={field} type="number" min={0} max={limit} step={1} value={value.quantity || ''}
         onChange={event => onChange({ ...value, quantity: Number(event.target.value) })}/>
     </label>
-    {allowReplacement && <label className="grid gap-1 text-sm">本行处理方式
+    {allowReplacement && !selectedLoss && <label className="grid gap-1 text-sm">本行处理方式
       <select className={field} value={value.outcome} onChange={event => onChange({
         ...value, outcome: event.target.value as Intervention['outcome'], replacement: alternative,
       })}><option value="cancel">取消受影响数量</option><option value="replace">另建替代采购</option></select>
@@ -61,8 +72,9 @@ function legacyTerms(line: Purchase['lines'][number]): PurchaseTerms {
   return { writtenSupplier: reply.supplier, supplierConditions: reply.conditions, sourceSha256: reply.replyHash, ...line.terms };
 }
 
-export default function PurchaseActions({ orderId, orderStatus, cancellation, po, permissions, busy, request, onError }: {
+export default function PurchaseActions({ orderId, orderStatus, cancellation, po, fulfillment, permissions, busy, request, onError }: {
   orderId: string; orderStatus: string; cancellation: Workspace['cancellation']; po: Purchase;
+  fulfillment: Workspace['fulfillment'];
   permissions: string[]; busy: boolean; request: PurchaseRequest; onError: (message: string) => void;
 }) {
   const [action, setAction] = useState<Action | null>(null);
@@ -274,7 +286,7 @@ export default function PurchaseActions({ orderId, orderStatus, cancellation, po
       </>}
       {action === 'resolve_change' && <>
         <label className="grid gap-1 text-sm">协调结果<select className={field} value={outcome}
-          onChange={event => setOutcome(event.target.value as typeof outcome)}>
+          onChange={event => { setOutcome(event.target.value as typeof outcome); setDispositions({}); }}>
           {canContinueOriginal && <option value="original_terms">双方确认按原条款继续</option>}
           {committed ? (!closed && <option value="replacement">按书面确认另建替代采购</option>)
             : <option value="revised_terms">双方同意修订，提交新版本独立审核</option>}
@@ -290,10 +302,19 @@ export default function PurchaseActions({ orderId, orderStatus, cancellation, po
         {outcome === 'revised_terms' && po.lines.map(line => <PurchaseLineFields key={line.orderItemId} line={line}
           values={revisions[line.orderItemId] ?? line.terms} onChange={terms => setRevisions({ ...revisions, [line.orderItemId]: terms })}/>)}
         {committed && (outcome === 'declined' || outcome === 'replacement') && <>
-          {po.remaining.map(line => <DispositionFields key={line.orderItemId} line={lineFor(line.orderItemId)} quantity={line.quantity} allowReplacement={outcome === 'replacement'}
-            value={dispositions[line.orderItemId] ?? { quantity: 0, outcome: 'cancel' }}
-            onChange={entry => setDispositions({ ...dispositions, [line.orderItemId]: entry })}/>)}
-          {po.paidCents > 0 && inputField('refundFollowup', '原付款与未决退款的后续核对安排')}
+          {po.remaining.flatMap(line => {
+            const sent = fulfillment.supplierDispatched.filter(row => row.purchaseOrderId === po.id && row.orderItemId === line.orderItemId)
+              .reduce((sum,row) => sum + row.quantity,0);
+            const quantity = Math.max(0,line.quantity-sent);
+            const losses = outcome === 'replacement' ? fulfillment.forwardingShortfalls.filter(row =>
+              row.purchaseOrderId === po.id && row.orderItemId === line.orderItemId && row.available > 0) : [];
+            return quantity || losses.length ? [<DispositionFields key={line.orderItemId} line={lineFor(line.orderItemId)}
+              quantity={quantity} losses={losses} allowReplacement={outcome === 'replacement'}
+              value={dispositions[line.orderItemId] ?? { quantity: 0, outcome: 'cancel' }}
+              onChange={entry => setDispositions({ ...dispositions, [line.orderItemId]: entry })}/>] : [];
+          })}
+          {po.paidCents > 0 && Object.values(dispositions).some(row => row.quantity > 0 && !row.forwardingLossId)
+            && inputField('refundFollowup', '原付款与未决退款的后续核对安排')}
         </>}
       </>}
       <div className="flex gap-2"><button className={primary} disabled={busy}>查看完整预览</button>

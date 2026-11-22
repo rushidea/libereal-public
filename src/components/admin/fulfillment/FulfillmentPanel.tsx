@@ -1,7 +1,8 @@
 'use client';
 
 import { useState } from 'react';
-import { actionStyle, DispatchForm, EventForm, EvidenceAction, routeLabels, statusLabels, type Workspace } from './FulfillmentForms';
+import { actionStyle, DispatchForm, EventForm, EvidenceAction, HistoricalInventoryForm, HistoricalShipmentForm, routeLabels, statusLabels,
+  type FulfillmentCapabilities, type Workspace } from './FulfillmentForms';
 
 type StepUp = (callback: (token: string) => Promise<void>) => Promise<void>;
 type Preview = { actionHash: string; snapshot: Record<string,unknown> };
@@ -14,6 +15,9 @@ const labels: Record<string,string> = {
   carrier:'承运方', trackingNumber:'运单号', feedSource:'物流信息来源', shipmentId:'原发货单', dispatchedAt:'发出时间', deliveredAt:'签收时间',
   source:'来源', originalContent:'通知内容摘要', exceptionId:'待处理异常', recipient:'收货方', party:'收货方类别', email:'联系邮箱',
   institution:'单位', phone:'电话', address:'地址', deliveryAddress:'订单收货资料', priorParcel:'原包裹', priorEvent:'原登记',
+  orderStatus:'原订单状态', receiptId:'原实收记录', inventoryAccountId:'库存账户', spec:'规格', unit:'单位', packageType:'包装', baseQuantity:'包装数量',
+  inventory:'入仓归属', identity:'核对依据', approved:'已批准的商品', decisions:'双方确认', resolutions:'实物短失或退回', disposition:'本次实物处置',
+  receivedAt:'实际入仓时间', history:'历史状态记录', priorShippedQty:'此前记录的已发数量', historicalAttributionId:'原核对记录',
 };
 function PreviewValue({ value }: { value: unknown }) {
   if (value === null || value === undefined || value === '') return <span>未填写</span>;
@@ -35,6 +39,7 @@ export default function FulfillmentPanel({ orderId, canWrite, stepUp, onUpdated 
 }) {
   const [open,setOpen] = useState(false);
   const [view,setView] = useState<Workspace|null>(null);
+  const [capabilities,setCapabilities] = useState<FulfillmentCapabilities>({ warehouse:false, shortfall:false });
   const [busy,setBusy] = useState(false);
   const [pending,setPending] = useState<Pending|null>(null);
   const [error,setError] = useState('');
@@ -44,6 +49,7 @@ export default function FulfillmentPanel({ orderId, canWrite, stepUp, onUpdated 
     const body = await response.json();
     if (!response.ok || !body.workspace) throw new Error(body.error || '履约记录暂时无法读取');
     setView(body.workspace);
+    setCapabilities({ warehouse: body.capabilities?.warehouse === true, shortfall: body.capabilities?.shortfall === true });
   }
   async function work(action: () => Promise<void>) {
     if (busy) return;
@@ -99,7 +105,8 @@ export default function FulfillmentPanel({ orderId, canWrite, stepUp, onUpdated 
           <p className="text-sm">{[parcel.carrier,parcel.trackingNumber].filter(Boolean).join(' · ') || parcel.reference} · {new Date(parcel.dispatchedAt).toLocaleString('zh-CN')}</p>
           <ul className="text-sm">{parcel.lines.map(line => <li key={line.id}>
             {view.order.orderItems.find(item => item.id === line.orderItemId)?.name ?? line.orderItemId} · 已签 {line.receivedQuantity} / {line.quantity}
-            {line.receipts.map(receipt => <span key={receipt.id}> · 批次 {receipt.inventoryBatch.batchNumber}（已转发 {receipt.forwardedQuantity}/{receipt.quantity}）</span>)}
+            {line.receipts.map(receipt => <span key={receipt.id}> · 批次 {receipt.inventoryBatch.batchNumber}（已转发 {receipt.forwardedQuantity}/{receipt.quantity}
+              {receipt.releasedQuantity > 0 && ' · 已处置 '+receipt.releasedQuantity}）</span>)}
           </li>)}</ul>
           <details><summary className="cursor-pointer text-sm text-brand-700">物流进展和凭据</summary>
             <ol className="mt-2 space-y-2 text-sm">{parcel.events.map(event => <li key={event.id}>
@@ -107,16 +114,25 @@ export default function FulfillmentPanel({ orderId, canWrite, stepUp, onUpdated 
               {event.status === 'resolved' && ' · 已核结'}<div>{progressDetail(event.details)} {event.reference}</div>
             </li>)}</ol></details>
           {canWrite && <details><summary className="cursor-pointer text-sm font-medium text-brand-700">办理本包裹</summary>
-            <EventForm parcel={parcel} view={view} busy={busy} submit={preview}/></details>}
+            <EventForm parcel={parcel} view={view} capabilities={capabilities} busy={busy} submit={preview}/></details>}
+          {view.legacyInventory.filter(row => row.parcelId === parcel.id).map(row => <details key={row.parcelLineId}>
+            <summary className="cursor-pointer text-sm font-medium text-amber-900">旧库存预留待核实 · {row.awaitingReview}</summary>
+            {row.recordedOutsideReview > 0 && <p className="text-sm">已有部分库存流水，须核对其覆盖的历史发货数量。</p>}
+            {canWrite && capabilities.warehouse && row.available > 0 && <HistoricalInventoryForm row={row} busy={busy} submit={preview}/>}
+          </details>)}
           {canWrite && view.unmatched.filter(n => n.carrier === parcel.carrier && n.trackingNumber === parcel.trackingNumber &&
             n.source === 'carrier/'+parcel.feedSource && n.occurredAt >= parcel.dispatchedAt).map(notice =>
-            <details key={notice.id}><summary className="cursor-pointer text-sm text-brand-700">核对待匹配通知 · {notice.reference}</summary>
+            <details key={notice.id}><summary className="cursor-pointer text-sm text-brand-700">核对待匹配通知 · {notice.id}</summary>
               <EvidenceAction action="match_notice" fields={{parcelId:parcel.id,eventId:notice.id}} submit={preview} busy={busy} label="预览通知归属"/></details>)}
         </article>)}
         {view.legacyShipments.map(s => <details key={s.id} className="rounded border p-3 text-sm">
           <summary className="cursor-pointer">接续既有运单 · {s.carrier} {s.trackingNumber ?? s.id}</summary>
           {canWrite && <EvidenceAction action="link_legacy" fields={{shipmentId:s.id}} submit={preview} busy={busy} label="预览接续原运单"/>}
         </details>)}
+        {canWrite && view.legacyBackfill.history.length > 0 && view.legacyBackfill.lines.length > 0 && <details className="rounded border p-3 text-sm">
+          <summary className="cursor-pointer">补核历史发货记录和原运单</summary>
+          <HistoricalShipmentForm view={view} busy={busy} submit={preview}/>
+        </details>}
         {canWrite && ['confirmed','partially_shipped'].includes(view.order.status) && <details className="rounded border border-gray-200 p-3">
           <summary className="cursor-pointer text-sm font-medium text-brand-700">登记采购发货或转发</summary>
           <div className="mt-3"><DispatchForm view={view} submit={preview} busy={busy}/></div></details>}
