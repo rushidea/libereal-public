@@ -313,6 +313,52 @@ describe('admin purchase endpoint', () => {
     ]}}}});
   });
 
+  it('locates the prior use from an older unnumbered approval without treating a confirmed whole-file use as unlocated', async () => {
+    await startActualSupply(orderId,'old-location');
+    await noteChange(orderId,'old-commercial-change');
+    signIn(staff.approver);
+    const written = {
+      action:'resolve_change' as const,outcome:'declined' as const,requestId:'old-unnumbered-approval',
+      supplierReference:'TEST-LEGACY-ORIGINAL-SUPPLIER-FILE',supplierSha256:pricingContentHash('legacy-supplier-two-written-rows'),
+      customerReference:'TEST-LEGACY-CUSTOMER-FIRST',customerSha256:pricingContentHash('legacy-first-customer'),
+      description:'原书面决定办理一件',dispositions:[{orderItemId,quantity:1,outcome:'cancel' as const}],
+    };
+    const initial = await previewAction(written);
+    await expectJson(await confirm(initial,await grant(staff.approver)),200);
+    const saved = await prisma.purchaseActivity.findFirstOrThrow({where:{orderId,action:'resolve_change'}});
+    await noteChange(orderId,'old-location-followup');
+    signIn(staff.approver);
+    const po = await currentPurchase();
+    const next = {...written,requestId:'complete-with-verified-old-location',orderId,purchaseOrderId:po.id,version:po.version,stage:'preview',
+      customerReference:'TEST-NEW-CUSTOMER-ALLOWS-SECOND',customerSha256:pricingContentHash('new-customer-second-only')};
+    const locate = {activityId:saved.id,orderItemId,row:8,quantity:1};
+    const line = {...written.dispositions[0],supplierDocumentRow:9,supplierLegacyLocations:[locate]};
+    await expectJson(await post({...next,dispositions:[line]}),409);
+
+    // Match the persisted shape from before commercial document accounting was introduced.
+    const archived = JSON.parse(saved.detail);
+    delete archived.snapshot.operation.decisionDocuments;
+    const oldBytes = JSON.stringify(archived);
+    await prisma.purchaseActivity.update({where:{id:saved.id},data:{detail:oldBytes}});
+    const unresolved = await expectJson(await post({...next,dispositions:[{...line,supplierLegacyLocations:undefined}]}),409);
+    expect(unresolved.error).toMatch(/未定位的旧批准/);
+    const badQty = await expectJson(await post({...next,dispositions:[{...line,supplierLegacyLocations:[{...locate,quantity:2}]}]}),409);
+    expect(badQty.error).toMatch(/旧批准实际占用量/);
+    const oldScope = {orderId,purchaseOrderId:po.id,orderItemId,quantity:1};
+    const spent = await expectJson(await post({...next,dispositions:[{...line,supplierDocumentRow:8,supplierDocumentScope:[oldScope],
+      supplierRestoreScope:true}]}),409);
+    expect(spent.error).toMatch(/超过原件核准范围/);
+    const prepared = await previewAction({...written,...next,dispositions:[line]});
+    await expectJson(await confirm(prepared),403);
+    const {workspace} = await expectJson(await confirm(prepared,await grant(staff.approver)),200);
+    expect(workspace.activities.at(-1)).toMatchObject({actorId:staff.approver,detail:{authorization:{permission:'purchases.approve'},
+      snapshot:{operation:{decisionDocuments:[expect.objectContaining({role:'supplier',row:9,legacyLocations:[locate]}),
+        expect.objectContaining({role:'customer'})]}}}});
+    expect(await prisma.purchaseActivity.findUnique({where:{id:saved.id}})).toEqual({...saved,detail:oldBytes});
+    await expectJson(await confirm(prepared,await grant(staff.approver)),200);
+    expect(await prisma.purchaseActivity.count({where:{orderId,action:'resolve_change'}})).toBe(2);
+  });
+
   it('keeps shipment session details out of new and historical responses while preserving the original audit bytes', async () => {
     signIn(staff.approver);
     const approval = await previewAction({ action: 'approve', requestId: 'approve-minimal-shipment-snapshot' });

@@ -497,6 +497,97 @@ describe('procurement-bound fulfillment parcels', () => {
       expect(await originalHold()).toEqual({pending:1,released:1,loggedReleases:1});
     });
 
+    it.each(['new_purchase','change_contract'] as const)('keeps free-only written decisions from becoming %s', async decision=>{
+      await acceptCustomerOrder();
+      const {relay} = await orderFromSuppliers();
+      const original = await dispatch(dispatchInput('purpose-original-two','supplier_to_customer',[goods(relay,2)]));
+      const loss = await verifyLoss(original,'purpose-original-two',2);
+      const cover = {orderId,purchaseOrderId:relay,orderItemId:relayLineId,shortfallId:loss.resolutionId,quantity:2};
+      const documents = {supplierDocumentRow:8,customerDocumentRow:12,supplierDocumentScope:[cover],customerDocumentScope:[cover]};
+      const shared = {action:'resolve_change' as const,outcome:'shortfall' as const,...agreement};
+      const free = {orderItemId:relayLineId,quantity:1,shortfallId:loss.resolutionId,shortfallDecision:'free_resend' as const,outcome:'cancel' as const,...documents};
+      await report(relay,'approve-one-of-two-free');
+      const first = await purchaseAction(relay,{...shared,requestId:'one-of-two-free-approved',dispositions:[free]});
+      const [approval] = first.fulfillment.freeResends;
+      expect(approval).toMatchObject({quantity:1,dispatched:0,available:1});
+      await report(relay,'wrong-use-of-free-only-document');
+      await expect(purchaseAction(relay,{...shared,requestId:'move-free-to-other-purpose',dispositions:[{
+        ...free,outcome:decision==='new_purchase'?'replace':'cancel',shortfallDecision:decision,revisesResendApprovalId:approval.approvalId,
+        ...(decision==='new_purchase'?{replacement:alternative('NOT-AUTHORIZED')}:{})}]})).rejects.toThrow(/商业决定、供方或实质条件已变化/);
+      const inReview = await current();
+      expect(inReview.fulfillment.freeResends[0].available).toBe(1);
+      expect(inReview.orders.find(row=>row.id===relay)).toMatchObject({totalCents:5000,paidCents:0,remaining:[{orderItemId:relayLineId,quantity:2}]});
+      const samePurpose = await purchaseAction(relay,{...shared,requestId:'same-purpose-second-unit',dispositions:[free]});
+      expect(samePurpose.fulfillment.freeResends).toHaveLength(2);
+      expect(samePurpose.activities.at(-1)?.detail.snapshot).toMatchObject({operation:{decisionDocuments:[
+        expect.objectContaining({authority:{purpose:'free_resend'},balances:[{...cover,usedBefore:1,using:1,remaining:0}]}),
+        expect.objectContaining({authority:{purpose:'free_resend'},balances:[{...cover,usedBefore:1,using:1,remaining:0}]}),
+      ]}});
+    });
+
+    it('keeps a supplier facts row usable while requiring new customer proof for changed alternative supplier or price', async ()=>{
+      await acceptCustomerOrder();
+      const {relay} = await orderFromSuppliers();
+      await purchaseAction(relay,{action:'record_payment',requestId:'original-paid-under-facts-only',amountCents:500,
+        reference:'TEST-ORIGINAL-PAID-UNDER-FACTS-ROW',conditionReference:'TEST-ORIGINAL-TERMS'});
+      const original = await dispatch(dispatchInput('facts-only-original-two','supplier_to_customer',[goods(relay,2)]));
+      const loss = await verifyLoss(original,'facts-only-loss',2);
+      const approval = await authorizeTwoResends(relay,loss.resolutionId,2);
+      const coverage = [{orderId,purchaseOrderId:relay,orderItemId:relayLineId,shortfallId:loss.resolutionId,quantity:2}];
+      const chosen = alternative('APPROVED-BY-CUSTOMER');
+      const redirect = (requestId:string,replacement:typeof chosen,customerSha256=revisedAgreement.customerSha256): PurchaseAction => ({
+        action:'resolve_change',outcome:'shortfall',requestId,...revisedAgreement,customerSha256,
+        dispositions:[{orderItemId:relayLineId,quantity:1,outcome:'replace',shortfallId:loss.resolutionId,shortfallDecision:'new_purchase',
+          revisesResendApprovalId:approval.approvalId,replacement,supplierDocumentRow:8,customerDocumentRow:12,
+          supplierDocumentScope:coverage,...(customerSha256===revisedAgreement.customerSha256?{customerDocumentScope:coverage}:{})}],
+      });
+      await report(relay,'original-supplier-fact-one');
+      const first = await purchaseAction(relay,redirect('approved-specific-alternate',chosen));
+      expect(first.activities.at(-1)?.detail.snapshot).toMatchObject({operation:{decisionDocuments:[
+        expect.objectContaining({authority:{purpose:'supplier_facts'}}),
+        expect.objectContaining({authority:expect.objectContaining({purpose:'new_purchase',alternate:expect.objectContaining({supplier:chosen.terms.supplier,unitPriceCents:2500})})}),
+      ]}});
+      await report(relay,'original-supplier-fact-two');
+      const newSeller = alternative('DIFFERENT-ACTUAL-SUPPLIER');
+      await expect(purchaseAction(relay,redirect('same-approval-different-seller',newSeller))).rejects.toThrow(/客户书证的商业决定、供方或实质条件已变化/);
+      const changedPrice = {...chosen,terms:{...chosen.terms,unitPriceCents:2800,linePayableCents:2800,
+        sourceReference:'TEST-NEW-PRICE-PROOF',sourceSha256:pricingContentHash('new-actual-price')}};
+      await expect(purchaseAction(relay,redirect('same-approval-different-price',changedPrice))).rejects.toThrow(/客户书证的商业决定、供方或实质条件已变化/);
+      const supplemented = await purchaseAction(relay,redirect('customer-later-approves-different-supplier',newSeller,
+        pricingContentHash('newly-signed-specific-customer-acceptance')));
+      expect(supplemented.fulfillment.freeResends[0].available).toBe(0);
+      expect(supplemented.orders.filter(row=>row.lines.some(line=>line.fromPurchaseOrderId===relay))).toHaveLength(2);
+      expect(supplemented.orders.find(row=>row.id===relay)).toMatchObject({paidCents:500,dueCents:4500});
+      expect(supplemented.activities.at(-1)?.detail.snapshot).toMatchObject({operation:{decisionDocuments:[
+        expect.objectContaining({role:'supplier',authority:{purpose:'supplier_facts'},balances:[expect.objectContaining({usedBefore:1,remaining:0})]}),
+        expect.objectContaining({role:'customer',authority:expect.objectContaining({purpose:'new_purchase',alternate:expect.objectContaining({supplier:newSeller.terms.supplier})})}),
+      ]}});
+    });
+
+    it('applies one signed scope to exact same-line losses A and B and excludes a third physical loss C', async ()=>{
+      await acceptCustomerOrder();
+      const {relay,direct} = await orderFromSuppliers();
+      const losses = [];
+      for (const [tag,po,orderItemId] of [['A',relay,relayLineId],['B',relay,relayLineId],['C',direct,directLineId]]) {
+        const parcel = await dispatch(dispatchInput('precise-source-'+tag,'supplier_to_customer',[{purchaseOrderId:po,orderItemId,quantity:1}]));
+        const loss = await verifyLoss(parcel,'precise-'+tag);
+        losses.push({orderId,purchaseOrderId:po,orderItemId,shortfallId:loss.resolutionId,quantity:1});
+      }
+      const [a,b,c] = losses;
+      const authorize = async (claim:typeof a, tag:string) => {
+        await report(claim.purchaseOrderId,'precise-scope-'+tag);
+        return purchaseAction(claim.purchaseOrderId,{action:'resolve_change',requestId:'consent-only-two-'+tag,outcome:'shortfall',...revisedAgreement,
+          supplierSha256:pricingContentHash({tag,scope:'specific supplier confirmation'}),
+          dispositions:[{orderItemId:claim.orderItemId,quantity:1,shortfallId:claim.shortfallId,shortfallDecision:'free_resend',outcome:'cancel',
+            customerDocumentRow:9,...(tag==='A'?{customerDocumentScope:[a,b]}:{})}]});
+      };
+      await authorize(a,'A');
+      const checked = await authorize(b,'B');
+      expect(checked.fulfillment.freeResends.map(row=>row.shortfallId)).toEqual([a.shortfallId,b.shortfallId]);
+      await expect(authorize(c,'C')).rejects.toThrow(/不包含本次办理对象/);
+      expect((await current()).fulfillment.shortfalls.find(row=>row.resolutionId===c.shortfallId)?.available).toBe(1);
+    });
+
     it.each([false,true])('independently allocates the two units with a shared two-unit supplier row = %s', async sharedSupplier=>{
       await acceptCustomerOrder();
       const {relay} = await orderFromSuppliers();

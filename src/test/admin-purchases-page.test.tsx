@@ -222,6 +222,52 @@ describe('supplier purchasing page', () => {
       requestId:posts[0].requestId,dispositions:posts[0].dispositions}));
   });
 
+  it('adds only the two evidenced shortfalls across purchase lines to the document scope', async () => {
+    const workspace = makeWorkspace('on_hold');
+    const [first] = workspace.orders;
+    first.orderedBefore = true;
+    const otherPurchase = 'PO-OTHER-COVERED';
+    const otherLine = 'TEST-OTHER-CUSTOMER-LINE';
+    workspace.orders.push({...first,id:otherPurchase,version:'6'.repeat(64),status:'ordered',openIncidentId:null,
+      lines:[{...first.lines[0],orderItemId:otherLine,purchaseOrderId:otherPurchase,
+        source:{...first.lines[0].source,orderItemId:otherLine,name:'另一采购商品'}}]});
+    workspace.fulfillment.shortfalls = ['A','B','C'].map(name=>({
+      resolutionId:'EXACT-LOSS-'+name,purchaseOrderId:name==='B'?otherPurchase:purchaseId,
+      orderItemId:name==='B'?otherLine:orderItemId,route:'supplier_to_customer',originalContract:true,contractSource:null,
+      quantity:1,available:1,reference:'TEST-TRUE-LOSS-'+name,occurredAt:'2031-04-15T00:00:00.000Z',independentlyReplaced:0,
+    }));
+    const posts = mockWorkspace(workspace,['purchases.read','purchases.approve'],body=>Response.json(preview(body,workspace)));
+    render(<PurchaseManager initialOrder={orderId}/>);
+    fireEvent.click(await screen.findByRole('button',{name:'回填协调结果'}));
+    fill('协调结果','shortfall');
+    fill('已核实的物流短失','EXACT-LOSS-A');
+    fill('双方书面决定','free_resend');
+    fill('本次受影响数量','1');
+    fill('客户同意原件行号','8');
+    fireEvent.click(screen.getByText('核对客户书证覆盖范围'));
+    fireEvent.click(screen.getByRole('button',{name:'填写客户书证覆盖的采购行及总量'}));
+    const options = screen.getByLabelText('添加原件列明的物流短失');
+    const b = within(options).getByRole<HTMLOptionElement>('option',{name:/TEST-TRUE-LOSS-B/});
+    fireEvent.change(options,{target:{value:b.value}});
+    expect(screen.getByRole('group',{name:/TEST-TRUE-LOSS-A/})).toBeInTheDocument();
+    expect(screen.getByRole('group',{name:/TEST-TRUE-LOSS-B/})).toBeInTheDocument();
+    expect(screen.queryByRole('group',{name:/TEST-TRUE-LOSS-C/})).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button',{name:'按编号添加其他订单的采购行'}));
+    expect(screen.getByLabelText('已核实的物流短失编号')).toBeRequired();
+    fireEvent.click(screen.getAllByRole('button',{name:'移除此范围'}).at(-1)!);
+    fill('人工与供应商协调的书面依据','TEST-EXACT-SUPPLIER-ORIGINAL');
+    fill('客户对方案的回复依据','TEST-CLIENT-ONLY-A-AND-B');
+    fill('供方书面回复摘要','d'.repeat(64));
+    fill('客户书面回复摘要','e'.repeat(64));
+    fill('双方确认的具体结果','只同意按实际 A 与 B 两项免费补件。');
+    fireEvent.click(screen.getByRole('button',{name:'查看完整预览'}));
+    await screen.findByRole('region',{name:'操作预览'});
+    expect(posts[0]).toMatchObject({dispositions:[{customerDocumentScope:[
+      {orderId,purchaseOrderId:purchaseId,orderItemId,shortfallId:'EXACT-LOSS-A',quantity:1},
+      {orderId,purchaseOrderId:otherPurchase,orderItemId:otherLine,shortfallId:'EXACT-LOSS-B',quantity:1},
+    ]}]});
+  });
+
   it('finds the customer order, preserves missing terms, and keeps customer conditions out of supplier fields', async () => {
     const workspace = makeWorkspace();
     const requests: RequestBody[] = [];

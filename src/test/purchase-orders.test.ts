@@ -260,6 +260,45 @@ describe('supplier commitments and customer fulfilment stay bound to actual evid
     await expect(startReview(recipient.id, bankProof(tradeNo))).rejects.toThrow(/原生流水.*归属原订单/);
   });
 
+  it('requires new customer consent before materially revising an existing replacement draft', async () => {
+    const order = await seedOrder('test-reverify-substitute-customer', { quantities:[2] });
+    const [item] = order.orderItems;
+    await acceptAsMerchant(order.id);
+    const [draft] = (await saveLine(await readWorkspace(order.id),0,terms(2))).orders;
+    const [approved] = (await submit(order.id,draft,{action:'approve',requestId:'material-original-approve'})).orders;
+    const [ordered] = (await register(order.id,approved,'material-original-register')).orders;
+    const [held] = (await hold(order.id,ordered,'material-original-review')).orders;
+    const origin = await submit(order.id,held,{
+      ...written,action:'resolve_change',requestId:'approve-old-customer-alternate',outcome:'replacement',
+      dispositions:[{orderItemId:item.id,quantity:1,outcome:'replace',replacement:{
+        name:'合成替代商品',brand:'合成替代品牌',catalogNumber:'TEST-MATERIAL-ORIGINAL-ALTERNATE',spec:'合成规格',unit:'件',
+        terms:terms(1,{sourceReference:'TEST-MATERIAL-ORIGINAL-ALTERNATE-QUOTE',sourceSha256:pricingContentHash('original-replacement-quote')}),
+      }}],
+    });
+    const alternate = origin.orders.find(row=>row.lines.some(line=>line.fromPurchaseOrderId===ordered.id))!;
+    const review = (await hold(order.id,alternate,'new-supplier-terms')).orders.find(row=>row.id===alternate.id)!;
+    const line = review.lines[0];
+    const changed = {...line.terms,unitPriceCents:2000,linePayableCents:2000,sourceReference:'TEST-NEW-REPLACEMENT-QUOTE',
+      sourceSha256:pricingContentHash('new-replacement-price')};
+    const request = {
+      orderId:order.id,purchaseOrderId:alternate.id,version:review.version,action:'resolve_change' as const,
+      requestId:'accept-new-replacement-price',outcome:'revised_terms' as const,supplierReference:'TEST-REPLACEMENT-NEW-SUPPLIER-TERMS',
+      customerReference:'TEST-REPLACEMENT-NEW-CUSTOMER-DECISION',description:'新价格只经新书面同意后提交重新批准。',
+      revisedTerms:[{orderItemId:item.id,terms:changed}],
+    };
+    await expect(prisma.$transaction(tx=>previewPurchaseAction(tx,request,preparer))).rejects.toThrow(/替代条件变更后客户同意/);
+    await expect(prisma.$transaction(tx=>previewPurchaseAction(tx,{...request,customerSha256:written.customerSha256},preparer)))
+      .rejects.toThrow(/客户新的书面同意/);
+
+    const actual = {...request,customerSha256:pricingContentHash('actual-customer-reacceptance-of-alternative')};
+    const preview = await prisma.$transaction(tx=>previewPurchaseAction(tx,actual,preparer));
+    const amended = await prisma.$transaction(tx=>applyPurchaseAction(tx,{...actual,actionHash:preview.actionHash},preparer));
+    const after = amended.orders.find(row=>row.id===alternate.id)!;
+    expect(after).toMatchObject({status:'draft',approvedHash:null,totalCents:2000});
+    expect(amended.activities.at(-1)?.detail.snapshot).toMatchObject({operation:{customerSha256:actual.customerSha256}});
+    await submit(order.id,after,{action:'approve',requestId:'independent-reapprove-new-price'});
+  });
+
   it('counts live sibling and nested replacement quantities together and rechecks new shipments before confirmation', async () => {
     const order = await seedOrder('test-replacement-tree', { quantities: [10] });
     const [item] = order.orderItems;
