@@ -11,15 +11,19 @@ import { actionNames, button, cents, field, LineDetails, money, primary, Purchas
 type Action = PurchaseActionInput['action'];
 type Preview = Awaited<ReturnType<typeof previewPurchaseAction>>;
 type Alternative = { name: string; brand: string; catalogNumber: string; spec: string; unit: string; terms: PurchaseTerms };
-type Intervention = { quantity: number; outcome: 'cancel' | 'replace'; replacement?: Alternative; shortfallId?: string; shortfallDecision?: ShortfallDecision };
+type Intervention = {
+  quantity: number; outcome: 'cancel' | 'replace'; replacement?: Alternative; shortfallId?: string;
+  shortfallDecision?: ShortfallDecision; revisesResendApprovalId?: string;
+};
 type Pending = { input: PurchaseActionInput; preview: Preview };
 
 function inputField(name: string, label: string) {
   return <label className="grid gap-1 text-sm">{label}<input className={field} name={name} required maxLength={2000}/></label>;
 }
 
-function DispositionFields({ line, quantity, losses, shortfall, value, allowReplacement, onChange }: {
-  line: Pick<Line, 'source'>; quantity: number; losses: Workspace['fulfillment']['shortfalls']; shortfall: boolean;
+function DispositionFields({ line, quantity, losses, resends, shortfall, value, allowReplacement, onChange }: {
+  line: Pick<Line, 'source'>; quantity: number; losses: Workspace['fulfillment']['shortfalls'];
+  resends: Workspace['fulfillment']['freeResends']; shortfall: boolean;
   value: Intervention; allowReplacement: boolean; onChange: (value: Intervention) => void;
 }) {
   const source = line.source;
@@ -30,24 +34,36 @@ function DispositionFields({ line, quantity, losses, shortfall, value, allowRepl
   const alternativeFields = { name: '替代商品名称', brand: '替代商品品牌', catalogNumber: '替代商品货号', spec: '替代商品规格', unit: '替代计量单位' } as const;
   const replacing = allowReplacement && value.outcome === 'replace';
   const selectedLoss = losses.find(row => row.resolutionId === value.shortfallId);
-  const limit = shortfall ? selectedLoss?.available ?? 0 : quantity;
+  const selectedResend = resends.find(row => row.approvalId === value.revisesResendApprovalId);
+  const limit = shortfall ? selectedResend?.available ?? selectedLoss?.available ?? 0 : quantity;
 
   return <fieldset className="grid gap-2 rounded border p-3">
     <legend>{source.name} · 原数量 {source.quantity} · 尚未供货 {quantity}</legend>
     {shortfall && <label className="grid gap-1 text-sm">已核实的物流短失
-      <select className={field} value={value.shortfallId ?? ''}
-        onChange={event => onChange({ quantity: 0, outcome: 'cancel', shortfallId: event.target.value || undefined })}>
-        <option value="">请选择原物流记录</option>
-        {losses.map(row => <option value={row.resolutionId} key={row.resolutionId}>{row.reference} · 尚可处理 {row.available}</option>)}
+      <select className={field} value={value.revisesResendApprovalId ?? value.shortfallId ?? ''}
+        onChange={event => {
+          const prior = resends.find(row => row.approvalId === event.target.value);
+          onChange({ quantity: 0, outcome: 'cancel', shortfallId: prior?.shortfallId ?? (event.target.value || undefined),
+            revisesResendApprovalId: prior?.approvalId });
+        }}>
+        <option value="">请选择原物流记录或待改办的免费批准</option>
+        {losses.filter(row => row.available > 0).map(row => <option value={row.resolutionId} key={row.resolutionId}>
+          {row.reference} · 尚可处理 {row.available}
+        </option>)}
+        {resends.map(row => <option value={row.approvalId} key={row.approvalId}>
+          {losses.find(loss => loss.resolutionId === row.shortfallId)?.reference} · 免费补发已发 {row.dispatched} · 已改办 {row.redirected} · 可改办 {row.available}
+        </option>)}
       </select>
     </label>}
+    {selectedResend && <p className="text-sm">请按供方新的书面决定和客户同意改办尚未发出的数量。</p>}
     {selectedLoss && <label className="grid gap-1 text-sm">双方书面决定
       <select className={field} value={value.shortfallDecision ?? ''} required={value.quantity > 0}
         onChange={event => {
           const decision = event.target.value as ShortfallDecision | '';
           onChange({ ...value, shortfallDecision: decision || undefined, outcome: decision === 'new_purchase' ? 'replace' : 'cancel', replacement: alternative });
         }}>
-        <option value="">请选择</option><option value="free_resend">供方同意免费重发，保留原合同</option>
+        <option value="">请选择</option>
+        {!selectedResend && <option value="free_resend">供方同意免费重发，保留原合同</option>}
         {selectedLoss.originalContract && <option value="change_contract">双方同意变更原合同的份额</option>}
         <option value="new_purchase">保留原合同应付，另建独立采购</option>
       </select>
@@ -99,7 +115,9 @@ export default function PurchaseActions({ orderId, orderStatus, cancellation, po
   const canContinueOriginal = !supplierCancelled && !po.needsRemainingReview;
   const openExceptions = po.commitmentExceptions.filter(row => !row.resolution);
   const legacyFiles = [...new Set(po.documentReviewLines.map(row => row.sha256))];
-  const pendingShortfalls = fulfillment.shortfalls.filter(row => row.purchaseOrderId === po.id && row.available > 0);
+  const shortfalls = fulfillment.shortfalls.filter(row => row.purchaseOrderId === po.id);
+  const pendingResends = fulfillment.freeResends.filter(row => row.purchaseOrderId === po.id && row.available > 0);
+  const canHandleShortfall = po.orderedBefore && !supplierCancelled && (pendingResends.length > 0 || shortfalls.some(row => row.available > 0));
   const closed = orderStatus === 'cancelled' || orderStatus === 'closed';
   const archiveTerms = (line: Purchase['lines'][number]) => revisions[line.orderItemId] ?? legacyTerms(line);
   const lineFor = (id: string) => po.lines.find(line => line.orderItemId === id)!;
@@ -300,7 +318,7 @@ export default function PurchaseActions({ orderId, orderStatus, cancellation, po
         <label className="grid gap-1 text-sm">协调结果<select className={field} value={outcome}
           onChange={event => { setOutcome(event.target.value as typeof outcome); setDispositions({}); }}>
           {canContinueOriginal && <option value="original_terms">双方确认按原条款继续</option>}
-          {po.orderedBefore && pendingShortfalls.length > 0 && <option value="shortfall">按书面决定处理已核实短失</option>}
+          {canHandleShortfall && <option value="shortfall">按书面决定处理已核实短失</option>}
           {committed ? (!closed && <option value="replacement">按书面确认另建替代采购</option>)
             : <option value="revised_terms">双方同意修订，提交新版本独立审核</option>}
           <option value="declined">{committed ? '取消受影响数量' : '客户未同意，结束本次采购准备'}</option>
@@ -319,9 +337,11 @@ export default function PurchaseActions({ orderId, orderStatus, cancellation, po
             const sent = fulfillment.supplierDispatched.filter(row => row.purchaseOrderId === po.id && row.orderItemId === line.orderItemId)
               .reduce((sum,row) => sum + row.quantity,0);
             const quantity = Math.max(0,(po.remaining.find(row => row.orderItemId === line.orderItemId)?.quantity ?? 0)-sent);
-            const losses = outcome === 'shortfall' ? pendingShortfalls.filter(row => row.orderItemId === line.orderItemId) : [];
-            return (outcome === 'shortfall' ? losses.length : quantity) ? [<DispositionFields key={line.orderItemId} line={line}
-              quantity={quantity} losses={losses} shortfall={outcome === 'shortfall'} allowReplacement={outcome !== 'declined'}
+            const losses = outcome === 'shortfall' ? shortfalls.filter(row => row.orderItemId === line.orderItemId) : [];
+            const resends = outcome === 'shortfall' ? pendingResends.filter(row => row.orderItemId === line.orderItemId) : [];
+            return (outcome === 'shortfall' ? resends.length > 0 || losses.some(row => row.available > 0) : quantity > 0)
+              ? [<DispositionFields key={line.orderItemId} line={line}
+              quantity={quantity} losses={losses} resends={resends} shortfall={outcome === 'shortfall'} allowReplacement={outcome !== 'declined'}
               value={dispositions[line.orderItemId] ?? { quantity: 0, outcome: 'cancel' }}
               onChange={entry => setDispositions({ ...dispositions, [line.orderItemId]: entry })}/>] : [];
           })}
@@ -385,6 +405,7 @@ export default function PurchaseActions({ orderId, orderStatus, cancellation, po
         {op.dispositions?.map(entry => <div key={entry.orderItemId}>
           <p>{entry.outcome === 'resend' ? '免费重发，保留原合同' : entry.shortfallDecision === 'new_purchase' ? '保留原合同应付，另建采购'
             : entry.outcome === 'cancel' ? '取消原合同份额' : '变更原合同并另建采购'} · 原订单行 {entry.orderItemId} · 数量 {entry.quantity}</p>
+          {entry.priorResend && <p className="break-all">原免费批准 {entry.revisesResendApprovalId} · 核准 {entry.priorResend.authorized} · 已发 {entry.priorResend.dispatched} · 已改办 {entry.priorResend.redirected} · 本次改办 {entry.quantity}</p>}
           {entry.replacement && <LineDetails line={entry.replacement}/>}
         </div>)}
         {op.refund && <p>原单已付 {money(op.refund.paidCents)} · 退款待核对 · {op.refund.followup}</p>}
