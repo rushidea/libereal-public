@@ -70,20 +70,20 @@ function readPurchases(id?: string) {
   return GET(new NextRequest(id ? `${url}?orderId=${encodeURIComponent(id)}` : url));
 }
 
-async function currentPurchase() {
-  const result = await expectJson(await readPurchases(orderId), 200);
+async function currentPurchase(target = orderId) {
+  const result = await expectJson(await readPurchases(target), 200);
   const [purchase] = result.workspace.orders;
   expect(purchase).toBeDefined();
   return purchase as { id: string; version: string; status: string; totalCents: number; paidCents: number };
 }
 
-async function previewAction(request: ActionRequest): Promise<Previewed> {
-  const purchase = await currentPurchase();
-  const input = { ...request, orderId, purchaseOrderId: purchase.id, version: purchase.version };
+async function previewAction(request: ActionRequest, target = orderId): Promise<Previewed> {
+  const purchase = await currentPurchase(target);
+  const input = { ...request, orderId: target, purchaseOrderId: purchase.id, version: purchase.version };
   const result = await expectJson(await post({ ...input, stage: 'preview' }), 200);
   expect(result.preview).toMatchObject({ actionHash: expect.stringMatching(/^[a-f0-9]{64}$/) });
   expect(result.preview.snapshot).toMatchObject({
-    orderId, purchaseOrderId: purchase.id, version: purchase.version,
+    orderId: target, purchaseOrderId: purchase.id, version: purchase.version,
     requestId: request.requestId, operation: { action: request.action },
   });
   return { ...input, actionHash: result.preview.actionHash };
@@ -206,6 +206,113 @@ afterEach(() => {
 });
 
 describe('admin purchase endpoint', () => {
+  async function startActualSupply(target: string, request: string) {
+    signIn(staff.approver);
+    await expectJson(await confirm(await previewAction({action:'approve',requestId:'approve-'+request},target),await grant(staff.approver)),200);
+    signIn(staff.operator);
+    await expectJson(await confirm(await previewAction({action:'register_order',requestId:'register-'+request,
+      reference:'TEST-COMMITMENT-'+request,referenceSha256:pricingContentHash({request,proof:'commitment'}),
+      occurredAt:new Date().toISOString()},target),await grant(staff.operator)),200);
+  }
+
+  async function noteChange(target:string,request:string) {
+    signIn(staff.operator);
+    await expectJson(await confirm(await previewAction({action:'report_change',requestId:'report-'+request,changeKind:'unavailable',
+      reference:'TEST-ACTUAL-SUPPLY-CHANGE-'+request,description:'供方书面收到采购协调，核对取消或补货对象。'},target),await grant(staff.operator)),200);
+  }
+
+  it.each([false,true])('rechecks a supplier document across two orders, with both orders covered = %s', async bothCovered => {
+    const otherOrder = 'TEST-DOCUMENT-COVERAGE-OTHER-ORDER';
+    const otherItem = 'TEST-DOCUMENT-COVERAGE-OTHER-ITEM';
+    await seedAcceptedOrder(otherOrder,otherItem);
+    signIn(staff.operator);
+    const prepared = await expectJson(await post({action:'prepare',orderId:otherOrder}),200);
+    await expectJson(await post({action:'save_line',orderId:otherOrder,orderItemId:otherItem,revision:prepared.workspace.lines[0].revision,
+      checkedEvidence:true,terms:{...procurementTerms,sourceSha256:pricingContentHash({otherOrder,proof:'terms'})}}),200);
+    await startActualSupply(orderId,'first-customer-scope');
+    await startActualSupply(otherOrder,'other-customer-scope');
+    await noteChange(orderId,'first-customer-scope');
+    await noteChange(otherOrder,'other-customer-scope');
+    signIn(staff.approver);
+    const first = await currentPurchase();
+    const second = await currentPurchase(otherOrder);
+    const scope = {orderId,purchaseOrderId:first.id,orderItemId,quantity:1};
+    const otherScope = {orderId:otherOrder,purchaseOrderId:second.id,orderItemId:otherItem,quantity:1};
+    const supplierSha256 = pricingContentHash('verified-supplier-row');
+    const supplierDocumentScope = bothCovered ? [scope,otherScope] : [scope];
+    const cancellation = (item: string, tag: string): ActionRequest => ({
+      action:'resolve_change',outcome:'declined',requestId:'allocate-document-'+tag,supplierReference:'TEST-SUPPLIER-DOCUMENT-'+tag,
+      supplierSha256,customerReference:'TEST-CUSTOMER-ORIGINAL-'+tag,customerSha256:pricingContentHash({tag,proof:'client'}),
+      description:'按书面决定取消确实受影响的一件',dispositions:[{orderItemId:item,quantity:1,outcome:'cancel',
+        supplierDocumentRow:8,customerDocumentRow:13,...(item===orderItemId || bothCovered ? {supplierDocumentScope} : {})}],
+    });
+    const firstPreview = await previewAction(cancellation(orderItemId,'first'),orderId);
+    const otherPreview = await previewAction(cancellation(otherItem,'other'),otherOrder);
+    await expectJson(await confirm(firstPreview),403);
+    if (bothCovered) {
+      const firstGrant = await grant(staff.approver);
+      const otherGrant = await grant(staff.approver);
+      const concurrent = await Promise.all([confirm(firstPreview,firstGrant),confirm(otherPreview,otherGrant)]);
+      expect(concurrent.map(response=>response.status).sort()).toEqual([200,409]);
+      const firstWon = concurrent[0].status === 200;
+      const remainingOrder = firstWon ? otherOrder : orderId;
+      const remainingItem = firstWon ? otherItem : orderItemId;
+      const refreshed = await previewAction(cancellation(remainingItem,firstWon?'other':'first'),remainingOrder);
+      const final = await expectJson(await confirm(refreshed,await grant(staff.approver)),200);
+      expect(final.workspace.activities.at(-1)?.detail.snapshot.operation.decisionDocuments).toContainEqual(expect.objectContaining({
+        role:'supplier',row:8,balances:expect.arrayContaining([
+          {...(firstWon?scope:otherScope),usedBefore:1,using:0,remaining:0},
+          {...(firstWon?otherScope:scope),usedBefore:0,using:1,remaining:0},
+        ]),
+      }));
+      expect(await prisma.purchaseActivity.count({where:{action:'resolve_change',orderId:{in:[orderId,otherOrder]}}})).toBe(2);
+      return;
+    }
+    const accepted = await expectJson(await confirm(firstPreview,await grant(staff.approver)),200);
+    expect(accepted.workspace.activities.at(-1)).toMatchObject({actorId:staff.approver,detail:{authorization:{permission:'purchases.approve'},
+      snapshot:{operation:{decisionDocuments:expect.arrayContaining([expect.objectContaining({
+        role:'supplier',sha256:supplierSha256,row:8,scopeConfirmed:true,balances:[{...scope,usedBefore:0,using:1,remaining:0}],
+      })])}}}});
+    const rejected = await expectJson(await confirm(otherPreview,await grant(staff.approver)),409);
+    expect(rejected.error).toMatch(/不包含本次办理对象/);
+    await expectJson(await post({...otherPreview,stage:'preview'}),409);
+    expect(await prisma.purchaseActivity.count({where:{orderId:otherOrder,action:'resolve_change'}})).toBe(0);
+  });
+
+  it('lets an approver document a previously unquantified original row and counts the prior unit before completing the current review', async () => {
+    await startActualSupply(orderId,'prior-coverage');
+    await noteChange(orderId,'initial-coverage');
+    signIn(staff.approver);
+    const first = await currentPurchase();
+    const prior = {
+      action:'resolve_change' as const,outcome:'declined' as const,requestId:'use-one-known-row',
+      supplierReference:'TEST-FILE-WITH-TWO-VERIFIED-UNITS',supplierSha256:pricingContentHash('two-unit-supplier-file'),
+      customerReference:'TEST-FIRST-CUSTOMER-ROW',customerSha256:pricingContentHash('same-two-row-customer-file'),
+      description:'本次按原件取消一件',dispositions:[{orderItemId,quantity:1,outcome:'cancel' as const,supplierDocumentRow:8,customerDocumentRow:12}],
+    };
+    const initial = await previewAction(prior);
+    const {workspace} = await expectJson(await confirm(initial,await grant(staff.approver)),200);
+    const old = workspace.activities.at(-1);
+    expect(old.detail.snapshot.operation.decisionDocuments[0]).toMatchObject({scopeConfirmed:false,allocations:[{orderItemId,quantity:1}]});
+
+    await noteChange(orderId,'review-unknown-remaining-coverage');
+    const next = {...prior,requestId:'fully-verified-same-row',customerReference:'TEST-SECOND-CUSTOMER-ROW',
+      dispositions:[{...prior.dispositions[0],customerDocumentRow:13}]};
+    const current = await currentPurchase();
+    const body = {...next,orderId,purchaseOrderId:current.id,version:current.version};
+    await expectJson(await post({...body,stage:'preview'}),403);
+    signIn(staff.approver);
+    await expectJson(await post({...body,stage:'preview'}),409);
+    const scope = {orderId,purchaseOrderId:first.id,orderItemId,quantity:2};
+    const reviewed = await previewAction({...next,dispositions:[{...next.dispositions[0],supplierRestoreScope:true,supplierDocumentScope:[scope]}]});
+    const {workspace: completed} = await expectJson(await confirm(reviewed,await grant(staff.approver)),200);
+    expect(completed.activities.find((row:{id:string})=>row.id===old.id)).toEqual(old);
+    expect(completed.activities.at(-1)).toMatchObject({actorId:staff.approver,detail:{snapshot:{operation:{decisionDocuments:[
+      expect.objectContaining({role:'supplier',restoredActivityIds:[old.id],balances:[{...scope,usedBefore:1,using:1,remaining:0}]}),
+      expect.objectContaining({role:'customer',row:13,scopeConfirmed:false}),
+    ]}}}});
+  });
+
   it('keeps shipment session details out of new and historical responses while preserving the original audit bytes', async () => {
     signIn(staff.approver);
     const approval = await previewAction({ action: 'approve', requestId: 'approve-minimal-shipment-snapshot' });

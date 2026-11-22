@@ -276,6 +276,8 @@ describe('procurement-bound fulfillment parcels', () => {
       const loss = state.fulfillment.shortfalls.find(row=>row.available>0)!;
       await purchaseAction(relay,{action:'report_change',requestId:'repeated-loss-'+attempt,changeKind:'other',reference:loss.reference,description:agreement.description});
       const approved = await purchaseAction(relay,{action:'resolve_change',requestId:'written-repeated-resend-'+attempt,outcome:'shortfall',...agreement,
+        supplierSha256:pricingContentHash({attempt,source:'written-supplier-resend'}),
+        customerSha256:pricingContentHash({attempt,source:'written-customer-consent'}),
         dispositions:[{orderItemId:relayLineId,quantity:1,outcome:'cancel',shortfallId:loss.resolutionId,shortfallDecision:'free_resend'}]});
       const authorization = approved.fulfillment.freeResends.find(row=>row.shortfallId===loss.resolutionId)!;
       parcel = await dispatch(dispatchInput('inbound-again-'+attempt,'supplier_to_libereal',[{...source,resendApprovalId:authorization.approvalId}]));
@@ -495,27 +497,35 @@ describe('procurement-bound fulfillment parcels', () => {
       expect(await originalHold()).toEqual({pending:1,released:1,loggedReleases:1});
     });
 
-    it('independently allocates two unused units to different rows of the same supplier and customer documents', async ()=>{
+    it.each([false,true])('independently allocates the two units with a shared two-unit supplier row = %s', async sharedSupplier=>{
       await acceptCustomerOrder();
       const {relay} = await orderFromSuppliers();
       const original = await dispatch(dispatchInput('lineage-two-original','supplier_to_customer',[goods(relay,2)]));
       const loss = await verifyLoss(original,'two-affected-lineage-units',2);
       const approval = await authorizeTwoResends(relay,loss.resolutionId,2);
+      const cover = {orderId,purchaseOrderId:relay,orderItemId:relayLineId,shortfallId:loss.resolutionId,quantity:2};
       const redirect = (tag:string,supplierDocumentRow:number,customerDocumentRow:number): PurchaseAction => ({
         action:'resolve_change',requestId:'approve-lineage-doc-row-'+tag,outcome:'shortfall',...revisedAgreement,
         dispositions:[{orderItemId:relayLineId,quantity:1,outcome:'replace',shortfallId:loss.resolutionId,
           shortfallDecision:'new_purchase',revisesResendApprovalId:approval.approvalId,replacement:alternative(tag),
-          supplierDocumentRow,customerDocumentRow}],
+          supplierDocumentRow,customerDocumentRow,...(sharedSupplier?{supplierDocumentScope:[cover]}:{})}],
       });
       await report(relay,'lineage-doc-first-portion');
       await expect(purchaseAction(relay,redirect('invalid-row',0,12))).rejects.toThrow(/原件所载的正整数/);
       const a = await purchaseAction(relay,redirect('A',2,12));
       expect(a.fulfillment.freeResends[0]).toMatchObject({redirected:1,dispatched:0,available:1});
       await report(relay,'lineage-doc-second-portion');
-      const wrong = {...redirect('same-supplier-row',2,13),supplierReference:'TEST-EXACT-SUPPLIER-DOC-RENAMED'};
-      await expect(purchaseAction(relay,wrong)).rejects.toThrow(/尚未使用的独立行/);
-      await expect(purchaseAction(relay,redirect('same-customer-row',3,12))).rejects.toThrow(/尚未使用的独立行/);
-      const b = await purchaseAction(relay,redirect('B',3,13));
+      const nextSupplierRow = sharedSupplier ? 2 : 3;
+      if (!sharedSupplier) {
+        const wrong = {...redirect('same-supplier-row',2,13),supplierReference:'TEST-EXACT-SUPPLIER-DOC-RENAMED'};
+        await expect(purchaseAction(relay,wrong)).rejects.toThrow(/尚未使用的独立行/);
+      } else {
+        const changedScope = redirect('changed-supplier-scope',2,13);
+        changedScope.dispositions![0].supplierDocumentScope = [{...cover,quantity:3}];
+        await expect(purchaseAction(relay,changedScope)).rejects.toThrow(/覆盖范围发生冲突/);
+      }
+      await expect(purchaseAction(relay,redirect('same-customer-row',nextSupplierRow,12))).rejects.toThrow(/尚未使用的独立行/);
+      const b = await purchaseAction(relay,redirect('B',nextSupplierRow,13));
       expect(b.fulfillment.freeResends[0]).toMatchObject({redirected:2,dispatched:0,available:0});
       const separateOrders = b.orders.filter(row=>row.lines.some(line=>line.fromPurchaseOrderId===relay));
       expect(separateOrders).toMatchObject([{status:'draft',approvedHash:null},{status:'draft',approvedHash:null}]);
@@ -524,11 +534,50 @@ describe('procurement-bound fulfillment parcels', () => {
         .toMatchObject([{status:'ordered',dueCents:2500},{status:'ordered',dueCents:2500}]);
       expect(b.orders.find(row=>row.id===relay)).toMatchObject({dueCents:5000,paidCents:0});
       expect(b.activities.at(-1)?.detail.snapshot).toMatchObject({operation:{dispositions:[
-        {revisesResendApprovalId:approval.approvalId,quantity:1,supplierDocumentRow:3,customerDocumentRow:13},
-      ]}});
+        {revisesResendApprovalId:approval.approvalId,quantity:1,supplierDocumentRow:nextSupplierRow,customerDocumentRow:13},
+      ], ...(sharedSupplier ? { decisionDocuments: expect.arrayContaining([
+        expect.objectContaining({role:'supplier',row:2,coverage:[cover],balances:[{...cover,usedBefore:1,using:1,remaining:0}]}),
+        expect.objectContaining({role:'customer',row:13,balances:[expect.objectContaining({quantity:1,usedBefore:0,using:1,remaining:0})]}),
+      ]) } : {}) }});
       await report(relay,'lineage-doc-no-third-portion');
       await expect(purchaseAction(relay,redirect('outside-approved-count',4,14))).rejects.toThrow(/尚未发货或改办/);
     });
+  });
+
+  it.each([false,true])('uses one customer document across actual suppliers only when both lines are covered = %s', async bothCovered=>{
+    await acceptCustomerOrder();
+    const {direct,relay} = await orderFromSuppliers();
+    const orders = [{purchaseOrderId:direct,orderItemId:directLineId},{purchaseOrderId:relay,orderItemId:relayLineId}];
+    const buyerFile = {customerReference:'TEST-CUSTOMER-WRITTEN-COMMON-CONSENT',customerSha256:pricingContentHash('actual-common-client-decision')};
+    for (const [index,row] of orders.entries()) {
+      const sent = await dispatch(dispatchInput('book-scope-original-'+index,'supplier_to_customer',[{...row,quantity:1}]));
+      await event(sent.id,{...eventInput('scope-physical-evidence-'+index,'customer_delivery',[]),...agreement,...buyerFile,
+        kind:'confirm_shortfall',lines:[{parcelLineId:sent.lines[0].id,quantity:1,outcome:'loss'}]});
+      await purchaseAction(row.purchaseOrderId,{action:'report_change',requestId:'scope-supply-change-'+index,changeKind:'unavailable',
+        reference:'TEST-SUPPLIER-SPECIFIC-CHANGE-'+index,description:'核对该供方实际短少的一件'});
+    }
+    const {fulfillment} = await prisma.$transaction(tx=>purchaseWorkspace(tx,orderId));
+    const actual = orders.map(row=>({orderId,...row,shortfallId:fulfillment.shortfalls.find(loss=>loss.purchaseOrderId===row.purchaseOrderId)!.resolutionId,quantity:1}));
+    const coverage = bothCovered ? actual : [actual[0]];
+    const resolve = (row:typeof actual[number], tag:number) => purchaseAction(row.purchaseOrderId,{
+      action:'resolve_change',requestId:'scope-confirm-'+tag,outcome:'shortfall',...agreement,...buyerFile,
+      supplierSha256:pricingContentHash({tag,proof:'specific-supplier-authorization'}),
+      dispositions:[{orderItemId:row.orderItemId,shortfallId:row.shortfallId,quantity:1,outcome:'cancel',shortfallDecision:'free_resend',
+        customerDocumentRow:10,...(tag===0?{customerDocumentScope:coverage}:{})}],
+    });
+    await resolve(actual[0],0);
+    if (bothCovered) {
+      const done = await resolve(actual[1],1);
+      expect(done.fulfillment.freeResends).toHaveLength(2);
+      expect(done.activities.at(-1)?.detail.snapshot).toMatchObject({operation:{decisionDocuments:expect.arrayContaining([
+        expect.objectContaining({role:'customer',row:10,balances:expect.arrayContaining([
+          {...actual[0],usedBefore:1,using:0,remaining:0},{...actual[1],usedBefore:0,using:1,remaining:0},
+        ])}),
+      ])}});
+    } else {
+      await expect(resolve(actual[1],1)).rejects.toThrow(/不包含本次办理对象/);
+      expect((await prisma.$transaction(tx=>purchaseWorkspace(tx,orderId))).fulfillment.freeResends).toHaveLength(1);
+    }
   });
 
   it('accepts two one-unit receipts against an unlimited account without moving another reservation', async () => {
@@ -665,6 +714,7 @@ describe('procurement-bound fulfillment parcels', () => {
       await purchaseAction(purchaseOrderId,{action:'report_change',requestId:'report-'+tag,changeKind:'unavailable',reference:loss.reference,
         description:'核对供应商免费重发决定'});
       const resolved = await purchaseAction(purchaseOrderId,{action:'resolve_change',requestId:'approve-'+tag,outcome:'shortfall',...decision,
+        supplierSha256:pricingContentHash({tag,source:'supplier-resend'}),customerSha256:pricingContentHash({tag,source:'customer-consent'}),
         dispositions:[{orderItemId,quantity:1,outcome:'cancel',shortfallId:loss.resolutionId,shortfallDecision:'free_resend'}]});
       expect(resolved.fulfillment.shortfalls.find(row=>row.resolutionId===loss.resolutionId)?.available).toBe(0);
       const approval = resolved.fulfillment.freeResends.find(row=>row.shortfallId===loss.resolutionId)!;

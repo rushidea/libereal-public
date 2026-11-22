@@ -171,6 +171,7 @@ describe('supplier purchasing page', () => {
     const shortfallId = 'TEST-LOSS-ALREADY-ASSIGNED';
     const approvalId = 'TEST-ORIGINAL-FREE-APPROVAL';
     const authorizedAt = '2031-04-15T00:00:00.000Z';
+    const covered = {orderId,purchaseOrderId:purchaseId,orderItemId,shortfallId,quantity:2};
     workspace.fulfillment.shortfalls = [{resolutionId:shortfallId,purchaseOrderId:purchaseId,orderItemId,route:'supplier_to_customer',
       originalContract:true,quantity:2,available:0,reference:'TEST-ORIGINAL-LOST-WAYBILL',occurredAt:authorizedAt,independentlyReplaced:0,
       contractSource:{purchaseOrderId:purchaseId,orderItemId,parcelLineId:'TEST-CONTRACT-PARCEL-LINE',reference:'TEST-FIRST-CONTRACT-SHIPMENT'}}];
@@ -180,7 +181,9 @@ describe('supplier purchasing page', () => {
       const result = preview(body,workspace);
       const operation = {...result.preview.snapshot.operation,dispositions:[{orderItemId,quantity:1,outcome:'cancel',shortfallId,
         shortfallDecision:'change_contract',revisesResendApprovalId:approvalId,supplierDocumentRow:2,customerDocumentRow:12,contractSource:workspace.fulfillment.shortfalls[0].contractSource,
-        priorResend:{authorized:2,dispatched:1,redirected:0,available:1}}]};
+        priorResend:{authorized:2,dispatched:1,redirected:0,available:1}}],
+        decisionDocuments:[{role:'supplier',sha256:'e'.repeat(64),row:2,balances:[{...covered,usedBefore:1,using:1,remaining:0}]}],
+      };
       return body.stage === 'confirm' ? Response.json({workspace})
         : Response.json({preview:{...result.preview,snapshot:{...result.preview.snapshot,operation}}});
     });
@@ -196,6 +199,9 @@ describe('supplier purchasing page', () => {
     fill('客户同意原件行号','12');
     expect(screen.getByText(/对应原合同发货凭据 TEST-FIRST-CONTRACT-SHIPMENT/)).toBeInTheDocument();
     fill('本次受影响数量','1');
+    fireEvent.click(screen.getByText('核对供方书证覆盖范围'));
+    fireEvent.click(screen.getByRole('button',{name:'填写供方书证覆盖的采购行及总量'}));
+    fill('供方书证核准总量','2');
     fill('人工与供应商协调的书面依据','TEST-NEW-SUPPLIER-DECISION');
     fill('客户对方案的回复依据','TEST-NEW-CUSTOMER-CONSENT');
     fill('供方书面回复摘要','e'.repeat(64));
@@ -207,8 +213,10 @@ describe('supplier purchasing page', () => {
     expect(panel).toHaveTextContent('供方决定原件第 2 行');
     expect(panel).toHaveTextContent('客户同意原件第 12 行');
     expect(panel).toHaveTextContent('对应原合同发货凭据 TEST-FIRST-CONTRACT-SHIPMENT');
+    expect(panel).toHaveTextContent('核准 2 · 已用 1 · 本次 1 · 办理后剩余 0');
     expect(posts[0]).toMatchObject({stage:'preview',dispositions:[{orderItemId,shortfallId,
-      revisesResendApprovalId:approvalId,quantity:1,shortfallDecision:'change_contract',supplierDocumentRow:2,customerDocumentRow:12}]});
+      revisesResendApprovalId:approvalId,quantity:1,shortfallDecision:'change_contract',supplierDocumentRow:2,customerDocumentRow:12,
+      supplierDocumentScope:[covered]}]});
     fireEvent.click(within(panel).getByRole('button',{name:/确认/}));
     await waitFor(()=>expect(posts[1]).toMatchObject({stage:'confirm',version,actionHash,
       requestId:posts[0].requestId,dispositions:posts[0].dispositions}));

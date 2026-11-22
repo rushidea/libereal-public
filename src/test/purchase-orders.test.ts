@@ -272,6 +272,7 @@ describe('supplier commitments and customer fulfilment stay bound to actual evid
 
     const replace = (quantity: number, requestId: string): ActionRequest => ({
       action: 'resolve_change', outcome: 'replacement', requestId, ...written,
+      supplierSha256: pricingContentHash({requestId,source:'supplier'}), customerSha256: pricingContentHash({requestId,source:'customer'}),
       dispositions: [{ orderItemId: item.id, quantity, outcome: 'replace', replacement: {
         name: `合成替代商品 ${requestId}`, brand: '合成品牌', catalogNumber: `TEST-${requestId}`, spec: '合成规格', unit: '件',
         terms: terms(quantity, { sourceReference: `TEST-QUOTE-${requestId}`, sourceSha256: pricingContentHash(requestId) }),
@@ -311,6 +312,7 @@ describe('supplier commitments and customer fulfilment stay bound to actual evid
     const [approved] = (await submit(order.id, draft, { action: 'approve', requestId: 'approve-shipping-original' })).orders;
     const [ordered] = (await register(order.id, approved, 'register-shipping-original')).orders;
     const replace = (quantity: number, id: string): ActionRequest => ({ action: 'resolve_change', outcome: 'replacement', requestId: id, ...written,
+      supplierSha256: pricingContentHash({id,source:'supplier'}), customerSha256: pricingContentHash({id,source:'customer'}),
       dispositions: [{ orderItemId: item.id, quantity, outcome: 'replace', replacement: {
         name: '合成替代商品', brand: '合成品牌', catalogNumber: 'TEST-ALTERNATE-SHIP', spec: '合成规格', unit: '件',
         terms: terms(quantity, { sourceSha256: pricingContentHash(id) }),
@@ -447,6 +449,7 @@ describe('supplier commitments and customer fulfilment stay bound to actual evid
       const [registered] = (await register(order.id, approved, 'register-root-purchase')).orders;
       const replacement = (requestId: string, quantity: number): ActionRequest => ({
         action: 'resolve_change', requestId, outcome: 'replacement', ...written,
+        supplierSha256: pricingContentHash({requestId,source:'supplier'}), customerSha256: pricingContentHash({requestId,source:'customer'}),
         refundFollowup: '核对原付款、费用和退款。',
         dispositions: [{ orderItemId: item.id, quantity, outcome: 'replace', replacement: {
           name: '合成替代品', brand: '合成品牌', catalogNumber: `TEST-SUB-${requestId}`, spec: '测试规格', unit: '件',
@@ -469,6 +472,8 @@ describe('supplier commitments and customer fulfilment stay bound to actual evid
       const partialHold = childFrom(await hold(order.id, pending, 'partial-cancel-child'));
       const partial = childFrom(await submit(order.id, partialHold, { action: 'resolve_change', requestId: 'cancel-one-replacement-unit',
         outcome: 'declined', ...written, refundFollowup: '部分取消后核对已付定金。',
+        supplierSha256: pricingContentHash('changed-supplier-decision-for-child'),
+        customerSha256: pricingContentHash('changed-customer-decision-for-child'),
         dispositions: [{ orderItemId: item.id, outcome: 'cancel', quantity: 1 }],
       }));
       expect(partial).toMatchObject({ commitmentState: 'pending', needsRemainingReview: true, canApproveRemaining: false });
