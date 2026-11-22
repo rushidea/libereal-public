@@ -492,20 +492,28 @@ describe('finance.write MFA scenario gating', () => {
     expect(res.status).toBe(200);
   });
 
-  it('blocks postpaid settlement when the finance step-up is rejected', async () => {
+  it('blocks cancellation of a postpaid order with occupied credit when the finance step-up is rejected', async () => {
     vi.mocked(requiresAdminMfaForPermission).mockImplementation(async (permission) => permission === 'finance.write');
     const previousMfa = process.env.MFA_ADMIN_REQUIRED;
     process.env.MFA_ADMIN_REQUIRED = 'true';
-    getTestDb().prepare(`UPDATE "Order" SET status = 'confirmed', paymentMethod = 'bank_transfer' WHERE id = 'o1'`).run();
+    const db = getTestDb();
+    seedUser(db, { id: 'credit-buyer', email: 'credit-buyer@example.test' });
+    db.prepare(`UPDATE "Order" SET status = 'confirmed', paymentMethod = 'bank_transfer', customerId='credit-buyer' WHERE id = 'o1'`).run();
+    db.prepare(`INSERT INTO CreditAccount (id,userId,baseLimit,usedAmount,status,paymentTermDays,createdAt,updatedAt)
+      VALUES ('credit-hold','credit-buyer',200,40,'active',30,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`).run();
+    db.prepare(`INSERT INTO AccountReceivable (id,orderId,userId,amount,status,confirmedAt,paymentTermDaysSnapshot,createdAt,updatedAt)
+      VALUES ('credit-receivable','o1','credit-buyer',40,'open',CURRENT_TIMESTAMP,30,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`).run();
 
     try {
-      const res = await orderPATCH(makePatch('o1', { status: 'completed' }) as NextRequest, {
+      const res = await orderPATCH(makePatch('o1', { status: 'cancelled' }) as NextRequest, {
         params: Promise.resolve({ id: 'o1' }),
       });
 
       expect(res.status).toBe(403);
       await expect(res.json()).resolves.toMatchObject({ error: 'Admin MFA required' });
-      expect(getTestDb().prepare('SELECT status FROM "Order" WHERE id = ?').get('o1')).toEqual({ status: 'confirmed' });
+      expect(db.prepare('SELECT status FROM "Order" WHERE id = ?').get('o1')).toEqual({ status: 'confirmed' });
+      expect(db.prepare('SELECT status,paidAt FROM AccountReceivable WHERE id = ?').get('credit-receivable')).toEqual({ status: 'open', paidAt: null });
+      expect(db.prepare('SELECT usedAmount FROM CreditAccount WHERE id = ?').get('credit-hold')).toEqual({ usedAmount: 40 });
     } finally {
       if (previousMfa === undefined) delete process.env.MFA_ADMIN_REQUIRED;
       else process.env.MFA_ADMIN_REQUIRED = previousMfa;

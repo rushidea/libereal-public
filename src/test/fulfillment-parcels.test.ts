@@ -2,7 +2,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import { NextRequest } from 'next/server';
 import { GET as orderGET, PATCH as orderPATCH } from '@/app/api/admin/orders/[id]/route';
 import { dispatchParcel, fulfillmentWorkspace, recordParcelEvent } from '@/lib/fulfillment-parcels';
-import { receiveInventoryBatch } from '@/lib/inventory';
+import { receiveInventoryBatch, reserveOrderInventory } from '@/lib/inventory';
 import { pricingContentHash } from '@/lib/pricing-adjustment-approval';
 import { prisma } from '@/lib/prisma';
 import { applyPurchaseAction, previewPurchaseAction, purchaseWorkspace, savePurchaseLine } from '@/lib/purchase-orders';
@@ -138,7 +138,7 @@ function dispatch(input: ReturnType<typeof dispatchInput>) {
   return prisma.$transaction(tx => dispatchParcel(tx, orderId, input, operator), { isolationLevel: 'Serializable' });
 }
 
-function event(parcelId: string, input: ReturnType<typeof eventInput>) {
+function event(parcelId: string, input: unknown) {
   return prisma.$transaction(tx => recordParcelEvent(tx, orderId, parcelId, input, operator), { isolationLevel: 'Serializable' });
 }
 
@@ -192,6 +192,172 @@ beforeEach(async () => {
 afterEach(() => { vi.useRealTimers(); });
 
 describe('procurement-bound fulfillment parcels', () => {
+  it('accepts two one-unit receipts against an unlimited account without moving another reservation', async () => {
+    await prisma.inventoryBatch.deleteMany({ where: { batchNumber: oldLot } });
+    await prisma.inventoryAccount.update({ where: { id: (await inventory()).id }, data: { actualQuantity: -1, availableQuantity: -1 } });
+    await prisma.product.update({ where: { id: productId }, data: { stockQuantity: -1 } });
+    const other = await prisma.order.create({ data: { id: 'test-unrelated-inventory-order', email: buyer.email, status: 'confirmed', subtotal: 200, total: 200,
+      orderItems: { create: { id: 'test-unrelated-inventory-item', position:0, productId, name: '合成商品', unitPrice: 100, quantity: 2 } } } });
+    await prisma.$transaction(tx => reserveOrderInventory(tx, other.id, operator.id));
+    await acceptCustomerOrder();
+    const { relay } = await orderFromSuppliers();
+    const first = await dispatch(dispatchInput('unlimited-a','supplier_to_libereal',[{ purchaseOrderId: relay, orderItemId: relayLineId, quantity: 1 }]));
+    const second = await dispatch(dispatchInput('unlimited-b','supplier_to_libereal',[{ purchaseOrderId: relay, orderItemId: relayLineId, quantity: 1 }]));
+    await event(first.id,eventInput('unlimited-receipt-a','warehouse_receipt',[{ parcelLineId: first.lines[0].id, quantity: 1, batchNumber: receivedLotA }]));
+    expect(await inventory()).toMatchObject({ actualQuantity: -1, availableQuantity: -1, reservedQuantity: 5 });
+    expect(await prisma.inventoryReservation.findUnique({ where:{ orderItemId: relayLineId } })).toMatchObject({ releasedQuantity: 1, status: 'active' });
+    await event(second.id,eventInput('unlimited-receipt-b','warehouse_receipt',[{ parcelLineId: second.lines[0].id, quantity: 1, batchNumber: receivedLotB }]));
+    expect(await batch(receivedLotB)).toMatchObject({ quantity:1,reservedQuantity:1 });
+    await dispatch(dispatchInput('unlimited-forward-a','libereal_to_customer',[
+      { purchaseOrderId: relay, orderItemId: relayLineId, quantity: 1, sourceReceiptId: (await receipt(first.lines[0].id,receivedLotA)).id },
+    ]));
+    expect(await batch(receivedLotA)).toMatchObject({ quantity:0,reservedQuantity:0 });
+    expect(await batch(receivedLotB)).toMatchObject({ quantity:1,reservedQuantity:1 });
+    expect(await prisma.inventoryReservation.findUnique({ where:{ orderItemId: 'test-unrelated-inventory-item' } }))
+      .toMatchObject({ quantity:2,releasedQuantity:0,fulfilledQuantity:0,status:'active' });
+  });
+
+  it('preserves a receipt before cancellation and one received afterward until evidenced stock disposition', async () => {
+    await acceptCustomerOrder();
+    const { relay } = await orderFromSuppliers();
+    const inbound = await dispatch(dispatchInput('inbound-before-cancel','supplier_to_libereal',[{ purchaseOrderId: relay, orderItemId: relayLineId, quantity: 2 }]));
+    const [line] = inbound.lines;
+    await event(inbound.id,eventInput('received-before-cancel','warehouse_receipt',[{ parcelLineId: line.id, quantity:1, batchNumber: receivedLotA }]));
+    const url = 'http://localhost/api/admin/orders/'+orderId;
+    const cancelled = await orderPATCH(new NextRequest(url,{ method:'PATCH', body:JSON.stringify({ status:'cancelled' }) }),{ params:Promise.resolve({ id:orderId }) });
+    expect(cancelled.status).toBe(200);
+    const finance = await prisma.accountReceivable.findUnique({ where:{ orderId } });
+    await event(inbound.id,eventInput('actually-arrived-after-cancel','warehouse_receipt',[{ parcelLineId: line.id, quantity:1, batchNumber: receivedLotB }]));
+    expect((await workspace()).receipts).toEqual([]);
+    expect((await workspace()).parcels.find(row => row.id === inbound.id)?.lines[0].receivedQuantity).toBe(2);
+    const a = await receipt(line.id,receivedLotA);
+    const b = await receipt(line.id,receivedLotB);
+    await expect(dispatch(dispatchInput('cannot-forward-cancelled','libereal_to_customer',[
+      { purchaseOrderId:relay,orderItemId:relayLineId,quantity:1,sourceReceiptId:a.id },
+    ]))).rejects.toThrow(/当前订单不能/);
+    const dispose = (id: string, receiptId: string, disposition:string) => ({
+      ...eventInput(id,'warehouse_receipt',[]),kind:'dispose_receipt', receiptId, quantity:1, disposition,
+    });
+    const released = dispose('reconcile-cancelled-lot-a',a.id,'released_to_stock');
+    await event(inbound.id,released);
+    await event(inbound.id,released);
+    await expect(event(inbound.id,dispose('duplicate-new-proof',a.id,'released_to_stock'))).rejects.toThrow(/尚未转发或处置/);
+    await event(inbound.id,dispose('real-return-to-supplier',b.id,'returned_to_supplier'));
+    expect(await batch(receivedLotA)).toMatchObject({ quantity:1,reservedQuantity:0 });
+    expect(await batch(receivedLotB)).toMatchObject({ quantity:0,reservedQuantity:0 });
+    expect(await prisma.fulfillmentReceipt.findMany({ where:{ parcelLineId:line.id } })).toMatchObject([
+      { quantity:1,forwardedQuantity:0,releasedQuantity:1 },{ quantity:1,forwardedQuantity:0,releasedQuantity:1 },
+    ]);
+    expect(await prisma.accountReceivable.findUnique({ where:{ orderId } })).toEqual(finance);
+    expect(await prisma.shipment.count({ where:{ orderId } })).toBe(0);
+  });
+
+  it('requires exact catalog specificity and a named review when two real stock packages share the approved spec', async () => {
+    await acceptCustomerOrder();
+    const { relay } = await orderFromSuppliers();
+    await purchaseAction(relay,{ action:'report_change',requestId:'report-alt-stock',changeKind:'unavailable',reference:'TEST-ORIGINAL-PROVIDER',description:'原件供货变化' });
+    const updated = await purchaseAction(relay,{ action:'resolve_change',requestId:'confirm-alt',outcome:'replacement',supplierReference:'TEST-SUPPLIER-LETTER',
+      customerReference:'TEST-CUSTOMER-LETTER',supplierSha256:'c'.repeat(64),customerSha256:'d'.repeat(64),description:'确认替代商品',
+      dispositions:[{ orderItemId:relayLineId,quantity:2,outcome:'replace',replacement:{
+        name:'合成替代品',brand:'合成品牌',catalogNumber:'TEST-ALT-SAME-CATALOG',spec:'100 μL',unit:'盒',terms:purchaseTerms(2,'TEST-ALTERNATE-SUPPLIER'),
+      } }],
+    });
+    const replacement = updated.orders.find(po => po.lines.some(line => line.fromPurchaseOrderId === relay))!;
+    await purchaseAction(replacement.id,{ action:'approve',requestId:'approve-alt' });
+    await purchaseAction(replacement.id,{ action:'register_order',requestId:'register-alt',reference:'TEST-ALTERNATE-RECEIPT',
+      referenceSha256:'e'.repeat(64),occurredAt:nextOccurrence() });
+    const alternate = await prisma.product.create({ data:{ id:'test-catalog-parent',name:'母商品显示名称',brand:'合成品牌',catalogNumber:'TEST-ALT-SAME-CATALOG',
+      spec:'100 μL',salesUnit:'盒',price:1,stockQuantity:50,variants:{create:[
+        { id:'test-alt-variant-a',catalogNumber:'TEST-ALT-SAME-CATALOG',spec:'100 μL',salesUnit:'盒',packageType:'box',baseQuantity:1,price:1 },
+        { id:'test-alt-variant-b',catalogNumber:'TEST-ALT-SAME-CATALOG',spec:'100 μL',salesUnit:'盒',packageType:'case',baseQuantity:8,price:1 },
+        { id:'test-alt-variant-wrong',catalogNumber:'TEST-ALT-SAME-CATALOG',spec:'200 μL',salesUnit:'瓶',price:1 },
+      ]} } });
+    await prisma.inventoryAccount.create({ data:{ id:'test-exact-stock-account',productId:alternate.id,variantId:'test-alt-variant-b',
+      actualQuantity:0,availableQuantity:0 } });
+    const inbound = await dispatch(dispatchInput('alternate-inbound','supplier_to_libereal',[{ purchaseOrderId:replacement.id,orderItemId:relayLineId,quantity:2 }]));
+    const [line] = inbound.lines;
+    const options = (await workspace()).inventoryChoices.find(row => row.parcelLineId === line.id)!;
+    expect(options.approved).toMatchObject({ catalogNumber:'TEST-ALT-SAME-CATALOG',spec:'100 μL',unit:'盒' });
+    expect(options.candidates.map(row=>row.variantId)).toEqual(['test-alt-variant-a','test-alt-variant-b']);
+    const attempt = (selection: object) => event(inbound.id,eventInput('alternate-receipt','warehouse_receipt',[
+      { parcelLineId:line.id,quantity:1,batchNumber:receivedLotA,...selection },
+    ]));
+    await expect(attempt({productId:alternate.id})).rejects.toThrow(/规格和单位/);
+    await expect(attempt({productId:alternate.id,variantId:'test-alt-variant-wrong'})).rejects.toThrow(/规格和单位/);
+    await expect(attempt({inventoryAccountId:'test-exact-stock-account'})).rejects.toThrow(/核对书证出处/);
+    const received = await attempt({inventoryAccountId:'test-exact-stock-account',identityReference:'TEST-ORIGINAL-CATALOG',
+      identitySha256:'f'.repeat(64),identityDocumentRow:3 });
+    expect(await batch(receivedLotA)).toMatchObject({ inventoryAccountId:'test-exact-stock-account', reservedQuantity:1 });
+    const evidence = received.events.find(row=>row.kind==='warehouse_receipt')!;
+    expect(evidence.actorId).toBe(operator.id);
+    expect(JSON.parse(evidence.details)).toMatchObject({lines:[{inventory:{variantId:'test-alt-variant-b',identity:{
+      version:options.version,evidence:{reference:'TEST-ORIGINAL-CATALOG',sha256:'f'.repeat(64),row:3},
+    }}}]});
+    expect(await prisma.inventoryAccount.findFirst({where:{productId:alternate.id,variantId:null}})).toBeNull();
+  });
+
+  it('preserves actual supplier and customer quantities through shortage, direct loss and an independently approved forward replacement', async () => {
+    await acceptCustomerOrder();
+    const { relay,direct } = await orderFromSuppliers();
+    await purchaseAction(relay,{ action:'record_payment',requestId:'relay-deposit',reference:'TEST-ORIGINAL-SUPPLY-PAYMENT',amountCents:500,
+      conditionReference:'TEST-ACTUAL-PAYMENT-CONDITION' });
+    const inbound = await dispatch(dispatchInput('inbound-physical-two','supplier_to_libereal',[{purchaseOrderId:relay,orderItemId:relayLineId,quantity:2}]));
+    const decision = { supplierReference:'TEST-SUPPLIER-DECISION', supplierSha256:'c'.repeat(64),
+      customerReference:'TEST-CUSTOMER-DECISION', customerSha256:'d'.repeat(64), description:'合成双方书面决定按实际短失处理' };
+    const report = (tag:string) => purchaseAction(relay,{action:'report_change',requestId:tag,changeKind:'unavailable',reference:'TEST-SUPPLIER-NOTICE',
+      description:'须核对该采购原发货和签收数量' });
+    await report('test-original-inbound-in-flight');
+    await expect(purchaseAction(relay,{ action:'resolve_change',requestId:'cannot-cancel-traveling-supply',outcome:'declined',...decision,
+      dispositions:[{orderItemId:relayLineId,quantity:1,outcome:'cancel'}],refundFollowup:'原款核对' })).rejects.toThrow(/尚未发出/);
+    await purchaseAction(relay,{ action:'resolve_change',requestId:'release-inbound-review',outcome:'original_terms',...decision });
+    await event(inbound.id,eventInput('one-actual-inbound-unit','warehouse_receipt',[{parcelLineId:inbound.lines[0].id,quantity:1,batchNumber:receivedLotA}]));
+    const shortage = (tag:string, parcelLineId:string, outcome:string) => ({
+      ...eventInput(tag,'warehouse_receipt',[]),...decision,kind:'confirm_shortfall',lines:[{parcelLineId,quantity:1,outcome}],
+    });
+    const missingInbound = shortage('one-documented-supplier-shortage',inbound.lines[0].id,'shortage');
+    await event(inbound.id,missingInbound);
+    await event(inbound.id,missingInbound);
+    await expect(event(inbound.id,shortage('cannot-reopen-same-shortage',inbound.lines[0].id,'shortage'))).rejects.toThrow(/尚未签收/);
+    expect((await workspace()).purchases.find(row=>row.purchaseOrderId===relay)?.available).toBe(1);
+    await dispatch(dispatchInput('supplier-resends-one','supplier_to_libereal',[{purchaseOrderId:relay,orderItemId:relayLineId,quantity:1}]));
+    expect((await workspace()).purchases.find(row=>row.purchaseOrderId===relay)?.available).toBe(0);
+
+    const outbound = await dispatch(dispatchInput('direct-first-dispatch','supplier_to_customer',[{purchaseOrderId:direct,orderItemId:directLineId,quantity:1}]));
+    const firstShipment = await prisma.shipment.findUniqueOrThrow({ where:{id:outbound.shipmentId!},include:{items:true} });
+    await event(outbound.id,shortage('direct-documented-loss',outbound.lines[0].id,'loss'));
+    expect(await prisma.orderItem.findUnique({where:{id:directLineId}})).toMatchObject({shippedQty:0});
+    expect(await prisma.shipment.findUnique({where:{id:firstShipment.id},include:{items:true}})).toEqual(firstShipment);
+    const directReplacement = await dispatch(dispatchInput('direct-second-dispatch','supplier_to_customer',[{purchaseOrderId:direct,orderItemId:directLineId,quantity:1}]));
+    await event(directReplacement.id,eventInput('direct-replacement-received','customer_delivery',[{parcelLineId:directReplacement.lines[0].id,quantity:1}]));
+    await expect(dispatch(dispatchInput('direct-duplicate-dispatch','supplier_to_customer',[{purchaseOrderId:direct,orderItemId:directLineId,quantity:1}]))).rejects.toThrow(/发货数量/);
+
+    const sourceReceipt = await receipt(inbound.lines[0].id,receivedLotA);
+    const forwarded = await dispatch(dispatchInput('forward-purchased-batch','libereal_to_customer',[
+      {purchaseOrderId:relay,orderItemId:relayLineId,quantity:1,sourceReceiptId:sourceReceipt.id},
+    ]));
+    await event(forwarded.id,shortage('forward-documented-loss',forwarded.lines[0].id,'loss'));
+    const state = await prisma.$transaction(tx=>purchaseWorkspace(tx,orderId));
+    const sourceUnits = state.fulfillment.supplierDispatched.filter(row=>row.purchaseOrderId===relay).reduce((sum,row)=>sum+row.quantity,0);
+    expect(sourceUnits).toBe(2);
+    const [loss] = state.fulfillment.forwardingShortfalls;
+    expect(loss).toMatchObject({purchaseOrderId:relay,available:1});
+    const followUp = (requestId:string):PurchaseAction => ({
+      action:'resolve_change',requestId,outcome:'replacement',...decision,
+      dispositions:[{orderItemId:relayLineId,quantity:1,outcome:'replace',forwardingLossId:loss.resolutionId,replacement:{
+        name:'合成补发品',brand:'合成品牌',catalogNumber:'TEST-B3-REPLACEMENT-CATALOG',spec:'合成规格',unit:'件',
+        terms:purchaseTerms(1,'TEST-B3-SEPARATE-REPLACEMENT-SUPPLIER'),
+      }}],
+    });
+    await report('forward-loss-replacement-review');
+    const updated = await purchaseAction(relay,followUp('approve-preparing-separate-loss-replacement'));
+    expect(updated.orders.find(row=>row.id===relay)).toMatchObject({ status:'ordered', paidCents:500, dueCents:4500,
+      remaining:[{orderItemId:relayLineId,quantity:2}] });
+    expect(updated.orders.find(row=>row.lines.some(line=>line.fromPurchaseOrderId===relay))).toMatchObject({status:'draft',approvedHash:null,paidCents:0});
+    expect(updated.fulfillment.forwardingShortfalls[0].available).toBe(0);
+    await report('another-forward-loss-review');
+    await expect(purchaseAction(relay,followUp('duplicate-loss-use'))).rejects.toThrow(/尚未使用的转发短失书证/);
+  });
+
   it('ships directly without consuming the warehouse and forwards only the units physically received into each batch', async () => {
     await acceptCustomerOrder();
     const supply = await orderFromSuppliers();

@@ -195,6 +195,56 @@ afterEach(() => {
 });
 
 describe('admin fulfillment HTTP and customer shipment views', () => {
+  it.each(['external_supply_release','warehouse_stock_shipped'] as const)('separates historical waybill verification, receipt, and legacy stock reconciliation (%s)', async outcome => {
+    await prisma.shipment.delete({where:{id:orderId+'-shipment'}});
+    const itemId = orderId+'-line';
+    const product = await prisma.product.create({data:{name:'合成旧单商品',catalogNumber:'TEST-ARCHIVE-SKU',brand:'合成品牌',price:100,stockQuantity:3}});
+    await prisma.orderItem.update({where:{id:itemId},data:{productId:product.id,shippedQty:0,status:'confirmed'}});
+    const account = await prisma.inventoryAccount.create({data:{productId:product.id,actualQuantity:5,availableQuantity:3,reservedQuantity:2}});
+    const hold = await prisma.inventoryReservation.create({data:{inventoryAccountId:account.id,orderId,orderItemId:itemId,quantity:2}});
+    const shipmentStatus = await prisma.orderStatusHistory.create({ data:{orderId,fromStatus:'confirmed',toStatus:'shipped',
+      actorId:operator,actorEmail:email(operator),reason:'admin_status_update',createdAt:new Date(Date.now()-30_000)} });
+    await prisma.creditAccount.create({data:{userId:buyer,usedAmount:200,baseLimit:2000}});
+    const receivable = await prisma.accountReceivable.create({data:{orderId,userId:buyer,amount:200,confirmedAt:new Date(Date.now()-60_000)}});
+    const prior = await expectJson(await read(),200);
+    expect(prior.workspace.legacyBackfill).toMatchObject({history:[{id:shipmentStatus.id}],lines:[{orderItemId:itemId,shippedQty:0,available:2}]});
+    const booking = { ...evidence('legacy-historical-document'),historyId:shipmentStatus.id,carrier,trackingNumber:publicTracking,
+      occurredAt:new Date(Date.now()-45_000).toISOString(),description:'查验合成旧运单原件和两件出货明细',lines:[{orderItemId:itemId,quantity:2}] };
+    const checked = await preview('link_legacy',booking);
+    await expectJson(await confirm('link_legacy',booking,checked.actionHash),403);
+    await expectJson(await confirm('link_legacy',booking,checked.actionHash,await grant(operator)),200);
+    await expectJson(await confirm('link_legacy',booking,checked.actionHash,await grant(operator)),200);
+    const shipment = await prisma.shipment.findFirstOrThrow({where:{orderId},include:{items:true,fulfillmentParcel:{include:{lines:true}}}});
+    expect(shipment).toMatchObject({status:'shipped',deliveredAt:null,items:[{orderItemId:itemId,quantity:2}]});
+    expect(await prisma.orderItem.findUnique({where:{id:itemId}})).toMatchObject({shippedQty:2});
+    expect(await prisma.inventoryAccount.findUnique({where:{id:account.id}})).toEqual(account);
+    const parcel = shipment.fulfillmentParcel!;
+    const delivery = {...evidence('legacy-confirmed-customer-signature'),parcelId:parcel.id,kind:'customer_delivery',
+      description:'查阅合成客户实收签单',lines:[{parcelLineId:parcel.lines[0].id,quantity:2}]};
+    const signed = await preview('record_event',delivery);
+    await expectJson(await confirm('record_event',delivery,signed.actionHash,await grant(operator)),200);
+    expect(await prisma.order.findUnique({where:{id:orderId}})).toMatchObject({status:'completed',paidAt:null});
+    expect((await expectJson(await read(),200)).workspace.legacyInventory).toMatchObject([{reservationId:hold.id,available:2,awaitingReview:2}]);
+    expect(await prisma.inventoryAccount.findUnique({where:{id:account.id}})).toEqual(account);
+    expect(await prisma.accountReceivable.findUnique({where:{orderId}})).toEqual(receivable);
+    expect(await prisma.notification.count()).toBe(0);
+
+    const reconcile = {...evidence('legacy-verified-inventory-proof'),parcelId:parcel.id,parcelLineId:parcel.lines[0].id,
+      quantity:2,outcome,description:'按原运单路线和未处理库存流水核对实物'};
+    const reconciliation = await preview('reconcile_legacy_inventory',reconcile);
+    expect(reconciliation.snapshot).toMatchObject({hold:{reservationId:hold.id,fulfilled:0,released:0},actorId:operator});
+    await expectJson(await confirm('reconcile_legacy_inventory',reconcile,reconciliation.actionHash,await grant(operator)),200);
+    await expectJson(await confirm('reconcile_legacy_inventory',reconcile,reconciliation.actionHash,await grant(operator)),200);
+    const external = outcome === 'external_supply_release';
+    expect(await prisma.inventoryAccount.findUnique({where:{id:account.id}})).toMatchObject({actualQuantity:external?5:3,reservedQuantity:0,
+      availableQuantity:external?5:3,shippedQuantity:external?0:2});
+    expect(await prisma.inventoryTransaction.count({where:{orderId,reservationId:hold.id}})).toBe(1);
+    expect((await expectJson(await read(),200)).workspace.legacyInventory).toEqual([]);
+    expect(await prisma.accountReceivable.findUnique({where:{orderId}})).toEqual(receivable);
+    expect(await prisma.creditAccount.findUnique({where:{userId:buyer}})).toMatchObject({usedAmount:200});
+    expect(await prisma.notification.count()).toBe(0);
+  });
+
   it('uses server-side read and write assignments for order details, actions, and the notice queue', async () => {
     signIn(blocked);
     await expectJson(await read(), 403);
@@ -309,6 +359,13 @@ describe('admin fulfillment HTTP and customer shipment views', () => {
     expect((await prisma.shipment.findUniqueOrThrow({ where: { id: input.shipmentId } })).deliveredAt).toBeNull();
     await expectJson(await confirm('record_event', receipt, delivery.actionHash, await grant(operator)), 200);
 
+    const privateFields = { actorId:operator,actorEmail:email(operator),metadata:JSON.stringify({route:'supplier_to_customer',
+      evidence:'TEST-INTERNAL-DELIVERY-ARCHIVE'}),message:'TEST-INTERNAL-STAFF-NOTE' };
+    await prisma.orderEvent.create({data:{orderId,type:'shipment_created',...privateFields}});
+    await prisma.orderStatusHistory.create({data:{orderId,fromStatus:'confirmed',toStatus:'shipped',actorId:operator,
+      actorEmail:email(operator),metadata:privateFields.metadata,reason:'TEST-INTERNAL-STAFF-REASON'}});
+    const adminDetail = await expectJson(await orderGET(new NextRequest(`http://localhost/api/orders/${orderId}`), params(orderId)), 200);
+    expect(adminDetail.events).toContainEqual(expect.objectContaining(privateFields));
     signIn(buyer, 'customer');
     const detail = await expectJson(await orderGET(new NextRequest(`http://localhost/api/orders/${orderId}`), params(orderId)), 200);
     const orders = await expectJson(await ordersGET(new NextRequest('http://localhost/api/orders')), 200);
@@ -320,7 +377,8 @@ describe('admin fulfillment HTTP and customer shipment views', () => {
       }]);
       expect(order.shipments[0].fulfillmentParcel).toEqual({ status: 'delivered' });
       const serialized = JSON.stringify(order);
-      for (const privateValue of [inboundTracking, source, report.reference, input.reference, receipt.reference, 'TEST-PRIVATE-LEGACY-NOTE']) {
+      for (const privateValue of [inboundTracking, source, report.reference, input.reference, receipt.reference, 'TEST-PRIVATE-LEGACY-NOTE',
+        'TEST-INTERNAL-DELIVERY-ARCHIVE','TEST-INTERNAL-STAFF-NOTE','TEST-INTERNAL-STAFF-REASON',email(operator),operator,'supplier_to_customer']) {
         expect(serialized).not.toContain(privateValue);
       }
     }

@@ -35,6 +35,7 @@ const inboundTracking = 'TEST-INBOUND-WAYBILL';
 const source = 'TEST-CARRIER-FEED';
 const lineId = 'TEST-INBOUND-LINE';
 const batchNumber = 'TEST-RECEIVED-LOT';
+const secondBatchNumber = 'TEST-NEXT-RECEIVED-LOT';
 const inboundReference = 'TEST-PRIVATE-INBOUND-PROOF';
 const digest = 'a'.repeat(64);
 const actionHash = 'b'.repeat(64);
@@ -68,9 +69,11 @@ function parcel(route: 'supplier_to_customer' | 'supplier_to_libereal', received
     }] : [],
     lines: [{
       id: inbound ? lineId : 'TEST-OUTBOUND-LINE', orderItemId, purchaseOrderId, productId: item.productId, variantId: null,
-      quantity: inbound ? 3 : 2, receivedQuantity, receipts: receivedQuantity ? [{
-        id: 'test-receipt', quantity: receivedQuantity, forwardedQuantity: 0, inventoryBatch: { batchNumber },
-      }] : [],
+      quantity: inbound ? 3 : 2, receivedQuantity,
+      balance: { pending: (inbound ? 3 : 2)-receivedQuantity, received: receivedQuantity, shipped: inbound ? 3 : 2 },
+      receipts: receivedQuantity ? [batchNumber,secondBatchNumber].map((value,index)=>({
+        id: 'test-receipt-'+index, quantity: 1, forwardedQuantity: 0, releasedQuantity: 0, remaining: 1, inventoryBatch: { batchNumber:value },
+      })) : [],
     }],
   };
 }
@@ -107,9 +110,10 @@ function mockAdmin(permissions: string[] | Promise<string[]>, startingInbound = 
     if (url === '/api/admin/fulfillment/notices') return Response.json({ notices: [notice], next: null });
     if (url === fulfillmentPath && !init?.method) {
       reads.workspace += 1;
-      return Response.json({ workspace: {
+      return Response.json({ capabilities: { warehouse: Array.isArray(permissions) && permissions.includes('inventory.write'), shortfall: false }, workspace: {
         order: { id: orderId, status: 'confirmed', orderItems: [item] },
-        purchases: [purchase], receipts: [], legacyShipments: [], unmatched: [], feedSource: source,
+        purchases: [purchase], receipts: [], legacyShipments: [], legacyBackfill: { history: [], lines: [] },
+        legacyInventory: [], inventoryChoices: [], unmatched: [], feedSource: source,
         parcels: startingInbound ? [parcel('supplier_to_libereal', operationApplied ? 2 : 0)] :
           operationApplied ? [parcel('supplier_to_customer')] : [],
       } });
@@ -247,15 +251,18 @@ describe('fulfillment in the existing order pages', () => {
     await waitFor(() => expect(reads.detail).toBeGreaterThanOrEqual(2));
   });
 
-  it('records an actual partial warehouse receipt from the package line and shows the returned batch', async () => {
-    const { operations, reads } = mockAdmin(['orders.read', 'orders.write'], true);
+  it('records two actual batches for one part-received line in a single confirmed warehouse receipt', async () => {
+    const { operations, reads } = mockAdmin(['orders.read', 'orders.write', 'inventory.write'], true);
     const panel = await openAdminFulfillment();
     const booking = await panel.findByText('办理本包裹', { selector: 'summary' });
     fireEvent.click(booking);
     const form = within(booking.parentElement!);
     expect(form.getByLabelText('办理事项')).toHaveValue('warehouse_receipt');
-    fill(form, /合成采购品 · 待签 3/, '2');
+    fill(form, /合成采购品 · 待签 3/, '1');
     fill(form, '实收批号', batchNumber);
+    fireEvent.click(form.getByRole('button',{name:'再加一个实收批号'}));
+    fill(form,'第 2 批实收数量','1');
+    fill(form,'第 2 批实收批号',secondBatchNumber);
     fill(form, '实际签收人与收货情况', '库管按合成签收单清点实收');
     fillEvidence(form, 'TEST-WAREHOUSE-PROOF');
     fireEvent.click(form.getByRole('button', { name: '预览办理结果' }));
@@ -263,17 +270,19 @@ describe('fulfillment in the existing order pages', () => {
     const preview = within(await screen.findByRole('region', { name: '物流操作预览' }));
     previewField(preview, '发货路线', '供应商发往 Libereal');
     previewField(preview, '事项', '本仓实收');
-    previewField(preview, '实际批次', batchNumber);
-    previewField(preview, '货号', catalogNumber);
-    previewField(preview, '数量', '2');
+    expect(preview.getAllByText('实际批次',{selector:'dt'}).map(node=>node.nextElementSibling?.textContent)).toEqual([batchNumber,secondBatchNumber]);
+    expect(preview.getAllByText('货号',{selector:'dt'}).map(node=>node.nextElementSibling?.textContent)).toEqual([catalogNumber,catalogNumber]);
+    expect(preview.getAllByText('数量',{selector:'dt'}).map(node=>node.nextElementSibling?.textContent)).toEqual(['1','1']);
     previewField(preview, '凭据出处', 'TEST-WAREHOUSE-PROOF');
     expect(operations[0]).toMatchObject({ action: 'record_event', stage: 'preview', input: {
       kind: 'warehouse_receipt', parcelId: 'TEST-INBOUND-PARCEL', documentRow: 4, sha256: digest,
-      lines: [{ parcelLineId: lineId, productId: item.productId, quantity: 2, batchNumber }],
+      lines: [{ parcelLineId: lineId, productId: item.productId, quantity: 1, batchNumber },
+        { parcelLineId: lineId, productId: item.productId, quantity: 1, batchNumber:secondBatchNumber }],
     } });
 
     await verifyWithDialog(operations);
     expect(await panel.findByText(new RegExp('批次 ' + batchNumber))).toBeInTheDocument();
+    expect(panel.getByText(new RegExp('批次 ' + secondBatchNumber))).toBeInTheDocument();
     expect(panel.getByText('部分签收')).toBeInTheDocument();
     expect(panel.getByText(/已签 2 \/ 3/)).toBeInTheDocument();
     expect(operations[1]).toEqual({ ...operations[0], stage: 'confirm', actionHash, stepUpToken: 'test-grant-from-mfa' });

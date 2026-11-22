@@ -246,6 +246,37 @@ describe('authenticated carrier notices', () => {
     }]);
   });
 
+  it('withdraws an earlier provisional match when a second matching parcel is recorded late', async () => {
+    await seedParticipants();
+    const first = await orderedPurchase('test-carrier-late-first');
+    const second = await orderedPurchase('test-carrier-late-second');
+    const tracking = 'TEST-SAME-CARRIER-LATE-WAYBILL';
+    const a = await dispatch(first,tracking);
+    const secondDispatch = evidence('actual-second-dispatch-before-report');
+    const report = notice('test-original-carrier-exception',tracking,'exception');
+    const original = await send(report);
+    const signed = await findEvent(original.id);
+    expect(signed).toMatchObject({parcelId:a.id,status:'awaiting_resolution'});
+    expect(await prisma.fulfillmentParcel.findUnique({where:{id:a.id}})).toMatchObject({status:'exception'});
+    const b = await dispatch(second,tracking,'supplier_to_customer',secondDispatch);
+    expect(await findEvent(original.id)).toMatchObject({parcelId:null,status:'pending',details:signed.details,
+      reference:signed.reference,evidenceSha256:signed.evidenceSha256,contentHash:signed.contentHash});
+    const firstView = await prisma.$transaction(tx=>fulfillmentWorkspace(tx,first.orderId));
+    expect(firstView.parcels[0]).toMatchObject({id:a.id,status:'dispatched',events:[
+      expect.objectContaining({kind:'dispatch'}),expect.objectContaining({kind:'carrier_auto_match'}),expect.objectContaining({kind:'carrier_match_withdrawn'}),
+    ]});
+    expect(JSON.stringify(firstView)).not.toContain(second.orderId);
+    expect(JSON.stringify(firstView)).not.toContain(report.reference);
+    const input = { parcelId:b.id,eventId:original.id,requestId:'verify-correct-waybill',
+      description:'按原件核实通知属于第二个包裹',...evidence('late-matching-original-proof') };
+    const preview = await prisma.$transaction(tx=>reviewCarrierMatch(tx,second.orderId,input,operator));
+    await prisma.$transaction(tx=>reviewCarrierMatch(tx,second.orderId,input,operator,preview.actionHash));
+    expect(await send(report)).toEqual({id:original.id,status:'awaiting_resolution'});
+    expect(await prisma.fulfillmentParcel.findUnique({where:{id:a.id}})).toMatchObject({status:'dispatched'});
+    expect(await prisma.fulfillmentParcel.findUnique({where:{id:b.id}})).toMatchObject({status:'exception'});
+    expect(await prisma.shipment.findUnique({where:{id:b.shipmentId!}})).toMatchObject({status:'shipped',deliveredAt:null});
+  });
+
   it('keeps carrier exceptions open until each is resolved and leaves warehouse receipt to staff', async () => {
     await seedParticipants();
     const purchase = await orderedPurchase('test-carrier-inbound');
