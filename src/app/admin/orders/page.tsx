@@ -10,6 +10,8 @@ import {
 } from 'lucide-react';
 import ProductSearchOverlayForOrder from '@/components/admin/ProductSearchOverlayForOrder';
 import { CatalogRepricingFinance } from '@/components/admin/CatalogRepricingFinance';
+import FulfillmentPanel from '@/components/admin/fulfillment/FulfillmentPanel';
+import CarrierNoticeQueue from '@/components/admin/fulfillment/CarrierNoticeQueue';
 import CustomerCreditEditor from '@/components/admin/CustomerCreditEditor';
 import { isAdminMfaStepUpResponse, useAdminMfaStepUp } from '@/components/admin/AdminMfaStepUpDialog';
 import { adminPermissionErrorMessage } from '@/data/admin-permission-message';
@@ -575,6 +577,7 @@ function OrdersPanel() {
 
   return (
     <div className="space-y-4">
+      <CarrierNoticeQueue/>
       <div className="flex flex-wrap gap-4 items-center justify-between">
         <div className="flex gap-2 items-center flex-wrap w-full lg:w-auto">
           <div className="relative w-full sm:w-auto">
@@ -1619,6 +1622,9 @@ function OrderDetailPanel({
         </div>
       </div>
       <ShipmentPanel order={order} orderItems={orderItems} fetchData={fetchData} canWriteOrders={canWriteOrders} beginMfaStepUp={beginMfaStepUp} />
+      {['confirmed','partially_shipped','shipped','completed','cancelled','closed'].includes(order.status) &&
+        <FulfillmentPanel key={order.id} orderId={order.id} canWrite={canWriteOrders} stepUp={beginMfaStepUp} onUpdated={fetchData}/>}
+
       {permissions?.includes('purchases.read') && ['confirmed','partially_shipped','shipped','completed'].includes(order.status) && (
         <Link href={`/admin/purchases?orderId=${encodeURIComponent(order.id)}`} className="inline-flex text-sm font-medium text-brand-700 underline">查看本单采购</Link>
       )}

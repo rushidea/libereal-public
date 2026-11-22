@@ -1,5 +1,7 @@
 'use client';
 
+import ShipmentProgress from '@/components/customer/ShipmentProgress';
+
 import { Fragment, use } from 'react';
 
 import { useEffect, useState } from 'react';
@@ -59,7 +61,7 @@ type Order = {
   addressSnapshot?: { name: string; phone: string; address: string; institution?: string };
   shipments: Array<{
     id: string; method: string; status: string; carrier?: string; trackingNumber?: string;
-    pickupPoint?: string; contactName?: string; contactPhone?: string; shippedAt?: string;
+    pickupPoint?: string; contactName?: string; contactPhone?: string; shippedAt?: string; deliveredAt?: string | null; fulfillmentParcel?: { status: string } | null;
   }>;
   createdAt: string;
   updatedAt: string;
@@ -255,6 +257,7 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
                 <div>
                   <p className="font-medium text-gray-800 dark:text-slate-900">{SHIPPING_LABELS[shipment.method] || shipment.method}</p>
                   {shipment.trackingNumber && <p className="text-gray-600 dark:text-gray-400">{shipment.carrier || '物流'} · {shipment.trackingNumber}</p>}
+                  <ShipmentProgress shipment={shipment}/>
                   {shipment.pickupPoint && <p className="text-gray-600 dark:text-gray-400">{shipment.pickupPoint}</p>}
                   {shipment.contactName && <p className="text-gray-600 dark:text-gray-400">{shipment.contactName} {shipment.contactPhone || ''}</p>}
                 </div>

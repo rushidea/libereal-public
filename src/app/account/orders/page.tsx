@@ -1,5 +1,7 @@
 'use client';
 
+import ShipmentProgress from '@/components/customer/ShipmentProgress';
+
 import React, { useEffect, useState, useRef, Suspense, startTransition } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useSession } from 'next-auth/react';
@@ -64,7 +66,7 @@ type Order = {
   adjustments: Array<{ id: string; label: string; amount: number; reason?: string | null }>;
   shipments: Array<{
     id: string; method: string; carrier?: string; trackingNumber?: string; pickupPoint?: string;
-    contactName?: string; contactPhone?: string; shippedAt?: string;
+    contactName?: string; contactPhone?: string; shippedAt?: string; deliveredAt?: string | null; fulfillmentParcel?: { status: string } | null;
   }>;
   createdAt: string;
   updatedAt: string;
@@ -393,7 +395,7 @@ function OrdersContent() {
                                 {selectedOrder.shipments.length === 0 ? <p className="text-sm text-gray-500">暂未发货</p> : selectedOrder.shipments.map((shipment) => (
                                   <div key={shipment.id} className="flex items-start gap-2 text-sm text-gray-600 dark:text-gray-400">
                                     <Truck className="w-4 h-4 mt-0.5" />
-                                    <span>{SHIPPING_LABELS[shipment.method] || shipment.method}{shipment.carrier ? ` · ${shipment.carrier}` : ''}{shipment.trackingNumber ? ` · ${shipment.trackingNumber}` : ''}{shipment.pickupPoint ? ` · ${shipment.pickupPoint}` : ''}</span>
+                                    <span>{SHIPPING_LABELS[shipment.method] || shipment.method}{shipment.carrier ? ` · ${shipment.carrier}` : ''}{shipment.trackingNumber ? ` · ${shipment.trackingNumber}` : ''}{shipment.pickupPoint ? ` · ${shipment.pickupPoint}` : ''}<ShipmentProgress shipment={shipment}/></span>
                                   </div>
                                 ))}
                               </div>
@@ -545,7 +547,7 @@ function OrdersContent() {
                       {selectedOrder.shipments.length > 0 && (
                         <div>
                           <p className="text-xs text-gray-500 dark:text-gray-500 mb-1">发货记录</p>
-                          {selectedOrder.shipments.map((shipment) => <p key={shipment.id} className="text-gray-700 dark:text-slate-900">{SHIPPING_LABELS[shipment.method] || shipment.method}{shipment.trackingNumber ? ` · ${shipment.trackingNumber}` : ''}</p>)}
+                          {selectedOrder.shipments.map((shipment) => <p key={shipment.id} className="text-gray-700 dark:text-slate-900">{SHIPPING_LABELS[shipment.method] || shipment.method}{shipment.trackingNumber ? ` · ${shipment.trackingNumber}` : ''}<ShipmentProgress shipment={shipment}/></p>)}
                         </div>
                       )}
                       {selectedOrder.paymentMethod && (
