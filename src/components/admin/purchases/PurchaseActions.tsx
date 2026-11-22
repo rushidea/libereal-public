@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import type { PurchaseActionInput, previewPurchaseAction } from '@/lib/purchase-orders';
 import type { PurchaseTerms } from '@/lib/purchase-terms';
+import type { IncidentQuantity } from '@/lib/purchase-incidents';
 import type { DecisionCoverage, DecisionDocumentInput, LegacyDecisionLocation } from '@/lib/purchase-decision-documents';
 import type { ShortfallDecision } from '@/lib/purchase-shortfalls';
 import DocumentDigestField from './DocumentDigestField';
@@ -17,6 +18,26 @@ type Intervention = DecisionDocumentInput & {
   shortfallDecision?: ShortfallDecision; revisesResendApprovalId?: string;
 };
 type ScopeSubjects = Array<{ subject: DecisionCoverage; name: string }>;
+type QuantityDraft = Record<string,number>;
+function enteredQuantities(values: QuantityDraft) {
+  return Object.entries(values).flatMap(([orderItemId,quantity]) => quantity > 0 ? [{ orderItemId,quantity }] : []);
+}
+
+function IncidentQuantityFields({ title, quantities, values, lineName, onChange }: {
+  title: string; quantities: IncidentQuantity[]; values: QuantityDraft; lineName: (orderItemId: string) => string;
+  onChange: (values: QuantityDraft) => void;
+}) {
+  if (!quantities.length) return null;
+  return <fieldset className="grid gap-2 rounded border p-3">
+    <legend>{title}</legend>
+    {quantities.map(row => <label key={row.orderItemId} className="grid gap-1 text-sm">
+      {title} · {lineName(row.orderItemId)} · 可核对 {row.quantity}
+      <input className={field} type="number" min={0} max={row.quantity} step={1} value={values[row.orderItemId] || ''}
+        onChange={event => onChange({ ...values,[row.orderItemId]:Number(event.target.value) })}/>
+    </label>)}
+  </fieldset>;
+}
+
 const scopeKey = (scope: DecisionCoverage) => JSON.stringify([scope.orderId,scope.purchaseOrderId,scope.orderItemId,scope.shortfallId ?? null]);
 const decisionPurposeLabels: Record<string,string> = {
   free_resend:'书面同意免费补发',supplier_facts:'供方确认短失或缺货事实，保留原合同应付',new_purchase:'客户同意按以下条件另采',
@@ -123,9 +144,9 @@ function LineDecisionDocuments({value,current,choices,customerOnly,onChange}: {
   </>;
 }
 
-function DispositionFields({ line, quantity, losses, resends, shortfall, value, current, choices, allowReplacement, onChange }: {
+function DispositionFields({ line, quantity, losses, resends, shortfall, value, current, choices, incidentLimit, allowReplacement, onChange }: {
   line: Pick<Line, 'source'>; quantity: number; losses: Workspace['fulfillment']['shortfalls'];
-  resends: Workspace['fulfillment']['freeResends']; shortfall: boolean; current: DecisionCoverage; choices: ScopeSubjects;
+  resends: Workspace['fulfillment']['freeResends']; shortfall: boolean; current: DecisionCoverage; choices: ScopeSubjects; incidentLimit?: number;
   value: Intervention; allowReplacement: boolean; onChange: (value: Intervention) => void;
 }) {
   const source = line.source;
@@ -137,7 +158,7 @@ function DispositionFields({ line, quantity, losses, resends, shortfall, value, 
   const replacing = allowReplacement && value.outcome === 'replace';
   const selectedLoss = losses.find(row => row.resolutionId === value.shortfallId);
   const selectedResend = resends.find(row => row.approvalId === value.revisesResendApprovalId);
-  const limit = shortfall ? selectedResend?.available ?? selectedLoss?.available ?? 0 : quantity;
+  const limit = Math.min(incidentLimit ?? Infinity,shortfall ? selectedResend?.available ?? selectedLoss?.available ?? 0 : quantity);
   const exactChoices = choices.filter(({subject}) => Boolean(subject.shortfallId) === shortfall);
 
   return <fieldset className="grid gap-2 rounded border p-3">
@@ -217,6 +238,10 @@ export default function PurchaseActions({ orderId, orderStatus, cancellation, po
   const [revisions, setRevisions] = useState<Record<string, PurchaseTerms>>({});
   const [dispositions, setDispositions] = useState<Record<string, Intervention>>({});
   const [coordinationDocuments, setCoordinationDocuments] = useState<Record<string,DecisionDocumentInput>>({});
+  const [affected, setAffected] = useState<QuantityDraft>({});
+  const [handling, setHandling] = useState<QuantityDraft>({});
+  const [verifiedScopeMatchesResult, setVerifiedScopeMatchesResult] = useState(false);
+  const [changeKind, setChangeKind] = useState<PurchaseActionInput['changeKind']>('unavailable');
   const [fileKinds, setFileKinds] = useState<Record<string, string>>({});
   const [outcome, setOutcome] = useState<PurchaseActionInput['outcome']>('original_terms');
   const committed = po.orderedBefore || po.paidCents > 0 || po.commitmentExceptions.length > 0;
@@ -233,7 +258,18 @@ export default function PurchaseActions({ orderId, orderStatus, cancellation, po
     subject: { orderId,purchaseOrderId:loss.purchaseOrderId,orderItemId:loss.orderItemId,shortfallId:loss.resolutionId,quantity:loss.quantity },
   }))];
   const supplierCancelled = po.commitmentState === 'supplier_cancelled';
-  const canContinueOriginal = !supplierCancelled && !po.needsRemainingReview;
+  const canContinueOriginal = !supplierCancelled && po.remaining.length > 0;
+  const physicalQuantity = (rows: Array<IncidentQuantity & { purchaseOrderId: string }>, orderItemId: string) => rows
+    .filter(row => row.purchaseOrderId === po.id && row.orderItemId === orderItemId).reduce((sum,row) => sum+row.quantity,0);
+  const declared = enteredQuantities(affected);
+  const selected = enteredQuantities(handling);
+  const outstanding = po.incident?.outstanding ?? (declared.length ? declared : null);
+  const handled = selected.length ? selected : outstanding ?? [];
+  const legacyScope = !!po.openIncidentId && !po.incident?.scope;
+  const reportLimits = po.remaining.flatMap(row => {
+    const received = changeKind === 'delay' || changeKind === 'unavailable' ? physicalQuantity(fulfillment.supplierReceived,row.orderItemId) : 0;
+    return row.quantity > received ? [{...row,quantity:row.quantity-received}] : [];
+  });
   const openExceptions = po.commitmentExceptions.filter(row => !row.resolution);
   const legacyFiles = [...new Set(po.documentReviewLines.map(row => row.sha256))];
   const shortfalls = fulfillment.shortfalls.filter(row => row.purchaseOrderId === po.id);
@@ -243,6 +279,10 @@ export default function PurchaseActions({ orderId, orderStatus, cancellation, po
   const closed = orderStatus === 'cancelled' || orderStatus === 'closed';
   const archiveTerms = (line: Purchase['lines'][number]) => revisions[line.orderItemId] ?? legacyTerms(line);
   const lineFor = (id: string) => po.lines.find(line => line.orderItemId === id)!;
+  const incidentLineName = (id: string) => {
+    const source = lineFor(id)?.source;
+    return source ? [source.name,source.catalogNumber,source.spec,'订单第 '+(source.position+1)+' 行'].filter(Boolean).join(' · ') : id;
+  };
   const permit = (key: string) => permissions.includes(`purchases.${key}`);
   const choices: Action[] = [];
   if (!closed && po.status === 'draft' && !committed && permit('approve')) {
@@ -266,13 +306,19 @@ export default function PurchaseActions({ orderId, orderStatus, cancellation, po
       const value = (key: string) => String(data.get(key) ?? '').trim() || undefined;
       const occurredAt = value('occurredAt');
       const resolvable = action === 'resolve_change' && committed && (outcome === 'declined' || outcome === 'replacement' || outcome === 'shortfall');
+      const explicitlyContinuing = action === 'resolve_change' && outcome === 'original_terms';
+      if (explicitlyContinuing && !outstanding?.length) throw new Error('请先核对原供货事项涉及的商品和数量');
       const input: PurchaseActionInput = {
         orderId, purchaseOrderId: po.id, action, version: po.version, requestId: crypto.randomUUID(),
         reference: value('reference'), referenceSha256: value('referenceSha256'),
         occurredAt: occurredAt ? new Date(occurredAt).toISOString() : undefined,
         description: value('description'), conditionReference: value('conditionReference'),
         amountCents: action === 'record_payment' ? cents(String(data.get('amount') ?? '')) : undefined,
-        changeKind: value('changeKind') as PurchaseActionInput['changeKind'], outcome: action === 'resolve_change' ? outcome : undefined,
+        changeKind: action === 'report_change' ? changeKind : undefined, outcome: action === 'resolve_change' ? outcome : undefined,
+        affectedLines: declared.length && (action === 'report_change' || (action === 'resolve_change' && legacyScope)) ? declared : undefined,
+        coordinationLines: explicitlyContinuing && selected.length ? selected : undefined,
+        confirmsFullIncidentScope: action === 'resolve_change' && legacyScope && !explicitlyContinuing && verifiedScopeMatchesResult ? true : undefined,
+        responsibility: value('responsibility'),
         supplierReference: value('supplierReference'), supplierSha256: value('supplierSha256'),
         customerReference: value('customerReference'), customerSha256: value('customerSha256'), refundFollowup: value('refundFollowup'),
         revisedTerms: action === 'review_legacy_approval' ? po.lines.map(line => ({ orderItemId: line.orderItemId, terms: archiveTerms(line) }))
@@ -318,7 +364,15 @@ export default function PurchaseActions({ orderId, orderStatus, cancellation, po
     {po.remainingScope && <p className="text-sm">核准的剩余商品应付 {money(po.remainingScope.totalCents)} · 经核实冲抵 {money(po.remainingScope.appliedPaidCents)} · 尚未付 {money(po.dueCents ?? undefined)}</p>}
     {po.needsRemainingReview && <p className="text-sm text-amber-900">{openExceptions.length
       ? '核对实际承诺后，再逐行核准原单剩余应付。'
-      : '部分商品已取消或转替代采购，须逐行核准原单剩余应付。'}</p>}
+      : '原单剩余应付待独立核准。供货协调结果可据实登记。'}</p>}
+    {po.incident && <div className="space-y-1 rounded bg-amber-50 p-2 text-sm text-amber-900">
+      <p>供货事项待办理 · {po.incident.reference} · 登记人 {po.incident.reportedBy}</p>
+      {po.incident.responsibility && <p>待核对环节 {po.incident.responsibility}</p>}
+      {po.incident.lastReviewedBy && <p>上次核对人 {po.incident.lastReviewedBy}</p>}
+      {po.incident.outstanding ? <ul className="pl-4">{po.incident.outstanding.map(row => <li key={row.orderItemId}>
+        {lineFor(row.orderItemId)?.source.name ?? row.orderItemId} · 仍待办理 {row.quantity}
+      </li>)}</ul> : <p>原影响范围待具名核对。</p>}
+    </div>}
     {supplierCancelled && !closed && <p className="text-sm">如仍需交付，请凭双方书面回复登记供货变化，另建采购并独立批准。</p>}
     {po.needsLegacyReview && <p className="text-sm text-amber-900">继续登记前须复核原批准、书证和已付凭据。</p>}
     {po.needsFundingReapproval && <p className="text-sm text-amber-900">客户付款条件已变化。后续动作需重新核准，已实际发生的订购按原有效期补录。</p>}
@@ -346,6 +400,7 @@ export default function PurchaseActions({ orderId, orderStatus, cancellation, po
     {!pending && <div className="flex flex-wrap gap-2">{choices.map(choice =>
       <button type="button" key={choice} className={button} disabled={busy} onClick={() => {
         setAction(choice); setOutcome(canContinueOriginal ? 'original_terms' : 'declined'); setRevisions({}); setDispositions({}); setCoordinationDocuments({}); setFileKinds({});
+        setAffected({}); setHandling({}); setVerifiedScopeMatchesResult(false); setChangeKind('unavailable');
       }}>{choice === 'register_order' && po.status === 'on_hold' ? '补录暂停前实际订购' : actionNames[choice]}</button>)}</div>}
     {action && !pending && <form key={action} className="grid gap-3 border-t pt-3" onSubmit={event => {
       event.preventDefault();
@@ -437,20 +492,37 @@ export default function PurchaseActions({ orderId, orderStatus, cancellation, po
         {inputField('reference', '实际付款流水或银行凭证编号')}
       </>}
       {action === 'report_change' && <>
-        <label className="grid gap-1 text-sm">变更类别<select className={field} name="changeKind">
+        <label className="grid gap-1 text-sm">变更类别<select className={field} value={changeKind}
+          onChange={event => setChangeKind(event.target.value as PurchaseActionInput['changeKind'])}>
           <option value="unavailable">缺货</option><option value="delay">延期</option><option value="price">涨价或调价</option><option value="other">其他</option>
         </select></label>
         {inputField('reference', '供应商反馈来源')}{inputField('description', '受影响的商品和具体变化')}
+        <label className="grid gap-1 text-sm">需要核对的供方或环节<input className={field} name="responsibility" maxLength={2000}/></label>
+        <IncidentQuantityFields title="本次供货事项影响数量" quantities={reportLimits} values={affected}
+          lineName={incidentLineName} onChange={setAffected}/>
+        {(changeKind === 'delay' || changeKind === 'unavailable') && <p className="text-sm">已实收后发现短失或退回，请选择“其他”并填写对应的物流凭据。</p>}
+        {!declared.length && <p className="text-sm">影响数量暂未核全时，可在回填协调结果时按原书证确认。</p>}
       </>}
       {action === 'resolve_change' && <>
         <label className="grid gap-1 text-sm">协调结果<select className={field} value={outcome}
-          onChange={event => { setOutcome(event.target.value as typeof outcome); setDispositions({}); setCoordinationDocuments({}); }}>
+          onChange={event => { setOutcome(event.target.value as typeof outcome); setDispositions({}); setCoordinationDocuments({}); setHandling({}); setVerifiedScopeMatchesResult(false); }}>
           {canContinueOriginal && <option value="original_terms">双方确认按原条款继续</option>}
           {canHandleShortfall && <option value="shortfall">按书面决定处理已核实短失</option>}
           {committed ? (!closed && <option value="replacement">按书面确认另建替代采购</option>)
             : <option value="revised_terms">双方同意修订，提交新版本独立审核</option>}
           <option value="declined">{committed ? '取消受影响数量' : '客户未同意，结束本次采购准备'}</option>
         </select></label>
+        {legacyScope && <>
+          {!verifiedScopeMatchesResult && <IncidentQuantityFields title="原供货事项完整涉及范围" quantities={po.remaining} values={affected}
+            lineName={incidentLineName} onChange={values=>{setAffected(values);setHandling({});}}/>}
+          <label className="grid gap-1 text-sm">需要核对的供方或环节<input className={field} name="responsibility" maxLength={2000}/></label>
+          <p className="text-sm">根据原反馈和双方书证核实涉及的全部商品。若还有未决商品或数量，请一并填入。</p>
+        </>}
+        {outcome === 'original_terms' && outstanding && <>
+          <IncidentQuantityFields title="本次继续原约的数量" quantities={outstanding} values={handling}
+            lineName={incidentLineName} onChange={setHandling}/>
+          <p className="text-sm">留空时本次办理上面已核实的全部未决数量。书证允许范围可另行录入。</p>
+        </>}
         {inputField('supplierReference', '人工与供应商协调的书面依据')}
         {inputField('customerReference', '客户对方案的回复依据')}
         {(committed || continueWithEvidence) && <>
@@ -460,7 +532,7 @@ export default function PurchaseActions({ orderId, orderStatus, cancellation, po
         {!committed && revisingReplacement && <DocumentDigestField name="customerSha256" label="替代条件变更后客户同意的书证摘要"/>}
         {(continueWithEvidence || revisingReplacement) && po.lines.flatMap(line => {
           const quantity = revisingReplacement ? (line.fromPurchaseOrderId ? line.source.quantity : 0)
-            : (po.remaining.find(row => row.orderItemId === line.orderItemId)?.quantity ?? 0);
+            : ((outcome === 'original_terms' ? handled : po.remaining).find(row => row.orderItemId === line.orderItemId)?.quantity ?? 0);
           if (!quantity) return [];
           return [<fieldset key={line.orderItemId} className="space-y-2 rounded border p-3">
             <legend>{line.source.name} · 书面决定范围 {quantity}</legend>
@@ -471,7 +543,9 @@ export default function PurchaseActions({ orderId, orderStatus, cancellation, po
         })}
         {inputField('description', '双方确认的具体结果')}
         {outcome === 'revised_terms' && po.lines.map(line => <PurchaseLineFields key={line.orderItemId} line={line}
-          values={revisions[line.orderItemId] ?? line.terms} onChange={terms => setRevisions({ ...revisions, [line.orderItemId]: terms })}/>)}
+          values={revisions[line.orderItemId] ?? line.terms} onChange={terms => {
+            setRevisions({ ...revisions, [line.orderItemId]: terms }); setVerifiedScopeMatchesResult(false);
+          }}/>)}
         {committed && (outcome === 'declined' || outcome === 'replacement' || outcome === 'shortfall') && <>
           {po.lines.flatMap(line => {
             const sent = fulfillment.supplierDispatched.filter(row => row.purchaseOrderId === po.id && row.orderItemId === line.orderItemId)
@@ -479,16 +553,25 @@ export default function PurchaseActions({ orderId, orderStatus, cancellation, po
             const quantity = Math.max(0,(po.remaining.find(row => row.orderItemId === line.orderItemId)?.quantity ?? 0)-sent);
             const losses = outcome === 'shortfall' ? shortfalls.filter(row => row.orderItemId === line.orderItemId) : [];
             const resends = outcome === 'shortfall' ? pendingResends.filter(row => row.orderItemId === line.orderItemId) : [];
-            return (outcome === 'shortfall' ? resends.length > 0 || losses.some(row => row.available > 0) : quantity > 0)
+            const incidentLimit = outstanding ? outstanding.find(row => row.orderItemId === line.orderItemId)?.quantity ?? 0 : undefined;
+            return (incidentLimit !== 0 && (outcome === 'shortfall' ? resends.length > 0 || losses.some(row => row.available > 0) : quantity > 0))
               ? [<DispositionFields key={line.orderItemId} line={line}
               quantity={quantity} losses={losses} resends={resends} shortfall={outcome === 'shortfall'} allowReplacement={outcome !== 'declined'}
-              choices={scopeSubjects} current={{ orderId,purchaseOrderId:po.id,orderItemId:line.orderItemId,quantity:line.source.quantity }}
+              choices={scopeSubjects} incidentLimit={incidentLimit}
+              current={{ orderId,purchaseOrderId:po.id,orderItemId:line.orderItemId,quantity:line.source.quantity }}
               value={dispositions[line.orderItemId] ?? { quantity: 0, outcome: 'cancel' }}
-              onChange={entry => setDispositions({ ...dispositions, [line.orderItemId]: entry })}/>] : [];
+              onChange={entry => {
+                setDispositions({ ...dispositions, [line.orderItemId]: entry }); setVerifiedScopeMatchesResult(false);
+              }}/>] : [];
           })}
           {po.paidCents > 0 && Object.values(dispositions).some(row => row.quantity > 0 && (!row.shortfallId || row.shortfallDecision === 'change_contract'))
             && inputField('refundFollowup', '原付款与未决退款的后续核对安排')}
         </>}
+        {legacyScope && outcome !== 'original_terms' && <label className="flex items-start gap-2 text-sm">
+          <input type="checkbox" checked={verifiedScopeMatchesResult}
+            onChange={event=>{setVerifiedScopeMatchesResult(event.target.checked);setAffected({});}}/>
+          我已核实，本次处置涵盖原事项涉及的全部商品和数量
+        </label>}
       </>}
       <div className="flex gap-2"><button className={primary} disabled={busy}>查看完整预览</button>
         <button type="button" className={button} onClick={() => setAction(null)}>收起</button></div>
@@ -537,8 +620,19 @@ export default function PurchaseActions({ orderId, orderStatus, cancellation, po
         <p>{op.description}</p>
       </div>}
       {op.action === 'record_payment' && <p>本次实际付款　<strong>{money(op.amountCents)}</strong> · 收款方 {po.lines[0].terms.payee} · 条件依据 {op.conditionReference}</p>}
-      {op.action === 'report_change' && <p>供货变化　{op.description}</p>}
+      {op.action === 'report_change' && <>
+        <p>供货变化　{op.description}</p>
+        {op.affectedLines?.map(row => <p key={row.orderItemId}>{lineFor(row.orderItemId)?.source.name} · 涉及 {row.quantity}</p>)}
+      </>}
+      {(op.action === 'report_change' || op.action === 'resolve_change') && op.supplyFacts?.map(row => <p key={row.orderItemId}>
+        {lineFor(row.orderItemId)?.source.name} · 客户已核实实收 {row.customerReceived} · 发往客户待核实收 {row.customerTransit}
+        {' · 仓库已实收 '+row.warehouseReceived+' · 入仓在途 '+row.warehouseTransit+' · 客户单待发 '+row.customerUnshipped}
+        {row.shortfalls.length > 0 && ' · 已核实短失 '+row.shortfalls.map(loss => loss.reference+' '+loss.quantity).join('、')}
+      </p>)}
       {op.action === 'resolve_change' && <>
+        <p>本次处理 {op.incidentProgress.handled.map(row => (lineFor(row.orderItemId)?.source.name ?? row.orderItemId)+' '+row.quantity).join('、')}</p>
+        {op.incidentProgress.outstanding.length > 0 && <p>仍待办理 {op.incidentProgress.outstanding
+          .map(row => (lineFor(row.orderItemId)?.source.name ?? row.orderItemId)+' '+row.quantity).join('、')}</p>}
         <p>协调结果　{op.description}</p>
         <p>供应商依据　{op.supplierReference}</p><p>客户回复　{op.customerReference}</p>
         {op.revisedTerms?.map(edit => <div key={edit.orderItemId}><strong>拟修订条款</strong>
