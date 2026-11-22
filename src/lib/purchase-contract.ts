@@ -1,5 +1,5 @@
+import { supplyIncidents } from '@/lib/purchase-incidents';
 import type { PurchaseActivity } from '@/lib/purchase-activity';
-import type { IncidentQuantity } from '@/lib/purchase-incidents';
 import type { ShortfallDecision } from '@/lib/purchase-shortfalls';
 import type { PurchaseSource } from '@/lib/purchase-source';
 import { pricingContentHash } from '@/lib/pricing-adjustment-approval';
@@ -21,7 +21,6 @@ type ArchiveSnapshot = {
   lines: ContractLine[];
   operation: {
     action?: string; occurredAt?: string; previousStatus?: PurchaseStatus; incidentId?: string; outcome?: string;
-    incidentProgress?: { outstanding: IncidentQuantity[] };
     reference?: string; amountCents?: number; conditionReference?: string;
     dispositions?: Array<{ orderItemId: string; quantity: number; forwardingLossId?: string; shortfallId?: string; shortfallDecision?: ShortfallDecision }>;
     scope?: RemainingScope;
@@ -63,26 +62,18 @@ export function remainingApproval(ledger: PurchaseActivity[], dispositionIds: st
 }
 
 export function approvalAt(ledger: PurchaseActivity[], at: number) {
+  const historical = ledger.filter(row=>Date.parse(row.createdAt)<=at);
   let approval: PurchaseActivity | undefined;
-  let suspended = false;
-  for (const row of ledger) {
-    if (Date.parse(row.createdAt) > at) continue;
-    if (isPurchaseApproval(row)) {
-      approval = row;
-      suspended = false;
-    } else if (row.action === 'report_change') {
-      suspended = true;
-    } else if (row.action === 'resolve_change') {
+  for (const row of historical) {
+    if (isPurchaseApproval(row)) approval = row;
+    else if (row.action === 'resolve_change') {
       const operation = purchaseSnapshot(row)?.operation;
-      if (operation?.outcome === 'original_terms' || (operation?.dispositions?.length && operation.dispositions.every(entry => !changesOriginalPurchase(entry)))) {
-        suspended = Boolean(operation.incidentProgress?.outstanding.length)
-          || (operation.previousStatus !== 'approved' && operation.previousStatus !== 'ordered');
-      } else {
+      if (operation?.outcome !== 'original_terms' && !operation?.dispositions?.every(entry=>!changesOriginalPurchase(entry))) {
         approval = undefined;
       }
     }
   }
-  return suspended ? undefined : approval;
+  return supplyIncidents(historical).length ? undefined : approval;
 }
 
 export function isPurchaseApproval(row: PurchaseActivity) {

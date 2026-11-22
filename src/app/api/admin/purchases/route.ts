@@ -48,7 +48,7 @@ export async function GET(req: NextRequest) {
 
 const purchasePermissions = {
   approve: 'purchases.approve', approve_lead_time: 'purchases.approve', register_order: 'purchases.write',
-  record_payment: 'purchases.pay', report_change: 'purchases.write', resolve_change: 'purchases.read',
+  record_payment: 'purchases.pay', report_change: 'purchases.write', review_change_scope: 'purchases.read', resolve_change: 'purchases.read',
   review_legacy_approval: 'purchases.approve', approve_remaining: 'purchases.approve', record_late_order_exception: 'purchases.approve',
   reapprove_purchase: 'purchases.approve', resolve_order_exception: 'purchases.approve',
 } as const satisfies Record<PurchaseActionInput['action'], AdminPermissionKey>;
@@ -59,7 +59,7 @@ const startPermissions = {
 } as const satisfies Record<PurchaseStartInput['action'], AdminPermissionKey>;
 
 async function requireResolutionPermission(tx: Prisma.TransactionClient, order: PurchaseActionInput | null, permissions: AdminPermissionKey[]) {
-  if (order?.action !== 'resolve_change') return null;
+  if (order?.action !== 'resolve_change' && order?.action !== 'review_change_scope') return null;
   const [commitment] = await tx.$queryRaw<Array<{ id: string }>>`SELECT id FROM PurchaseActivity
     WHERE orderId=${order.orderId} AND purchaseOrderId=${order.purchaseOrderId}
       AND (action IN ('register_order','record_payment') OR (action='record_late_order_exception'
@@ -120,7 +120,7 @@ export async function POST(req: NextRequest) {
       description: body.description, outcome: body.outcome, supplierReference: body.supplierReference,
       supplierSha256: body.supplierSha256, customerReference: body.customerReference, customerSha256: body.customerSha256,
       revisedTerms: body.revisedTerms, dispositions: body.dispositions, refundFollowup: body.refundFollowup,
-      decisionDocumentLines: body.decisionDocumentLines, affectedLines: body.affectedLines, coordinationLines: body.coordinationLines,
+      decisionDocumentLines: body.decisionDocumentLines, incidentId: body.incidentId, affectedLines: body.affectedLines, coordinationLines: body.coordinationLines,
       confirmsFullIncidentScope: body.confirmsFullIncidentScope, responsibility: body.responsibility,
       paymentReference: body.paymentReference, paymentSha256: body.paymentSha256, leadTimeReference: body.leadTimeReference,
       leadTimeSha256: body.leadTimeSha256, remainingLines: body.remainingLines, appliedPaidCents: body.appliedPaidCents,

@@ -1,6 +1,7 @@
 import { purchaseOperation, type PurchaseActivity } from '@/lib/purchase-activity';
 import { jsonObject } from '@/lib/order-catalog-repricing';
-import { parcelLineBalance, type FulfillmentDb as Db } from '@/lib/fulfillment-records';
+import { availableReceipt, parcelLineBalance, type FulfillmentDb as Db } from '@/lib/fulfillment-records';
+import type { IncidentCandidate } from '@/lib/purchase-incident-scope';
 import { positiveCents, PurchaseError } from '@/lib/purchase-terms';
 
 export type ShortfallDecision = 'free_resend' | 'change_contract' | 'new_purchase';
@@ -29,7 +30,8 @@ export async function purchaseShortfalls(tx: Db, orderId: string, activities: Pu
   const parcels = await tx.fulfillmentParcel.findMany({ where: { orderId, route: {
     in: ['supplier_to_customer','supplier_to_libereal','libereal_to_customer'],
   } }, include: {
-    lines: { include: { sourceReceipt: { select: { parcelLineId: true } }, resolutions: { include: {
+    lines: { include: { receipts: { select: { id:true,quantity:true,forwardedQuantity:true,releasedQuantity:true,
+      inventoryBatch:{select:{batchNumber:true}} } }, sourceReceipt: { select: { parcelLineId: true } }, resolutions: { include: {
       event: { select: { occurredAt: true, reference: true } },
     } } } },
     events: { where: { kind: 'dispatch', status: 'applied' }, select: { details: true } },
@@ -189,6 +191,20 @@ export async function purchaseShortfalls(tx: Db, orderId: string, activities: Pu
       if (pending > 0) warehouseTransit.push({...source,quantity:pending});
     }
   }
-  return { supplierDispatched: [...supplierDispatched.values()], supplierReceived, warehouseReceived, warehouseTransit, shortfalls, freeResends,
+  const incidentSources: Array<IncidentCandidate & { purchaseOrderId: string }> = [];
+  for (const {parcel,line,purchaseOrderId} of companyParcels) {
+    const target = {purchaseOrderId,orderItemId:line.orderItemId};
+    const {pending} = parcelLineBalance(line);
+    if (pending) incidentSources.push({...target,quantity:pending,source:{kind:'parcel',id:line.id},reference:parcel.trackingNumber ?? parcel.reference});
+    for (const receipt of line.receipts) {
+      const quantity = availableReceipt(receipt);
+      if (quantity) incidentSources.push({...target,quantity,source:{kind:'receipt',id:receipt.id},reference:receipt.inventoryBatch.batchNumber,parcelLineId:line.id});
+    }
+  }
+  for (const loss of shortfalls) if (loss.available > 0) incidentSources.push({purchaseOrderId:loss.purchaseOrderId,orderItemId:loss.orderItemId,
+    quantity:loss.available,source:{kind:'shortfall',id:loss.resolutionId},reference:loss.reference});
+  for (const resend of freeResends) if (resend.available > 0) incidentSources.push({purchaseOrderId:resend.purchaseOrderId,orderItemId:resend.orderItemId,
+    quantity:resend.available,source:{kind:'resend',id:resend.approvalId},reference:resend.approvalId});
+  return { supplierDispatched: [...supplierDispatched.values()], supplierReceived, warehouseReceived, warehouseTransit, shortfalls, freeResends, incidentSources,
     parcelLinesWithPriorHoldTransfer, replacementsWithPriorHoldTransfer, parcelLinesWithUnverifiedStockSource, replacementsWithUnverifiedStockSource };
 }

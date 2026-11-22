@@ -3,6 +3,7 @@ import { configuredCarrier, pendingForWaybill, reconcilePendingForParcel } from 
 import { fulfillmentStatus, isInactiveOrderStatus, validateShipmentItems } from '@/lib/order-domain';
 import { releaseProcurementInventoryHold, shipProcurementBatch } from '@/lib/inventory';
 import { purchaseWorkspace } from '@/lib/purchase-orders';
+import { heldIncidentQuantity } from '@/lib/purchase-incidents';
 import { PurchaseError, requiredText } from '@/lib/purchase-terms';
 import { availableReceipt, confirmPreview, inputObject, optionalText, parcelInclude, parcelKeys, parcelLineBalance, positiveQuantity,
   shipmentEvidence, verifyRepeat, type FulfillmentActor, type FulfillmentDb as Db } from '@/lib/fulfillment-records';
@@ -57,38 +58,58 @@ export async function fulfillmentWorkspace(tx: Db, orderId: string) {
     const key = lineKey(row); dispatched.set(key, (dispatched.get(key) ?? 0) + row.quantity);
   };
   for (const row of purchasing.fulfillment.supplierDispatched) add(row);
+  const forwardLimits = new Map<string,number>();
+  const freeResends: typeof purchasing.fulfillment.freeResends = [];
   const purchases = purchasing.orders.flatMap(po => {
     const receipt = po.orderReceipt;
-    if (!receipt?.occurredAt || po.commitmentState === 'supplier_cancelled' || po.commitmentState === 'pending') return [];
-    const unresolved = po.incident?.outstanding;
-    const supplierDelay = po.incident?.changeKind === 'delay' || po.incident?.changeKind === 'unavailable';
-    if ((po.status === 'on_hold' || po.openIncidentId) && (!unresolved || po.needsRemainingReview || po.needsLegacyReview)) return [];
+    if (!receipt?.occurredAt || po.commitmentState === 'supplier_cancelled' || po.commitmentState === 'pending'
+      || po.incidents.some(row=>!row.outstanding)
+      || ((po.status === 'on_hold' || po.incidents.length) && po.needsLegacyReview)
+      || (po.status === 'on_hold' && !po.incidents.length && !po.needsRemainingReview)) return [];
     return receipt.lines.flatMap(ordered => {
       const line = po.lines.find(row => row.orderItemId === ordered.orderItemId);
       if (!line) return [];
       const remaining = po.remaining.find(row => row.orderItemId === line.orderItemId)?.quantity ?? 0;
       const supplied = dispatched.get(lineKey({ purchaseOrderId: po.id, orderItemId: line.orderItemId })) ?? 0;
-      const incidentHold = unresolved?.find(row => row.orderItemId === line.orderItemId)?.quantity ?? 0;
-      const available = Math.max(0, Math.min(ordered.quantity, remaining) - supplied - incidentHold);
-      return [{ purchaseOrderId: po.id, orderItemId: line.orderItemId, name: line.source.name, supplier: line.terms.supplier ?? '',
+      const purchaseOrderId = po.id;
+      const orderItemId = line.orderItemId;
+      const held = heldIncidentQuantity(po.incidents,orderItemId,{kind:'unshipped'});
+      const available = po.needsRemainingReview ? 0 : Math.max(0,Math.min(ordered.quantity,remaining)-supplied-held);
+      let canForward = false;
+      if (remaining > 0) for (const source of po.incidentSources) {
+        if (source.orderItemId !== orderItemId || source.source.kind !== 'receipt') continue;
+        // A received lot still belongs to the specific parcel whose commercial terms are under review.
+        if (source.parcelLineId && po.incidents.some(issue=>issue.outstanding?.some(row=>
+          row.source?.kind==='parcel' && row.source.id===source.parcelLineId))) continue;
+        const permitted = source.quantity-heldIncidentQuantity(po.incidents,orderItemId,source.source);
+        if (permitted <= 0) continue;
+        forwardLimits.set(source.source.id,permitted);
+        canForward = true;
+      }
+      if (po.needsRemainingReview && !canForward) return [];
+      if (!po.needsRemainingReview) for (const resend of purchasing.fulfillment.freeResends) {
+        if (resend.purchaseOrderId !== purchaseOrderId || resend.orderItemId !== orderItemId) continue;
+        const permitted = resend.available-heldIncidentQuantity(po.incidents,orderItemId,{kind:'resend',id:resend.approvalId});
+        if (permitted > 0) freeResends.push({...resend,available:permitted});
+      }
+      return [{ purchaseOrderId, orderItemId, name: line.source.name, supplier: line.terms.supplier ?? '',
         catalogNumber: line.source.catalogNumber, productId: line.source.productId, variantId: line.source.variantId,
-        orderedAt: receipt.occurredAt!, available, incidentHold, canForward: !incidentHold || supplierDelay, contractVersion: po.version,
+        orderedAt: receipt.occurredAt!, available, contractVersion: po.version,
         originalHoldAlreadyMoved: purchasing.fulfillment.replacementsWithPriorHoldTransfer.some(row =>
           row.purchaseOrderId === po.id && row.orderItemId === line.orderItemId),
         stockSourceUnverified: purchasing.fulfillment.replacementsWithUnverifiedStockSource.some(row =>
           row.purchaseOrderId === po.id && row.orderItemId === line.orderItemId) }];
     });
   });
-  const forwarding = new Set(purchases.filter(purchase => purchase.canForward).map(lineKey));
   const receipts = isInactiveOrderStatus(order.status) ? [] : parcels.flatMap(parcel =>
-    parcel.route !== 'supplier_to_libereal' || parcel.status === 'exception' ? [] : parcel.lines.flatMap(line => {
-      if (!line.purchaseOrderId || !forwarding.has(lineKey({purchaseOrderId:line.purchaseOrderId,orderItemId:line.orderItemId}))) return [];
-      return line.receipts.filter(row => availableReceipt(row) > 0).map(row => ({
-        id: row.id, purchaseOrderId: line.purchaseOrderId, orderItemId: line.orderItemId, batchNumber: row.inventoryBatch.batchNumber,
-        available: availableReceipt(row), inventoryAccountId: row.inventoryBatch.inventoryAccountId, ...row.inventoryBatch.account,
-        receivedAt: parcel.events.find(event => event.id === row.eventId)?.occurredAt.toISOString() ?? null,
-      }));
-    }));
+    parcel.route !== 'supplier_to_libereal' || parcel.status === 'exception' ? [] : parcel.lines.flatMap(line =>
+      line.receipts.flatMap(row => {
+        const available = forwardLimits.get(row.id);
+        if (!available) return [];
+        return [{id:row.id,purchaseOrderId:line.purchaseOrderId,orderItemId:line.orderItemId,batchNumber:row.inventoryBatch.batchNumber,
+          available,inventoryAccountId:row.inventoryBatch.inventoryAccountId,...row.inventoryBatch.account,
+          receivedAt:parcel.events.find(event=>event.id===row.eventId)?.occurredAt.toISOString() ?? null}];
+      })));
   const inventoryChoices = [];
   for (const parcel of parcels) {
     if (parcel.route !== 'supplier_to_libereal') continue;
@@ -121,8 +142,6 @@ export async function fulfillmentWorkspace(tx: Db, orderId: string) {
   const workspaceParcels = parcels.map(parcel => ({ ...parcel, lines: parcel.lines.map(line => ({
     ...line, balance: parcelLineBalance(line), receipts: line.receipts.map(receipt => ({ ...receipt, remaining: availableReceipt(receipt) })),
   })) }));
-  const freeResends = purchasing.fulfillment.freeResends.filter(row => row.available > 0 && purchases.some(purchase =>
-    purchase.purchaseOrderId === row.purchaseOrderId && purchase.orderItemId === row.orderItemId && !purchase.incidentHold));
   return { order, purchases, parcels: workspaceParcels, receipts, legacyShipments, legacyBackfill, legacyInventory, inventoryChoices, unmatched,
     freeResends, feedSource: configuredCarrier()?.source ?? null };
 }
