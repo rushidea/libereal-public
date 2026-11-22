@@ -432,6 +432,95 @@ describe('supplier commitments and customer fulfilment stay bound to actual evid
     expect(activities(final.id, 'record_payment')).toHaveLength(2);
   });
 
+  it('keeps an entirely cancelled commitment closed after credit restoration and releases demand for a new purchase', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      vi.setSystemTime(new Date('2031-07-02T08:00:00.000Z'));
+      await adjustCredit({ overrideLimit: 200 });
+      vi.setSystemTime(new Date('2031-07-02T08:05:00.000Z'));
+      const order = await seedOrder('test-entire-supplier-cancellation');
+      const [item] = order.orderItems;
+      await acceptAsMerchant(order.id);
+      const [draft] = (await saveLine(await readWorkspace(order.id), 0, terms(2))).orders;
+      const [approved] = (await submit(order.id, draft, { action: 'approve', requestId: 'approve-root-purchase' })).orders;
+      vi.setSystemTime(new Date('2031-07-02T08:10:00.000Z'));
+      const [registered] = (await register(order.id, approved, 'register-root-purchase')).orders;
+      const replacement = (requestId: string, quantity: number): ActionRequest => ({
+        action: 'resolve_change', requestId, outcome: 'replacement', ...written,
+        refundFollowup: '核对原付款、费用和退款。',
+        dispositions: [{ orderItemId: item.id, quantity, outcome: 'replace', replacement: {
+          name: '合成替代品', brand: '合成品牌', catalogNumber: `TEST-SUB-${requestId}`, spec: '测试规格', unit: '件',
+          terms: terms(quantity, { sourceSha256: pricingContentHash(requestId), sourceReference: `TEST-QUOTE-${requestId}` }),
+        } }],
+      });
+      const [rootHeld] = (await hold(order.id, registered, 'replace-root')).orders;
+      const child = (await submit(order.id, rootHeld, replacement('source-one', 2))).orders.find(row => row.id !== registered.id)!;
+      const childFrom = (workspace: Workspace) => workspace.orders.find(row => row.id === child.id)!;
+      const selected = childFrom(await submit(order.id, child, { action: 'approve', requestId: 'approve-first-replacement' }));
+      const deposited = childFrom(await submit(order.id, selected, payment('replacement-deposit', 900)));
+      const prior = await prisma.purchaseActivity.findMany({ where: { purchaseOrderId: child.id, action: { in: ['approve', 'record_payment'] } },
+        orderBy: { id: 'asc' } });
+
+      vi.setSystemTime(new Date('2031-07-02T09:00:00.000Z'));
+      await adjustCredit({ overrideLimit: 199 });
+      vi.setSystemTime(new Date('2031-07-02T10:00:00.000Z'));
+      const pending = childFrom(await submit(order.id, deposited, { action: 'record_late_order_exception', requestId: 'record-credit-exception',
+        reference: 'TEST-ACTUAL-REPLACEMENT-COMMITMENT', ...registrationEvidence(), exceptionOutcome: 'liability_review', description: '原供方实际承诺待核。' }));
+      const partialHold = childFrom(await hold(order.id, pending, 'partial-cancel-child'));
+      const partial = childFrom(await submit(order.id, partialHold, { action: 'resolve_change', requestId: 'cancel-one-replacement-unit',
+        outcome: 'declined', ...written, refundFollowup: '部分取消后核对已付定金。',
+        dispositions: [{ orderItemId: item.id, outcome: 'cancel', quantity: 1 }],
+      }));
+      expect(partial).toMatchObject({ commitmentState: 'pending', needsRemainingReview: true, canApproveRemaining: false });
+      const followup = '书面确认整笔取消，按供方档案核对原定金与取消事宜，待财务确认实际结果。';
+      const cancelled = childFrom(await submit(order.id, partial, { action: 'resolve_order_exception', requestId: 'confirm-entire-cancellation',
+        exceptionId: pending.commitmentExceptions[0].id, exceptionResolution: 'supplier_cancelled',
+        reference: 'TEST-SUPPLIER-CANCELS-ENTIRE-COMMITMENT', referenceSha256: 'e'.repeat(64), description: followup,
+      }));
+      expect(cancelled).toMatchObject({ status: 'on_hold', commitmentState: 'supplier_cancelled', orderReceipt: null, paidCents: 900,
+        dueCents: null, remainingScope: null, needsRemainingReview: false, canApproveRemaining: false, canRegisterOrder: false });
+      expect(cancelled.ledger.at(-1)?.detail).toMatchObject({ snapshot: { operation: {
+        resolution: 'supplier_cancelled', referenceSha256: 'e'.repeat(64), responsibleActor: approver.id,
+        refund: { status: 'pending_review', paidCents: 900, responsibleActor: approver.id, followup },
+      } } });
+
+      vi.setSystemTime(new Date('2031-07-02T11:00:00.000Z'));
+      await adjustCredit({ overrideLimit: 200 });
+      const restoredCredit = await readWorkspace(order.id);
+      expect(restoredCredit.eligibility.eligible).toBe(true);
+      await expect(previewAction(order.id, childFrom(restoredCredit), { action: 'approve_remaining', requestId: 'do-not-reapprove-cancelled-goods',
+        reference: 'TEST-PREVIOUS-PARTIAL-DOCUMENT', referenceSha256: 'f'.repeat(64), description: '原部分取消尚余一行。',
+        remainingLines: [{ orderItemId: item.id, payableCents: 1375 }], appliedPaidCents: 0,
+      })).rejects.toThrow();
+      // A header displaying an approval cannot re-open the goods balance established by the signed cancellation.
+      await prisma.purchaseOrder.update({ where: { id: child.id }, data: { status: 'approved' } });
+      const archived = childFrom(await readWorkspace(order.id));
+      await expect(previewAction(order.id, archived, payment('do-not-pay-cancelled-goods', 100))).rejects.toThrow(/未付合计/);
+      await expect(register(order.id, archived, 'do-not-reopen-cancelled-commitment')).rejects.toThrow(/已有实际承诺异常/);
+
+      const change = childFrom(await hold(order.id, archived, 'remaining-customer-demand'));
+      await expect(previewAction(order.id, change, { action: 'resolve_change', requestId: 'attempt-old-terms', outcome: 'original_terms',
+        ...written })).rejects.toThrow(/另建采购并独立批准/);
+      const request = replacement('new-supplier-commitment', 1);
+      const input = { ...request, orderId: order.id, purchaseOrderId: child.id, version: change.version };
+      const preview = await prisma.$transaction(tx => previewPurchaseAction(tx, input, approver));
+      expect(preview.snapshot.demand).toMatchObject([{ orderItemId: item.id, unshipped: 2, activeReplacements: 0 }]);
+      const workspace = await apply({ ...input, actionHash: preview.actionHash });
+      const newDraft = workspace.orders.find(row => row.lines.some(line => line.fromPurchaseOrderId === child.id))!;
+      expect(newDraft).toMatchObject({ status: 'draft', approvedHash: null, paidCents: 0, orderReceipt: null });
+      await expect(previewAction(order.id, newDraft, payment('no-independent-approval-yet', 100))).rejects.toThrow();
+      const newlyApproved = (await submit(order.id, newDraft, { action: 'approve', requestId: 'approve-new-obligation' })).orders.find(row => row.id === newDraft.id)!;
+      vi.setSystemTime(new Date('2031-07-02T11:05:00.000Z'));
+      const result = await register(order.id, newlyApproved, 'register-new-obligation');
+      expect(result.orders.find(row => row.id === newDraft.id)).toMatchObject({ orderedBefore: true, totalCents: 1375, paidCents: 0 });
+      expect(childFrom(result)).toMatchObject({ commitmentState: 'supplier_cancelled', paidCents: 900, dueCents: null });
+      expect(await prisma.purchaseActivity.findMany({ where: { purchaseOrderId: child.id, action: { in: ['approve', 'record_payment'] } },
+        orderBy: { id: 'asc' } })).toEqual(prior);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it.each(['before the change', 'during the change', 'after cancellation', 'an archived ordered header'])(
     'reconciles the surviving quantity when actual commitment liability is verified %s',
     async (sequence) => {
@@ -541,7 +630,7 @@ describe('supplier commitments and customer fulfilment stay bound to actual evid
     const closed = await readWorkspace(order.id);
     expect(closed).toMatchObject({ orderStatus: 'cancelled', eligibility: { eligible: false }, cancellation: { id: expect.any(String) } });
     expect(Date.parse(closed.cancellation!.occurredAt)).toBeGreaterThan(Date.parse(at));
-    expect(closed.orders[0].canRegisterHistorical).toBe(true);
+    expect(closed.orders[0].canRegisterOrder).toBe(true);
     const late = { ...registrationEvidence(), occurredAt: closed.cancellation!.occurredAt, reference: 'TEST-AFTER-CUTOFF' };
     await expect(submit(order.id, closed.orders[0], { ...late, action: 'register_order', requestId: 'normal-register-too-late' })).rejects.toThrow(/须走异常处理/);
     const [exception] = (await submit(order.id, closed.orders[0], { ...late, action: 'record_late_order_exception',
@@ -1230,9 +1319,16 @@ describe('recorded customer acceptance and per-order funding', () => {
         action: 'review_supplier_document_scope', purchaseOrderId: first.purchase.id, orderItemId: first.item.id, actorId: approver.id,
         detail: expect.objectContaining({ document: expect.objectContaining({ sha256, row: 3 }) }),
       }));
+      const incoming = await seedOrder('test-new-purchase-same-document', { quantities: [1] });
+      await acceptAsMerchant(incoming.id);
+      await finance(incoming.id);
+      const incomingWorkspace = await readWorkspace(incoming.id);
+      const anotherRow = terms(1, { sourceSha256: sha256, sourceReference: 'TEST-ORIGINAL-QUOTE-FILE',
+        sourceDocumentKind: 'multiple_items', sourceDocumentRow: 2, validUntil: firstChecked.lines[0].terms.validUntil });
       if (second) {
         const [stillPending] = (await readWorkspace(second.order.id)).orders;
         expect(stillPending).toMatchObject({ needsFundingReapproval: true, documentReviewLines: [{ orderItemId: second.item.id, sha256 }], paidCents: 900 });
+        await expect(saveLine(incomingWorkspace, 0, anotherRow)).rejects.toThrow(/旧供货书证须先以原件逐行核对/);
         await expect(apply(proposedConflict!)).rejects.toThrow(/该供货书证行已对应其他商品/);
         await expect(submit(second.order.id, stillPending, request(second, 3))).rejects.toThrow(/该供货书证行已对应其他商品/);
         expect((await readWorkspace(second.order.id)).orders[0].version).toBe(stillPending.version);
@@ -1242,6 +1338,29 @@ describe('recorded customer acceptance and per-order funding', () => {
           { terms: { sourceSha256: sha256, sourceDocumentRow: 7, unitPriceCents: second.unitPriceCents } },
         ] } } });
       }
+      await expect(saveLine(incomingWorkspace, 0, { ...anotherRow, sourceDocumentRow: 3 })).rejects.toThrow(/该供货书证行已对应其他商品/);
+      const [nextDraft] = (await saveLine(incomingWorkspace, 0, anotherRow)).orders;
+      expect(nextDraft).toMatchObject({ status: 'draft', paidCents: 0, approvedHash: null });
+      const [nextApproved] = (await submit(incoming.id, nextDraft, { action: 'approve', requestId: 'approve-new-quote-row' })).orders;
+      expect(nextApproved.ledger.find(row => row.action === 'approve')?.detail).toMatchObject({ snapshot: { purchaseOrderId: nextDraft.id,
+        lines: [{ source: { catalogNumber: 'TEST-SKU' }, terms: { sourceSha256: sha256, sourceDocumentRow: 2 } }],
+      } });
+
+      const same = await seedOrder('test-new-purchase-same-approved-quote-line', { quantities: [1] });
+      const [oldLine] = firstChecked.lines;
+      await prisma.orderItem.update({ where: { id: same.orderItems[0].id }, data: {
+        productId: oldLine.source.productId, catalogNumber: oldLine.source.catalogNumber, name: oldLine.source.name,
+      } });
+      await acceptAsMerchant(same.id);
+      const [sameDraft] = (await saveLine(await readWorkspace(same.id), 0, {
+        ...oldLine.terms, sourceDocumentKind: 'multiple_items', sourceDocumentRow: 3,
+      })).orders;
+      expect(sameDraft).toMatchObject({ status: 'draft', approvedHash: null });
+      const [independent] = (await submit(same.id, sameDraft, { action: 'approve', requestId: 'approve-same-quote-separately' })).orders;
+      expect(independent.ledger.find(row => row.action === 'approve')).toMatchObject({ purchaseOrderId: sameDraft.id, actorId: approver.id });
+      expect(await prisma.purchaseRequirement.findUnique({ where: { orderItemId: first.item.id } })).toMatchObject({
+        terms: expect.not.stringContaining('sourceDocumentKind'),
+      });
     } finally {
       vi.useRealTimers();
     }
@@ -1315,7 +1434,7 @@ describe('recorded customer acceptance and per-order funding', () => {
       vi.setSystemTime(new Date('2031-05-01T10:00:00.000Z'));
       const [held] = (await submit(order.id, approved, { action: 'report_change', requestId: 'after-actual-order-hold', changeKind: 'price',
         reference: 'TEST-HOLD-NOTICE', description: '合成供应商变更仍待核对。' })).orders;
-      expect(held.canRegisterHistorical).toBe(true);
+      expect(held.canRegisterOrder).toBe(true);
       const receipt = { action: 'register_order', requestId: 'actual-proof-while-held', reference: 'TEST-PRE-HOLD-ORDER', referenceSha256: 'c'.repeat(64) } as const;
       await expect(submit(order.id, held, { ...receipt, occurredAt: new Date().toISOString() })).rejects.toThrow(/供应条件未暂停/);
       const [recorded] = (await submit(order.id, held, { ...receipt, occurredAt: '2031-05-01T09:00:00.000Z' })).orders;

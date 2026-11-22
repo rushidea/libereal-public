@@ -51,8 +51,8 @@ function makeWorkspace(status?: Purchase['status'], lineChanges: Partial<Line> =
     totalCents: 8642, paidCents: 0, lines: [line], ledger: [], orderedBefore: status === 'ordered',
     openIncidentId: status === 'on_hold' ? 'TEST-INCIDENT' : null, orderReceipt: null, leadTimeApproved: false,
     dueCents: 8642, remaining: [{ orderItemId, quantity: source.quantity }], remainingScope: null,
-    needsRemainingReview: false, canApproveRemaining: false, needsLegacyReview: false, needsFundingReapproval: false, canRegisterHistorical: false,
-    documentReviewLines: [], commitmentExceptions: [], canRecordCommitmentException: false,
+    needsRemainingReview: false, canApproveRemaining: false, needsLegacyReview: false, needsFundingReapproval: false, canRegisterOrder: status === 'approved',
+    documentReviewLines: [], commitmentState: 'ordinary', commitmentExceptions: [], canRecordCommitmentException: false,
   } : null;
   const payment = { receivedCents: 0, allocatedCents: 0, receipts: [], excludedReceiptIds: [], paymentAttemptId: null, nativePaidAt: null, settledReceivableId: null };
   const startReview: Workspace['startReview'] = {
@@ -227,27 +227,51 @@ describe('supplier purchasing page', () => {
     expect(posts[1]).toMatchObject({ stage: 'confirm', actionHash, requestId: posts[0].requestId });
   });
 
-  it('offers the actual commitment review before review or payment of the remaining amount', async () => {
+  it('reviews an actual supplier cancellation without opening the original purchase for payment or registration', async () => {
     const workspace = makeWorkspace('on_hold');
     const [purchase] = workspace.orders;
+    const original = { id: 'TEST-EXCEPTION', actorId: 'test-owner', reference: 'TEST-CREDIT-COMMITMENT', occurredAt: '2031-06-01T09:00:00.000Z',
+      outcome: 'liability_review', resolution: null, resolutionId: null, resolutionActorId: null };
     Object.assign(purchase, { openIncidentId: null, dueCents: null, paidCents: 900, needsRemainingReview: true,
-      remaining: [{ orderItemId, quantity: 1 }], commitmentExceptions: [{
-        id: 'TEST-EXCEPTION', actorId: 'test-owner', reference: 'TEST-CREDIT-COMMITMENT', occurredAt: '2031-06-01T09:00:00.000Z',
-        outcome: 'liability_review', resolution: null, resolutionId: null,
-      }] });
-    const posts = mockWorkspace(workspace, ['purchases.read', 'purchases.approve', 'purchases.pay']);
+      remaining: [{ orderItemId, quantity: 1 }], commitmentState: 'pending', commitmentExceptions: [original] });
+    const posts = mockWorkspace(workspace, ['purchases.read', 'purchases.approve', 'purchases.pay', 'purchases.write'], body => {
+      const result = preview(body, workspace);
+      const operation = { ...result.preview.snapshot.operation, resolution: body.exceptionResolution, responsibleActor: 'test-reviewer',
+        remainingReviewPending: false, refund: { status: 'pending_review', paidCents: 900, responsibleActor: 'test-reviewer', followup: body.description } };
+      if (body.stage === 'preview') return Response.json({ preview: { ...result.preview, snapshot: { ...result.preview.snapshot, operation } } });
+      const cancelled = { ...purchase, needsRemainingReview: false, commitmentState: 'supplier_cancelled', commitmentExceptions: [{
+        ...original, resolution: 'supplier_cancelled', resolutionId: 'TEST-CANCELLATION', resolutionActorId: 'test-reviewer',
+      }], ledger: [{ id: 'TEST-CANCELLATION', action: 'resolve_order_exception', createdAt: original.occurredAt,
+        actorId: 'test-reviewer', detail: { snapshot: { operation } } }] };
+      return Response.json({ workspace: { ...workspace, orders: [cancelled] } });
+    });
     render(<PurchaseManager initialOrder={orderId} />);
     expect(await screen.findByText('核对实际承诺后，再逐行核准原单剩余应付。')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '核对订购异常处理结果' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '核准原单剩余应付' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '登记实际付款' })).not.toBeInTheDocument();
-    expect(posts).toEqual([]);
+    fireEvent.click(screen.getByRole('button', { name: '核对订购异常处理结果' }));
+    fill('核对结果', 'supplier_cancelled');
+    fill('供方书面处理结果及原合同应付核对依据', 'TEST-SUPPLIER-CANCELLATION');
+    fill('异常处理结果书证摘要', 'e'.repeat(64));
+    fill('核对结果及已付款、退款或取消费用的后续安排', '按供方原件核对定金和退款。');
+    fireEvent.click(screen.getByRole('button', { name: '查看完整预览' }));
+    const panel = await screen.findByRole('region', { name: '操作预览' });
+    expect(panel).toHaveTextContent(/供方整笔取消.*责任人 test-reviewer/);
+    expect(panel).toHaveTextContent(/原单已付.*9\.00.*退款待财务核对/);
+    fireEvent.click(within(panel).getByRole('button', { name: '确认核对订购异常处理结果' }));
+    expect(await screen.findByText('供方整笔取消')).toBeInTheDocument();
+    expect(screen.getByText('原付款的退款安排待财务核对。')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '登记供货变化' })).toBeInTheDocument();
+    for (const name of ['核准原单剩余应付', '登记实际付款', '登记供应商订购结果', '补录暂停前实际订购']) {
+      expect(screen.queryByRole('button', { name })).not.toBeInTheDocument();
+    }
+    expect(posts[1]).toMatchObject({ stage: 'confirm', actionHash, requestId: posts[0].requestId, exceptionResolution: 'supplier_cancelled' });
   });
 
   it('requires legacy proof on the same paid purchase before it can be registered', async () => {
     const workspace = makeWorkspace('approved');
     const [purchase] = workspace.orders;
-    Object.assign(purchase, { paidCents: 900, dueCents: 7742, needsLegacyReview: true });
+    Object.assign(purchase, { paidCents: 900, dueCents: 7742, needsLegacyReview: true, canRegisterOrder: false });
     const posts = mockWorkspace(workspace, ['purchases.read', 'purchases.approve', 'purchases.write', 'purchases.pay'], body => {
       if (body.stage === 'preview') {
         const result = preview(body, workspace);
@@ -256,7 +280,7 @@ describe('supplier purchasing page', () => {
             payments: [{ id: 'test-deposit', amountCents: 900, receiptReference: 'TEST-ORIGINAL-TRANSFER' }] } };
         return Response.json({ preview: { ...result.preview, snapshot: { ...result.preview.snapshot, operation } } });
       }
-      return Response.json({ workspace: { ...workspace, orders: [{ ...purchase, version: 'd'.repeat(64), needsLegacyReview: false }] } });
+      return Response.json({ workspace: { ...workspace, orders: [{ ...purchase, version: 'd'.repeat(64), needsLegacyReview: false, canRegisterOrder: true }] } });
     });
     render(<PurchaseManager initialOrder={orderId} />);
     fireEvent.click(await screen.findByRole('button', { name: '复核旧采购批准' }));
@@ -285,10 +309,10 @@ describe('supplier purchasing page', () => {
   it('exposes a pre-hold receipt action and preserves the visible supply hold after confirmation', async () => {
     const workspace = makeWorkspace('on_hold');
     const [purchase] = workspace.orders;
-    purchase.canRegisterHistorical = true;
+    purchase.canRegisterOrder = true;
     const posts = mockWorkspace(workspace, ['purchases.read', 'purchases.write'], body => {
       if (body.stage === 'preview') return Response.json(preview(body, workspace));
-      return Response.json({ workspace: { ...workspace, orders: [{ ...purchase, version: 'd'.repeat(64), canRegisterHistorical: false, orderedBefore: true,
+      return Response.json({ workspace: { ...workspace, orders: [{ ...purchase, version: 'd'.repeat(64), canRegisterOrder: false, orderedBefore: true,
         orderReceipt: { occurredAt: body.occurredAt, registeredAt: '2031-04-13T09:00:00.000Z', reference: body.reference, lines: [] } }] } });
     });
     render(<PurchaseManager initialOrder={orderId} />);
