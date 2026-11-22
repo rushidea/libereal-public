@@ -14,6 +14,7 @@ type Alternative = { name: string; brand: string; catalogNumber: string; spec: s
 type Intervention = {
   quantity: number; outcome: 'cancel' | 'replace'; replacement?: Alternative; shortfallId?: string;
   shortfallDecision?: ShortfallDecision; revisesResendApprovalId?: string;
+  supplierDocumentRow?: number; customerDocumentRow?: number;
 };
 type Pending = { input: PurchaseActionInput; preview: Preview };
 
@@ -55,7 +56,17 @@ function DispositionFields({ line, quantity, losses, resends, shortfall, value, 
         </option>)}
       </select>
     </label>}
-    {selectedResend && <p className="text-sm">请按供方新的书面决定和客户同意改办尚未发出的数量。</p>}
+    {selectedResend && <>
+      <p className="text-sm">请按供方新的书面决定和客户同意改办尚未发出的数量。同一原件写明多项独立决定时，请填写本次使用的原件行号。</p>
+      <label className="grid gap-1 text-sm">供方决定原件行号
+        <input className={field} type="number" min={1} step={1} value={value.supplierDocumentRow ?? ''}
+          onChange={event => onChange({ ...value, supplierDocumentRow: event.target.value ? Number(event.target.value) : undefined })}/>
+      </label>
+      <label className="grid gap-1 text-sm">客户同意原件行号
+        <input className={field} type="number" min={1} step={1} value={value.customerDocumentRow ?? ''}
+          onChange={event => onChange({ ...value, customerDocumentRow: event.target.value ? Number(event.target.value) : undefined })}/>
+      </label>
+    </>}
     {selectedLoss && <label className="grid gap-1 text-sm">双方书面决定
       <select className={field} value={value.shortfallDecision ?? ''} required={value.quantity > 0}
         onChange={event => {
@@ -72,6 +83,9 @@ function DispositionFields({ line, quantity, losses, resends, shortfall, value, 
       <input className={field} type="number" min={0} max={limit} step={1} value={value.quantity || ''}
         onChange={event => onChange({ ...value, quantity: Number(event.target.value) })}/>
     </label>
+    {value.shortfallDecision === 'change_contract' && selectedLoss?.contractSource && <p className="text-sm">
+      对应原合同发货凭据 {selectedLoss.contractSource.reference}
+    </p>}
     {allowReplacement && (!shortfall || value.shortfallDecision === 'change_contract') && <label className="grid gap-1 text-sm">本行处理方式
       <select className={field} value={value.outcome} onChange={event => onChange({
         ...value, outcome: event.target.value as Intervention['outcome'], replacement: alternative,
@@ -117,6 +131,7 @@ export default function PurchaseActions({ orderId, orderStatus, cancellation, po
   const legacyFiles = [...new Set(po.documentReviewLines.map(row => row.sha256))];
   const shortfalls = fulfillment.shortfalls.filter(row => row.purchaseOrderId === po.id);
   const pendingResends = fulfillment.freeResends.filter(row => row.purchaseOrderId === po.id && row.available > 0);
+  const stockSourceNeedsReview = fulfillment.replacementsWithUnverifiedStockSource.some(row => row.purchaseOrderId === po.id);
   const canHandleShortfall = po.orderedBefore && !supplierCancelled && (pendingResends.length > 0 || shortfalls.some(row => row.available > 0));
   const closed = orderStatus === 'cancelled' || orderStatus === 'closed';
   const archiveTerms = (line: Purchase['lines'][number]) => revisions[line.orderItemId] ?? legacyTerms(line);
@@ -187,6 +202,9 @@ export default function PurchaseActions({ orderId, orderStatus, cancellation, po
       <span>{supplierCancelled ? '供方整笔取消' : po.status === 'on_hold' && !po.openIncidentId ? '采购暂停' : statuses[po.status]}</span></div>
     <p className="break-all text-xs text-slate-600">{po.id} · 第 {po.revision} 版</p>
     {po.lines[0]?.fromPurchaseOrderId && <p className="break-all text-sm">替代采购 · 原采购单 {po.lines[0].fromPurchaseOrderId}</p>}
+    {stockSourceNeedsReview && <p className="rounded bg-amber-50 p-2 text-sm text-amber-900">
+      原库存归属待核。请通过登记供货变化，按原采购行和书面授权留下核对人及发现的问题。
+    </p>}
     <p className="text-sm">{po.remainingScope || po.dueCents === null ? '原合同应付' : '本单应付'} <strong>{money(po.totalCents)}</strong>　已登记实际付款 {money(po.paidCents)}</p>
     {po.remainingScope && <p className="text-sm">核准的剩余商品应付 {money(po.remainingScope.totalCents)} · 经核实冲抵 {money(po.remainingScope.appliedPaidCents)} · 尚未付 {money(po.dueCents ?? undefined)}</p>}
     {po.needsRemainingReview && <p className="text-sm text-amber-900">{openExceptions.length
@@ -406,6 +424,9 @@ export default function PurchaseActions({ orderId, orderStatus, cancellation, po
           <p>{entry.outcome === 'resend' ? '免费重发，保留原合同' : entry.shortfallDecision === 'new_purchase' ? '保留原合同应付，另建采购'
             : entry.outcome === 'cancel' ? '取消原合同份额' : '变更原合同并另建采购'} · 原订单行 {entry.orderItemId} · 数量 {entry.quantity}</p>
           {entry.priorResend && <p className="break-all">原免费批准 {entry.revisesResendApprovalId} · 核准 {entry.priorResend.authorized} · 已发 {entry.priorResend.dispatched} · 已改办 {entry.priorResend.redirected} · 本次改办 {entry.quantity}</p>}
+          {entry.supplierDocumentRow && <p>供方决定原件第 {entry.supplierDocumentRow} 行</p>}
+          {entry.customerDocumentRow && <p>客户同意原件第 {entry.customerDocumentRow} 行</p>}
+          {entry.contractSource && <p>对应原合同发货凭据 {entry.contractSource.reference}</p>}
           {entry.replacement && <LineDetails line={entry.replacement}/>}
         </div>)}
         {op.refund && <p>原单已付 {money(op.refund.paidCents)} · 退款待核对 · {op.refund.followup}</p>}
