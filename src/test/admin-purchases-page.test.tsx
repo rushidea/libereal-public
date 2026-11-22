@@ -77,7 +77,7 @@ function makeWorkspace(status?: Purchase['status'], lineChanges: Partial<Line> =
     eligibility: { eligible: true, reason: null, basis: { acceptanceId: 'test-acceptance', receivableId: 'test-receivable',
       reserveId: 'test-credit-reserve', amount: 250, mode: 'credit', payment, planEvidenceId: null } },
     lines: [line], orders: purchase ? [purchase] : [], activities: [], customerRemaining:[{orderItemId,quantity:2}],
-    fulfillment: { version, targets: [], delivered: [], historicalDelivered: [], customerReceived: [], supplierReceived: [], warehouseReceived: [], warehouseTransit: [], supplierDispatched: [], incidentSources: [], shortfalls: [], freeResends: [], parcelLinesWithPriorHoldTransfer: [], replacementsWithPriorHoldTransfer: [], parcelLinesWithUnverifiedStockSource: [], replacementsWithUnverifiedStockSource: [], inconsistent: [], ledger: [] },
+    fulfillment: { version, targets: [], delivered: [], historicalDelivered: [], customerReceived: [], supplierReceived: [], warehouseReceived: [], warehouseTransit: [], supplierDispatched: [], incidentSources: [], dispatchHolds: [], shortfalls: [], freeResends: [], parcelLinesWithPriorHoldTransfer: [], replacementsWithPriorHoldTransfer: [], parcelLinesWithUnverifiedStockSource: [], replacementsWithUnverifiedStockSource: [], inconsistent: [], ledger: [] },
   };
 }
 

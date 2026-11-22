@@ -136,7 +136,7 @@ function eventInput(requestId: string, kind: 'warehouse_receipt' | 'customer_del
   };
 }
 
-function dispatch(input: ReturnType<typeof dispatchInput>) {
+function dispatch(input: ReturnType<typeof dispatchInput> & {holdReview?: {status?:string;supplierReference:string;customerReference?:string;responsibility:string;description:string;sha256:string}}) {
   return prisma.$transaction(tx => dispatchParcel(tx, orderId, input, operator), { isolationLevel: 'Serializable' });
 }
 
@@ -1864,4 +1864,298 @@ describe('actual scope of a supply incident', () => {
     const approved=await purchaseAction(moved.id,{action:'approve',requestId:'independently-approve-moved-clear-share'});
     expect(approved.orders.find(po=>po.id===moved.id)).toMatchObject({status:'approved',remaining:[line(relayLineId,1)],paidCents:0});
   });
+  const previewDispatch = (input: unknown) => prisma.$transaction(tx=>previewDispatchParcel(tx,orderId,input,operator));
+  const pendingDeviation = (tag: string) => ({status:'pending',supplierReference:'TEST-ACTUAL-WAYBILL-'+tag,
+    responsibility:'合成在途货物责任人',description:'供方确认实际误发，客户尚未作出书面处理决定。',
+    sha256:pricingContentHash({actualDispatchVerification:tag})});
+  const continuation = (tag: string, parcelLineId: string, incidentId: string, quantity: number, receiptId?: string) => ({
+    ...eventInput(tag,'warehouse_receipt',[]),...agreement(tag),kind:'review_dispatch_hold',
+    holdResponsibility:'合成具名核对人',lines:[{parcelLineId,quantity,incidentId,receiptId,outcome:'continue'}],
+  });
+
+  it.each(['original','resend','receipt'] as const)('records the evidenced held unit and leaves the same source’s ordinary unit available (%s)',async kind=>{
+    await acceptCustomerOrder();
+    const {relay:id}=await orderFromSuppliers();
+    let source: NonNullable<PurchaseAction['affectedLines']>[number]['source']={kind:'unshipped'};
+    let selected=goods(id,relayLineId) as DispatchLine;
+    let route:Route='supplier_to_customer';
+    if (kind==='resend') {
+      const lost=await dispatch(dispatchInput('both-original-units-really-left','supplier_to_customer',[goods(id,relayLineId,2)]));
+      await event(lost.id,{...eventInput('both-original-units-verified-lost','customer_delivery',[]),...agreement('two-losses'),
+        kind:'confirm_shortfall',lines:[{parcelLineId:lost.lines[0].id,quantity:2,outcome:'loss'}]});
+      const loss=(await prisma.$transaction(tx=>purchaseWorkspace(tx,orderId))).fulfillment.shortfalls[0];
+      await report(id,'lost-two-before-free-resend','双方拟对这两件免费补发。',[{...line(relayLineId,2),source:{kind:'shortfall',id:loss.resolutionId}}]);
+      const approved=await purchaseAction(id,{action:'resolve_change',outcome:'shortfall',requestId:'explicit-free-resend-two',
+        ...agreement('approve-two-free'),dispositions:[{...line(relayLineId,2),outcome:'cancel',shortfallId:loss.resolutionId,shortfallDecision:'free_resend'}]});
+      const resendApprovalId=approved.fulfillment.freeResends[0].approvalId;
+      selected={...selected,resendApprovalId};
+      source={kind:'resend',id:resendApprovalId};
+    }
+    if (kind==='receipt') {
+      const intake=await dispatch(dispatchInput('ordinary-receipt-before-deviation','supplier_to_libereal',[goods(id,relayLineId,2)]));
+      await event(intake.id,eventInput('same-lot-two-known-pieces','warehouse_receipt',[
+        {parcelLineId:intake.lines[0].id,quantity:2,batchNumber:receivedLotA},
+      ]));
+      const {id:sourceReceiptId}=await receipt(intake.lines[0].id,receivedLotA);
+      selected={...selected,sourceReceiptId};
+      source={kind:'receipt',id:sourceReceiptId};
+      route='libereal_to_customer';
+    }
+    const reported=await purchaseAction(id,{action:'report_change',changeKind:kind==='receipt'?'other':'delay',
+      requestId:'pause-exactly-one',reference:'TEST-ONLY-ONE-ACTUAL-PIECE-PAUSED',
+      description:'原件对应同一来源的两件货，只有标识明确的一件暂停。',affectedLines:[{...line(relayLineId,1),source}]},operator);
+    const issue=reported.orders.find(row=>row.id===id)!.incidents[0];
+    const ordinary=dispatchInput('independent-ordinary-piece-still-moves',route,[selected]);
+    const assigned={incidentId:issue.id,quantity:1};
+    const actual={...dispatchInput('mistaken-held-unit-actually-left',route,[selected]),
+      lines:[{...selected,holdAssignments:[assigned]}],holdReview:pendingDeviation('named-actual-piece')};
+    const options=await prisma.$transaction(tx=>fulfillmentWorkspace(tx,orderId,Date.parse(actual.occurredAt),true));
+    const candidate=kind==='receipt' ? options.receipts[0] : kind==='resend' ? options.freeResends[0]
+      : options.purchases.find(row=>row.orderItemId===relayLineId);
+    expect(candidate?.holdAllowance).toMatchObject({ordinarilyAvailable:1,assignable:[assigned]});
+    await expect(previewDispatch({...actual,lines:[{...selected,holdAssignments:[{...assigned,quantity:2}]}]})).rejects.toThrow(/暂停份额/);
+    const proof=await previewDispatch(actual);
+    const confirm=()=>prisma.$transaction(tx=>dispatchParcel(tx,orderId,actual,operator,proof.actionHash));
+    const first=await confirm();
+    expect((await confirm()).id).toBe(first.id);
+    expect((await workspace()).parcels.find(row=>row.id===first.id)?.holdFacts).toMatchObject([
+      {parcelLineId:first.lines[0].id,quantity:1,pending:1,assignments:[assigned]},
+    ]);
+    await expect(previewDispatch({...ordinary,lines:actual.lines,holdReview:actual.holdReview})).rejects.toThrow(/暂停份额/);
+    const second=await dispatch(ordinary);
+    expect(second.id).not.toBe(first.id);
+    expect(second.dispatchedAt < first.dispatchedAt).toBe(true);
+    expect((await workspace()).parcels.find(row=>row.id===second.id)?.holdFacts).toEqual([]);
+    await expect(previewDispatch(dispatchInput('same-source-third-piece-does-not-exist',route,[selected])))
+      .rejects.toThrow(/发货数量|采购行实际收到的批次|已经批准的本行免费重发数量/);
+    expect(await prisma.orderItem.findUniqueOrThrow({where:{id:relayLineId}})).toMatchObject({shippedQty:2});
+    expect(await prisma.accountReceivable.findUniqueOrThrow({where:{orderId}})).toMatchObject({status:'open',amount:300,paidAt:null});
+  });
+
+  it.each([false,true])('receives quarantined goods before the buyer replies and clears only the lot covered by the decision (mapped lots = %s)',async mapped=>{
+    await acceptCustomerOrder();
+    const {relay:id}=await orderFromSuppliers();
+    await purchaseAction(id,{action:'record_payment',requestId:'deposit-before-quarantine',reference:'TEST-ACTUAL-900-DEPOSIT',
+      conditionReference:'TEST-ORIGINAL-DEPOSIT-CLAUSE',amountCents:900});
+    const ordered=await report(id,'two-misrouted','实际只有停发的两件在原件范围。',[waiting(relayLineId,2)]);
+    const incidentId=ordered.orders.find(row=>row.id===id)!.incidents[0].id;
+    const raw={...dispatchInput('supplier-missent-before-customer-answers','supplier_to_libereal',[goods(id,relayLineId,2)]),
+      holdReview:pendingDeviation('real-unanswered-inbound')};
+    const parcel=await dispatch(raw);
+    expect(await prisma.shipment.count({where:{orderId}})).toBe(0);
+    const parcelLineId=parcel.lines[0].id;
+    await event(parcel.id,eventInput('warehouse-counts-and-quarantines-two-lots','warehouse_receipt',[
+      {parcelLineId,quantity:1,batchNumber:receivedLotA},{parcelLineId,quantity:1,batchNumber:receivedLotB},
+    ]));
+    const a=await receipt(parcelLineId,receivedLotA), b=await receipt(parcelLineId,receivedLotB);
+    expect(await batch(receivedLotA)).toMatchObject({quantity:1,reservedQuantity:1});
+    expect(await batch(receivedLotB)).toMatchObject({quantity:1,reservedQuantity:1});
+    if (mapped) {
+      await purchaseAction(id,{action:'review_change_scope',incidentId,requestId:'verify-the-two-actual-quarantined-lots',
+        reference:'TEST-ORIGINAL-QUARANTINE-LOT-RECORD',referenceSha256:pricingContentHash('original signed warehouse lot locations'),
+        description:'具名仓单核明两件误发各自的实际批次，仍待客户决定。',
+        affectedLines:[a,b].map(lot=>({...line(relayLineId,1),source:{kind:'receipt' as const,id:lot.id}}))});
+    }
+    expect((await workspace()).receipts).toEqual([]);
+    await expect(purchaseAction(id,{action:'record_payment',requestId:'premature-finance-during-quarantine',reference:'TEST-NOT-A-PAID-BALANCE',
+      conditionReference:'TEST-ORIGINAL-COMMERCIAL-CONDITION',amountCents:100})).rejects.toThrow(/书面/);
+    const earlier=dispatchInput('attempted-transfer-before-written-consent','libereal_to_customer',[{...goods(id,relayLineId),sourceReceiptId:a.id}]);
+    const agreeA=continuation('buyer-consent-only-actual-lot-a',parcelLineId,incidentId,1,a.id);
+    await expect(event(parcel.id,{...agreeA,customerReference:undefined})).rejects.toThrow(/客户书面/);
+    await event(parcel.id,agreeA);
+    await event(parcel.id,agreeA);
+    expect((await workspace()).receipts.map(row=>row.id)).toEqual([a.id]);
+    expect((await workspace()).parcels[0].holdFacts[0]).toMatchObject({pending:1,pendingAssignments:[{incidentId,quantity:1}]});
+    expect(await prisma.fulfillmentEvent.count({where:{parcelId:parcel.id,kind:'review_dispatch_hold'}})).toBe(1);
+    await expect(previewDispatch(earlier)).rejects.toThrow(/实际收到的批次|发货数量/);
+    await dispatch(dispatchInput('transfer-only-consented-lot','libereal_to_customer',[{...goods(id,relayLineId),sourceReceiptId:a.id}]));
+    expect(await batch(receivedLotB)).toMatchObject({quantity:1,reservedQuantity:1});
+    expect(await current(id)).toMatchObject({paidCents:900,dueCents:4100,incidents:[{id:incidentId}]});
+    expect((await workspace()).receipts).toEqual([]);
+    expect(await receipt(parcelLineId,receivedLotB)).toMatchObject({id:b.id,forwardedQuantity:0,releasedQuantity:0});
+  });
+
+  it('separates normal goods on the same waybill and requires the named decision for each affected quantity after closure',async()=>{
+    await acceptCustomerOrder();
+    const {relay:id}=await orderFromSuppliers();
+    const first=await report(id,'hold-one-on-mixed-waybill','原件标明暂停件一件，另一件不受影响。',[waiting(relayLineId,1)]);
+    const issue=first.orders.find(row=>row.id===id)!.incidents[0];
+    const raw={...dispatchInput('same-waybill-with-an-ordinary-and-held-unit','supplier_to_libereal',[goods(id,relayLineId,2)]),
+      lines:[{...goods(id,relayLineId,2),holdAssignments:[{incidentId:issue.id,quantity:1}]}],holdReview:pendingDeviation('mixed-two-pieces')};
+    const parcel=await dispatch(raw);
+    const held=(await workspace()).parcels[0].holdFacts[0].parcelLineId;
+    const ordinary=parcel.lines.find(row=>row.id!==held)!.id;
+    await event(parcel.id,eventInput('warehouse-identifies-mixed-dispatch-units','warehouse_receipt',[
+      {parcelLineId:ordinary,quantity:1,batchNumber:receivedLotA},{parcelLineId:held,quantity:1,batchNumber:receivedLotB},
+    ]));
+    const normal=await receipt(ordinary,receivedLotA), restricted=await receipt(held,receivedLotB);
+    expect((await workspace()).receipts.map(row=>row.id)).toEqual([normal.id]);
+    // Closing the customer order is independent of the physical rights to the misrouted stock.
+    const cancelled=await orderPATCH(new NextRequest('http://localhost/api/admin/orders/'+orderId,
+      {method:'PATCH',body:JSON.stringify({status:'cancelled'})}),{params:Promise.resolve({id:orderId})});
+    expect(cancelled.status,JSON.stringify(await cancelled.json())).toBe(200);
+    const disposal={...eventInput('warehouse-after-order-closed','warehouse_receipt',[]),kind:'dispose_receipt',
+      receiptId:normal.id,quantity:1,disposition:'released_to_stock'};
+    await expect(event(parcel.id,{...disposal,receiptId:restricted.id})).rejects.toThrow(/误发实物仍待书面处理/);
+    await event(parcel.id,disposal);
+    const agreed=continuation('both-parties-agree-warehouse-may-keep-missent-goods',held,issue.id,1,restricted.id);
+    await expect(event(parcel.id,agreed)).rejects.toThrow(/书面留仓决定或实际退回/);
+    const release={...agreed,lines:[{...agreed.lines[0],outcome:'release_to_stock'}]};
+    await expect(event(parcel.id,{...release,lines:[{...release.lines[0],incidentId:'other-incident'}]})).rejects.toThrow(/原暂停事项/);
+    await event(parcel.id,release);
+    await event(parcel.id,release);
+    expect(await receipt(ordinary,receivedLotA)).toMatchObject({releasedQuantity:1,forwardedQuantity:0});
+    expect(await receipt(held,receivedLotB)).toMatchObject({releasedQuantity:1,forwardedQuantity:0});
+    expect((await workspace()).parcels[0].holdFacts[0].pending).toBe(0);
+    expect(await prisma.shipment.count({where:{orderId}})).toBe(0);
+    expect(await prisma.fulfillmentEvent.count({where:{parcelId:parcel.id,kind:'review_dispatch_hold'}})).toBe(1);
+  });
+
+  it('applies the actual return to its named issue while another share on the same waybill remains pending',async()=>{
+    await acceptCustomerOrder();
+    const {relay:id}=await orderFromSuppliers();
+    await report(id,'separate-issue-a','原件 A 对应独立一件。',[waiting(relayLineId,1)]);
+    await report(id,'separate-issue-b','原件 B 另对应独立一件。',[waiting(relayLineId,1)]);
+    const [a,b]=(await current(id)).incidents;
+    const raw={...dispatchInput('both-actual-paused-issues-are-in-one-waybill','supplier_to_libereal',[goods(id,relayLineId,2)]),
+      lines:[{...goods(id,relayLineId,2),holdAssignments:[{incidentId:a.id,quantity:1},{incidentId:b.id,quantity:1}]}],
+      holdReview:pendingDeviation('two-distinct-paused-shares')};
+    const parcel=await dispatch(raw);
+    const assigned=(await workspace()).parcels[0].holdFacts;
+    const parcelLineId=(id:string)=>assigned.find(row=>row.assignments?.some(part=>part.incidentId===id))!.parcelLineId;
+    const [aLine,bLine]=[parcelLineId(a.id),parcelLineId(b.id)];
+    expect(aLine).not.toBe(bLine);
+    await event(parcel.id,eventInput('joint-intake-with-separate-issue-identities','warehouse_receipt',[
+      {parcelLineId:aLine,quantity:1,batchNumber:receivedLotA},{parcelLineId:bLine,quantity:1,batchNumber:receivedLotB},
+    ]));
+    const returned=await receipt(bLine,receivedLotB);
+    const physical=await event(parcel.id,{...eventInput('physical-return-of-b-only','warehouse_receipt',[]),...agreement('physical-return-b'),
+      kind:'confirm_shortfall',lines:[{parcelLineId:bLine,quantity:1,outcome:'return',receiptId:returned.id}]});
+    const originalReturn=physical.lines.find(row=>row.id===bLine)!.resolutions[0];
+    const decision={...continuation('named-return-of-b-only',bLine,b.id,1),
+      lines:[{parcelLineId:bLine,incidentId:b.id,quantity:1,outcome:'return',resolutionId:originalReturn.id}]};
+    await expect(event(parcel.id,{...decision,lines:[{...decision.lines[0],incidentId:a.id}]})).rejects.toThrow(/原暂停事项/);
+    await event(parcel.id,decision);
+    const facts=(await workspace()).parcels[0].holdFacts;
+    expect(facts.find(row=>row.parcelLineId===aLine)).toMatchObject({pending:1,decisions:[]});
+    expect(facts.find(row=>row.parcelLineId===bLine)).toMatchObject({pending:0,decisions:[{incidentId:b.id,outcome:'return',
+      resolutionId:originalReturn.id,receiptId:returned.id}]});
+    expect(await receipt(aLine,receivedLotA)).toMatchObject({releasedQuantity:0,forwardedQuantity:0});
+    expect(await receipt(bLine,receivedLotB)).toMatchObject({releasedQuantity:1,forwardedQuantity:0});
+    expect(await current(id)).toMatchObject({paidCents:0,incidents:[
+      {id:a.id,outstanding:[{source:{kind:'parcel',id:aLine},quantity:1}]},
+      {id:b.id,outstanding:[{source:{kind:'shortfall',id:originalReturn.id},quantity:1}]},
+    ]});
+  });
+
+  it('records actual direct signature before any buyer decision without closing the customer order or collecting money',async()=>{
+    await acceptCustomerOrder();
+    const {direct,relay:id}=await orderFromSuppliers();
+    const a=await dispatch(dispatchInput('normal-a-for-direct-completion','supplier_to_customer',[goods(direct,directLineId)]));
+    await event(a.id,eventInput('a-independent-actually-signed','customer_delivery',[{parcelLineId:a.lines[0].id,quantity:1}]));
+    const reportB=await report(id,'b-paused-before-actual-direct-departure','两件直发误发，客户待回复。',[waiting(relayLineId,2)]);
+    const incidentId=reportB.orders.find(row=>row.id===id)!.incidents[0].id;
+    const b=await dispatch({...dispatchInput('buyer-still-has-not-agreed-to-direct-delivery','supplier_to_customer',[goods(id,relayLineId,2)]),
+      holdReview:pendingDeviation('uncleared-direct-but-physically-gone')});
+    const parcelLineId=b.lines[0].id;
+    const actual=eventInput('physically-signed-for-b','customer_delivery',[{parcelLineId,quantity:2}]);
+    await event(b.id,actual);
+    expect(await prisma.shipment.findUniqueOrThrow({where:{id:b.shipmentId!}})).toMatchObject({status:'delivered',deliveredAt:new Date(actual.occurredAt)});
+    expect(await prisma.order.findUniqueOrThrow({where:{id:orderId}})).toMatchObject({status:'shipped',paidAt:null});
+    await event(b.id,continuation('customer-separately-accepts-the-b-quantity',parcelLineId,incidentId,2));
+    expect(await prisma.order.findUniqueOrThrow({where:{id:orderId}})).toMatchObject({status:'completed',paidAt:null});
+    expect(await prisma.shipment.findUniqueOrThrow({where:{id:b.shipmentId!}})).toMatchObject({deliveredAt:new Date(actual.occurredAt)});
+    expect(await prisma.accountReceivable.findUniqueOrThrow({where:{orderId}})).toMatchObject({status:'open',amount:300,paidAt:null});
+  });
+
+  it('uses the verified physical identity of a held intake lot without backdating a release for it',async()=>{
+    await acceptCustomerOrder();
+    const {relay:id}=await orderFromSuppliers();
+    const intake=await dispatch(dispatchInput('two-intake-pieces-one-original-line','supplier_to_libereal',[goods(id,relayLineId,2)]));
+    const origin=intake.lines[0].id;
+    const restricted=await report(id,'one-of-this-intake-shares-is-held','原件涉及该在途包裹内的一件，随后需按仓单定位批号。',
+      [{...line(relayLineId,1),source:{kind:'parcel',id:origin}}]);
+    const issue=restricted.orders.find(row=>row.id===id)!.incidents[0];
+    await event(intake.id,eventInput('record-two-distinct-actual-receipts','warehouse_receipt',[
+      {parcelLineId:origin,quantity:1,batchNumber:receivedLotA},{parcelLineId:origin,quantity:1,batchNumber:receivedLotB},
+    ]));
+    const a=await receipt(origin,receivedLotA), b=await receipt(origin,receivedLotB);
+    const oldA=dispatchInput('prior-clearly-held-first-lot','libereal_to_customer',[{...goods(id,relayLineId),sourceReceiptId:a.id}]);
+    const oldB=dispatchInput('prior-unaffected-second-lot','libereal_to_customer',[{...goods(id,relayLineId),sourceReceiptId:b.id}]);
+    await expect(previewDispatch(oldB)).rejects.toThrow(/实际收到的批次|发货数量/);
+    const fact={action:'review_change_scope' as const,incidentId:issue.id,requestId:'named-warehouse-attribution',
+      reference:'TEST-SIGNED-ORIGINAL-LOT-ATTRIBUTION',description:'原仓单和实物标识合证：暂停份额对应甲批，乙批一直未受影响。',
+      affectedLines:[{...line(relayLineId,1),source:{kind:'receipt' as const,id:a.id}}]};
+    nextOccurrence();
+    await expect(purchaseAction(id,fact)).rejects.toThrow(/书证摘要/);
+    await purchaseAction(id,{...fact,referenceSha256:pricingContentHash('tested warehouse positioning evidence')});
+    const recorded=await dispatch(oldB);
+    expect(recorded.dispatchedAt.toISOString()).toBe(oldB.occurredAt);
+    await expect(previewDispatch(oldA)).rejects.toThrow(/实际收到的批次|发货数量/);
+    expect(await current(id)).toMatchObject({incidents:[{id:issue.id,outstanding:fact.affectedLines}]});
+    expect(await receipt(origin,receivedLotA)).toMatchObject({forwardedQuantity:0});
+  });
+
+  it('requires a named attribution for the prior dispatch format before assigning another unit',async()=>{
+    await acceptCustomerOrder();
+    const {relay:id}=await orderFromSuppliers();
+    await report(id,'old-pre-split-notice','旧版记录包含同一来源的两件停发。',[waiting(relayLineId,2)]);
+    const incidentId=(await current(id)).incidents[0].id;
+    const original={...pendingDeviation('actual-both-parties-from-old-workspace'),status:undefined,customerReference:'TEST-PRIOR-WRITTEN-CUSTOMER-REPLY'};
+    const oldParcel=await dispatch({...dispatchInput('one-pre-split-deviation-already-recorded','supplier_to_customer',[goods(id,relayLineId)]),holdReview:original});
+    const dispatchLog=oldParcel.events.find(row=>row.kind==='dispatch')!;
+    const recorded=JSON.parse(dispatchLog.details);
+    const oldLine=recorded.lines[0];
+    // Recreate the previous dispatch event shape. The original request, proof, shipment and quantities stay in place.
+    delete oldLine.holdAssignments;
+    delete oldLine.holdSource;
+    await prisma.fulfillmentEvent.update({where:{id:dispatchLog.id},data:{details:JSON.stringify(recorded)}});
+    await prisma.$executeRaw`DELETE FROM PurchaseActivity WHERE purchaseOrderId=${id} AND action='locate_held_dispatch'`;
+    const later={...dispatchInput('another-actual-held-unit-under-the-same-source','supplier_to_customer',[goods(id,relayLineId)]),
+      holdReview:pendingDeviation('another-real-held-piece')};
+    await expect(previewDispatch(later)).rejects.toThrow(/指定实际发出的暂停份额/);
+    const key=oldParcel.lines[0].id;
+    const review={...eventInput('verified-legacy-attribution-with-real-original-document','customer_delivery',[]),kind:'review_dispatch_hold',
+      holdResponsibility:'合成旧档核对人',lines:[{parcelLineId:key,outcome:'identify',quantity:1,holdAssignments:[{incidentId,quantity:1}]}]};
+    await expect(event(oldParcel.id,{...review,lines:[{...review.lines[0],holdAssignments:[{incidentId:'not-the-original-report',quantity:1}]}]}))
+      .rejects.toThrow(/所选原事项/);
+    await event(oldParcel.id,review);
+    const latest=await dispatch(later);
+    const before=(await workspace()).parcels.find(row=>row.id===oldParcel.id)!;
+    expect(before.holdFacts).toMatchObject([{quantity:1,pending:0,assignments:[{incidentId,quantity:1}]}]);
+    expect(latest.id).not.toBe(oldParcel.id);
+    expect(await prisma.fulfillmentParcel.count({where:{orderId}})).toBe(2);
+    expect(await prisma.orderItem.findUniqueOrThrow({where:{id:relayLineId}})).toMatchObject({shippedQty:2});
+  });
+
+  it('preserves earlier restrictions and independent release dates across two verified notice associations',async()=>{
+    await acceptCustomerOrder();
+    const id=await groupedOrder();
+    await report(id,'e-earliest-reported-notice','先到的转述尚缺准确货物范围。');
+    const earlyA=dispatchInput('a-during-original-notice','supplier_to_customer',[goods(id,directLineId)]);
+    nextOccurrence();
+    await report(id,'c-independent-b-record','另一份书证只覆盖一件 B。',[waiting(relayLineId,1)]);
+    const by=async(tag:string)=>(await current(id)).incidentHistory.find(row=>row.reference.endsWith(tag))!;
+    const e=await by('e-earliest-reported-notice'), c=await by('c-independent-b-record');
+    await purchaseAction(id,{action:'resolve_change',outcome:'original_terms',requestId:'scoped-c-one-b-released',
+      incidentId:c.id,...agreement('c-one-b-in-own-time')});
+    const bAfterC=dispatchInput('b-after-own-valid-c-release','supplier_to_customer',[goods(id,relayLineId,2)]);
+    await report(id,'m-primary-a-and-b-two-lines','原件明确 A 和一件 B。',[waiting(directLineId,1),waiting(relayLineId,1)]);
+    const m=await by('m-primary-a-and-b-two-lines');
+    await purchaseAction(id,{action:'review_change_scope',reviewResult:'duplicate',requestId:'associate-original-e-and-m',
+      incidentId:e.id,relatedIncidentId:m.id,reference:'TEST-E-REPEATS-M-SCOPE',description:'手续核明 E 源自 M 的 A 和一件 B。'});
+    const whileAStillHeld=dispatchInput('a-between-fact-link-and-commercial-decision','supplier_to_customer',[goods(id,directLineId)]);
+    nextOccurrence();
+    await purchaseAction(id,{action:'resolve_change',outcome:'original_terms',requestId:'m-continuation-for-a-only',
+      incidentId:m.id,coordinationLines:[waiting(directLineId,1)],...agreement('later-approval-for-a')});
+    const aAfterAgreement=dispatchInput('a-after-its-own-later-approval','supplier_to_customer',[goods(id,directLineId)]);
+    await purchaseAction(id,{action:'review_change_scope',reviewResult:'duplicate',requestId:'only-m-outstanding-b-matches-c',
+      incidentId:m.id,relatedIncidentId:c.id,reference:'TEST-RESIDUAL-M-B-MATCHES-C',description:'A 已单独结论，本次只把 M 剩下的一件 B 核为 C 的事实。'});
+    expect(await by('e-earliest-reported-notice')).toMatchObject({linkedTo:c.id});
+    await expect(previewDispatch(earlyA)).rejects.toThrow(/发货数量/);
+    await expect(previewDispatch(whileAStillHeld)).rejects.toThrow(/发货数量/);
+    await expect(previewDispatch(aAfterAgreement)).resolves.toMatchObject({snapshot:{occurredAt:aAfterAgreement.occurredAt}});
+    await expect(previewDispatch(bAfterC)).resolves.toMatchObject({snapshot:{occurredAt:bAfterC.occurredAt,lines:[{quantity:2}]}});
+  });
+
 });

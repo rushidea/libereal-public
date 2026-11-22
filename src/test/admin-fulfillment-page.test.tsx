@@ -34,6 +34,8 @@ const outboundTracking = 'TEST-OUTBOUND-WAYBILL';
 const inboundTracking = 'TEST-INBOUND-WAYBILL';
 const source = 'TEST-CARRIER-FEED';
 const lineId = 'TEST-INBOUND-LINE';
+const incidentId = 'TEST-PRIOR-HOLD';
+const incidentPaper = 'TEST-ORIGINAL-SUPPLIER-PAUSE';
 const batchNumber = 'TEST-RECEIVED-LOT';
 const secondBatchNumber = 'TEST-NEXT-RECEIVED-LOT';
 const inboundReference = 'TEST-PRIVATE-INBOUND-PROOF';
@@ -71,7 +73,7 @@ function parcel(route: 'supplier_to_customer' | 'supplier_to_libereal', received
       id: inbound ? lineId : 'TEST-OUTBOUND-LINE', orderItemId, purchaseOrderId, productId: item.productId, variantId: null,
       quantity: inbound ? 3 : 2, receivedQuantity,
       balance: { pending: (inbound ? 3 : 2)-receivedQuantity, received: receivedQuantity, shipped: inbound ? 3 : 2 },
-      receipts: receivedQuantity ? [batchNumber,secondBatchNumber].map((value,index)=>({
+      resolutions: [], receipts: receivedQuantity ? [batchNumber,secondBatchNumber].map((value,index)=>({
         id: 'test-receipt-'+index, quantity: 1, forwardedQuantity: 0, releasedQuantity: 0, remaining: 1, inventoryBatch: { batchNumber:value },
       })) : [],
     }],
@@ -90,7 +92,7 @@ type OperationRequest = {
   stepUpToken?: string;
 };
 
-function mockAdmin(permissions: string[] | Promise<string[]>, startingInbound = false) {
+function mockAdmin(permissions: string[] | Promise<string[]>, startingInbound = false, hold?: 'departure' | 'intake') {
   const operations: OperationRequest[] = [];
   const reads = { workspace: 0, detail: 0 };
   const notice = {
@@ -110,13 +112,18 @@ function mockAdmin(permissions: string[] | Promise<string[]>, startingInbound = 
     if (url === '/api/admin/fulfillment/notices') return Response.json({ notices: [notice], next: null });
     if ((url === fulfillmentPath || url.startsWith(fulfillmentPath+'?dispatchAt=')) && !init?.method) {
       reads.workspace += 1;
+      const inbound = parcel('supplier_to_libereal', operationApplied || hold==='intake' ? 2 : 0);
+      const heldInbound={...inbound,holdFacts:hold==='intake' ? [{parcelLineId:lineId,quantity:1,pending:1,
+        incidentIds:[incidentId],assignments:[{incidentId,quantity:1}],pendingAssignments:[{incidentId,quantity:1}],decisions:[]}] : []};
+
       return Response.json({ capabilities: { warehouse: Array.isArray(permissions) && permissions.includes('inventory.write'),
         shortfall:Array.isArray(permissions) && permissions.includes('purchases.approve') }, workspace: {
         order: { id: orderId, status: 'confirmed', orderItems: [item] },
-        purchases: [url.includes('reviewHold=1') ? {...purchase,holdAllowance:{ordinarilyAvailable:0,historicalHoldIds:['TEST-PRIOR-HOLD']}} : purchase],
+        purchases: [url.includes('reviewHold=1') ? {...purchase,holdAllowance:{ordinarilyAvailable:hold==='departure'?1:0,historicalHoldIds:[incidentId],
+          assignable:[{incidentId,quantity:1,reference:incidentPaper}]}} : purchase],
         receipts: [], legacyShipments: [], legacyBackfill: { history: [], lines: [] },
         legacyInventory: [], inventoryChoices: [], unmatched: [], freeResends: [], feedSource: source,
-        parcels: startingInbound ? [parcel('supplier_to_libereal', operationApplied ? 2 : 0)] :
+        parcels: startingInbound ? [heldInbound] :
           operationApplied ? [parcel('supplier_to_customer')] : [],
       } });
     }
@@ -256,6 +263,59 @@ describe('fulfillment in the existing order pages', () => {
     expect(operations[0]).toMatchObject({action:'dispatch',stage:'preview',input:{occurredAt:new Date(localTime).toISOString(),
       holdReview:{supplierReference:'TEST-SUPPLIER-PROVES-PHYSICAL',customerReference:'TEST-CUSTOMER-CONFIRMS-CONTINUATION',
         responsibility:'合成审批经办人',sha256:digest}}});
+    await verifyWithDialog(operations);
+    await waitFor(()=>expect(operations[1]).toMatchObject({stage:'confirm',input:operations[0].input,actionHash}));
+  });
+
+  it('allows a named missed dispatch with an available ordinary unit and no buyer reply',async()=>{
+    const {operations}=mockAdmin(['orders.read','orders.write','purchases.approve'],false,'departure');
+    const panel=await openAdminFulfillment();
+    fireEvent.click(await panel.findByText('登记采购发货或转发',{selector:'summary'}));
+    fireEvent.click(panel.getByLabelText('补录已实际发运的包裹'));
+    fireEvent.click(panel.getByLabelText('核对当时未放行的实际发运'));
+    fill(panel,'要查询的实际发运时间',localTime);
+    fireEvent.click(panel.getByRole('button',{name:'核对当时可用的货物'}));
+    await panel.findByLabelText(/当时正常可发 1 · 可核对实发 3/);
+    fill(panel,/当时正常可发 1 · 可核对实发 3/,'1');
+    fill(panel,'随本包实发的暂停数量 · '+incidentPaper,'1');
+    fill(panel,'物流凭据出处','TEST-ACTUALLY-MISROUTED-ORIGINAL-WAYBILL');
+    fill(panel,'物流凭据摘要',digest);
+    fireEvent.click(panel.getByLabelText('客户书面处理尚待回复'));
+    expect(panel.queryByLabelText('客户对接续履约的书面回复')).toBeNull();
+    fill(panel,'供方对实际发运的书面确认','TEST-PHYSICAL-SUPPLIER-REPLY');
+    fill(panel,'发运偏差的责任人','合成在途责任人');
+    fill(panel,'实际发运情况和待办','运单确证误发，已联系客户等待实际处理决定。');
+    fill(panel,'供方确认实际发运的书证摘要',digest);
+    fireEvent.click(panel.getByRole('button',{name:'预览发货'}));
+    expect(within(await screen.findByRole('region',{name:'物流操作预览'})).getByText('客户书面处理待回复')).toBeInTheDocument();
+    expect(operations[0]).toMatchObject({action:'dispatch',stage:'preview',input:{lines:[{quantity:1,holdAssignments:[{incidentId,quantity:1}]}],
+      holdReview:{status:'pending',supplierReference:'TEST-PHYSICAL-SUPPLIER-REPLY'}}});
+    expect(operations[0].input).not.toHaveProperty('holdReview.customerReference');
+    await verifyWithDialog(operations);
+    await waitFor(()=>expect(operations[1]).toMatchObject({stage:'confirm',input:operations[0].input,actionHash}));
+  });
+
+  it('lets the reviewer record the buyer decision against the actual intake lot and original issue',async()=>{
+    const {operations}=mockAdmin(['orders.read','orders.write','purchases.approve','inventory.write'],true,'intake');
+    const panel=await openAdminFulfillment();
+    fireEvent.click(await panel.findByText('办理本包裹',{selector:'summary'}));
+    const summary=await panel.findByText(/合成采购品 · 误发待处理 1 件/,{selector:'summary'});
+    fireEvent.click(summary);
+    const review=within(summary.parentElement!);
+    fill(review,'本次实际处理数量','1');
+    fill(review,'书证对应的实收批次','test-receipt-1');
+    fill(review,'供方书面处理决定','TEST-WRITTEN-SUPPLIER-DECISION');
+    fill(review,'供方处理书证摘要',digest);
+    fill(review,'客户书面处理决定','TEST-WRITTEN-CUSTOMER-DECISION');
+    fill(review,'客户处理书证摘要',digest);
+    fill(review,'本次核对的责任人','合成复核职责人');
+    fill(review,'填写原件核对经过和实际结果','原件只同意第二批一件继续交付。');
+    fillEvidence(review,'TEST-REAL-SIGNED-LOT-DECISION');
+    fireEvent.click(review.getByRole('button',{name:'预览误发处理结果'}));
+    await screen.findByRole('region',{name:'物流操作预览'});
+    expect(operations[0]).toMatchObject({action:'record_event',stage:'preview',input:{kind:'review_dispatch_hold',
+      parcelId:'TEST-INBOUND-PARCEL',lines:[{parcelLineId:lineId,incidentId,quantity:1,receiptId:'test-receipt-1',outcome:'continue'}],
+      customerReference:'TEST-WRITTEN-CUSTOMER-DECISION',holdResponsibility:'合成复核职责人'}});
     await verifyWithDialog(operations);
     await waitFor(()=>expect(operations[1]).toMatchObject({stage:'confirm',input:operations[0].input,actionHash}));
   });

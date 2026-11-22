@@ -326,6 +326,10 @@ describe('admin fulfillment HTTP and customer shipment views', () => {
       params(orderId)),403);
     await expectJson(await post({action:'dispatch',stage:'preview',input:{...evidence('hold-without-approved-role'),
       holdReview:{supplierReference:'TEST-PROOF',customerReference:'TEST-CUSTOMER-PROOF'}}}),403);
+    await expectJson(await post({action:'record_event',stage:'preview',input:{...evidence('decision-without-approved-role'),
+      kind:'review_dispatch_hold',lines:[{parcelLineId:'test-paused-line',incidentId:'test-issue',quantity:1,outcome:'continue'}]}}),403);
+    await expectJson(await post({action:'record_event',stage:'preview',input:{...evidence('cannot-take-stock-without-stock-role'),
+      kind:'review_dispatch_hold',lines:[{parcelLineId:'test-paused-line',incidentId:'test-issue',quantity:1,outcome:'release_to_stock'}]}}),403);
     expect(await prisma.fulfillmentParcel.count({where:{orderId,reference:{contains:'hold-without-approved-role'}}})).toBe(0);
   });
 
