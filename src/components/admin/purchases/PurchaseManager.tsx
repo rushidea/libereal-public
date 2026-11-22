@@ -3,11 +3,15 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useAdminMfaStepUp, isAdminMfaStepUpResponse } from '@/components/admin/AdminMfaStepUpDialog';
 import type { previewPurchaseAction } from '@/lib/purchase-orders';
+import type { previewPurchaseStartAction } from '@/lib/purchase-start';
 import PurchaseLineForm, { button, field, primary, type Workspace } from './PurchaseLineForm';
 import PurchaseActions from './PurchaseActions';
+import PurchaseStartReview from './PurchaseStartReview';
 
-type Result = { permissions?:string[]; workspace?:Workspace; preview?:Awaited<ReturnType<typeof previewPurchaseAction>>; error?:string;
+type Result = { permissions?:string[]; workspace?:Workspace; preview?:Awaited<ReturnType<typeof previewPurchaseAction | typeof previewPurchaseStartAction>>; error?:string;
   orders?:{id:string;status:string;prepared:number;purchases:number}[] };
+
+export type PurchaseRequest = (body: Record<string, unknown>) => Promise<Result | undefined>;
 
 export default function PurchaseManager({initialOrder}:{initialOrder:string}) {
   const [query,setQuery]=useState('');
@@ -34,7 +38,13 @@ export default function PurchaseManager({initialOrder}:{initialOrder:string}) {
     } catch(e) { if(id===loadId.current && !signal?.aborted)setError(e instanceof Error?e.message:'采购记录读取失败'); }
     finally { if(id===loadId.current && !signal?.aborted)setBusy(false); }
   },[]);
-  useEffect(()=>{const controller=new AbortController();void load(initialOrder,'',controller.signal);return ()=>controller.abort();},[initialOrder,load]);
+  useEffect(() => {
+    const controller = new AbortController();
+    queueMicrotask(() => {
+      if (!controller.signal.aborted) void load(initialOrder, '', controller.signal);
+    });
+    return () => controller.abort();
+  }, [initialOrder, load]);
 
   async function request(body:Record<string,unknown>,token?:string):Promise<Result|undefined> {
     const target=selected.current;
@@ -71,6 +81,8 @@ export default function PurchaseManager({initialOrder}:{initialOrder:string}) {
     {workspace&&<><div className="flex flex-wrap items-center justify-between gap-2"><h2 className="text-lg font-semibold">客户订单 {workspace.orderId}</h2>
       <button className={button} disabled={busy} onClick={()=>void load(workspace.orderId)}>刷新原单</button></div>
       <p className="text-sm">{workspace.eligibility.eligible?'已核实平台接单及本单采购启动依据':workspace.eligibility.reason}</p>
+      {workspace.startReview && <PurchaseStartReview key={workspace.startReview.version} review={workspace.startReview}
+        permissions={permissions} busy={busy} request={request} onError={setError}/>}
       {workspace.lines.length===0&&workspace.eligibility.eligible&&permissions.includes('purchases.write')&&workspace.orderStatus==='confirmed'&&
         <button className={primary} disabled={busy} onClick={()=>void request({action:'prepare',orderId:workspace.orderId})}>从原订单准备采购</button>}
       {workspace.lines.length>0&&<section className="space-y-3"><h2 className="text-lg font-semibold">采购准备</h2>
@@ -78,7 +90,7 @@ export default function PurchaseManager({initialOrder}:{initialOrder:string}) {
           const po=workspace.orders.find(o=>o.id===line.purchaseOrderId);
           const editable=workspace.eligibility.eligible&&permissions.includes('purchases.write')&&(!po||(po.status==='draft'&&!po.orderedBefore&&!po.paidCents));
           return <PurchaseLineForm key={`${line.orderItemId}-${line.revision}`} line={line} enabled={editable} busy={busy}
-            save={async(l,terms)=>{await request({action:'save_line',orderId:workspace.orderId,orderItemId:l.orderItemId,revision:l.revision,terms});}}/>;
+            save={async (line, terms, checkedEvidence) => { await request({ action: 'save_line', orderId: workspace.orderId, orderItemId: line.orderItemId, revision: line.revision, terms, checkedEvidence }); }}/>;
         })}</section>}
       {workspace.orders.length>0&&<section className="space-y-3"><h2 className="text-lg font-semibold">采购单</h2>
         {workspace.orders.map(po=><PurchaseActions key={po.version} orderId={workspace.orderId} po={po} permissions={permissions} busy={busy} request={request} onError={setError}/>)}</section>}

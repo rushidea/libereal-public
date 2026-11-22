@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import type { purchaseWorkspace } from '@/lib/purchase-orders';
 import type { PurchaseTerms } from '@/lib/purchase-terms';
+import DocumentDigestField from './DocumentDigestField';
 
 export type Workspace = Awaited<ReturnType<typeof purchaseWorkspace>>;
 export type Line = Workspace['lines'][number];
@@ -12,13 +13,14 @@ export const field = 'rounded border border-slate-300 bg-white px-2 py-1.5 text-
 export const button = 'rounded border border-slate-300 bg-white px-3 py-1.5 text-sm hover:bg-slate-50 disabled:opacity-50';
 export const primary = 'rounded bg-slate-900 px-3 py-1.5 text-sm text-white hover:bg-slate-700 disabled:opacity-50';
 export const statuses = { draft:'待独立批准',approved:'采购已批准',ordered:'已登记供应商订购',on_hold:'供货变化待处理',superseded:'草稿已归并' };
-export const actionNames = { approve:'批准采购单',register_order:'登记供应商订购结果',record_payment:'登记实际付款',
+export const actionNames = { approve:'批准采购单',approve_lead_time:'单独批准超长订货周期',register_order:'登记供应商订购结果',record_payment:'登记实际付款',
   report_change:'登记供货变化',resolve_change:'回填协调结果',prepare:'准备采购',save_line:'保存采购资料' };
 
 const textFields = {
   supplier:'供货方全称',payee:'收款方全称',paymentTerms:'供应商付款条件',
   freightTerms:'运费及其他费用',leadTime:'供货期',sourceReference:'供应商书面报价依据',
-  settlementReference:'收款方及付款条件补充依据',coordinationReference:'本单交期及客户条件核实依据',amountBreakdown:'行金额差额及计算依据',
+  settlementReference:'收款方及付款条件书面依据',coordinationReference:'本单交期及客户条件核实依据',amountBreakdown:'行金额差额及计算依据',
+  writtenSupplier:'报价原文所列供货方',supplierConditions:'原函所列供货条件',identityReference:'供货方简称与法人主体对应依据',
 } as const;
 type TextKey = keyof typeof textFields;
 
@@ -46,18 +48,31 @@ export function LineDetails({line}:{line:Pick<Line,'source'|'terms'>}) {
     <p>运费及其他费用　{terms.freightTerms || '待核实'}{terms.amountBreakdown && ` · ${terms.amountBreakdown}`}</p>
     <p>供货期　{terms.leadTime || '待核实'}　报价有效至 {terms.validUntil ? new Date(terms.validUntil).toLocaleString('zh-CN') : '待核实'}</p>
     <p>书面报价依据　{terms.sourceReference || '待补'}</p>
+    {terms.writtenSupplier && <p>原函供货方　{terms.writtenSupplier}{terms.identityReference && ` · 法人核对 ${terms.identityReference}`}</p>}
+    {terms.supplierConditions && <p>原函供货条件　{terms.supplierConditions}</p>}
     {terms.settlementReference && <p>结算依据　{terms.settlementReference}</p>}
+    {terms.verification && <p>书证核对　{terms.verification.actorEmail} · {new Date(terms.verification.verifiedAt).toLocaleString('zh-CN')}</p>}
     <p>交期及客户条件核实依据　{terms.coordinationReference || '待补'}</p>
   </div>;
 }
 
-export function PurchaseLineFields({line,values,onChange}:{line:Line;values:PurchaseTerms;onChange:(v:PurchaseTerms)=>void}) {
+export function PurchaseLineFields({line,values,onChange}:{line:Pick<Line,'source'>;values:PurchaseTerms;onChange:(v:PurchaseTerms)=>void}) {
   const [amounts,setAmounts] = useState({ unitPriceCents:values.unitPriceCents == null ? '' : (values.unitPriceCents/100).toFixed(2),
     linePayableCents:values.linePayableCents == null ? '' : (values.linePayableCents/100).toFixed(2) });
   return <fieldset className="grid gap-3 sm:grid-cols-2">
     <legend className="mb-2 font-medium">{line.source.catalogNumber || line.source.name} · 数量 {line.source.quantity}</legend>
     {(Object.entries(textFields) as [TextKey,string][]).map(([k,label]) => <label key={k} className="grid gap-1 text-xs">{label}
       <input className={field} value={values[k] ?? ''} maxLength={2000} onChange={e => onChange({...values,[k]:e.target.value})}/></label>)}
+    <DocumentDigestField label="供货书证摘要" value={values.sourceSha256 ?? ''} onChange={sourceSha256 => onChange({ ...values, sourceSha256 })}/>
+    <DocumentDigestField label="结算书证摘要" value={values.settlementSha256 ?? ''} onChange={settlementSha256 => onChange({ ...values, settlementSha256 })}/>
+    {values.writtenSupplier && values.supplier && values.writtenSupplier !== values.supplier &&
+      <DocumentDigestField label="法人主体映射书证摘要" value={values.identitySha256 ?? ''} onChange={identitySha256 => onChange({ ...values, identitySha256 })}/>}
+    <label className="grid gap-1 text-xs">本单交期核对结果
+      <select className={field} value={values.leadTimeAssessment ?? ''} onChange={e => onChange({ ...values, leadTimeAssessment: e.target.value as PurchaseTerms['leadTimeAssessment'] })}>
+        <option value="">待核对</option><option value="within_agreement">符合本单客户交期约定</option>
+        <option value="exception_required">超出约定，须单独批准</option>
+      </select>
+    </label>
     {(['unitPriceCents','linePayableCents'] as const).map(k => <label key={k} className="grid gap-1 text-xs">
       {k==='unitPriceCents' ? '采购单价（元）' : '含税含费用的本行应付合计（元）'}
       <input className={field} inputMode="decimal" pattern="[0-9]+([.][0-9]{1,2})?" value={amounts[k]} onChange={e=>{
@@ -73,8 +88,9 @@ export function PurchaseLineFields({line,values,onChange}:{line:Line;values:Purc
   </fieldset>;
 }
 
-export default function PurchaseLineForm({line,enabled,busy,save}:{line:Line;enabled:boolean;busy:boolean;save:(line:Line,terms:PurchaseTerms)=>Promise<void>}) {
+export default function PurchaseLineForm({line,enabled,busy,save}:{line:Line;enabled:boolean;busy:boolean;save:(line:Line,terms:PurchaseTerms,checkedEvidence:boolean)=>Promise<void>}) {
   const [terms,setTerms]=useState(line.terms);
+  const [checkedEvidence,setCheckedEvidence]=useState(false);
   const written=line.source.written;
   return <article className="space-y-3 rounded border border-slate-200 p-4">
     <div className="flex flex-wrap items-center justify-between gap-2"><strong>{line.source.name} · {line.source.quantity} {line.source.unit ?? '件'}</strong>
@@ -87,8 +103,12 @@ export default function PurchaseLineForm({line,enabled,busy,save}:{line:Line;ena
     {line.missing.length>0 && <p className="text-sm text-amber-800">待补　{line.missing.join('、')}</p>}
     {line.purchaseOrderId && <p className="break-all text-xs">采购单 {line.purchaseOrderId}</p>}
     {enabled && <details><summary className="cursor-pointer text-sm font-medium">编辑本行采购资料</summary>
-      <form className="mt-3 space-y-3" onSubmit={async e=>{e.preventDefault();await save(line,terms);}}>
-        <PurchaseLineFields line={line} values={terms} onChange={setTerms}/><button disabled={busy} className={button}>保存本行资料</button>
+      <form className="mt-3 space-y-3" onSubmit={async e=>{e.preventDefault();await save(line,terms,checkedEvidence);}}>
+        <PurchaseLineFields line={line} values={terms} onChange={newTerms => { setTerms(newTerms); setCheckedEvidence(false); }}/>
+        <label className="flex gap-2 text-sm"><input type="checkbox" checked={checkedEvidence} onChange={e => setCheckedEvidence(e.target.checked)}/>
+          我已核对本行供货方、收款方、付款条件和交期的书面原件
+        </label>
+        <button disabled={busy} className={button}>保存本行资料</button>
       </form></details>}
   </article>;
 }
