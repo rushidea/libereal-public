@@ -41,22 +41,22 @@ function makeWorkspace(status?: Purchase['status'], lineChanges: Partial<Line> =
       unitPriceCents: terms.unitPriceCents, currency: 'CNY', taxBasis: 'included', sourceReference: terms.sourceReference,
       leadTime: terms.leadTime, validUntil: terms.validUntil,
     },
-    revision: 3, purchaseOrderId: status ? purchaseId : null, replacementId: null, fromPurchaseOrderId: null,
+    revision: 3, purchaseOrderId: status ? purchaseId : null, replacementId: null, fromPurchaseOrderId: null, authorizationId:null,
     missing: status ? [] : ['收款方', '供应商付款条件'], availableQuantity: source.quantity,
     ...lineChanges,
   };
   const open = status === 'on_hold' ? {id:'TEST-INCIDENT',reference:'TEST-ORIGINAL-INCIDENT',changeKind:'unavailable',
     previousStatus:'draft',reportedBy:'test-operator',description:'待人工核对原供货条件。',
-    responsibility:null,scope:null,outstanding:null,lastReviewedBy:null,factReview:null} : null;
+    responsibility:null,scope:null,outstanding:null,lastReviewedBy:null,factReview:null,reportVersion:version,status:'open' as const,linkedTo:null} : null;
   const purchase: Purchase | null = status ? {
     id: purchaseId, status, version, revision: 4, contentHash: 'd'.repeat(64),
     approvedHash: status === 'draft' || status === 'on_hold' ? null : 'd'.repeat(64),
     totalCents: 8642, paidCents: 0, lines: [line], ledger: [], orderedBefore: status === 'ordered',
-    openIncidentId: open?.id ?? null, incident: open, incidents: open ? [open] : [],
+    openIncidentId: open?.id ?? null, incident: open, incidents: open ? [open] : [], incidentHistory:open ? [open] : [],
     incidentSources:[{orderItemId,quantity:line.source.quantity,source:{kind:'unshipped'},reference:'TEST-ORDER-REFERENCED'}],
     orderReceipt: null, leadTimeApproved: false,
     dueCents: 8642, remaining: [{ orderItemId, quantity: source.quantity }], remainingScope: null,
-    needsRemainingReview: false, canApproveRemaining: false, needsLegacyReview: false, needsFundingReapproval: false, canRegisterOrder: status === 'approved',
+    needsRemainingReview: false, payableReviewWindows:[], canApproveRemaining: false, needsLegacyReview: false, needsFundingReapproval: false, canRegisterOrder: status === 'approved',
     documentReviewLines: [], commitmentState: 'ordinary', commitmentExceptions: [], canRecordCommitmentException: false,
   } : null;
   const payment = { receivedCents: 0, allocatedCents: 0, receipts: [], excludedReceiptIds: [], paymentAttemptId: null, nativePaidAt: null, settledReceivableId: null };
@@ -319,6 +319,39 @@ describe('supplier purchasing page', () => {
     expect(screen.getByRole('region',{name:'供货事项 TEST-A'})).toBeInTheDocument();
   });
 
+  it('submits an independently written retained quote for one of two draft units',async()=>{
+    const workspace=makeWorkspace('on_hold',{replacementId:'TEST-ALT-ROW',fromPurchaseOrderId:'TEST-PARENT-PO',authorizationId:'TEST-PARENT-AUTH'});
+    const [purchase] = workspace.orders;
+    const onlyOne=[{orderItemId,quantity:1,source:{kind:'unshipped' as const}}];
+    purchase.incidents=[{...purchase.incidents[0],scope:onlyOne,outstanding:onlyOne}];
+    const posts=mockWorkspace(workspace,['purchases.read','purchases.write'],body=>{
+      const {preview:result}=preview(body,workspace);
+      return Response.json({preview:{...result,snapshot:{...result.snapshot,operation:{...result.snapshot.operation,
+        incidentProgress:{handled:onlyOne,outstanding:[]},draftAllocations:[{orderItemId,quantity:1,originalQuantity:2,originalQuotedCents:8642,
+          retained:{source:{...source,quantity:1},terms:{...terms,linePayableCents:4550}}}],
+      }}}});
+    });
+    render(<PurchaseManager initialOrder={orderId}/>);
+    fireEvent.click(await screen.findByRole('button',{name:'回填协调结果'}));
+    fill('协调结果','declined');
+    const quote=within(screen.getByRole('group',{name:/留存 1.*书面新报价/}));
+    const amount=quote.getByLabelText('含税含费用的本行应付合计（元）');
+    expect(amount).toHaveValue('');
+    fireEvent.change(amount,{target:{value:'45.50'}});
+    fireEvent.change(quote.getByLabelText('供应商书面报价依据'),{target:{value:'TEST-KEPT-ONE-ACTUAL-QUOTE'}});
+    fireEvent.change(quote.getByLabelText('供货书证摘要'),{target:{value:'a'.repeat(64)}});
+    fireEvent.change(quote.getByLabelText('客户同意原件行号'),{target:{value:'9'}});
+    fill('人工与供应商协调的书面依据','TEST-SUPPLIER-REPLY');
+    fill('客户对方案的回复依据','TEST-ACTUAL-BUYER-CHOICE');
+    fill('客户书面撤回依据摘要','e'.repeat(64));
+    fill('双方确认的具体结果','只撤一件，另一件按新报价继续准备。');
+    fireEvent.click(screen.getByRole('button',{name:'查看完整预览'}));
+    const panel=await screen.findByRole('region',{name:'操作预览'});
+    expect(panel).toHaveTextContent('原组留存 1 件 · 新报价');
+    expect(posts[0]).toMatchObject({outcome:'declined',retainedDraftTerms:[{orderItemId,customerDocumentRow:9,
+      terms:{sourceReference:'TEST-KEPT-ONE-ACTUAL-QUOTE',sourceSha256:'a'.repeat(64),linePayableCents:4550}}]});
+  });
+
   it('offers customer document row and coverage on the existing replacement revision form', async () => {
     const workspace = makeWorkspace('on_hold',{fromPurchaseOrderId:'TEST-OLD-ORIGINAL-PURCHASE'});
     mockWorkspace(workspace,['purchases.read','purchases.write']);
@@ -457,7 +490,7 @@ describe('supplier purchasing page', () => {
         return Response.json({ preview: { ...result.preview, snapshot: { ...result.preview.snapshot, operation: { ...result.preview.snapshot.operation, scope } } } });
       }
       return Response.json({ workspace: { ...workspace, orders: [{ ...purchase, status: status === 'ordered' ? 'ordered' : 'approved', revision: 5, version: 'e'.repeat(64),
-        dueCents: 3000, needsRemainingReview: false, canApproveRemaining: false, remainingScope: scope }] } });
+        dueCents: 3000, needsRemainingReview: false, payableReviewWindows:[], canApproveRemaining: false, remainingScope: scope }] } });
     });
     render(<PurchaseManager initialOrder={orderId} />);
     expect(await screen.findByText(/原合同应付/)).toHaveTextContent(/86\.42.*已登记实际付款.*23\.00/);

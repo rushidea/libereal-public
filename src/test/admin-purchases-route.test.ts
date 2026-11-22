@@ -336,6 +336,16 @@ describe('admin purchase endpoint', () => {
     await expectJson(await confirm(first,await grant(staff.approver)),200);
     expect(activity('review_change_scope')).toEqual([{actorId:staff.approver,amountCents:null}]);
     expect(after.activities.find((row:{id:string})=>row.id===incident.id)).toEqual(before.activities.at(-1));
+    await noteChange(orderId,'late-copy-of-same-notice');
+    signIn(staff.approver);
+    const {workspace:two} = await expectJson(await readPurchases(orderId),200);
+    const late = two.orders[0].incidents[1];
+    const duplicate = await previewAction({action:'review_change_scope',reviewResult:'duplicate',relatedIncidentId:incident.id,incidentId:late.id,
+      requestId:'same-effect-only-one',reference:'TEST-REPEATED-SENDER-DOCUMENT',description:'这份送达仅转述原通知，无独立范围。'});
+    const {workspace:linked} = await expectJson(await confirm(duplicate,await grant(staff.approver)),200);
+    expect(linked.orders[0]).toMatchObject({status:'on_hold',incidents:[{id:incident.id,outstanding:request.affectedLines}],
+      incidentHistory:[{id:incident.id,status:'open'},{id:late.id,status:'duplicate',linkedTo:incident.id}]});
+    expect(activity('resolve_change')).toEqual([]);
   });
 
   it('records and resolves only the selected supply scope through the authorized preview and confirmation', async () => {

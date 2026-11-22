@@ -1561,4 +1561,179 @@ describe('actual scope of a supply incident', () => {
     await purchaseAction(draft.id,{action:'approve',requestId:'approve-a-independently'});
     expect(await current(draft.id)).toMatchObject({status:'approved',totalCents:2500,paidCents:0});
   });
+
+  it('records repeated and no-impact facts against the canonical issue during and after its only commercial decision',async()=>{
+    await acceptCustomerOrder();
+    const id = await groupedOrder();
+    await report(id,'early-unstructured-copy','第一份通知暂未核清原件范围。');
+    const b = waiting(relayLineId,1);
+    await report(id,'actual-b-fact','原供方明确只有一件 B 延期。',[b]);
+    const [early,origin] = (await current(id)).incidents;
+    const facts = {action:'review_change_scope' as const,reviewResult:'duplicate' as const,reference:'TEST-SAME-B-ORIGINAL-EVIDENCE',
+      description:'这份通知只是转述原件所列的一件 B。'};
+    const merged = await purchaseAction(id,{...facts,requestId:'review-early-copy',incidentId:early.id,relatedIncidentId:origin.id});
+    expect(merged.orders.find(po=>po.id===id)).toMatchObject({status:'on_hold',incidents:[{id:origin.id,outstanding:[b]}]});
+    expect(merged.activities.at(-1)?.detail.snapshot).toMatchObject({operation:{incidentId:early.id,relatedIncidentId:origin.id,
+      reportVersion:early.reportVersion,incrementalQuantity:0,relatedIncident:{reportVersion:origin.reportVersion}}});
+    await expect(purchaseAction(id,{...facts,requestId:'no-link-back-through-alias',incidentId:origin.id,relatedIncidentId:early.id}))
+      .rejects.toThrow(/不能关联本事项/);
+    await purchaseAction(id,{action:'resolve_change',outcome:'original_terms',requestId:'once-b-commercial-continue',
+      incidentId:origin.id,...agreement('only-one-b-consent')});
+    await purchaseAction(id,{action:'report_change',requestId:'another-delivery-of-same-source',changeKind:'delay',
+      reference:origin.reference,description:'同一档案的再次送达，确认无新约定。'},operator);
+    const [late] = (await current(id)).incidents;
+    await purchaseAction(id,{...facts,requestId:'link-to-canonical-settled-via-alias',incidentId:late.id,relatedIncidentId:early.id});
+    await report(id,'no-extra-impact','另一通电话只核对地址，没有新供货变动。');
+    const [nonissue] = (await current(id)).incidents;
+    const end = await purchaseAction(id,{action:'review_change_scope',reviewResult:'no_impact',requestId:'zero-extra-impact',
+      incidentId:nonissue.id,reference:'TEST-CONFIRMED-ONLY-ADDRESS',description:'与原供方按原稿核查，确无新增事实或条件。'});
+    expect(end.orders.find(po=>po.id===id)).toMatchObject({status:'ordered',paidCents:0,dueCents:7500,incidents:[],incidentHistory:[
+      {id:early.id,status:'duplicate',linkedTo:origin.id},{id:origin.id,status:'settled'},
+      {id:late.id,status:'duplicate',linkedTo:origin.id},{id:nonissue.id,status:'no_impact',linkedTo:null},
+    ]});
+    expect(end.activities.filter(row=>row.action==='resolve_change')).toHaveLength(1);
+  });
+
+  it.each([false,true])('records the actual A dispatch on its original authorization while B payable is unresolved, free=%s',async free=>{
+    await acceptCustomerOrder();
+    const id=await groupedOrder();
+    await purchaseAction(id,{action:'record_payment',requestId:'valid-original-900',reference:'TEST-DEPOSIT-900-PRIOR',
+      conditionReference:'TEST-OLD-DEPOSIT-TERM',amountCents:900});
+    let resendApprovalId: string | undefined;
+    if (free) {
+      const first = await dispatch(dispatchInput('a-original-lost','supplier_to_customer',[goods(id,directLineId)]));
+      await event(first.id,{...eventInput('physical-a-loss','customer_delivery',[]),...agreement('verified-lost-a'),
+        kind:'confirm_shortfall',lines:[{parcelLineId:first.lines[0].id,quantity:1,outcome:'loss'}]});
+      const loss = (await prisma.$transaction(tx=>purchaseWorkspace(tx,orderId))).fulfillment.shortfalls[0];
+      await report(id,'separately-approved-free-a','A 确认短失，只同意免费补这一件。',[
+        {...line(directLineId,1),source:{kind:'shortfall',id:loss.resolutionId}},
+      ]);
+      const approved = await purchaseAction(id,{action:'resolve_change',outcome:'shortfall',requestId:'permit-a-resend-before-b',
+        ...agreement('free-a-existing-book'),dispositions:[{...line(directLineId,1),outcome:'cancel',shortfallId:loss.resolutionId,shortfallDecision:'free_resend'}]});
+      resendApprovalId = approved.fulfillment.freeResends[0].approvalId;
+    }
+    const shipment = dispatchInput('actual-old-dispatch-evidence','supplier_to_customer',[{...goods(id,directLineId),resendApprovalId}]);
+    const actual = shipment.occurredAt;
+    nextOccurrence();
+    await report(id,'b-change-after-real-a','此事只变更 B 供货数量。',[waiting(relayLineId,1)]);
+    await purchaseAction(id,{action:'resolve_change',outcome:'declined',requestId:'b-reduced-with-cash-not-reconciled',
+      ...agreement('actual-only-b-reduced'),dispositions:[{...line(relayLineId,1),outcome:'cancel'}],refundFollowup:'已付900分另做抵扣或退款核查。'});
+    const before = await current(id);
+    expect(before).toMatchObject({paidCents:900,dueCents:null,needsRemainingReview:true});
+    if (free) expect((await workspace()).freeResends).toMatchObject([{approvalId:resendApprovalId,available:1}]);
+    const then = await prisma.$transaction(tx=>fulfillmentWorkspace(tx,orderId,Date.parse(actual)));
+    expect(then.purchases.find(row=>row.orderItemId===relayLineId)?.available).toBe(1);
+    const history = await dispatch(shipment);
+    expect(history.dispatchedAt.toISOString()).toBe(actual);
+    const beforePayableApproval = dispatchInput('cannot-invent-additional-b-dispatch','supplier_to_customer',[goods(id,relayLineId)]);
+    await expect(dispatch(beforePayableApproval)).rejects.toThrow(/发货数量/);
+    const contradiction = {...dispatchInput('before-real-order-authority','supplier_to_customer',[goods(id,relayLineId)]),
+      occurredAt:new Date(Date.parse(before.orderReceipt!.occurredAt!)-1000).toISOString()};
+    await expect(dispatch(contradiction)).rejects.toThrow(/发货当时已经生效/);
+    const updated = await current(id);
+    expect(updated).toMatchObject({paidCents:900,dueCents:null,needsRemainingReview:true});
+    expect(updated.ledger.filter(row=>row.action==='record_payment')).toEqual(before.ledger.filter(row=>row.action==='record_payment'));
+    nextOccurrence();
+    await purchaseAction(id,{action:'approve_remaining',requestId:'separately-verify-actual-retained-payable',
+      reference:'TEST-ACTUAL-RETAINED-CHARGES',referenceSha256:pricingContentHash('retain one A and one B'),
+      description:'以原书证核实 A 与剩余一件 B，以及已付900分的实际抵扣。',
+      remainingLines:[{orderItemId:directLineId,payableCents:2500},{orderItemId:relayLineId,payableCents:2500}],appliedPaidCents:900});
+    await expect(dispatch(beforePayableApproval)).rejects.toThrow(/发货数量/);
+    expect((await current(id)).dueCents).toBe(4100);
+  });
+
+  it.each(['declined','revised_terms'] as const)('allocates one of two units in a replacement draft for %s with independently written amounts',async outcome=>{
+    await acceptCustomerOrder();
+    const {relay:id}=await orderFromSuppliers();
+    await purchaseAction(id,{action:'record_payment',requestId:'old-cash-before-physical-loss',reference:'TEST-ORIGINAL-LOSS-DEPOSIT',
+      conditionReference:'TEST-PREVIOUS-PAYMENT-ORIGINAL-TERM',amountCents:900});
+    const sent=await dispatch(dispatchInput('two-originals-both-lost','supplier_to_customer',[goods(id,relayLineId,2)]));
+    await event(sent.id,{...eventInput('two-units-confirmed-lost','customer_delivery',[]),...agreement('two-physical-units-confirmed-lost'),
+      kind:'confirm_shortfall',lines:[{parcelLineId:sent.lines[0].id,quantity:2,outcome:'loss'}]});
+    const loss=(await prisma.$transaction(tx=>purchaseWorkspace(tx,orderId))).fulfillment.shortfalls[0];
+    const fromLoss={...line(relayLineId,2),source:{kind:'shortfall' as const,id:loss.resolutionId}};
+    await report(id,'original-loss-two-things','两个均有书证。保持原合同应付另采。',[fromLoss]);
+    const alternativeSupplier='TEST-ORIGINAL-REPLACEMENT-PARTY';
+    const prepared=await purchaseAction(id,{action:'resolve_change',outcome:'shortfall',requestId:'replace-two-from-one-real-loss-scope',
+      ...agreement('both-after-original-loss'),dispositions:[{...line(relayLineId,2),outcome:'replace',shortfallId:loss.resolutionId,shortfallDecision:'new_purchase',
+        replacement:{name:'合成替代份额',brand:'合成替代品牌',catalogNumber:'TEST-SHARED-ALT-SKU',unit:'件',spec:'合成规格',
+          terms:purchaseTerms(2,alternativeSupplier)}}]});
+    const draft=prepared.orders.find(po=>po.lines.some(row=>row.fromPurchaseOrderId===id))!;
+    const originalRow=await prisma.purchaseReplacementLine.findUniqueOrThrow({where:{id:draft.lines[0].replacementId!}});
+    const partial=waiting(relayLineId,1);
+    await report(draft.id,'split-known-one-unit','客户只改变其中一件，另一件按书证新报价保留。',[partial]);
+    const keep={...purchaseTerms(1,alternativeSupplier),unitPriceCents:2630,linePayableCents:2630};
+    const moved={...purchaseTerms(1,'TEST-APPROVED-ALTERNATE-ONE-PIECE'),unitPriceCents:3140,linePayableCents:3140};
+    const input={action:'resolve_change' as const,outcome,requestId:'changed-item-exactly-one',
+      ...agreement('separate-one-piece-written-decision'),supplierSha256:undefined,coordinationLines:[partial],
+      decisionDocumentLines:[{orderItemId:relayLineId,customerDocumentRow:4}],
+      ...(outcome==='revised_terms'?{revisedTerms:[{orderItemId:relayLineId,terms:moved}]}:{})};
+    await expect(purchaseAction(draft.id,input,operator)).rejects.toThrow(/留存份额/);
+    await expect(purchaseAction(draft.id,{...input,retainedDraftTerms:[{orderItemId:relayLineId,terms:draft.lines[0].terms}]},operator))
+      .rejects.toThrow(/报价|书证/);
+    const adjusted=await purchaseAction(draft.id,{...input,retainedDraftTerms:[{orderItemId:relayLineId,terms:keep,customerDocumentRow:9}]},operator);
+    const after=adjusted.orders.find(po=>po.id===draft.id)!;
+    expect(after).toMatchObject({status:'draft',approvedHash:null,paidCents:0,totalCents:2630,remaining:[line(relayLineId,1)]});
+    const retainDb=await prisma.purchaseReplacementLine.findUniqueOrThrow({where:{id:originalRow.id}});
+    expect(retainDb).toMatchObject({quantity:1,authorizationId:originalRow.authorizationId,fromPurchaseOrderId:id});
+    expect((await current(id))).toMatchObject({paidCents:900,dueCents:4100,totalCents:5000});
+    const audit=adjusted.activities.at(-1)!;
+    expect(audit.detail.snapshot).toMatchObject({operation:{draftAllocations:[{authorizationId:originalRow.authorizationId,
+      originalQuotedCents:5000,originalQuantity:2,quantity:1,retained:{terms:{linePayableCents:2630}}}],decisionDocuments:[
+      {role:'customer',row:4,allocations:[{orderItemId:relayLineId,quantity:1}]},
+      {role:'customer',row:9,allocations:[{orderItemId:relayLineId,quantity:1}]},
+    ]}});
+    expect(adjusted.fulfillment.shortfalls.find(row=>row.resolutionId===loss.resolutionId)).toMatchObject({available:0,independentlyReplaced:2});
+    const all = [draft.id];
+    if (outcome==='revised_terms') {
+      const peer=adjusted.orders.find(po=>po.id!==draft.id && po.lines.some(row=>row.authorizationId===audit.id))!;
+      expect(peer).toMatchObject({status:'draft',approvedHash:null,paidCents:0,totalCents:3140,remaining:[line(relayLineId,1)]});
+      all.push(peer.id);
+    }
+    for (const purchaseOrderId of all) {
+      expect(adjusted.fulfillment.replacementsWithPriorHoldTransfer).toContainEqual({purchaseOrderId,orderItemId:relayLineId});
+      await purchaseAction(purchaseOrderId,{action:'approve',requestId:'independent-split-approval-'+purchaseOrderId});
+      await purchaseAction(purchaseOrderId,{action:'register_order',requestId:'actual-split-order-'+purchaseOrderId,
+        reference:'TEST-ACTUAL-SPLIT-ORDER-'+purchaseOrderId,referenceSha256:pricingContentHash({purchaseOrderId,proof:'actual split order'}),
+        occurredAt:nextOccurrence()},operator);
+      await dispatch(dispatchInput('real-split-dispatched-'+purchaseOrderId,'supplier_to_customer',[goods(purchaseOrderId,relayLineId)]));
+    }
+    const reservation=await prisma.inventoryReservation.findUniqueOrThrow({where:{orderItemId:relayLineId}});
+    expect(reservation.releasedQuantity).toBe(2);
+  });
+
+  it('can split an original three-unit substitute in two successive partial decisions without granting it twice',async()=>{
+    await prisma.orderItem.update({where:{id:relayLineId},data:{quantity:3}});
+    await prisma.order.update({where:{id:orderId},data:{subtotal:400,total:400}});
+    await acceptCustomerOrder();
+    const original=await groupedOrder(3);
+    await report(original,'all-b-needs-the-same-alternative','三件 B 确定按各自供货证据替代。',[waiting(relayLineId,3)]);
+    const prepared=await purchaseAction(original,{action:'resolve_change',outcome:'replacement',requestId:'authorize-only-one-three-unit-branch',
+      ...agreement('three-allowed-once'),dispositions:[{...line(relayLineId,3),outcome:'replace',replacement:{
+        name:'合成逐次拆量',brand:'合成品牌',catalogNumber:'TEST-ITERATED-DRAFT',spec:'合成规格',unit:'件',terms:purchaseTerms(3,'TEST-ITERATED-SUPPLIER'),
+      }}]});
+    const draft=prepared.orders.find(po=>po.lines.some(row=>row.fromPurchaseOrderId===original))!;
+    const origin=draft.lines[0].authorizationId;
+    await report(draft.id,'two-units-may-change','两件需要分别办理，第三件继续保留。',[waiting(relayLineId,2)]);
+    const one=[waiting(relayLineId,1)];
+    const first=await purchaseAction(draft.id,{action:'resolve_change',outcome:'revised_terms',requestId:'first-move-only-one',
+      ...agreement('first-iterated-authority'),coordinationLines:one,
+      revisedTerms:[{orderItemId:relayLineId,terms:purchaseTerms(1,'TEST-INDEPENDENT-PARTY-ONE')}],
+      retainedDraftTerms:[{orderItemId:relayLineId,terms:purchaseTerms(2,'TEST-ITERATED-SUPPLIER')}]},operator);
+    const branch=first.orders.find(po=>po.lines.some(row=>row.authorizationId===first.activities.at(-1)?.id))!;
+    expect(first.orders.find(po=>po.id===draft.id)).toMatchObject({status:'on_hold',remaining:[line(relayLineId,2)],
+      incidents:[{outstanding:one}],lines:[{authorizationId:origin}]});
+    const retained=purchaseTerms(1,'TEST-ITERATED-SUPPLIER');
+    const next={action:'resolve_change' as const,outcome:'declined' as const,requestId:'second-withdraw-one',
+      ...agreement('second-iterated-authority'),supplierSha256:undefined,coordinationLines:one,
+      retainedDraftTerms:[{orderItemId:relayLineId,terms:retained}],orderId,purchaseOrderId:draft.id,version:(await current(draft.id)).version};
+    const preview=await prisma.$transaction(tx=>previewPurchaseAction(tx,next,operator));
+    const confirm=()=>prisma.$transaction(tx=>applyPurchaseAction(tx,{...next,actionHash:preview.actionHash},operator));
+    const finished=await confirm();
+    expect((await confirm()).activities).toEqual(finished.activities);
+    expect(finished.orders.find(po=>po.id===draft.id)).toMatchObject({status:'draft',remaining:[line(relayLineId,1)],incidents:[],lines:[{authorizationId:origin}]});
+    expect(finished.orders.find(po=>po.id===branch.id)).toMatchObject({status:'draft',remaining:[line(relayLineId,1)],paidCents:0});
+    expect(finished.fulfillment.replacementsWithUnverifiedStockSource).toEqual([]);
+    expect(finished.activities.filter(row=>row.purchaseOrderId===original && row.action==='resolve_change')).toHaveLength(1);
+  });
 });

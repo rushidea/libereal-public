@@ -108,7 +108,7 @@ function mockAdmin(permissions: string[] | Promise<string[]>, startingInbound = 
       return Response.json({ order });
     }
     if (url === '/api/admin/fulfillment/notices') return Response.json({ notices: [notice], next: null });
-    if (url === fulfillmentPath && !init?.method) {
+    if ((url === fulfillmentPath || url.startsWith(fulfillmentPath+'?dispatchAt=')) && !init?.method) {
       reads.workspace += 1;
       return Response.json({ capabilities: { warehouse: Array.isArray(permissions) && permissions.includes('inventory.write'), shortfall: false }, workspace: {
         order: { id: orderId, status: 'confirmed', orderItems: [item] },
@@ -211,6 +211,25 @@ describe('fulfillment in the existing order pages', () => {
     expect(await queue.findByText(new RegExp(notice.reference))).toBeInTheDocument();
     expect(queue.getByText(/按运单核对原订单/)).toBeInTheDocument();
     expect(operations).toEqual([]);
+  });
+
+  it('uses the stated shipment time to look up former capacity and binds it to the normal waybill preview',async()=>{
+    const {operations} = mockAdmin(['orders.read','orders.write']);
+    const panel = await openAdminFulfillment();
+    fireEvent.click(await panel.findByText('登记采购发货或转发',{selector:'summary'}));
+    fireEvent.click(panel.getByLabelText('补录已实际发运的包裹'));
+    fill(panel,'要查询的实际发运时间',localTime);
+    expect(panel.queryByRole('button',{name:'预览发货'})).not.toBeInTheDocument();
+    fireEvent.click(panel.getByRole('button',{name:'核对当时可用的货物'}));
+    await panel.findByLabelText(/合成采购品.*可发 3/);
+    expect(panel.getByLabelText('实际发生时间（本地时间）')).toHaveAttribute('readonly');
+    fill(panel,/合成采购品.*可发 3/,'1');
+    fill(panel,'物流凭据出处','TEST-LATE-ORIGINAL-WAYBILL');
+    fill(panel,'物流凭据摘要',digest);
+    fireEvent.click(panel.getByRole('button',{name:'预览发货'}));
+    await screen.findByRole('region',{name:'物流操作预览'});
+    expect(operations[0]).toMatchObject({action:'dispatch',stage:'preview',input:{occurredAt:new Date(localTime).toISOString(),
+      reference:'TEST-LATE-ORIGINAL-WAYBILL',lines:[{purchaseOrderId,quantity:1}]}});
   });
 
   it('shows the source, recipient, SKU, quantity and proof before dispatch, then rereads the confirmed waybill', async () => {
