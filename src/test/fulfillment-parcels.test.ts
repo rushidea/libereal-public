@@ -240,7 +240,7 @@ describe('procurement-bound fulfillment parcels', () => {
     const [loss] = state.fulfillment.shortfalls;
     await purchaseAction(relay,{action:'report_change',requestId:'one-unit-missing',changeKind:'other',reference:loss.reference,description:agreement.description});
     const next = await purchaseAction(relay,{action:'resolve_change',requestId:'written-one-unit-fix',outcome:'shortfall',...agreement,
-      dispositions:[{orderItemId:relayLineId,quantity:1,outcome:decision==='free_resend'?'cancel':'replace',
+      confirmsFullIncidentScope: true, dispositions:[{orderItemId:relayLineId,quantity:1,outcome:decision==='free_resend'?'cancel':'replace',
         shortfallId:loss.resolutionId,shortfallDecision:decision,...(decision==='new_purchase'?{replacement}:{})}]});
     let supplies: DispatchLine = { ...original, resendApprovalId: next.fulfillment.freeResends[0]?.approvalId };
     if (decision === 'new_purchase') {
@@ -278,7 +278,7 @@ describe('procurement-bound fulfillment parcels', () => {
       const approved = await purchaseAction(relay,{action:'resolve_change',requestId:'written-repeated-resend-'+attempt,outcome:'shortfall',...agreement,
         supplierSha256:pricingContentHash({attempt,source:'written-supplier-resend'}),
         customerSha256:pricingContentHash({attempt,source:'written-customer-consent'}),
-        dispositions:[{orderItemId:relayLineId,quantity:1,outcome:'cancel',shortfallId:loss.resolutionId,shortfallDecision:'free_resend'}]});
+        confirmsFullIncidentScope: true, dispositions:[{orderItemId:relayLineId,quantity:1,outcome:'cancel',shortfallId:loss.resolutionId,shortfallDecision:'free_resend'}]});
       const authorization = approved.fulfillment.freeResends.find(row=>row.shortfallId===loss.resolutionId)!;
       parcel = await dispatch(dispatchInput('inbound-again-'+attempt,'supplier_to_libereal',[{...source,resendApprovalId:authorization.approvalId}]));
     }
@@ -320,7 +320,7 @@ describe('procurement-bound fulfillment parcels', () => {
       customerReference:'TEST-FRESH-CUSTOMER-SIGNED',customerSha256:'d'.repeat(64),
       action:'resolve_change' as const, outcome:'shortfall' as const, requestId:'fresh-scope-approval',
       ...(decision==='change_contract'?{refundFollowup:'原已付款待财务按实际归属核对'}:{}),
-      dispositions:[line],
+      confirmsFullIncidentScope: true, dispositions:[line],
     };
     await expect(purchaseAction(relay,{...change,dispositions:[{...line,quantity:2}]})).rejects.toThrow(/尚未发货或改办/);
     await expect(purchaseAction(relay,{...change,supplierSha256:agreement.supplierSha256})).rejects.toThrow(/新的供应商书面决定/);
@@ -379,7 +379,7 @@ describe('procurement-bound fulfillment parcels', () => {
     const [{ approvalId }] = authorized.fulfillment.freeResends;
     const redirect: PurchaseAction = {action:'resolve_change',requestId:'new-decision-for-one',outcome:'shortfall',...agreement,
       supplierSha256:'c'.repeat(64),customerSha256:'d'.repeat(64),description:'经核对只改办一件',
-      dispositions:[{orderItemId:relayLineId,quantity:1,outcome:'replace',replacement,shortfallId:loss.resolutionId,
+      confirmsFullIncidentScope: true, dispositions:[{orderItemId:relayLineId,quantity:1,outcome:'replace',replacement,shortfallId:loss.resolutionId,
         shortfallDecision:'new_purchase',revisesResendApprovalId:approvalId}]};
     await report('first-unused-unit-review');
     const changed = await purchaseAction(relay,redirect);
@@ -417,7 +417,7 @@ describe('procurement-bound fulfillment parcels', () => {
     async function authorizeTwoResends(purchaseOrderId:string, shortfallId:string, quantity:number) {
       await report(purchaseOrderId,'review-written-free');
       const result = await purchaseAction(purchaseOrderId,{action:'resolve_change',requestId:'authorize-written-free',outcome:'shortfall',...agreement,
-        dispositions:[{orderItemId:relayLineId,quantity,outcome:'cancel',shortfallId,shortfallDecision:'free_resend'}]});
+        confirmsFullIncidentScope: true, dispositions:[{orderItemId:relayLineId,quantity,outcome:'cancel',shortfallId,shortfallDecision:'free_resend'}]});
       return result.fulfillment.freeResends.find(row=>row.shortfallId===shortfallId)!;
     }
     async function commitReplacement(purchaseOrderId:string,tag:string) {
@@ -437,14 +437,14 @@ describe('procurement-bound fulfillment parcels', () => {
       const loss = await verifyLoss(original,'original');
       await report(relay,'new-order-after-first-physical-loss');
       const one = await purchaseAction(relay,{action:'resolve_change',requestId:'allow-first-separate-order',outcome:'shortfall',...agreement,
-        dispositions:[{orderItemId:relayLineId,quantity:1,outcome:'replace',shortfallId:loss.resolutionId,shortfallDecision:'new_purchase',
+        confirmsFullIncidentScope: true, dispositions:[{orderItemId:relayLineId,quantity:1,outcome:'replace',shortfallId:loss.resolutionId,shortfallDecision:'new_purchase',
           replacement:alternative('R1')}]});
       const r1 = one.orders.find(row=>row.lines.some(line=>line.fromPurchaseOrderId===relay))!;
       await commitReplacement(r1.id,'R1');
       await report(r1.id,'R1-unavailable-before-dispatch');
       const replacementGoods = alternative('R2');
       const two = await purchaseAction(r1.id,{action:'resolve_change',requestId:'allow-ordinary-R2',outcome:'replacement',...revisedAgreement,
-        dispositions:[{orderItemId:relayLineId,quantity:1,outcome:'replace',replacement:replacementGoods}]});
+        confirmsFullIncidentScope: true, dispositions:[{orderItemId:relayLineId,quantity:1,outcome:'replace',replacement:replacementGoods}]});
       const r2 = two.orders.find(row=>row.lines.some(line=>line.fromPurchaseOrderId===r1.id))!;
       await commitReplacement(r2.id,'R2');
       if (laterRoute === 'supplier_to_libereal') {
@@ -482,7 +482,7 @@ describe('procurement-bound fulfillment parcels', () => {
       await report(relay,'amend-same-contract-after-free-loss');
       const applied = await purchaseAction(relay,{action:'resolve_change',requestId:'approve-original-contract-change',outcome:'shortfall',...revisedAgreement,
         refundFollowup:'原已付款独立核对，按实有安排继续',
-        dispositions:[{orderItemId:relayLineId,quantity:1,outcome:'cancel',shortfallId:secondLoss.resolutionId,shortfallDecision:'change_contract'}]});
+        confirmsFullIncidentScope: true, dispositions:[{orderItemId:relayLineId,quantity:1,outcome:'cancel',shortfallId:secondLoss.resolutionId,shortfallDecision:'change_contract'}]});
       expect(applied.activities.at(-1)?.detail.snapshot).toMatchObject({operation:{
         dispositions:[{shortfallId:secondLoss.resolutionId,quantity:1,contractSource:secondLoss.contractSource}],
         refund:{status:'pending_review',paidCents:500,responsibleActor:approver.id},
@@ -507,17 +507,17 @@ describe('procurement-bound fulfillment parcels', () => {
       const shared = {action:'resolve_change' as const,outcome:'shortfall' as const,...agreement};
       const free = {orderItemId:relayLineId,quantity:1,shortfallId:loss.resolutionId,shortfallDecision:'free_resend' as const,outcome:'cancel' as const,...documents};
       await report(relay,'approve-one-of-two-free');
-      const first = await purchaseAction(relay,{...shared,requestId:'one-of-two-free-approved',dispositions:[free]});
+      const first = await purchaseAction(relay,{...shared,requestId:'one-of-two-free-approved',confirmsFullIncidentScope: true, dispositions:[free]});
       const [approval] = first.fulfillment.freeResends;
       expect(approval).toMatchObject({quantity:1,dispatched:0,available:1});
       await report(relay,'wrong-use-of-free-only-document');
-      await expect(purchaseAction(relay,{...shared,requestId:'move-free-to-other-purpose',dispositions:[{
+      await expect(purchaseAction(relay,{...shared,requestId:'move-free-to-other-purpose',confirmsFullIncidentScope: true, dispositions:[{
         ...free,outcome:decision==='new_purchase'?'replace':'cancel',shortfallDecision:decision,revisesResendApprovalId:approval.approvalId,
         ...(decision==='new_purchase'?{replacement:alternative('NOT-AUTHORIZED')}:{})}]})).rejects.toThrow(/商业决定、供方或实质条件已变化/);
       const inReview = await current();
       expect(inReview.fulfillment.freeResends[0].available).toBe(1);
       expect(inReview.orders.find(row=>row.id===relay)).toMatchObject({totalCents:5000,paidCents:0,remaining:[{orderItemId:relayLineId,quantity:2}]});
-      const samePurpose = await purchaseAction(relay,{...shared,requestId:'same-purpose-second-unit',dispositions:[free]});
+      const samePurpose = await purchaseAction(relay,{...shared,requestId:'same-purpose-second-unit',confirmsFullIncidentScope: true, dispositions:[free]});
       expect(samePurpose.fulfillment.freeResends).toHaveLength(2);
       expect(samePurpose.activities.at(-1)?.detail.snapshot).toMatchObject({operation:{decisionDocuments:[
         expect.objectContaining({authority:{purpose:'free_resend'},balances:[{...cover,usedBefore:1,using:1,remaining:0}]}),
@@ -537,7 +537,7 @@ describe('procurement-bound fulfillment parcels', () => {
       const chosen = alternative('APPROVED-BY-CUSTOMER');
       const redirect = (requestId:string,replacement:typeof chosen,customerSha256=revisedAgreement.customerSha256): PurchaseAction => ({
         action:'resolve_change',outcome:'shortfall',requestId,...revisedAgreement,customerSha256,
-        dispositions:[{orderItemId:relayLineId,quantity:1,outcome:'replace',shortfallId:loss.resolutionId,shortfallDecision:'new_purchase',
+        confirmsFullIncidentScope: true, dispositions:[{orderItemId:relayLineId,quantity:1,outcome:'replace',shortfallId:loss.resolutionId,shortfallDecision:'new_purchase',
           revisesResendApprovalId:approval.approvalId,replacement,supplierDocumentRow:8,customerDocumentRow:12,
           supplierDocumentScope:coverage,...(customerSha256===revisedAgreement.customerSha256?{customerDocumentScope:coverage}:{})}],
       });
@@ -585,7 +585,7 @@ describe('procurement-bound fulfillment parcels', () => {
         await report(claim.purchaseOrderId,'precise-scope-'+tag);
         return purchaseAction(claim.purchaseOrderId,{action:'resolve_change',requestId:'consent-only-two-'+tag,outcome:'shortfall',...revisedAgreement,
           supplierSha256:pricingContentHash({tag,scope:'specific supplier confirmation'}),
-          dispositions:[{orderItemId:claim.orderItemId,quantity:1,shortfallId:claim.shortfallId,shortfallDecision:'free_resend',outcome:'cancel',
+          confirmsFullIncidentScope: true, dispositions:[{orderItemId:claim.orderItemId,quantity:1,shortfallId:claim.shortfallId,shortfallDecision:'free_resend',outcome:'cancel',
             customerDocumentRow:9,...(tag==='A'?{customerDocumentScope:[a,b]}:{})}]});
       };
       await authorize(a,'A');
@@ -609,11 +609,11 @@ describe('procurement-bound fulfillment parcels', () => {
       const common = {action:'resolve_change' as const,...revisedAgreement,refundFollowup:'原定金及可能的退款各按原书证待核。'};
       await report(relay,'supplier-reduces-first-unit');
       const first = await purchaseAction(relay,{...common,outcome:loss?'shortfall':'declined',requestId:'supplier-reduce-customer-stop-one',
-        dispositions:[{...line,outcome:'cancel',customerDocumentRow:12}]});
+        confirmsFullIncidentScope: true, dispositions:[{...line,outcome:'cancel',customerDocumentRow:12}]});
       expect(first.orders.find(row=>row.id===relay)).toMatchObject({paidCents:500,dueCents:null,remaining:[{orderItemId:relayLineId,quantity:1}]});
       await report(relay,'supplier-reduces-second-unit');
       const second = await purchaseAction(relay,{...common,outcome:loss?'shortfall':'replacement',requestId:'supplier-reduce-customer-alternate-one',
-        dispositions:[{...line,outcome:'replace',replacement:alternative('AFTER-CONTRACT-REDUCTION'),customerDocumentRow:13}]});
+        confirmsFullIncidentScope: true, dispositions:[{...line,outcome:'replace',replacement:alternative('AFTER-CONTRACT-REDUCTION'),customerDocumentRow:13}]});
       expect(second.orders.find(row=>row.id===relay)).toMatchObject({paidCents:500,totalCents:5000,remaining:[]});
       expect(second.orders.find(row=>row.lines.some(item=>item.fromPurchaseOrderId===relay))).toMatchObject({status:'draft',approvedHash:null,paidCents:0});
       expect(second.activities.find(row=>row.id===firstPayment?.id)).toEqual(firstPayment);
@@ -628,9 +628,10 @@ describe('procurement-bound fulfillment parcels', () => {
       const {relay} = await orderFromSuppliers();
       const subject = {orderId,purchaseOrderId:relay,orderItemId:relayLineId,quantity:2};
       const paper = {orderItemId:relayLineId,supplierDocumentRow:8,customerDocumentRow:12,supplierDocumentScope:[subject],customerDocumentScope:[subject]};
-      const continuation = {action:'resolve_change' as const,outcome:'original_terms' as const,...agreement,decisionDocumentLines:[paper]};
+      const continuation = {action:'resolve_change' as const,outcome:'original_terms' as const,...agreement,decisionDocumentLines:[paper],
+        affectedLines:[{orderItemId:relayLineId,quantity:first==='continue_first'?2:1}]};
       const reduction = {action:'resolve_change' as const,outcome:'declined' as const,...agreement,
-        dispositions:[{...paper,quantity:1,outcome:'cancel' as const}]};
+        confirmsFullIncidentScope: true, dispositions:[{...paper,quantity:1,outcome:'cancel' as const}]};
       await report(relay,'supplier-first-contract-decision');
       if (first === 'continue_first') {
         const continued = await purchaseAction(relay,{...continuation,requestId:'approve-original-terms'});
@@ -660,7 +661,7 @@ describe('procurement-bound fulfillment parcels', () => {
       const cover = {orderId,purchaseOrderId:relay,orderItemId:relayLineId,shortfallId:loss.resolutionId,quantity:2};
       const redirect = (tag:string,supplierDocumentRow:number,customerDocumentRow:number): PurchaseAction => ({
         action:'resolve_change',requestId:'approve-lineage-doc-row-'+tag,outcome:'shortfall',...revisedAgreement,
-        dispositions:[{orderItemId:relayLineId,quantity:1,outcome:'replace',shortfallId:loss.resolutionId,
+        confirmsFullIncidentScope: true, dispositions:[{orderItemId:relayLineId,quantity:1,outcome:'replace',shortfallId:loss.resolutionId,
           shortfallDecision:'new_purchase',revisesResendApprovalId:approval.approvalId,replacement:alternative(tag),
           supplierDocumentRow,customerDocumentRow,...(sharedSupplier?{supplierDocumentScope:[cover]}:{})}],
       });
@@ -716,7 +717,7 @@ describe('procurement-bound fulfillment parcels', () => {
     const resolve = (row:typeof actual[number], tag:number) => purchaseAction(row.purchaseOrderId,{
       action:'resolve_change',requestId:'scope-confirm-'+tag,outcome:'shortfall',...agreement,...buyerFile,
       supplierSha256:pricingContentHash({tag,proof:'specific-supplier-authorization'}),
-      dispositions:[{orderItemId:row.orderItemId,shortfallId:row.shortfallId,quantity:1,outcome:'cancel',shortfallDecision:'free_resend',
+      confirmsFullIncidentScope: true, dispositions:[{orderItemId:row.orderItemId,shortfallId:row.shortfallId,quantity:1,outcome:'cancel',shortfallDecision:'free_resend',
         customerDocumentRow:10,...(tag===0?{customerDocumentScope:coverage}:{})}],
     });
     await resolve(actual[0],0);
@@ -852,7 +853,7 @@ describe('procurement-bound fulfillment parcels', () => {
     await expect(purchaseAction(relay,{ action:'resolve_change',requestId:'cannot-cancel-traveling-supply',outcome:'declined',...decision,
       dispositions:[{orderItemId:relayLineId,quantity:1,outcome:'cancel'}],refundFollowup:'原款核对' })).rejects.toThrow(/尚未发出/);
     await purchaseAction(relay,{ action:'resolve_change',requestId:'release-inbound-review',outcome:'original_terms',...decision,
-      supplierSha256:pricingContentHash('supplier-confirms-inbound-original-contract'),
+      affectedLines:[{orderItemId:relayLineId,quantity:2}],supplierSha256:pricingContentHash('supplier-confirms-inbound-original-contract'),
       customerSha256:pricingContentHash('customer-confirms-inbound-original-contract') });
     await event(inbound.id,eventInput('one-actual-inbound-unit','warehouse_receipt',[{parcelLineId:inbound.lines[0].id,quantity:1,batchNumber:receivedLotA}]));
     const shortage = (tag:string, parcelLineId:string, outcome:string) => ({
@@ -871,7 +872,7 @@ describe('procurement-bound fulfillment parcels', () => {
         description:'核对供应商免费重发决定'});
       const resolved = await purchaseAction(purchaseOrderId,{action:'resolve_change',requestId:'approve-'+tag,outcome:'shortfall',...decision,
         supplierSha256:pricingContentHash({tag,source:'supplier-resend'}),customerSha256:pricingContentHash({tag,source:'customer-consent'}),
-        dispositions:[{orderItemId,quantity:1,outcome:'cancel',shortfallId:loss.resolutionId,shortfallDecision:'free_resend'}]});
+        confirmsFullIncidentScope: true, dispositions:[{orderItemId,quantity:1,outcome:'cancel',shortfallId:loss.resolutionId,shortfallDecision:'free_resend'}]});
       expect(resolved.fulfillment.shortfalls.find(row=>row.resolutionId===loss.resolutionId)?.available).toBe(0);
       const approval = resolved.fulfillment.freeResends.find(row=>row.shortfallId===loss.resolutionId)!;
       expect(approval.available).toBe(1);
@@ -896,7 +897,7 @@ describe('procurement-bound fulfillment parcels', () => {
       dispositions:[{orderItemId:directLineId,quantity:1,outcome:'replace',shortfallId:alreadyClaimed.resolutionId,shortfallDecision:'new_purchase'}],
     })).rejects.toThrow(/尚未使用的实际物流书证/);
     await purchaseAction(direct,{action:'resolve_change',requestId:'confirm-keeping-free-approval',outcome:'original_terms',...decision,
-      supplierSha256:pricingContentHash('supplier-confirms-original-direct-contract'),
+      affectedLines:[{orderItemId:directLineId,quantity:1}],supplierSha256:pricingContentHash('supplier-confirms-original-direct-contract'),
       customerSha256:pricingContentHash('customer-confirms-original-direct-contract')});
     await expect(dispatch(dispatchInput('wrong-free-decision','supplier_to_customer',[
       {purchaseOrderId:direct,orderItemId:directLineId,quantity:1,resendApprovalId:warehouseApproval},
@@ -919,7 +920,7 @@ describe('procurement-bound fulfillment parcels', () => {
     expect(loss).toMatchObject({purchaseOrderId:relay,available:1});
     const followUp = (requestId:string):PurchaseAction => ({
       action:'resolve_change',requestId,outcome:'shortfall',...decision,
-      dispositions:[{orderItemId:relayLineId,quantity:1,outcome:'replace',shortfallId:loss.resolutionId,shortfallDecision:'new_purchase',replacement:{
+      confirmsFullIncidentScope: true, dispositions:[{orderItemId:relayLineId,quantity:1,outcome:'replace',shortfallId:loss.resolutionId,shortfallDecision:'new_purchase',replacement:{
         name:'合成补发品',brand:'合成品牌',catalogNumber:'TEST-B3-REPLACEMENT-CATALOG',spec:'合成规格',unit:'件',
         terms:purchaseTerms(1,'TEST-B3-SEPARATE-REPLACEMENT-SUPPLIER'),
       }}],
@@ -950,7 +951,7 @@ describe('procurement-bound fulfillment parcels', () => {
     const [loss]=state.fulfillment.shortfalls;
     await purchaseAction(relay,{action:'report_change',requestId:'report-mixed-resend',changeKind:'other',reference:loss.reference,description:agreement.description});
     const approved=await purchaseAction(relay,{action:'resolve_change',requestId:'approve-mixed-resend',outcome:'shortfall',...agreement,
-      dispositions:[{orderItemId:relayLineId,quantity:1,outcome:'cancel',shortfallId:loss.resolutionId,shortfallDecision:'free_resend'}]});
+      confirmsFullIncidentScope: true, dispositions:[{orderItemId:relayLineId,quantity:1,outcome:'cancel',shortfallId:loss.resolutionId,shortfallDecision:'free_resend'}]});
     const [resend]=approved.fulfillment.freeResends;
     const together=await dispatch(dispatchInput('normal-and-free-in-one','supplier_to_customer',[ordinary,{...ordinary,resendApprovalId:resend.approvalId}]));
     expect(together.lines).toHaveLength(2);
@@ -990,7 +991,7 @@ describe('procurement-bound fulfillment parcels', () => {
     await purchaseAction(relay,{action:'report_change',requestId:'document-actual-amendment',changeKind:'other',
       reference:paperwork.supplierReference,description:'原合同确已减量，尚余实际收到的一件。'});
     const result=await purchaseAction(relay,{action:'resolve_change',requestId:'apply-actual-amendment',outcome:'shortfall',...paperwork,
-      dispositions:[{orderItemId:relayLineId,quantity:1,outcome:'cancel',shortfallId:loss.resolutionId,shortfallDecision:'change_contract'}],
+      confirmsFullIncidentScope: true, dispositions:[{orderItemId:relayLineId,quantity:1,outcome:'cancel',shortfallId:loss.resolutionId,shortfallDecision:'change_contract'}],
       refundFollowup:'已付定金由财务核对抵扣，待核实实际结果。'});
     expect(result.orders.find(row=>row.id===relay)).toMatchObject({dueCents:null,needsRemainingReview:true,paidCents:500});
     expect(result.orders).toHaveLength(2);
@@ -1050,7 +1051,7 @@ describe('procurement-bound fulfillment parcels', () => {
       await purchaseAction(relay,{action:'report_change',requestId:'review-free-final',changeKind:'unavailable',reference:loss.reference,
         description:agreement.description});
       const decision=await purchaseAction(relay,{action:'resolve_change',requestId:'allow-one-free-final',outcome:'shortfall',...agreement,
-        dispositions:[{orderItemId:relayLineId,quantity:1,outcome:'cancel',shortfallId:loss.resolutionId,shortfallDecision:'free_resend'}]});
+        confirmsFullIncidentScope: true, dispositions:[{orderItemId:relayLineId,quantity:1,outcome:'cancel',shortfallId:loss.resolutionId,shortfallDecision:'free_resend'}]});
       const [authorized]=decision.fulfillment.freeResends;
       const resend=await dispatch(dispatchInput('final-free-resend','supplier_to_customer',[
         {purchaseOrderId:relay,orderItemId:relayLineId,quantity:1,resendApprovalId:authorized.approvalId},
@@ -1192,5 +1193,193 @@ describe('procurement-bound fulfillment parcels', () => {
     expect(await prisma.creditAccount.findUniqueOrThrow({ where: { userId: buyer.id } })).toMatchObject({ usedAmount: originalCredit.usedAmount });
     expect(await prisma.creditTransaction.count({ where: { orderId, type: 'release' } })).toBe(0);
     expect(await prisma.pointsLog.count({ where: { userId: buyer.id, relatedId: orderId, type: 'order_credit' } })).toBe(0);
+  });
+});
+
+describe('actual scope of a supply incident', () => {
+  const current = async (id: string) => (await prisma.$transaction(tx=>purchaseWorkspace(tx,orderId))).orders.find(row=>row.id===id)!;
+  const line = (orderItemId: string, quantity: number) => ({orderItemId,quantity});
+  const goods = (purchaseOrderId: string, orderItemId: string, quantity = 1) => ({purchaseOrderId,orderItemId,quantity});
+  const agreement = (tag: string) => ({
+    supplierReference:'TEST-SUPPLY-LETTER-'+tag,supplierSha256:pricingContentHash({role:'supplier',tag}),
+    customerReference:'TEST-CUSTOMER-LETTER-'+tag,customerSha256:pricingContentHash({role:'customer',tag}),
+    description:'双方确认本次选定数量的处置，其余按原事实单独核对。',
+  });
+  const report = (id: string, tag: string, description: string, affectedLines?: PurchaseAction['affectedLines']) =>
+    purchaseAction(id,{action:'report_change',requestId:'report-'+tag,changeKind:'delay', reference:'TEST-INCIDENT-'+tag,description,affectedLines},operator);
+
+  async function groupedOrder(relayQuantity = 2) {
+    const supplier = 'TEST-GROUPED-SUPPLY';
+    for (const item of [line(directLineId,1),line(relayLineId,relayQuantity)]) {
+      await prisma.$transaction(async tx=>{
+        const source = (await purchaseWorkspace(tx,orderId)).lines.find(row=>row.orderItemId===item.orderItemId)!;
+        await savePurchaseLine(tx,{orderId,orderItemId:item.orderItemId,revision:source.revision,
+          terms:{...purchaseTerms(item.quantity,supplier),sourceReference:'TEST-GROUPED-QUOTE-'+item.orderItemId,
+            sourceSha256:pricingContentHash({item,supplier})},checkedEvidence:true},operator);
+      });
+    }
+    const {orders:[draft]}=await prisma.$transaction(tx=>purchaseWorkspace(tx,orderId));
+    await purchaseAction(draft.id,{action:'approve',requestId:'approve-grouped-supply'});
+    await purchaseAction(draft.id,{action:'register_order',requestId:'actual-grouped-supply',reference:'TEST-GROUPED-ORDER',
+      referenceSha256:pricingContentHash('real grouped synthetic order'),occurredAt:nextOccurrence()},operator);
+    return draft.id;
+  }
+
+  it.each([false,true])('continues the one delayed unit using only its evidence, with unrelated signed and inbound goods (grouped = %s)',async grouped=>{
+    await acceptCustomerOrder();
+    const id = grouped ? await groupedOrder() : (await orderFromSuppliers()).relay;
+    const shippedItem = grouped ? directLineId : relayLineId;
+    const sent = await dispatch(dispatchInput('original-already-sent','supplier_to_customer',[goods(id,shippedItem)]));
+    await event(sent.id,eventInput('confirmed-original-signed','customer_delivery',[{parcelLineId:sent.lines[0].id,quantity:1}]));
+    const inbound = grouped ? await dispatch(dispatchInput('original-already-inbound','supplier_to_libereal',[goods(id,relayLineId)])) : null;
+    if (grouped) {
+      await expect(report(id,'wrong-delayed-line','已签收的 A 不应作为新的延误处理。',[line(directLineId,1)]))
+        .rejects.toThrow(/超出对应采购行/);
+    }
+    const delayed = line(relayLineId,1);
+    const reported = await report(id,'only-one-delayed','仅剩一件延期，已实收及在途的商品照原记录。',[delayed]);
+    expect(reported.orders.find(po=>po.id===id)?.incident).toMatchObject({reportedBy:operator.id,scope:[delayed],outstanding:[delayed]});
+    const subject = {...delayed,orderId,purchaseOrderId:id};
+    const resolved = await purchaseAction(id,{action:'resolve_change',requestId:'continue-real-one',outcome:'original_terms',...agreement('one-only'),
+      decisionDocumentLines:[{orderItemId:relayLineId,supplierDocumentRow:8,customerDocumentRow:13,
+        supplierDocumentScope:[subject],customerDocumentScope:[subject]}]});
+    expect(resolved.orders.find(po=>po.id===id)).toMatchObject({status:'ordered',incident:null,paidCents:0});
+    expect(resolved.activities.at(-1)?.detail.snapshot).toMatchObject({operation:{
+      incidentProgress:{scope:[delayed],handled:[delayed],outstanding:[]},
+      supplyFacts:[{orderItemId:relayLineId,customerReceived:grouped?0:1,warehouseTransit:grouped?1:0,shortfalls:[]}],
+      decisionDocuments:[
+        {role:'supplier',row:8,balances:[{...subject,using:1,remaining:0}]},
+        {role:'customer',row:13,balances:[{...subject,using:1,remaining:0}]},
+      ],
+    }});
+    const parcels = (await workspace()).parcels;
+    expect(parcels.find(parcel=>parcel.id===sent.id)).toMatchObject({status:'delivered'});
+    if (inbound) expect(parcels.find(parcel=>parcel.id===inbound.id)).toMatchObject({status:'dispatched'});
+  });
+
+  it('lets an unaffected line dispatch during an actual PO delay but keeps the held units blocked',async()=>{
+    await acceptCustomerOrder();
+    const id = await groupedOrder();
+    const affected = line(relayLineId,1);
+    await purchaseAction(id,{action:'record_payment',requestId:'original-deposit',reference:'TEST-ORIGINAL-BANK-PAYMENT',amountCents:500,
+      conditionReference:'TEST-ORIGINAL-DEPOSIT-CONDITION'});
+    const held = (await report(id,'one-line-partial-hold','B 有一件延迟，另一件和 A 仍按原承诺。',[affected])).orders.find(row=>row.id===id)!;
+    expect((await workspace()).purchases).toEqual([
+      expect.objectContaining({purchaseOrderId:id,orderItemId:directLineId,available:1}),
+      expect.objectContaining({purchaseOrderId:id,orderItemId:relayLineId,available:1}),
+    ]);
+    await expect(dispatch(dispatchInput('try-both-one-held','supplier_to_customer',[goods(id,relayLineId,2)]))).rejects.toThrow(/发货数量/);
+    const first = await dispatch(dispatchInput('send-unaffected-a','supplier_to_customer',[goods(id,directLineId)]));
+    const second = await dispatch(dispatchInput('send-unaffected-b-unit','supplier_to_libereal',[goods(id,relayLineId)]));
+    await expect(dispatch(dispatchInput('try-held-b-unit','supplier_to_customer',[goods(id,relayLineId)]))).rejects.toThrow(/发货数量/);
+    expect(first.lines).toMatchObject([{purchaseOrderId:id,orderItemId:directLineId,quantity:1}]);
+    expect(second.lines).toMatchObject([{purchaseOrderId:id,orderItemId:relayLineId,quantity:1}]);
+    expect(await current(id)).toMatchObject({openIncidentId:held.openIncidentId,status:'on_hold',paidCents:500,dueCents:7000,
+      incident:{outstanding:[affected]}});
+    expect(await prisma.accountReceivable.findUniqueOrThrow({where:{orderId}})).toMatchObject({status:'open',paidAt:null});
+  });
+
+  it('forwards the received batch of a partially delayed purchase line without releasing its other unit',async()=>{
+    await acceptCustomerOrder();
+    const {relay:id} = await orderFromSuppliers();
+    const inbound = await dispatch(dispatchInput('one-purchase-unit-arrived','supplier_to_libereal',[goods(id,relayLineId)]));
+    await event(inbound.id,eventInput('actual-inbound-receipt-before-delay','warehouse_receipt',[
+      {parcelLineId:inbound.lines[0].id,quantity:1,batchNumber:receivedLotA},
+    ]));
+    const received = await receipt(inbound.lines[0].id,receivedLotA);
+    const affected = line(relayLineId,1);
+    await expect(report(id,'do-not-hold-actual-receipt','供方已交仓的货不能计作缺货。',[line(relayLineId,2)]))
+      .rejects.toThrow(/超出对应采购行/);
+    const held = await report(id,'the-other-unit-is-delayed','供方仅余下一件延期，仓库已实收一件继续按原计划转发。',[affected]);
+    expect(held.activities.at(-1)?.detail.snapshot).toMatchObject({operation:{supplyFacts:[
+      {orderItemId:relayLineId,supplierReceived:1,warehouseReceived:1,warehouseTransit:0,customerReceived:0},
+    ]}});
+    const view = await workspace();
+    expect(view.purchases.find(po=>po.purchaseOrderId===id)).toMatchObject({available:0});
+    expect(view.receipts).toMatchObject([{id:received.id,orderItemId:relayLineId,available:1}]);
+    const forwarded = await dispatch(dispatchInput('forward-real-received-unit','libereal_to_customer',[
+      {...goods(id,relayLineId),sourceReceiptId:received.id},
+    ]));
+    await event(forwarded.id,eventInput('actual-customer-sign-for-forwarded','customer_delivery',[{parcelLineId:forwarded.lines[0].id,quantity:1}]));
+    await expect(dispatch(dispatchInput('try-supplier-delayed-unit','supplier_to_customer',[goods(id,relayLineId)]))).rejects.toThrow(/发货数量/);
+    expect(await current(id)).toMatchObject({status:'on_hold',incident:{outstanding:[affected]}});
+    const review = await prisma.$transaction(tx=>purchaseWorkspace(tx,orderId));
+    expect(review.fulfillment.supplierReceived).toEqual([{purchaseOrderId:id,orderItemId:relayLineId,quantity:1}]);
+    expect(review.fulfillment.customerReceived).toEqual(review.fulfillment.supplierReceived);
+    expect((await workspace()).receipts).toEqual([]);
+  });
+
+  it('requires the old scope to be verified, applies only the selected effects, and keeps remaining payable independent',async()=>{
+    await acceptCustomerOrder();
+    const id = await groupedOrder();
+    await purchaseAction(id,{action:'record_payment',requestId:'older-paid-deposit',reference:'TEST-OLD-DEPOSIT',amountCents:500,
+      conditionReference:'TEST-ORIGINAL-DEPOSIT-CLAUSE'});
+    const deposit = (await current(id)).ledger.find(row=>row.action==='record_payment');
+    const a = line(directLineId,1), b = line(relayLineId,2), oneB = line(relayLineId,1);
+    const old = (await report(id,'historical-without-scope','原反馈注明 A 与 B 的未交货均待核对，A 一件与 B 两件。')).orders.find(row=>row.id===id)!;
+    const cancel = {action:'resolve_change' as const,outcome:'declined' as const,...agreement('cancel-one-b'),
+      dispositions:[{...oneB,outcome:'cancel' as const}],refundFollowup:'已付 500 分保留，另行核对抵扣和未决退款。'};
+    await expect(purchaseAction(id,{...cancel,requestId:'cannot-close-rest-on-implicit-b'})).rejects.toThrow(/原供货事项全部涉及/);
+    expect((await current(id)).incident).toMatchObject({id:old.openIncidentId,scope:null,outstanding:null});
+    expect((await workspace()).purchases).toEqual([]);
+
+    const seller = {...b,orderId,purchaseOrderId:id}, customer = {...oneB,orderId,purchaseOrderId:id};
+    const request = {action:'resolve_change' as const,outcome:'original_terms' as const,requestId:'confirmed-one-b-only',
+      orderId,purchaseOrderId:id,version:old.version,affectedLines:[a,b],coordinationLines:[oneB],...agreement('b-part-continues'),
+      responsibility:'采购经办应向原供方核对第二件 B 和 A。',
+      decisionDocumentLines:[{orderItemId:relayLineId,supplierDocumentRow:8,customerDocumentRow:13,supplierDocumentScope:[seller],
+        customerDocumentScope:[customer]}]};
+    const overview = await prisma.$transaction(tx=>previewPurchaseAction(tx,request,approver));
+    const confirm = () => prisma.$transaction(tx=>applyPurchaseAction(tx,{...request,actionHash:overview.actionHash},approver));
+    const first = await confirm();
+    expect((await confirm()).activities).toEqual(first.activities);
+    expect(first.activities.at(-1)?.detail.snapshot).toMatchObject({operation:{incidentProgress:{scopeBasis:'reviewed',scope:[a,b],
+      handled:[oneB],outstanding:[a,oneB]},decisionDocuments:[
+        {role:'supplier',row:8,balances:[{...seller,using:1,remaining:1}]},
+        {role:'customer',row:13,balances:[{...customer,using:1,remaining:0}]},
+      ]}});
+    expect(await current(id)).toMatchObject({status:'on_hold',paidCents:500,incident:{id:old.openIncidentId,scope:[a,b],
+      outstanding:[a,oneB],reportedBy:operator.id,lastReviewedBy:approver.id}});
+
+    const reduced = await purchaseAction(id,{...cancel,requestId:'actual-disposition-for-b'});
+    expect(reduced.orders.find(row=>row.id===id)).toMatchObject({status:'on_hold',remaining:[a,oneB],paidCents:500,
+      dueCents:null,needsRemainingReview:true,canApproveRemaining:false,incident:{id:old.openIncidentId,outstanding:[a]}});
+    expect((await workspace()).purchases).toEqual([]);
+    await purchaseAction(id,{action:'resolve_change',outcome:'original_terms',requestId:'remaining-a-can-continue',...agreement('a-continues')});
+    expect(await current(id)).toMatchObject({status:'on_hold',incident:null,paidCents:500,dueCents:null,
+      needsRemainingReview:true,canApproveRemaining:true});
+    const newPayable = await purchaseAction(id,{action:'approve_remaining',requestId:'separately-approve-actual-balance',
+      reference:'TEST-VERIFIED-REMAINING-PAYABLE',referenceSha256:pricingContentHash('verified remainder for A and B'),
+      description:'逐行核对原剩余商品金额及实际定金部分抵扣。',
+      remainingLines:[{orderItemId:directLineId,payableCents:2500},{orderItemId:relayLineId,payableCents:2500}],appliedPaidCents:300});
+    expect(newPayable.orders.find(row=>row.id===id)).toMatchObject({status:'ordered',remaining:[a,oneB],totalCents:7500,paidCents:500,dueCents:4700});
+    expect(newPayable.activities.find(row=>row.id===deposit?.id)).toEqual(deposit);
+  });
+
+  it('can review actual delay after another quantity was already cancelled with a deposit unresolved',async()=>{
+    await prisma.orderItem.update({where:{id:relayLineId},data:{quantity:3}});
+    await prisma.order.update({where:{id:orderId},data:{subtotal:400,total:400}});
+    await acceptCustomerOrder();
+    const id = await groupedOrder(3);
+    await purchaseAction(id,{action:'record_payment',requestId:'prior-paid-deposit',reference:'TEST-PRIOR-PAID-DEPOSIT',amountCents:500,
+      conditionReference:'TEST-PRIOR-PAYMENT-CLAUSE'});
+    await report(id,'one-cancelled-first','B 的一件先按双方约定取消。',[line(relayLineId,1)]);
+    const cancellation = await purchaseAction(id,{action:'resolve_change',requestId:'agreed-reduction-first',outcome:'declined',...agreement('actual-earlier-change'),
+      dispositions:[{...line(relayLineId,1),outcome:'cancel'}],refundFollowup:'保留原款，财务单独核实尚未抵扣部分。'});
+    const originalCancellation = cancellation.activities.at(-1);
+    const delayed = line(relayLineId,2);
+    await report(id,'remaining-two-late','B 剩余两件延迟，A 仍按合同。',[delayed]);
+    const continued = await purchaseAction(id,{action:'resolve_change',outcome:'original_terms',requestId:'supply-continues-before-funding',
+      ...agreement('continue-existing-two')});
+    expect(continued.activities.at(-1)?.detail.snapshot).toMatchObject({operation:{previousStatus:'on_hold',
+      incidentProgress:{handled:[delayed],outstanding:[]}}});
+    expect(await current(id)).toMatchObject({status:'on_hold',incident:null,paidCents:500,dueCents:null,
+      needsRemainingReview:true,canApproveRemaining:true,remaining:[line(directLineId,1),delayed]});
+    const payable = await purchaseAction(id,{action:'approve_remaining',requestId:'check-financial-balance',
+      reference:'TEST-ORIGINAL-REMAINING-BALANCE',referenceSha256:pricingContentHash('working original items excluding the cancelled unit'),
+      description:'核实未取消商品与原定金中的有效抵扣。',
+      remainingLines:[{orderItemId:directLineId,payableCents:2500},{orderItemId:relayLineId,payableCents:5000}],appliedPaidCents:300});
+    expect(payable.orders.find(row=>row.id===id)).toMatchObject({status:'ordered',paidCents:500,dueCents:7200,remaining:[line(directLineId,1),delayed]});
+    expect(payable.activities.find(row=>row.id===originalCancellation?.id)).toEqual(originalCancellation);
   });
 });

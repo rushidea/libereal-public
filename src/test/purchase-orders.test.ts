@@ -274,7 +274,7 @@ describe('supplier commitments and customer fulfilment stay bound to actual evid
       const state = await submit(order.id,held,{
         ...written,action:'resolve_change',requestId:'approve-original-alternate-'+tag,outcome:'replacement',
         supplierSha256:pricingContentHash({tag,role:'original supplier'}),customerSha256:pricingContentHash({tag,role:'original customer'}),
-        dispositions:[{orderItemId:item.id,quantity:1,outcome:'replace',replacement:{
+        confirmsFullIncidentScope: true, dispositions:[{orderItemId:item.id,quantity:1,outcome:'replace',replacement:{
           name:'合成替代商品 '+tag,brand:'合成替代品牌',catalogNumber:'TEST-MATERIAL-ORIGINAL-ALTERNATE-'+tag,spec:'合成规格',unit:'件',
           terms:terms(1,{sourceReference:'TEST-MATERIAL-ORIGINAL-ALTERNATE-QUOTE-'+tag,sourceSha256:pricingContentHash({tag,proof:'original replacement quote'})}),
         }}],
@@ -295,7 +295,7 @@ describe('supplier commitments and customer fulfilment stay bound to actual evid
         orderId:order.id,purchaseOrderId:alternate.id,version:review.version,action:'resolve_change' as const,
         requestId:'accept-new-replacement-price-'+index,outcome:'revised_terms' as const,supplierReference:'TEST-REPLACEMENT-NEW-SUPPLIER-TERMS-'+index,
         customerReference:'TEST-REPLACEMENT-NEW-CUSTOMER-DECISION',description:'按客户各行新的书面决定重新确认价格。',
-        revisedTerms:[{orderItemId:item.id,terms:changed}],
+        confirmsFullIncidentScope: true, revisedTerms:[{orderItemId:item.id,terms:changed}],
       };
       await expect(prisma.$transaction(tx=>previewPurchaseAction(tx,request,preparer))).rejects.toThrow(/替代条件变更后客户同意/);
       if (index===0) {
@@ -348,7 +348,7 @@ describe('supplier commitments and customer fulfilment stay bound to actual evid
     const replace = (quantity: number, requestId: string): ActionRequest => ({
       action: 'resolve_change', outcome: 'replacement', requestId, ...written,
       supplierSha256: pricingContentHash({requestId,source:'supplier'}), customerSha256: pricingContentHash({requestId,source:'customer'}),
-      dispositions: [{ orderItemId: item.id, quantity, outcome: 'replace', replacement: {
+      confirmsFullIncidentScope: true, dispositions: [{ orderItemId: item.id, quantity, outcome: 'replace', replacement: {
         name: `合成替代商品 ${requestId}`, brand: '合成品牌', catalogNumber: `TEST-${requestId}`, spec: '合成规格', unit: '件',
         terms: terms(quantity, { sourceReference: `TEST-QUOTE-${requestId}`, sourceSha256: pricingContentHash(requestId) }),
       } }],
@@ -388,7 +388,7 @@ describe('supplier commitments and customer fulfilment stay bound to actual evid
     const [ordered] = (await register(order.id, approved, 'register-shipping-original')).orders;
     const replace = (quantity: number, id: string): ActionRequest => ({ action: 'resolve_change', outcome: 'replacement', requestId: id, ...written,
       supplierSha256: pricingContentHash({id,source:'supplier'}), customerSha256: pricingContentHash({id,source:'customer'}),
-      dispositions: [{ orderItemId: item.id, quantity, outcome: 'replace', replacement: {
+      confirmsFullIncidentScope: true, dispositions: [{ orderItemId: item.id, quantity, outcome: 'replace', replacement: {
         name: '合成替代商品', brand: '合成品牌', catalogNumber: 'TEST-ALTERNATE-SHIP', spec: '合成规格', unit: '件',
         terms: terms(quantity, { sourceSha256: pricingContentHash(id) }),
       } }],
@@ -460,7 +460,7 @@ describe('supplier commitments and customer fulfilment stay bound to actual evid
     const [held] = (await hold(order.id, ordered, 'book-scope-change')).orders;
     const replacement = (sourceDocumentRow: number, requestId: string): ActionRequest => ({
       ...written, action: 'resolve_change', outcome: 'replacement', requestId,
-      dispositions: [{ orderItemId: order.orderItems[0].id, quantity: 1, outcome: 'replace', replacement: {
+      confirmsFullIncidentScope: true, dispositions: [{ orderItemId: order.orderItems[0].id, quantity: 1, outcome: 'replace', replacement: {
         name: '合成替代规格', brand: '合成品牌', catalogNumber: 'TEST-SCOPE-SKU-2', spec: '不同合成规格', unit: '件',
         terms: terms(1, { sourceSha256: quoted.sourceSha256, validUntil: quoted.validUntil, sourceDocumentKind: 'multiple_items', sourceDocumentRow }),
       } }],
@@ -484,7 +484,7 @@ describe('supplier commitments and customer fulfilment stay bound to actual evid
     const before = orderedBefore ? (await register(order.id, deposited, 'register-before-partial-cancellation')).orders[0] : deposited;
     const [held] = (await hold(order.id, before, 'partial-cancellation')).orders;
     const [adjusted] = (await submit(order.id, held, { action: 'resolve_change', requestId: 'agreed-partial-cancellation', outcome: 'declined',
-      ...written, refundFollowup: '财务核对原款与退款安排。', dispositions: [{ orderItemId: cancelled.id, quantity: 2, outcome: 'cancel' }],
+      ...written, refundFollowup: '财务核对原款与退款安排。', confirmsFullIncidentScope: true, dispositions: [{ orderItemId: cancelled.id, quantity: 2, outcome: 'cancel' }],
     })).orders;
     expect(adjusted).toMatchObject({ totalCents: 4125, paidCents: 1200, dueCents: null, needsRemainingReview: true,
       remaining: [{ orderItemId: unaffected.id, quantity: 1 }] });
@@ -526,7 +526,7 @@ describe('supplier commitments and customer fulfilment stay bound to actual evid
         action: 'resolve_change', requestId, outcome: 'replacement', ...written,
         supplierSha256: pricingContentHash({requestId,source:'supplier'}), customerSha256: pricingContentHash({requestId,source:'customer'}),
         refundFollowup: '核对原付款、费用和退款。',
-        dispositions: [{ orderItemId: item.id, quantity, outcome: 'replace', replacement: {
+        confirmsFullIncidentScope: true, dispositions: [{ orderItemId: item.id, quantity, outcome: 'replace', replacement: {
           name: '合成替代品', brand: '合成品牌', catalogNumber: `TEST-SUB-${requestId}`, spec: '测试规格', unit: '件',
           terms: terms(quantity, { sourceSha256: pricingContentHash(requestId), sourceReference: `TEST-QUOTE-${requestId}` }),
         } }],
@@ -549,7 +549,7 @@ describe('supplier commitments and customer fulfilment stay bound to actual evid
         outcome: 'declined', ...written, refundFollowup: '部分取消后核对已付定金。',
         supplierSha256: pricingContentHash('changed-supplier-decision-for-child'),
         customerSha256: pricingContentHash('changed-customer-decision-for-child'),
-        dispositions: [{ orderItemId: item.id, outcome: 'cancel', quantity: 1 }],
+        confirmsFullIncidentScope: true, dispositions: [{ orderItemId: item.id, outcome: 'cancel', quantity: 1 }],
       }));
       expect(partial).toMatchObject({ commitmentState: 'pending', needsRemainingReview: true, canApproveRemaining: false });
       const followup = '书面确认整笔取消，按供方档案核对原定金与取消事宜，待财务确认实际结果。';
@@ -639,7 +639,7 @@ describe('supplier commitments and customer fulfilment stay bound to actual evid
         const [beforeCancellation] = sequence === 'during the change' ? (await verifyLiability(incident)).orders : [incident];
         const [cancelled] = (await submit(order.id, beforeCancellation, { action: 'resolve_change', requestId: 'agree-cancel-one',
           outcome: 'declined', ...written, refundFollowup: '定金单据继续留存，未抵扣款列入退款待核。',
-          dispositions: [{ orderItemId: item.id, quantity: 1, outcome: 'cancel' }],
+          confirmsFullIncidentScope: true, dispositions: [{ orderItemId: item.id, quantity: 1, outcome: 'cancel' }],
         })).orders;
         const liabilityPending = sequence === 'after cancellation' || sequence === 'an archived ordered header';
         expect(cancelled).toMatchObject({ status: 'on_hold', dueCents: null, paidCents: 900, needsRemainingReview: true,
@@ -978,7 +978,7 @@ describe('purchase preparation from an accepted customer order', () => {
       reference: 'TEST-NATIVE-SHORTAGE', description: '原报价的一部分货物缺货。' })).orders;
     await expect(submit(order.id, held, { action: 'resolve_change', requestId: 'deny-native-book-on-new-product', outcome: 'replacement',
       supplierReference: 'TEST-SUPPLIER-NATIVE-CHANGE', supplierSha256: 'b'.repeat(64), customerReference: 'TEST-CUSTOMER-NATIVE-CHANGE', customerSha256: 'd'.repeat(64),
-      description: '需要独立书面替代报价。', dispositions: [{ orderItemId: requirement.orderItemId, quantity: 1, outcome: 'replace', replacement: {
+      description: '需要独立书面替代报价。', confirmsFullIncidentScope: true, dispositions: [{ orderItemId: requirement.orderItemId, quantity: 1, outcome: 'replace', replacement: {
         name: '合成不同商品', brand: '不同合成品牌', catalogNumber: 'TEST-NEW-ITEM', spec: '替代规格', unit: '件',
         terms: { ...verified.lines[0].terms, linePayableCents: 1375 },
       } }],
@@ -1166,6 +1166,7 @@ describe('purchase order approval and execution records', () => {
 
     await submit(order.id, held, {
       action: 'resolve_change', requestId: 'test-resolve-original', outcome: 'original_terms',
+      affectedLines:[{orderItemId:order.orderItems[0].id,quantity:2}],
       supplierReference: 'TEST-SUPPLIER-ORIGINAL-TERMS', customerReference: 'TEST-CUSTOMER-ORIGINAL-TERMS',
       supplierSha256: 'a'.repeat(64), customerSha256: 'b'.repeat(64),
       description: '合成双方确认恢复原约定。',
@@ -1194,7 +1195,7 @@ describe('purchase order approval and execution records', () => {
     };
     const direction = { action: 'resolve_change', requestId: 'test-new-replacement', outcome: 'replacement', ...written,
       refundFollowup: '原付款留在原单，由财务核对退回凭据。',
-      dispositions: [{ orderItemId: order.orderItems[0].id, quantity: 1, outcome: 'replace', replacement }],
+      confirmsFullIncidentScope: true, dispositions: [{ orderItemId: order.orderItems[0].id, quantity: 1, outcome: 'replace', replacement }],
     } as const;
     await expect(submit(order.id, priceHold, {
       ...direction, requestId: 'test-no-excess-replacement',
@@ -1700,11 +1701,27 @@ describe('recorded customer acceptance and per-order funding', () => {
       const first = allDrafts.orders.find(row => row.lines[0].orderItemId === order.orderItems[0].id)!;
       const withApproval = await submit(order.id, first, { action: 'approve', requestId: 'test-active-authority' });
       vi.setSystemTime(new Date('2031-04-01T09:00:00.000Z'));
+      const item = order.orderItems[0].id;
       const withHold = await submit(order.id, withApproval.orders.find(row => row.id === first.id)!, {
         action: 'report_change', requestId: 'test-supplier-hold', changeKind: 'delay', reference: 'TEST-DELAY', description: '待核对原供方履约。',
+        affectedLines:[{orderItemId:item,quantity:2}],
       });
+      vi.setSystemTime(new Date('2031-04-01T10:00:00.000Z'));
+      const partiallyReleased = await submit(order.id, withHold.orders.find(row => row.id === first.id)!, {
+        action:'resolve_change',requestId:'test-release-only-one-unit',outcome:'original_terms',coordinationLines:[{orderItemId:item,quantity:1}],
+        supplierReference:'TEST-PARTIAL-SUPPLIER-REPLY',customerReference:'TEST-PARTIAL-CUSTOMER-REPLY',
+        supplierSha256:pricingContentHash('supplier continuation only for one unit'),customerSha256:pricingContentHash('customer continuation only for one unit'),
+        description:'仅一件核对完毕，另一件仍待核对。',
+      });
+      const stillHeld = partiallyReleased.orders.find(row=>row.id===first.id)!;
+      expect(stillHeld).toMatchObject({status:'on_hold',incident:{outstanding:[{orderItemId:item,quantity:1}]}});
+      vi.setSystemTime(new Date('2031-04-01T10:15:00.000Z'));
+      await expect(previewAction(order.id,stillHeld,{action:'register_order',requestId:'test-disallow-buy-after-partial-release',
+        reference:'TEST-COMMITMENT-DURING-PARTIAL-HOLD',referenceSha256:pricingContentHash('during partial hold'),
+        occurredAt:'2031-04-01T10:14:00.000Z'})).rejects.toThrow();
+
       vi.setSystemTime(new Date('2031-04-01T10:30:00.000Z'));
-      await submit(order.id, withHold.orders.find(row => row.id === first.id)!, {
+      await submit(order.id, stillHeld, {
         action: 'resolve_change', requestId: 'test-supplier-hold-release', outcome: 'original_terms',
         supplierReference: 'TEST-ORIGINAL-SUPPLIER-REPLY', customerReference: 'TEST-ORIGINAL-CUSTOMER-REPLY',
         supplierSha256: pricingContentHash('supplier-confirmed-continuing-this-approved-order'),

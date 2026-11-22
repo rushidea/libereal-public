@@ -49,7 +49,7 @@ function makeWorkspace(status?: Purchase['status'], lineChanges: Partial<Line> =
     id: purchaseId, status, version, revision: 4, contentHash: 'd'.repeat(64),
     approvedHash: status === 'draft' ? null : 'd'.repeat(64),
     totalCents: 8642, paidCents: 0, lines: [line], ledger: [], orderedBefore: status === 'ordered',
-    openIncidentId: status === 'on_hold' ? 'TEST-INCIDENT' : null, orderReceipt: null, leadTimeApproved: false,
+    openIncidentId: status === 'on_hold' ? 'TEST-INCIDENT' : null, incident: null, orderReceipt: null, leadTimeApproved: false,
     dueCents: 8642, remaining: [{ orderItemId, quantity: source.quantity }], remainingScope: null,
     needsRemainingReview: false, canApproveRemaining: false, needsLegacyReview: false, needsFundingReapproval: false, canRegisterOrder: status === 'approved',
     documentReviewLines: [], commitmentState: 'ordinary', commitmentExceptions: [], canRecordCommitmentException: false,
@@ -71,8 +71,8 @@ function makeWorkspace(status?: Purchase['status'], lineChanges: Partial<Line> =
     orderId, orderStatus: 'confirmed', cancellation: null, canPrepare: false, startReview,
     eligibility: { eligible: true, reason: null, basis: { acceptanceId: 'test-acceptance', receivableId: 'test-receivable',
       reserveId: 'test-credit-reserve', amount: 250, mode: 'credit', payment, planEvidenceId: null } },
-    lines: [line], orders: purchase ? [purchase] : [], activities: [],
-    fulfillment: { version, targets: [], delivered: [], historicalDelivered: [], supplierDispatched: [], shortfalls: [], freeResends: [], parcelLinesWithPriorHoldTransfer: [], replacementsWithPriorHoldTransfer: [], parcelLinesWithUnverifiedStockSource: [], replacementsWithUnverifiedStockSource: [], inconsistent: [], ledger: [] },
+    lines: [line], orders: purchase ? [purchase] : [], activities: [], customerRemaining:[{orderItemId,quantity:2}],
+    fulfillment: { version, targets: [], delivered: [], historicalDelivered: [], customerReceived: [], supplierReceived: [], warehouseReceived: [], warehouseTransit: [], supplierDispatched: [], shortfalls: [], freeResends: [], parcelLinesWithPriorHoldTransfer: [], replacementsWithPriorHoldTransfer: [], parcelLinesWithUnverifiedStockSource: [], replacementsWithUnverifiedStockSource: [], inconsistent: [], ledger: [] },
   };
 }
 
@@ -91,7 +91,10 @@ function preview(body: RequestBody, workspace: Workspace) {
         lines: purchase.lines.map(({ orderItemId, source, terms, revision }) => ({ orderItemId, source, terms, revision })),
         eligibility: workspace.eligibility,
         operation: { action, reference, description, conditionReference, amountCents, changeKind,
-          outcome, supplierReference, customerReference, revisedTerms, occurredAt, referenceSha256 },
+          outcome, supplierReference, customerReference, revisedTerms, occurredAt, referenceSha256,
+          ...(action === 'resolve_change' ? {incidentProgress:{
+            handled: body.coordinationLines ?? body.affectedLines ?? [{orderItemId,quantity:2}],outstanding:[],
+          }} : {}) },
       },
     },
   };
@@ -229,6 +232,7 @@ describe('supplier purchasing page', () => {
     render(<PurchaseManager initialOrder={orderId}/>);
     fireEvent.click(await screen.findByRole('button',{name:'回填协调结果'}));
     expect(screen.getByLabelText('协调结果')).toHaveValue('original_terms');
+    fireEvent.change(screen.getByLabelText(/原供货事项完整涉及范围 · 合成采购商品/),{target:{value:'2'}});
     fill('人工与供应商协调的书面依据','TEST-SUPPLIER-CONTINUATION-FILE');
     fill('客户对方案的回复依据','TEST-CUSTOMER-CONTINUATION-FILE');
     fill('供方书面回复摘要','d'.repeat(64));
@@ -241,6 +245,43 @@ describe('supplier purchasing page', () => {
     expect(posts[0]).toMatchObject({outcome:'original_terms',decisionDocumentLines:[{
       orderItemId,supplierDocumentRow:8,customerDocumentRow:12,
     }]});
+  });
+
+  it('shows the remaining payable and waits for the quantity outside the current coordination result', async () => {
+    const workspace = makeWorkspace('on_hold');
+    const [purchase] = workspace.orders;
+    const scope = [{orderItemId,quantity:2}];
+    const portion = [{orderItemId,quantity:1}];
+    Object.assign(purchase,{
+      orderedBefore:true,paidCents:900,dueCents:null,needsRemainingReview:true,
+      incident:{id:purchase.openIncidentId,reference:'TEST-TWO-DELAYED',changeKind:'delay',reportedBy:'test-operator',
+        responsibility:null,scope,outstanding:scope,lastReviewedBy:null},
+    });
+    const posts = mockWorkspace(workspace,['purchases.read','purchases.approve'],body=>{
+      const {preview:result} = preview(body,workspace);
+      return Response.json({preview:{...result,snapshot:{...result.snapshot,operation:{...result.snapshot.operation,
+        incidentProgress:{scope,handled:portion,outstanding:portion,scopeBasis:'recorded'},
+      }}}});
+    });
+    render(<PurchaseManager initialOrder={orderId}/>);
+    expect(await screen.findByText('原单剩余应付待独立核准。供货协调结果可据实登记。')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button',{name:'回填协调结果'}));
+    expect(screen.queryByText('原供货事项完整涉及范围')).not.toBeInTheDocument();
+    fill('人工与供应商协调的书面依据','TEST-SIGNED-SUPPLIER-ONE');
+    fill('客户对方案的回复依据','TEST-SIGNED-CUSTOMER-ONE');
+    fill('供方书面回复摘要','d'.repeat(64));
+    fill('客户书面回复摘要','e'.repeat(64));
+    fill('双方确认的具体结果','同意一件按原约交付，另一件继续由采购经办人核对。');
+    fireEvent.change(screen.getByLabelText(/本次继续原约的数量 · 合成采购商品/),{target:{value:'1'}});
+    fill('供方决定原件行号','8');
+    fill('客户同意原件行号','12');
+    fireEvent.click(screen.getByRole('button',{name:'查看完整预览'}));
+    const panel = await screen.findByRole('region',{name:'操作预览'});
+    expect(panel).toHaveTextContent('本次处理 合成采购商品 1');
+    expect(panel).toHaveTextContent('仍待办理 合成采购商品 1');
+    expect(posts[0]).toMatchObject({outcome:'original_terms',coordinationLines:portion,
+      decisionDocumentLines:[{orderItemId,supplierDocumentRow:8,customerDocumentRow:12}]});
+    expect(posts[0]).not.toHaveProperty('affectedLines');
   });
 
   it('offers customer document row and coverage on the existing replacement revision form', async () => {

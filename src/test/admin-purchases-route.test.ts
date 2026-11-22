@@ -243,7 +243,7 @@ describe('admin purchase endpoint', () => {
     const cancellation = (item: string, tag: string): ActionRequest => ({
       action:'resolve_change',outcome:'declined',requestId:'allocate-document-'+tag,supplierReference:'TEST-SUPPLIER-DOCUMENT-'+tag,
       supplierSha256,customerReference:'TEST-CUSTOMER-ORIGINAL-'+tag,customerSha256:pricingContentHash({tag,proof:'client'}),
-      description:'按书面决定取消确实受影响的一件',dispositions:[{orderItemId:item,quantity:1,outcome:'cancel',
+      description:'按书面决定取消确实受影响的一件',confirmsFullIncidentScope: true, dispositions:[{orderItemId:item,quantity:1,outcome:'cancel',
         supplierDocumentRow:8,customerDocumentRow:13,...(item===orderItemId || bothCovered ? {supplierDocumentScope} : {})}],
     });
     const firstPreview = await previewAction(cancellation(orderItemId,'first'),orderId);
@@ -288,7 +288,7 @@ describe('admin purchase endpoint', () => {
       action:'resolve_change' as const,outcome:'declined' as const,requestId:'use-one-known-row',
       supplierReference:'TEST-FILE-WITH-TWO-VERIFIED-UNITS',supplierSha256:pricingContentHash('two-unit-supplier-file'),
       customerReference:'TEST-FIRST-CUSTOMER-ROW',customerSha256:pricingContentHash('same-two-row-customer-file'),
-      description:'本次按原件取消一件',dispositions:[{orderItemId,quantity:1,outcome:'cancel' as const,supplierDocumentRow:8,customerDocumentRow:12}],
+      description:'本次按原件取消一件',confirmsFullIncidentScope: true, dispositions:[{orderItemId,quantity:1,outcome:'cancel' as const,supplierDocumentRow:8,customerDocumentRow:12}],
     };
     const initial = await previewAction(prior);
     const {workspace} = await expectJson(await confirm(initial,await grant(staff.approver)),200);
@@ -313,6 +313,39 @@ describe('admin purchase endpoint', () => {
     ]}}}});
   });
 
+  it('records and resolves only the selected supply scope through the authorized preview and confirmation', async () => {
+    await startActualSupply(orderId,'exact-supply-scope');
+    const scope = [{orderItemId,quantity:2}];
+    const portion = [{orderItemId,quantity:1}];
+    signIn(staff.operator);
+    const report = await previewAction({action:'report_change',requestId:'supply-two-delayed',changeKind:'delay',
+      reference:'TEST-SUPPLY-TWO-DELAY',description:'两件延期，供方会分别确认供货决定。',affectedLines:scope});
+    const {workspace: reported} = await expectJson(await confirm(report,await grant(staff.operator)),200);
+    expect(reported.orders[0].incident).toMatchObject({scope,outstanding:scope,reportedBy:staff.operator});
+    const action = {action:'resolve_change' as const,outcome:'original_terms' as const,requestId:'supply-one-confirmed',coordinationLines:portion,
+      supplierReference:'TEST-SUPPLIER-CONFIRMS-ONE',customerReference:'TEST-CUSTOMER-CONFIRMS-ONE',
+      supplierSha256:pricingContentHash('seller agrees the one first'),customerSha256:pricingContentHash('customer agrees the one first'),
+      description:'供方书面确认一件照原合同继续，另一件仍待具体回复。',responsibility:'原供方协调人',
+      decisionDocumentLines:[{orderItemId,supplierDocumentRow:6,customerDocumentRow:12}]};
+    let po = await currentPurchase();
+    await expectJson(await post({...action,stage:'preview',orderId,purchaseOrderId:po.id,version:po.version}),403);
+    signIn(staff.approver);
+    const first = await previewAction(action);
+    await expectJson(await confirm({...first,coordinationLines:scope},await grant(staff.approver)),409);
+    const {workspace: result} = await expectJson(await confirm(first,await grant(staff.approver)),200);
+    expect(result.orders[0]).toMatchObject({status:'on_hold',incident:{scope,outstanding:portion,lastReviewedBy:staff.approver,
+      responsibility:'原供方协调人'}});
+    expect(result.activities.at(-1)).toMatchObject({actorId:staff.approver,detail:{authorization:{permission:'purchases.approve'},
+      snapshot:{operation:{incidentProgress:{handled:portion,outstanding:portion},decisionDocuments:[
+        {role:'supplier',row:6,allocations:[{orderItemId,quantity:1}]},{role:'customer',row:12,allocations:[{orderItemId,quantity:1}]},
+      ]}}}});
+    await expectJson(await confirm(first,await grant(staff.approver)),200);
+    expect(activity('resolve_change')).toHaveLength(1);
+    po = await currentPurchase();
+    await expectJson(await post({...action,requestId:'cannot-use-larger-quantity',coordinationLines:scope,
+      stage:'preview',orderId,purchaseOrderId:po.id,version:po.version}),409);
+  });
+
   it('keeps numbered continuation evidence bound to its documented purpose and normal approval permission', async () => {
     await startActualSupply(orderId,'numbered-continue-original');
     await noteChange(orderId,'numbered-continuation-review');
@@ -322,7 +355,8 @@ describe('admin purchase endpoint', () => {
     const common = {action:'resolve_change' as const,supplierReference:'TEST-ORIGINAL-SUPPLIER-CONTINUE',
       customerReference:'TEST-ORIGINAL-CUSTOMER-CONTINUE',description:'两件原商品按书面约定继续。',...digest};
     const lines = {orderItemId,supplierDocumentRow:8,customerDocumentRow:12};
-    const consent = await previewAction({...common,outcome:'original_terms',requestId:'continue-with-form-rows',decisionDocumentLines:[lines]});
+    const consent = await previewAction({...common,outcome:'original_terms',requestId:'continue-with-form-rows',decisionDocumentLines:[lines],
+      affectedLines:[{orderItemId,quantity:2}]});
     await expectJson(await confirm(consent),403);
     const {workspace} = await expectJson(await confirm(consent,await grant(staff.approver)),200);
     expect(workspace.activities.at(-1)).toMatchObject({actorId:staff.approver,detail:{authorization:{permission:'purchases.approve'},
@@ -333,7 +367,7 @@ describe('admin purchase endpoint', () => {
     await noteChange(orderId,'do-not-reuse-original-purpose');
     const po = await currentPurchase();
     const wrong = {...common,outcome:'declined',requestId:'reuse-continue-as-cancel',orderId,purchaseOrderId:po.id,version:po.version,
-      dispositions:[{...lines,outcome:'cancel',quantity:1}],stage:'preview'};
+      confirmsFullIncidentScope: true, dispositions:[{...lines,outcome:'cancel',quantity:1}],stage:'preview'};
     await expectJson(await post(wrong),403);
     signIn(staff.approver);
     const rejected = await expectJson(await post(wrong),409);
@@ -349,7 +383,7 @@ describe('admin purchase endpoint', () => {
       action:'resolve_change' as const,outcome:'declined' as const,requestId:'old-unnumbered-approval',
       supplierReference:'TEST-LEGACY-ORIGINAL-SUPPLIER-FILE',supplierSha256:pricingContentHash('legacy-supplier-two-written-rows'),
       customerReference:'TEST-LEGACY-CUSTOMER-FIRST',customerSha256:pricingContentHash('legacy-first-customer'),
-      description:'原书面决定办理一件',dispositions:[{orderItemId,quantity:1,outcome:'cancel' as const}],
+      description:'原书面决定办理一件',confirmsFullIncidentScope: true, dispositions:[{orderItemId,quantity:1,outcome:'cancel' as const}],
     };
     const initial = await previewAction(written);
     await expectJson(await confirm(initial,await grant(staff.approver)),200);
@@ -491,7 +525,7 @@ describe('admin purchase endpoint', () => {
     signIn(staff.approver);
     const resolution = await previewAction({ action: 'resolve_change', requestId: 'cancel-one-unit', outcome: 'declined',
       supplierReference: 'TEST-SUPPLIER-CANCEL-ONE', supplierSha256: 'c'.repeat(64), customerReference: 'TEST-CUSTOMER-CANCEL-ONE', customerSha256: 'd'.repeat(64),
-      description: '合成双方书面同意取消一件。', refundFollowup: '财务单独核对未抵扣的定金。', dispositions: [{ orderItemId, quantity: 1, outcome: 'cancel' }] });
+      description: '合成双方书面同意取消一件。', refundFollowup: '财务单独核对未抵扣的定金。', confirmsFullIncidentScope: true, dispositions: [{ orderItemId, quantity: 1, outcome: 'cancel' }] });
     await expectJson(await confirm(resolution, await grant(staff.approver)), 200);
     const po = await currentPurchase();
     const remainder: ActionRequest = { action: 'approve_remaining', requestId: 'approve-only-one-unit', reference: 'TEST-REMAINING-AP', referenceSha256: 'e'.repeat(64),
