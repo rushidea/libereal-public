@@ -45,6 +45,12 @@ export default function FulfillmentPanel({ orderId, canWrite, stepUp, onUpdated 
   const [pending,setPending] = useState<Pending|null>(null);
   const [error,setError] = useState('');
   const url = '/api/admin/orders/'+encodeURIComponent(orderId)+'/fulfillment';
+  async function readAt(dispatchedAt: string): Promise<Workspace> {
+    const response = await fetch(url+'?dispatchAt='+encodeURIComponent(dispatchedAt),{cache:'no-store'});
+    const body = await response.json();
+    if (!response.ok || !body.workspace) throw new Error(body.error || '无法核对当时可用的货物');
+    return body.workspace;
+  }
   async function refresh() {
     const response = await fetch(url,{ cache: 'no-store' });
     const body = await response.json();
@@ -138,7 +144,7 @@ export default function FulfillmentPanel({ orderId, canWrite, stepUp, onUpdated 
         </details>}
         {canWrite && ['confirmed','partially_shipped'].includes(view.order.status) && <details className="rounded border border-gray-200 p-3">
           <summary className="cursor-pointer text-sm font-medium text-brand-700">登记采购发货或转发</summary>
-          <div className="mt-3"><DispatchForm view={view} submit={preview} busy={busy}/></div></details>}
+          <div className="mt-3"><DispatchForm view={view} submit={preview} busy={busy} readAt={readAt}/></div></details>}
         {!view.parcels.length && !view.legacyShipments.length && <p className="text-sm text-gray-600">这笔订单还没有实际发出的包裹。</p>}
       </>}
     </>}

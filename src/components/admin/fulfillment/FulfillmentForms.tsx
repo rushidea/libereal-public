@@ -28,9 +28,9 @@ function evidence(form: FormData) {
   return { requestId: crypto.randomUUID(), occurredAt: new Date(read(form,'occurredAt')).toISOString(), reference: read(form,'reference'),
     documentRow: Number(read(form,'documentRow')), sha256: read(form,'sha256') };
 }
-export function Proof({ explanation }: { explanation?: string }) {
+export function Proof({ explanation, fixedDate }: { explanation?: string; fixedDate?: string }) {
   return <div className="grid gap-3 sm:grid-cols-2">
-    <Label title="实际发生时间（本地时间）"><input name="occurredAt" className={inputStyle} type="datetime-local" step="1" required/></Label>
+    <Label title="实际发生时间（本地时间）"><input name="occurredAt" className={inputStyle} type="datetime-local" step="1" defaultValue={fixedDate} readOnly={Boolean(fixedDate)} required/></Label>
     <Label title="原件中的行号"><input name="documentRow" className={inputStyle} type="number" min={1} step={1} defaultValue={1} required/></Label>
     <Label title="物流凭据出处"><input name="reference" className={inputStyle} placeholder="运单、签收单或档案编号" required/></Label>
     <DocumentDigestField name="sha256" label="物流凭据摘要" required/>
@@ -38,20 +38,44 @@ export function Proof({ explanation }: { explanation?: string }) {
   </div>;
 }
 
-export function DispatchForm({ view, submit, busy }: { view: Workspace; submit: SubmitIntent; busy: boolean }) {
+export function DispatchForm({ view, submit, busy, readAt }: {
+  view: Workspace; submit: SubmitIntent; busy: boolean; readAt: (value: string) => Promise<Workspace>;
+}) {
   const [route,setRoute] = useState('supplier_to_customer');
+  const [earlier,setEarlier] = useState(false);
+  const [date,setDate] = useState('');
+  const [checked,setChecked] = useState<Workspace|null>(null);
+  const [looking,setLooking] = useState(false);
+  const [lookupError,setLookupError] = useState('');
+  const sources = earlier ? checked : view;
+  async function lookup() {
+    if (!date || looking) return;
+    setLooking(true);setLookupError('');setChecked(null);
+    try { setChecked(await readAt(new Date(date).toISOString())); }
+    catch (e) { setLookupError(e instanceof Error ? e.message : '无法核对该时点的订购与实物'); }
+    finally { setLooking(false); }
+  }
   const forwarding = route === 'libereal_to_customer';
-  const rows = forwarding ? view.receipts.flatMap(receipt => {
-    const p = view.purchases.find(row => row.purchaseOrderId === receipt.purchaseOrderId && row.orderItemId === receipt.orderItemId);
+  const rows = !sources ? [] : forwarding ? sources.receipts.flatMap(receipt => {
+    const p = sources.purchases.find(row => row.purchaseOrderId === receipt.purchaseOrderId && row.orderItemId === receipt.orderItemId);
     return p ? [{ ...p, sourceReceiptId: receipt.id, batchNumber: receipt.batchNumber, available: receipt.available, resendApprovalId: undefined }] : [];
   }) : [
-    ...view.purchases.filter(p => p.available > 0).map(p => ({ ...p, sourceReceiptId: null, batchNumber: null, resendApprovalId: undefined })),
-    ...view.freeResends.flatMap(resend => {
-      const p = view.purchases.find(row => row.purchaseOrderId === resend.purchaseOrderId && row.orderItemId === resend.orderItemId);
+    ...sources.purchases.filter(p => p.available > 0).map(p => ({ ...p, sourceReceiptId: null, batchNumber: null, resendApprovalId: undefined })),
+    ...sources.freeResends.flatMap(resend => {
+      const p = sources.purchases.find(row => row.purchaseOrderId === resend.purchaseOrderId && row.orderItemId === resend.orderItemId);
       return p ? [{ ...p, sourceReceiptId: null, batchNumber: null, available: resend.available, resendApprovalId: resend.approvalId }] : [];
     }),
   ];
-  return <form className="space-y-3" onSubmit={event => {
+  return <div className="space-y-3">
+    <label className="flex gap-2 text-sm"><input type="checkbox" checked={earlier} disabled={looking || busy}
+      onChange={event=>{setEarlier(event.target.checked);setChecked(null);setLookupError('');}}/>补录已实际发运的包裹</label>
+    {earlier && <div className="flex flex-wrap items-end gap-2">
+      <Label title="要查询的实际发运时间"><input type="datetime-local" step="1" className={inputStyle} value={date} disabled={looking}
+        onChange={event=>{setDate(event.target.value);setChecked(null);setLookupError('');}}/></Label>
+      <button type="button" className={actionStyle} disabled={looking || busy || !date} onClick={()=>void lookup()}>核对当时可用的货物</button>
+      {lookupError && <p role="alert" className="text-sm text-red-700">{lookupError}</p>}
+    </div>}
+    {sources && <form key={earlier ? date : 'current'} className="space-y-3" onSubmit={event => {
     event.preventDefault(); const form = new FormData(event.currentTarget);
     const lines = rows.map((row,index) => ({ purchaseOrderId: row.purchaseOrderId, orderItemId: row.orderItemId,
       sourceReceiptId: row.sourceReceiptId, resendApprovalId: row.resendApprovalId, quantity: Number(read(form,'qty'+index)) })).filter(row => row.quantity > 0);
@@ -71,9 +95,10 @@ export function DispatchForm({ view, submit, busy }: { view: Workspace; submit: 
       <div className="grid gap-3 sm:grid-cols-2"><Label title="承运方"><input name="carrier" className={inputStyle}/></Label>
         <Label title="运单号"><input name="trackingNumber" className={inputStyle}/></Label></div>
       {view.feedSource && <label className="flex gap-2 text-sm"><input type="checkbox" name="feed"/>接收 {view.feedSource} 的运单回传</label>}
-      <Proof/><button className={actionStyle} disabled={busy}>预览发货</button>
+      <Proof fixedDate={earlier?date:undefined}/><button className={actionStyle} disabled={busy}>预览发货</button>
     </>}
-  </form>;
+  </form>}
+  </div>;
 }
 
 export type FulfillmentCapabilities = { warehouse: boolean; shortfall: boolean };
