@@ -97,7 +97,7 @@ export default function PurchaseManager({initialOrder}:{initialOrder:string}) {
         })}</section>}
       {workspace.orders.length>0&&<section className="space-y-3"><h2 className="text-lg font-semibold">采购单</h2>
         {workspace.orders.map(po=><PurchaseActions key={po.version} orderId={workspace.orderId} orderStatus={workspace.orderStatus} cancellation={workspace.cancellation}
-          po={po} fulfillment={workspace.fulfillment} permissions={permissions} busy={busy} request={request} onError={setError}/>)}</section>}
+          po={po} orders={workspace.orders} fulfillment={workspace.fulfillment} permissions={permissions} busy={busy} request={request} onError={setError}/>)}</section>}
     </>}
   </div>;
 }
