@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { actionStyle, DispatchForm, EventForm, EvidenceAction, HistoricalInventoryForm, HistoricalShipmentForm, routeLabels, statusLabels,
+import { actionStyle, DispatchForm, EventForm, EvidenceAction, HistoricalInventoryForm, HistoricalShipmentForm, HoldReviewForm, routeLabels, statusLabels,
   type FulfillmentCapabilities, type Workspace } from './FulfillmentForms';
 
 type StepUp = (callback: (token: string) => Promise<void>) => Promise<void>;
@@ -18,7 +18,8 @@ const labels: Record<string,string> = {
   orderStatus:'原订单状态', receiptId:'原实收记录', inventoryAccountId:'库存账户', spec:'规格', unit:'单位', packageType:'包装', baseQuantity:'包装数量',
   inventory:'入仓归属', identity:'核对依据', approved:'已批准的商品', decisions:'双方确认', resolutions:'实物短失或退回', disposition:'本次实物处置',
   receivedAt:'实际入仓时间', history:'历史状态记录', priorShippedQty:'此前记录的已发数量', historicalAttributionId:'原核对记录',
-  holdReview:'发运偏差核对',unreleased:'发运时未放行的数量',incidentIds:'当时相关供货事项',
+  holdReview:'发运偏差核对',unreleased:'发运时未放行的数量',incidentIds:'当时相关供货事项',incidentId:'原暂停事项',
+  status:'办理状态',originalIncidentId:'发运时的原事项',resolutionId:'实际退回记录',holdAssignments:'实发暂停份额',holdDecisions:'逐项处理结果',holdResponsibility:'处理责任人',outcome:'实际处理结果',holdSource:'实际货物来源',
   responsibility:'责任人',supplierReference:'供方书面核对',customerReference:'客户书面回复',
   resendApprovalId:'免费重发批准', resend:'原免费重发依据', allocation:'原出库流水归属', shipmentItemId:'原运单商品行',
 };
@@ -37,7 +38,7 @@ function reviewedHold(raw: string) {
   try {
     const review = JSON.parse(raw).holdReview;
     return review && typeof review.responsibility==='string' && typeof review.description==='string'
-      ? {responsibility:review.responsibility,description:review.description} : null;
+      ? {responsibility:review.responsibility,description:review.description,status:review.status} : null;
   } catch { return null; }
 }
 function progressDetail(raw: string) {
@@ -121,6 +122,7 @@ export default function FulfillmentPanel({ orderId, canWrite, stepUp, onUpdated 
           <p className="text-sm">{[parcel.carrier,parcel.trackingNumber].filter(Boolean).join(' · ') || parcel.reference} · {new Date(parcel.dispatchedAt).toLocaleString('zh-CN')}</p>
           <ul className="text-sm">{parcel.lines.map(line => <li key={line.id}>
             {view.order.orderItems.find(item => item.id === line.orderItemId)?.name ?? line.orderItemId} · 已签 {line.receivedQuantity} / {line.quantity}
+            {parcel.holdFacts?.filter(hold=>hold.parcelLineId===line.id && hold.pending>0).map(hold=><span key={hold.parcelLineId} className="text-amber-900"> · 误发待处理 {hold.pending} 件</span>)}
             {line.receipts.map(receipt => <span key={receipt.id}> · 批次 {receipt.inventoryBatch.batchNumber}（已转发 {receipt.forwardedQuantity}/{receipt.quantity}
               {receipt.releasedQuantity > 0 && ' · 已处置 '+receipt.releasedQuantity}）</span>)}
           </li>)}</ul>
@@ -128,7 +130,7 @@ export default function FulfillmentPanel({ orderId, canWrite, stepUp, onUpdated 
             {parcel.events.filter(event=>event.kind==='dispatch').map(event=>{
               const review=reviewedHold(event.details);
               return review && <p key={event.id} className="rounded bg-amber-50 p-2 text-sm text-amber-900">
-                当时未放行的实际发运已核对 · 核对人 {event.actorId} · 责任人 {review.responsibility} · {review.description}
+                当时未放行的实际发运已核对{review.status==='pending' && ' · 登记时客户尚未回复'} · 核对人 {event.actorId} · 责任人 {review.responsibility} · {review.description}
               </p>;
             })}
           <ol className="mt-2 space-y-2 text-sm">{parcel.events.map(event => <li key={event.id}>
@@ -136,7 +138,10 @@ export default function FulfillmentPanel({ orderId, canWrite, stepUp, onUpdated 
               {event.status === 'resolved' && ' · 已核结'}<div>{progressDetail(event.details)} {event.reference}</div>
             </li>)}</ol></details>
           {canWrite && <details><summary className="cursor-pointer text-sm font-medium text-brand-700">办理本包裹</summary>
-            <EventForm parcel={parcel} view={view} capabilities={capabilities} busy={busy} submit={preview}/></details>}
+            <EventForm parcel={parcel} view={view} capabilities={capabilities} busy={busy} submit={preview}/>
+            {capabilities.shortfall && parcel.holdFacts?.map(hold=><HoldReviewForm key={hold.parcelLineId} parcel={parcel} hold={hold}
+              view={view} capabilities={capabilities} busy={busy} submit={preview}/>)}
+          </details>}
           {view.legacyInventory.filter(row => row.parcelId === parcel.id).map(row => <details key={row.parcelLineId}>
             <summary className="cursor-pointer text-sm font-medium text-amber-900">旧库存预留待核实 · {row.awaitingReview}</summary>
             {row.recognized.length > 0 && <p className="text-sm">已有原生运单及出库凭据可核对，已计 {row.recognized.reduce((sum,item) => sum+item.quantity,0)} 件。</p>}

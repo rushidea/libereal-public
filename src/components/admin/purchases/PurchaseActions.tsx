@@ -325,7 +325,8 @@ export default function PurchaseActions({ orderId, orderStatus, cancellation, po
   if (po.canRegisterOrder && permit('write')) choices.push('register_order');
   if (po.canRecordCommitmentException && permit('approve')) choices.push('record_late_order_exception');
   if (openExceptions.length && permit('approve')) choices.push('resolve_order_exception');
-  if (['approved', 'ordered'].includes(po.status) && !po.needsLegacyReview && !po.needsFundingReapproval && (!closed || po.orderedBefore)
+  const waitingForDeliveryDecision=fulfillment.dispatchHolds.some(row=>row.purchaseOrderId===po.id && row.pending>0);
+  if (!waitingForDeliveryDecision && ['approved', 'ordered'].includes(po.status) && !po.needsLegacyReview && !po.needsFundingReapproval && (!closed || po.orderedBefore)
     && po.dueCents !== null && Math.min(po.dueCents, po.totalCents - po.paidCents) > 0 && permit('pay')) choices.push('record_payment');
   if (po.lines.length && permit('write')) choices.push('report_change');
 
@@ -410,6 +411,7 @@ export default function PurchaseActions({ orderId, orderStatus, cancellation, po
     </p>}
     <p className="text-sm">{po.remainingScope || po.dueCents === null ? '原合同应付' : '本单应付'} <strong>{money(po.totalCents)}</strong>　已登记实际付款 {money(po.paidCents)}</p>
     {po.remainingScope && <p className="text-sm">核准的剩余商品应付 {money(po.remainingScope.totalCents)} · 经核实冲抵 {money(po.remainingScope.appliedPaidCents)} · 尚未付 {money(po.dueCents ?? undefined)}</p>}
+    {waitingForDeliveryDecision && <p className="text-sm text-amber-900">相关实发份额待客户书面处理。请在原包裹核对结果后继续付款办理。</p>}
     {po.needsRemainingReview && <p className="text-sm text-amber-900">{openExceptions.length
       ? '核对实际承诺后，再逐行核准原单剩余应付。'
       : '原单剩余应付待独立核准。供货协调结果可据实登记。'}</p>}
