@@ -8,6 +8,7 @@ export type PurchaseTerms = {
   freightTerms?: string; leadTime?: string; validUntil?: string; sourceReference?: string;
   settlementReference?: string; coordinationReference?: string; amountBreakdown?: string;
   writtenSupplier?: string; supplierConditions?: string; sourceSha256?: string; settlementSha256?: string;
+  sourceDocumentKind?: 'single_item' | 'multiple_items'; sourceDocumentRow?: number;
   identityReference?: string; identitySha256?: string;
   leadTimeAssessment?: 'within_agreement' | 'exception_required';
   verification?: { actorId: string; actorEmail: string; verifiedAt: string; version: string };
@@ -72,6 +73,14 @@ export function normalizePurchaseTerms(raw: unknown): PurchaseTerms {
     terms.taxBasis = input.taxBasis;
   }
   if (input.validUntil) terms.validUntil = purchaseTimestamp(input.validUntil, '报价有效期');
+  if (input.sourceDocumentKind !== undefined && input.sourceDocumentKind !== '' && input.sourceDocumentKind !== null) {
+    if (input.sourceDocumentKind !== 'single_item' && input.sourceDocumentKind !== 'multiple_items') throw new PurchaseError('请核对供货书证涵盖的商品行', 400);
+    terms.sourceDocumentKind = input.sourceDocumentKind;
+  }
+  if (terms.sourceDocumentKind === 'multiple_items') {
+    if (!positiveCents(input.sourceDocumentRow)) throw new PurchaseError('请填写供货书证中的商品行序号', 400);
+    terms.sourceDocumentRow = input.sourceDocumentRow;
+  }
   if (input.leadTimeAssessment != null && input.leadTimeAssessment !== '') {
     if (input.leadTimeAssessment !== 'within_agreement' && input.leadTimeAssessment !== 'exception_required') {
       throw new PurchaseError('请填写本单交期核对结果', 400);
@@ -129,14 +138,15 @@ export function missingWrittenTerms(terms: PurchaseTerms, source: PurchaseSource
 export function requireNewDocumentsForChangedTerms(previous: PurchaseTerms, next: PurchaseTerms, quantityChanged = false) {
   if (!previous.verification) return;
   const changed = (keys: Array<keyof PurchaseTerms>) => keys.some(key => previous[key] !== next[key]);
-  if (previous.sourceSha256 && previous.sourceSha256 === next.sourceSha256
+  const sameOffer = previous.sourceSha256 === next.sourceSha256 && (previous.sourceDocumentRow ?? 1) === (next.sourceDocumentRow ?? 1);
+  if (previous.sourceSha256 && sameOffer
     && changed(['writtenSupplier', 'unitPriceCents', 'currency', 'taxBasis', 'freightTerms', 'leadTime', 'validUntil', 'supplierConditions'])) {
     throw new PurchaseError('变更供货方、价格或供货条款须核对新的供货书证');
   }
   if (previous.settlementSha256 && previous.settlementSha256 === next.settlementSha256 && changed(['supplier', 'payee', 'paymentTerms'])) {
     throw new PurchaseError('变更供货主体、收款方或付款条件须核对新的结算书证');
   }
-  if (!quantityChanged && previous.sourceSha256 === next.sourceSha256 && previous.settlementSha256 === next.settlementSha256 && changed(['linePayableCents'])) {
+  if (!quantityChanged && sameOffer && previous.settlementSha256 === next.settlementSha256 && changed(['linePayableCents'])) {
     throw new PurchaseError('变更本行应付金额须核对新的供货或结算书证');
   }
 }

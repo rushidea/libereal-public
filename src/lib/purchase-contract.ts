@@ -60,7 +60,7 @@ export function approvalAt(ledger: PurchaseActivity[], at: number) {
   let suspended = false;
   for (const row of ledger) {
     if (Date.parse(row.createdAt) > at) continue;
-    if (row.action === 'approve' || row.action === 'approve_remaining') {
+    if (isPurchaseApproval(row)) {
       approval = row;
       suspended = false;
     } else if (row.action === 'report_change') {
@@ -77,14 +77,17 @@ export function approvalAt(ledger: PurchaseActivity[], at: number) {
   return suspended ? undefined : approval;
 }
 
+export function isPurchaseApproval(row: PurchaseActivity) {
+  return row.action === 'approve' || row.action === 'approve_remaining' || row.action === 'reapprove_purchase';
+}
+
 export function legacyApproval(ledger: PurchaseActivity[]) {
   const approved = ledger.findLast(row => row.action === 'approve');
   return approved && !Object.hasOwn(approved.detail, 'customerPlanVersion') ? approved : undefined;
 }
 
-export function legacyApprovalReview(ledger: PurchaseActivity[], approvalId: string, customerPlanVersion: string) {
-  return ledger.findLast(row => row.action === 'review_legacy_approval' && row.detail.customerPlanVersion === customerPlanVersion
-    && purchaseSnapshot(row)?.operation.legacyApprovalId === approvalId);
+export function legacyApprovalReview(ledger: PurchaseActivity[], approvalId: string) {
+  return ledger.findLast(row => row.action === 'review_legacy_approval' && purchaseSnapshot(row)?.operation.legacyApprovalId === approvalId);
 }
 
 export function legacyArchiveEvidence(orderId: string, purchaseOrderId: string, contentHash: string, approval: PurchaseActivity, ledger: PurchaseActivity[]) {

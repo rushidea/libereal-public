@@ -6,17 +6,20 @@ import { jsonObject } from '@/lib/order-catalog-repricing';
 import { pricingContentHash } from '@/lib/pricing-adjustment-approval';
 import { addPurchaseActivity, findPurchaseActivityByRequest, readPurchaseActivities, type PurchaseActivity, type PurchaseActor, type PurchaseAuthorization } from '@/lib/purchase-activity';
 import { loadPurchaseOrderSource, type SourceOrder } from '@/lib/purchase-source';
+import { previewBankAllocation, previewBankReceipt, purchaseReceiptAllocations } from '@/lib/purchase-receipts';
 import { documentSha256, positiveCents, PurchaseError, purchaseTimestamp, requiredText } from '@/lib/purchase-terms';
 
 type Db = Prisma.TransactionClient;
 type PlanMode = 'prepay' | 'credit' | 'partial_prepay';
-type PaymentPlan = { mode: PlanMode; requiredPrepayCents: number; balanceTerms: string | null; evidenceId: string | null };
-type StartAction = 'verify_acceptance' | 'review_customer_terms' | 'record_customer_receipt' | 'approve_credit_exception';
+export type PaymentPlan = { mode: PlanMode; requiredPrepayCents: number; balanceTerms: string | null; evidenceId: string | null };
+type StartAction = 'verify_acceptance' | 'review_customer_terms' | 'verify_bank_receipt' | 'record_customer_receipt' | 'approve_credit_exception';
 export type PurchaseStartInput = {
   action: StartAction; orderId: string; version: string; requestId: string; actionHash?: string;
   reference?: unknown; sha256?: unknown; description?: unknown; historyId?: unknown; originalActor?: unknown; authorityReference?: unknown;
   occurredAt?: unknown; paymentMode?: unknown; requiredPrepayCents?: unknown; balanceTerms?: unknown;
   transactionReference?: unknown; allocationReference?: unknown; receiptKind?: unknown; receiptTotalCents?: unknown; amountCents?: unknown;
+  bankTrace?: unknown; receivingAccount?: unknown; payer?: unknown; documentKind?: unknown; statementRow?: unknown;
+  bankReceiptId?: unknown; legacyAllocationId?: unknown;
 };
 
 function object(value: unknown): Record<string, unknown> {
@@ -106,8 +109,12 @@ async function acceptance(tx: Db, order: SourceOrder, activities: PurchaseActivi
   return { proof: null, manual: true };
 }
 
-function paymentPlan(order: SourceOrder, activities: PurchaseActivity[], termsVersion: string): PaymentPlan | null {
-  const review = lastActivity(activities, 'review_customer_terms');
+export function paymentPlanAt(order: Pick<SourceOrder, 'paymentMethod' | 'total'>, activities: PurchaseActivity[], termsVersion: string, at = Date.now()): PaymentPlan | null {
+  const review = activities.findLast(row => row.action === 'review_customer_terms' && row.purchaseOrderId === null && Date.parse(row.createdAt) <= at);
+  return paymentPlanFromReview(order, termsVersion, review);
+}
+
+export function paymentPlanFromReview(order: Pick<SourceOrder, 'paymentMethod' | 'total'>, termsVersion: string, review?: PurchaseActivity): PaymentPlan | null {
   if (review) {
     const stored = operation(review);
     if (stored.termsVersion !== termsVersion) return null;
@@ -124,43 +131,36 @@ function paymentPlan(order: SourceOrder, activities: PurchaseActivity[], termsVe
   return null;
 }
 
-async function nativePaymentReferences(tx: Db, references: string[]) {
-  if (!references.length) return new Set<string>();
-  const attempts = await tx.paymentAttempt.findMany({ where: { provider: 'alipay', OR: [
-    { outTradeNo: { in: references } }, { tradeNo: { in: references } },
-  ] }, select: { outTradeNo: true, tradeNo: true } });
-  return new Set(attempts.flatMap(row => row.tradeNo ? [row.outTradeNo, row.tradeNo] : [row.outTradeNo]));
+export function paymentPlanContent(plan: PaymentPlan | null) {
+  return plan && { mode: plan.mode, requiredPrepayCents: plan.requiredPrepayCents,
+    balanceTerms: plan.balanceTerms?.trim().replace(/\s+/g, ' ') ?? null };
 }
 
 async function receiptEvidence(tx: Db, order: SourceOrder, activities: PurchaseActivity[], principal: number) {
-  const receipts = activities.filter(row => row.purchaseOrderId === null && row.action === 'record_customer_receipt')
-    .map(row => {
-      const evidence = operation(row);
-      return { id: row.id, ...evidence, transactionReference: evidence.transactionReference, amountCents: row.amountCents ?? 0 };
-    });
-  const references = Array.from(new Set(receipts.flatMap(row => typeof row.transactionReference === 'string' ? [row.transactionReference] : [])));
-  const native = await nativePaymentReferences(tx, references);
-  const countedReceipts = receipts.filter(row => typeof row.transactionReference === 'string' && !native.has(row.transactionReference));
-  const allocatedCents = countedReceipts.reduce((sum, item) => sum + item.amountCents, 0);
+  const { bankReceipts, ...recorded } = await purchaseReceiptAllocations(tx, order, activities);
   const alipay = order.paymentAttempts.filter(row => row.provider === 'alipay' && row.status === 'paid'
     && row.paidAt && row.tradeNo && order.paidAt && cents(row.amount) === principal);
   let paymentAttemptId: string | null = null;
+  let nativePaidAt: string | null = null;
   if (alipay.length === 1) {
     const [attempt] = alipay;
     const events = await tx.orderEvent.findMany({ where: { orderId: order.id, type: 'payment_received' } });
     if (events.some(row => {
       const meta = jsonObject(row.metadata);
       return meta.outTradeNo === attempt.outTradeNo && meta.tradeNo === attempt.tradeNo;
-    })) paymentAttemptId = attempt.id;
+    })) {
+      paymentAttemptId = attempt.id;
+      nativePaidAt = attempt.paidAt!.toISOString();
+    }
   }
   const ar = order.receivable;
   const release = order.creditTransactions.filter(row => row.type === 'release' && row.userId === order.customerId && row.actorId
     && !row.reason && cents(row.amount) === -principal);
   const settled = ar && ar.status === 'paid' && ar.paidAt && order.paidAt?.getTime() === ar.paidAt.getTime()
     && ar.userId === order.customerId && cents(ar.amount) === principal && release.length === 1 ? ar.id : null;
-  return { receivedCents: paymentAttemptId || settled ? principal : allocatedCents, allocatedCents, receipts,
-    excludedReceiptIds: receipts.filter(row => !countedReceipts.includes(row)).map(row => row.id),
-    paymentAttemptId, settledReceivableId: settled };
+  const payment = { ...recorded, receivedCents: paymentAttemptId ? principal : recorded.allocatedCents,
+    paymentAttemptId, nativePaidAt, settledReceivableId: settled };
+  return { payment, bankReceipts };
 }
 
 async function creditEvidence(tx: Db, order: SourceOrder, outstandingCents: number) {
@@ -177,17 +177,33 @@ async function creditEvidence(tx: Db, order: SourceOrder, outstandingCents: numb
     paymentTermDays: ar.paymentTermDaysSnapshot, dueAt: ar.dueAt?.toISOString() ?? null };
 }
 
+function creditExceptionMatches(exception: PurchaseActivity | undefined, creditVersion: string | null) {
+  if (!exception || !creditVersion) return false;
+  const approved = operation(exception).creditVersion;
+  if (approved === creditVersion) return true;
+  const historical = object(object(exception.detail.snapshot).review);
+  if (historical.creditVersion !== approved || typeof approved !== 'string') return false;
+  const payment = object(historical.payment);
+  const receipts = Array.isArray(payment.receipts) ? payment.receipts : [];
+  const normalized = { orderId: object(historical.orderTerms).orderId, termsVersion: historical.termsVersion,
+    accepted: historical.acceptance, plan: paymentPlanContent(historical.plan as PaymentPlan | null),
+    payment: { receiptIds: receipts.filter(row => row?.counted !== false).map(row => row?.id), receivedCents: payment.receivedCents },
+    credit: historical.credit };
+  return pricingContentHash(normalized) === creditVersion;
+}
+
 export async function purchaseStartReview(tx: Db, order: SourceOrder, activities: PurchaseActivity[]) {
   const orderTerms = orderApprovalTerms(order);
   const termsVersion = pricingContentHash(orderTerms);
   const active = activeOrder(order);
   const accepted = await acceptance(tx, order, activities);
   const principal = cents(order.total);
-  const plan = paymentPlan(order, activities, termsVersion);
-  const payment = await receiptEvidence(tx, order, activities, principal);
+  const plan = paymentPlanAt(order, activities, termsVersion);
+  const { payment, bankReceipts } = await receiptEvidence(tx, order, activities, principal);
   const outstandingCents = Math.max(0, principal - payment.receivedCents);
   const credit = outstandingCents > 0 && plan?.mode !== 'prepay' ? await creditEvidence(tx, order, outstandingCents) : null;
-  const creditVersion = credit && pricingContentHash({ orderId: order.id, termsVersion, accepted: accepted.proof, plan, payment, credit });
+  const creditVersion = credit && pricingContentHash({ orderId: order.id, termsVersion, accepted: accepted.proof, plan: paymentPlanContent(plan),
+    payment: { receiptIds: payment.receipts.filter(row => row.counted).map(row => row.id), receivedCents: payment.receivedCents }, credit });
   const exception = lastActivity(activities, 'approve_credit_exception');
   const overCredit = Boolean(credit && credit.occupiedCents > credit.limitCents);
   const start = !active ? '原客户订单尚未由 Libereal 接受，或已关闭'
@@ -195,7 +211,7 @@ export async function purchaseStartReview(tx: Db, order: SourceOrder, activities
     : (!Number.isSafeInteger(principal) || principal < 0) || !plan ? '需核实本单约定的付款条件'
     : payment.receivedCents < plan.requiredPrepayCents ? '需核实本单约定的付款条件与实际收款记录'
     : outstandingCents > 0 && !credit ? '需核实本单应收、授信占用及余额'
-    : overCredit && (!exception || operation(exception).creditVersion !== creditVersion) ? '本单超过授信，需要财务另行批准'
+    : overCredit && !creditExceptionMatches(exception, creditVersion) ? '本单超过授信，需要财务另行批准'
     : null;
   const eligible = start === null;
   const eligibility = { eligible, reason: start, basis: eligible && accepted.proof && plan ? {
@@ -209,14 +225,15 @@ export async function purchaseStartReview(tx: Db, order: SourceOrder, activities
     history: order.statusHistory.filter(row => row.toStatus === 'confirmed' && row.fromStatus === 'pending').map(row => ({
       id: row.id, actorId: row.actorId, actorEmail: row.actorEmail, recordedAt: row.createdAt.toISOString(),
     })),
-    active, principal, plan, payment, outstandingCents, credit, creditVersion, overCredit,
+    active, principal, plan, payment, bankReceipts, outstandingCents, credit, creditVersion, overCredit,
     creditExceptionRequired: active && accepted.proof !== null && overCredit && !eligible
       && plan !== null && payment.receivedCents >= plan.requiredPrepayCents,
   };
   return { eligibility, review: { ...review, version: pricingContentHash(review) } };
 }
 
-async function previewOperation(tx: Db, input: PurchaseStartInput, state: Awaited<ReturnType<typeof purchaseStartReview>>['review']) {
+async function previewOperation(tx: Db, order: SourceOrder, activities: PurchaseActivity[], input: PurchaseStartInput,
+  state: Awaited<ReturnType<typeof purchaseStartReview>>['review']) {
   if (!state.active) throw new PurchaseError('原客户订单当前不能启动采购');
   const reference = requiredText(input.reference, '书面依据编号');
   const sha256 = documentSha256(input.sha256, '书面依据摘要');
@@ -246,36 +263,10 @@ async function previewOperation(tx: Db, input: PurchaseStartInput, state: Awaite
       requiredPrepayCents: mode === 'prepay' ? state.principal : mode === 'credit' ? 0 : input.requiredPrepayCents as number,
       balanceTerms: mode === 'prepay' ? null : requiredText(input.balanceTerms, '账期或尾款条件') };
   }
+  if (input.action === 'verify_bank_receipt') return previewBankReceipt(tx, order, input, evidence);
   if (input.action === 'record_customer_receipt') {
-    const transactionReference = requiredText(input.transactionReference, '到账凭证的交易流水编号');
-    const allocationReference = requiredText(input.allocationReference, '本单回款分摊编号');
-    const receiptKind = input.receiptKind;
-    if (receiptKind !== 'bank_receipt' && receiptKind !== 'platform_receipt') {
-      throw new PurchaseError('须提供银行或结算平台的实际到账凭证', 400);
-    }
-    if ((await nativePaymentReferences(tx, [transactionReference])).has(transactionReference)) {
-      throw new PurchaseError('该笔支付宝原生流水已归属原订单，不可再作人工回款分摊');
-    }
-    const occurredAt = purchaseTimestamp(input.occurredAt, '实际到账时间');
-    if (Date.parse(occurredAt) > Date.now() || !state.plan || state.outstandingCents === 0
-      || !positiveCents(input.receiptTotalCents) || !positiveCents(input.amountCents)
-      || input.amountCents > Math.min(input.receiptTotalCents, state.outstandingCents)) {
-      throw new PurchaseError('本次核对金额须有实际到账凭证，且不得超过到账原额或本单未收余额');
-    }
-    const allocations = await tx.$queryRaw<{ amountCents: bigint; detail: string }[]>`
-      SELECT amountCents,detail FROM PurchaseActivity WHERE action='record_customer_receipt'
-        AND json_extract(detail,'$.snapshot.operation.transactionReference')=${transactionReference}`;
-    const consistent = allocations.every(row => {
-      const prior = object(object(jsonObject(row.detail).snapshot).operation);
-      return prior.sha256 === sha256 && prior.receiptKind === receiptKind && prior.receiptTotalCents === input.receiptTotalCents
-        && prior.occurredAt === occurredAt;
-    });
-    const allocatedBeforeCents = allocations.reduce((sum, row) => sum + Number(row.amountCents), 0);
-    if (!consistent || allocatedBeforeCents + input.amountCents > input.receiptTotalCents) {
-      throw new PurchaseError('同一到账凭据的版本、日期和可用分配金额须与原登记一致');
-    }
-    return { ...evidence, transactionReference, allocationReference, receiptKind, occurredAt, amountCents: input.amountCents,
-      receiptTotalCents: input.receiptTotalCents, allocatedBeforeCents };
+    if (!state.plan) throw new PurchaseError('请先核对本单付款条件');
+    return previewBankAllocation(tx, order, activities, input, evidence, state.outstandingCents);
   }
   if (!state.creditExceptionRequired || !state.creditVersion) throw new PurchaseError('目前没有可单独批准的超授信例外');
   return { ...evidence, creditVersion: state.creditVersion, credit: state.credit };
@@ -283,10 +274,11 @@ async function previewOperation(tx: Db, input: PurchaseStartInput, state: Awaite
 
 export async function previewPurchaseStartAction(tx: Db, input: PurchaseStartInput, actor: PurchaseActor) {
   const order = await loadPurchaseOrderSource(tx, input.orderId);
-  const { review } = await purchaseStartReview(tx, order, await readPurchaseActivities(tx, order.id));
+  const activities = await readPurchaseActivities(tx, order.id);
+  const { review } = await purchaseStartReview(tx, order, activities);
   if (input.version !== review.version) throw new PurchaseError('订单或支付依据已变化，请重新核对当前版本');
   const snapshot = { orderId: order.id, requestId: input.requestId, action: input.action, actor: { id: actor.id, email: actor.email },
-    review, operation: await previewOperation(tx, input, review) };
+    review, operation: await previewOperation(tx, order, activities, input, review) };
   return { snapshot, actionHash: pricingContentHash(snapshot) };
 }
 
@@ -300,12 +292,10 @@ export async function applyPurchaseStartAction(tx: Db, input: PurchaseStartInput
   }
   const { snapshot, actionHash } = await previewPurchaseStartAction(tx, input, actor);
   if (input.actionHash !== actionHash) throw new PurchaseError('订单或支付依据已变化，请重新核对当前版本');
-  const receipt = input.action === 'record_customer_receipt' ? snapshot.operation : null;
+  const receipt = snapshot.operation;
   await addPurchaseActivity(tx, { orderId: input.orderId, actor, action: input.action, requestKey,
-    ...(receipt && 'amountCents' in receipt ? {
-      amountCents: receipt.amountCents,
-      referenceKey: pricingContentHash({ purpose: 'customer_receipt_allocation', allocation: receipt.allocationReference }),
-    } : {}),
+    amountCents: 'action' in receipt && receipt.action === 'record_customer_receipt' ? receipt.amountCents : undefined,
+    referenceKey: 'receiptReferenceKey' in receipt ? receipt.receiptReferenceKey : undefined,
     detail: { intent, actionHash, authorization, snapshot },
   });
 }

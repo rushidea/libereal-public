@@ -6,7 +6,11 @@ import { consumeSecurityStepUpGrant } from '@/lib/security/security-step-up';
 import { extractStepUpToken } from '@/lib/admin-order-step-up';
 import { prisma } from '@/lib/prisma';
 import { pricingContentHash } from '@/lib/pricing-adjustment-approval';
-import { applyPurchaseAction, prepareOrderPurchases, previewPurchaseAction, purchaseWorkspace, savePurchaseLine, type PurchaseActionInput } from '@/lib/purchase-orders';
+import {
+  applyPurchaseAction, applyPurchaseShipment, prepareOrderPurchases, previewPurchaseAction, previewPurchaseShipment,
+  purchaseWorkspace, savePurchaseLine, type PurchaseActionInput,
+} from '@/lib/purchase-orders';
+import type { ShipmentAttributionInput } from '@/lib/purchase-fulfillment';
 import { applyPurchaseStartAction, previewPurchaseStartAction, type PurchaseStartInput } from '@/lib/purchase-start';
 import { PurchaseError, requiredText } from '@/lib/purchase-terms';
 
@@ -46,11 +50,12 @@ const purchasePermissions = {
   approve: 'purchases.approve', approve_lead_time: 'purchases.approve', register_order: 'purchases.write',
   record_payment: 'purchases.pay', report_change: 'purchases.write', resolve_change: 'purchases.read',
   review_legacy_approval: 'purchases.approve', approve_remaining: 'purchases.approve', record_late_order_exception: 'purchases.approve',
+  reapprove_purchase: 'purchases.approve',
 } as const satisfies Record<PurchaseActionInput['action'], AdminPermissionKey>;
 
 const startPermissions = {
   verify_acceptance: 'orders.write', review_customer_terms: 'finance.write',
-  record_customer_receipt: 'finance.write', approve_credit_exception: 'finance.write',
+  verify_bank_receipt: 'finance.write', record_customer_receipt: 'finance.write', approve_credit_exception: 'finance.write',
 } as const satisfies Record<PurchaseStartInput['action'], AdminPermissionKey>;
 
 async function requireResolutionPermission(tx: Prisma.TransactionClient, order: PurchaseActionInput | null, permissions: AdminPermissionKey[]) {
@@ -71,9 +76,11 @@ export async function POST(req: NextRequest) {
     if (!body || typeof body !== 'object' || Array.isArray(body)) throw new PurchaseError('无效的采购请求', 400);
     const draft = body.action === 'prepare' || body.action === 'save_line';
     const start = Object.hasOwn(startPermissions, body.action);
-    if (!draft && !start && !Object.hasOwn(purchasePermissions, body.action)) throw new PurchaseError('无法识别的采购动作', 400);
+    const attribution = body.action === 'attribute_purchase_shipment';
+    if (!draft && !start && !attribution && !Object.hasOwn(purchasePermissions, body.action)) throw new PurchaseError('无法识别的采购动作', 400);
     const permission = draft ? 'purchases.write'
-      : start ? startPermissions[body.action as PurchaseStartInput['action']] : purchasePermissions[body.action as PurchaseActionInput['action']];
+      : attribution ? 'purchases.approve'
+        : start ? startPermissions[body.action as PurchaseStartInput['action']] : purchasePermissions[body.action as PurchaseActionInput['action']];
     const user = await requireAdmin(permission, { skipStepUp: true });
     if (user instanceof NextResponse) return user;
     const permissions = await getAdminPermissions(user);
@@ -99,8 +106,12 @@ export async function POST(req: NextRequest) {
       paymentMode: body.paymentMode, requiredPrepayCents: body.requiredPrepayCents, balanceTerms: body.balanceTerms,
       transactionReference: body.transactionReference, allocationReference: body.allocationReference,
       receiptKind: body.receiptKind, receiptTotalCents: body.receiptTotalCents, amountCents: body.amountCents,
+      bankTrace: body.bankTrace, receivingAccount: body.receivingAccount, payer: body.payer, documentKind: body.documentKind,
+      statementRow: body.statementRow, bankReceiptId: body.bankReceiptId, legacyAllocationId: body.legacyAllocationId,
     } : null;
-    const purchase: PurchaseActionInput | null = start ? null : {
+    const shipment: ShipmentAttributionInput | null = attribution ? { ...base, targetId: body.targetId, sources: body.sources,
+      reference: body.reference, sha256: body.sha256, description: body.description, occurredAt: body.occurredAt, documentRow: body.documentRow } : null;
+    const purchase: PurchaseActionInput | null = start || attribution ? null : {
       ...base, purchaseOrderId: requiredText(body.purchaseOrderId, '采购单号'), action: body.action,
       reference: body.reference, referenceSha256: body.referenceSha256, occurredAt: body.occurredAt,
       amountCents: body.amountCents, conditionReference: body.conditionReference, changeKind: body.changeKind,
@@ -113,6 +124,7 @@ export async function POST(req: NextRequest) {
     };
     if (body.stage === 'preview') {
       const preview = await prisma.$transaction(async tx => {
+        if (shipment) return previewPurchaseShipment(tx, shipment, user);
         await requireResolutionPermission(tx, purchase, permissions);
         if (orderReview) return previewPurchaseStartAction(tx, orderReview, user);
         return previewPurchaseAction(tx, purchase!, user);
@@ -130,6 +142,7 @@ export async function POST(req: NextRequest) {
       const approvalPermission = await requireResolutionPermission(tx, purchase, permissions) ?? permission;
       const authorization = { action: 'admin_sensitive' as const, permission: approvalPermission,
         sessionFingerprint: pricingContentHash({ userId: user.id, sessionId: user.sessionId }), verifiedAt: new Date().toISOString() };
+      if (shipment) return applyPurchaseShipment(tx, shipment, user, authorization);
       if (purchase) return applyPurchaseAction(tx, purchase, user, authorization);
       await applyPurchaseStartAction(tx, orderReview!, user, authorization);
       return prepareOrderPurchases(tx, orderId, user);

@@ -57,9 +57,11 @@ async function writtenQuote(tx: Db, order: SourceOrder, item: Item, links: Await
   const task = await tx.backgroundTask.findUnique({ where: { id: snap.supplierQuoteReviewId } });
   if (!task || task.type !== 'inquiry.supplier_written_quote' || task.status !== 'succeeded') return null;
   const req = jsonObject(task.payload), res = jsonObject(task.result), scope = object(req.scope);
+  const specification = orderItemView(item).spec;
   if (scope.inquiryId !== order.inquiryId || scope.inquiryItemId !== quoted.inquiryItemId || scope.productId !== item.productId
     || (scope.variantId ?? null) !== (snap.variantId ?? null) || scope.catalogNumber !== snap.catalogNumber
-    || scope.quantity !== item.quantity || scope.customerEmail !== order.email || (scope.userId && scope.userId !== order.customerId)
+    || scope.quantity !== item.quantity || (item.brand && scope.brand !== item.brand) || (specification && scope.specification !== specification)
+    || scope.customerEmail !== order.email || (scope.userId && scope.userId !== order.customerId)
     || req.sourceHash !== pricingContentHash(scope) || typeof req.requestHash !== 'string' || req.requestHash !== res.requestHash
     || task.dedupeKey !== `supplier-written-quote:${req.requestHash}` || !res.confirmedBy || !res.confirmedAt) return null;
   try {

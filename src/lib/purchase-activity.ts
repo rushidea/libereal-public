@@ -21,6 +21,14 @@ export async function readPurchaseActivities(tx: Db, orderId: string) {
 
 export type PurchaseActivity = Awaited<ReturnType<typeof readPurchaseActivities>>[number];
 
+export function purchaseObject(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
+export function purchaseOperation(detail: Record<string, unknown>) {
+  return purchaseObject(purchaseObject(detail.snapshot).operation);
+}
+
 export async function addPurchaseActivity(tx: Db, input: {
   orderId: string; purchaseOrderId?: string | null; orderItemId?: string; actor: PurchaseActor;
   action: string; requestKey?: string; referenceKey?: string; amountCents?: number; detail: unknown;
