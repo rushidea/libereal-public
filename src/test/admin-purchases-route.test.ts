@@ -205,6 +205,37 @@ afterEach(() => {
 });
 
 describe('admin purchase endpoint', () => {
+  it('requires an explicit finance approval of a bank original before its amount can be allocated', async () => {
+    signIn(staff.approver);
+    const before = await expectJson(await readPurchases(orderId), 200);
+    const proof = { action: 'verify_bank_receipt', requestId: 'verify-actual-bank-original', orderId,
+      version: before.workspace.startReview.version, bankTrace: 'TEST-BANK-RECEIPT-ORIGINAL', receivingAccount: 'TEST-COMPANY-ACCOUNT',
+      payer: '合成付款人', documentKind: 'single_receipt', receivedCents: 15000, receiptTotalCents: 15000,
+      occurredAt: new Date().toISOString(), reference: 'TEST-BANK-SLIP', sha256: 'd'.repeat(64), description: '核对实际收款及归属。' };
+    await expectJson(await post({ ...proof, stage: 'preview' }), 403);
+    const db = getTestDb();
+    db.prepare("INSERT OR IGNORE INTO AdminPermission (id,key,resource,action,name) VALUES ('finance.write','finance.write','finance','write','finance.write')").run();
+    db.prepare('INSERT INTO AdminRolePermission (roleId,permissionId) VALUES (?,?)').run(staffRole[staff.finance], 'finance.write');
+    signIn(staff.finance);
+    const manualPlatform = { ...proof, action: 'record_customer_receipt', requestId: 'unverified-platform', receiptKind: 'platform_receipt',
+      transactionReference: 'TEST-UNKNOWN-PLATFORM-TRANSFER', allocationReference: 'TEST-UNVERIFIED', amountCents: 15000 };
+    await expectJson(await post({ ...manualPlatform, stage: 'preview' }), 409);
+    const { preview } = await expectJson(await post({ ...proof, stage: 'preview' }), 200);
+    await expectJson(await post({ ...proof, stage: 'confirm', actionHash: preview.actionHash }), 403);
+    const { workspace } = await expectJson(await post({ ...proof, stage: 'confirm', actionHash: preview.actionHash, stepUpToken: await grant(staff.finance) }), 200);
+    expect(workspace.startReview.payment.receivedCents).toBe(0);
+    const [bank] = workspace.startReview.bankReceipts;
+    expect(bank).toMatchObject({ actorId: staff.finance, bank: { bankTrace: proof.bankTrace, receiptTotalCents: 15000 } });
+    const allocate = { action: 'record_customer_receipt', orderId, version: workspace.startReview.version, requestId: 'allocate-confirmed-proof', bankReceiptId: bank.id,
+      allocationReference: 'TEST-EXACT-ALLOCATION', amountCents: 15000, reference: 'TEST-ALLOCATION-SHEET', sha256: 'e'.repeat(64), description: '复核本单分摊。' };
+    const allocation = await expectJson(await post({ ...allocate, stage: 'preview' }), 200);
+    await expectJson(await post({ ...allocate, stage: 'confirm', amountCents: 14999, actionHash: allocation.preview.actionHash, stepUpToken: await grant(staff.finance) }), 409);
+    const final = await expectJson(await post({ ...allocate, stage: 'confirm', actionHash: allocation.preview.actionHash, stepUpToken: await grant(staff.finance) }), 200);
+    expect(final.workspace.startReview.payment.receivedCents).toBe(15000);
+    expect(activity('verify_bank_receipt')).toHaveLength(1);
+    expect(activity('record_customer_receipt')).toEqual([{ actorId: staff.finance, amountCents: 15000 }]);
+  });
+
   it('lists and prepares historical partially shipped orders with outstanding lines only', async () => {
     const partial = 'TEST-PARTIALLY-SHIPPED';
     const complete = 'TEST-SHIPPED-COMPLETELY';

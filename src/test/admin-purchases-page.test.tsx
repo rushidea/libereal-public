@@ -51,9 +51,9 @@ function makeWorkspace(status?: Purchase['status'], lineChanges: Partial<Line> =
     totalCents: 8642, paidCents: 0, lines: [line], ledger: [], orderedBefore: status === 'ordered',
     openIncidentId: status === 'on_hold' ? 'TEST-INCIDENT' : null, orderReceipt: null, leadTimeApproved: false,
     dueCents: 8642, remaining: [{ orderItemId, quantity: source.quantity }], remainingScope: null,
-    needsRemainingReview: false, needsLegacyReview: false, canRegisterHistorical: false,
+    needsRemainingReview: false, needsLegacyReview: false, needsFundingReapproval: false, canRegisterHistorical: false,
   } : null;
-  const payment = { receivedCents: 0, allocatedCents: 0, receipts: [], excludedReceiptIds: [], paymentAttemptId: null, settledReceivableId: null };
+  const payment = { receivedCents: 0, allocatedCents: 0, receipts: [], excludedReceiptIds: [], paymentAttemptId: null, nativePaidAt: null, settledReceivableId: null };
   const startReview: Workspace['startReview'] = {
     orderTerms: { orderId, inquiryId: null, organizationId: null, ownerScope: 'personal', customerId: 'test-buyer',
       customerEmail: 'synthetic@example.test', payee: 'Libereal', total: 250, subtotal: 250, pointsDiscount: 0,
@@ -64,13 +64,14 @@ function makeWorkspace(status?: Purchase['status'], lineChanges: Partial<Line> =
     acceptance: { id: 'test-acceptance', actor: 'test-merchant', at: '2031-04-02T00:00:00.000Z', origin: 'merchant_history' },
     history: [], canVerifyAcceptance: false, active: true, principal: 25000,
     plan: { mode: 'credit', requiredPrepayCents: 0, balanceTerms: null, evidenceId: null },
-    payment, outstandingCents: 25000, credit: null, creditVersion: null, overCredit: false, creditExceptionRequired: false, version,
+    payment, bankReceipts: [], outstandingCents: 25000, credit: null, creditVersion: null, overCredit: false, creditExceptionRequired: false, version,
   };
   return {
     orderId, orderStatus: 'confirmed', cancellation: null, canPrepare: false, startReview,
     eligibility: { eligible: true, reason: null, basis: { acceptanceId: 'test-acceptance', receivableId: 'test-receivable',
       reserveId: 'test-credit-reserve', amount: 250, mode: 'credit', payment, planEvidenceId: null } },
     lines: [line], orders: purchase ? [purchase] : [], activities: [],
+    fulfillment: { version, targets: [], delivered: [], inconsistent: [], ledger: [] },
   };
 }
 
@@ -259,6 +260,60 @@ describe('supplier purchasing page', () => {
     fireEvent.click(within(panel).getByRole('button', { name: '确认复核旧采购批准' }));
     expect(await screen.findByRole('button', { name: '登记供应商订购结果' })).toBeInTheDocument();
     expect(posts.map(body => body.action)).toEqual(['review_legacy_approval', 'review_legacy_approval']);
+  });
+
+  it('exposes a pre-hold receipt action and preserves the visible supply hold after confirmation', async () => {
+    const workspace = makeWorkspace('on_hold');
+    const [purchase] = workspace.orders;
+    purchase.canRegisterHistorical = true;
+    const posts = mockWorkspace(workspace, ['purchases.read', 'purchases.write'], body => {
+      if (body.stage === 'preview') return Response.json(preview(body, workspace));
+      return Response.json({ workspace: { ...workspace, orders: [{ ...purchase, version: 'd'.repeat(64), canRegisterHistorical: false, orderedBefore: true,
+        orderReceipt: { occurredAt: body.occurredAt, registeredAt: '2031-04-13T09:00:00.000Z', reference: body.reference, lines: [] } }] } });
+    });
+    render(<PurchaseManager initialOrder={orderId} />);
+    fireEvent.click(await screen.findByRole('button', { name: '补录暂停前实际订购' }));
+    expect(screen.getByText(/采购仍处于暂停/)).toBeInTheDocument();
+    fill('供应商已接受订购的单据或书面确认编号', 'TEST-BEFORE-HOLD');
+    fill('供应商实际确认订购时间（本地时间）', '2031-04-13T08:00');
+    fill('实际订购凭据摘要', 'e'.repeat(64));
+    fireEvent.click(screen.getByRole('button', { name: '查看完整预览' }));
+    const panel = await screen.findByRole('region', { name: '操作预览' });
+    expect(panel).toHaveTextContent('TEST-BEFORE-HOLD');
+    fireEvent.click(within(panel).getByRole('button', { name: '确认登记供应商订购结果' }));
+    expect(await screen.findByText(/供应商实际订购.*TEST-BEFORE-HOLD/)).toBeInTheDocument();
+    expect(screen.getByText('供货变化待处理')).toBeInTheDocument();
+    expect(posts[1]).toMatchObject({ action: 'register_order', stage: 'confirm', requestId: posts[0].requestId, actionHash });
+  });
+
+  it('previews the exact sources of a single customer shipment and confirms the same attribution once', async () => {
+    const workspace = makeWorkspace('ordered');
+    const target = { id: 'TEST-SHIPMENT-LINE', shipmentId: 'TEST-SHIPMENT', orderItemId, name: '合成采购商品', quantity: 2,
+      occurredAt: '2031-05-01T08:00:00.000Z', reference: 'TEST-CARRIER', purchaseSources: [{ purchaseOrderId: purchaseId, quantity: 2, orderedAt: null }] };
+    workspace.fulfillment.targets = [target];
+    const operation = { target, sources: [{ purchaseOrderId: purchaseId, quantity: 1 }, { purchaseOrderId: null, quantity: 1 }],
+      occurredAt: target.occurredAt, reference: 'TEST-SHIPMENT-ARCHIVE', sha256: 'e'.repeat(64), description: '核对出库来源与合计。' };
+    const posts = mockWorkspace(workspace, ['purchases.read', 'purchases.approve'], body => {
+      if (body.stage === 'preview') return Response.json({ preview: { actionHash, snapshot: { orderId, operation, referenceKey: 'TEST-SHIPMENT-REFERENCE' } } });
+      return Response.json({ workspace: { ...workspace, fulfillment: { ...workspace.fulfillment, version: 'd'.repeat(64), targets: [],
+        ledger: [{ id: 'TEST-ATTRIBUTION', actorId: 'test-approver', recordedAt: target.occurredAt, operation }] } } });
+    });
+    render(<PurchaseManager initialOrder={orderId} />);
+    fireEvent.click(await screen.findByRole('button', { name: '核对发货来源' }));
+    fill(`采购单 ${purchaseId} 的发出数量`, '1');
+    fill('其他有据来源的发出数量', '1');
+    fill('发货来源书面凭据档案', operation.reference);
+    fill('发货来源书证摘要', operation.sha256);
+    fill('发货归属核对结果', operation.description);
+    fireEvent.click(screen.getByRole('button', { name: '查看发货归属预览' }));
+    const previewPanel = await screen.findByRole('region', { name: '发货归属预览' });
+    expect(previewPanel).toHaveTextContent(`采购单 ${purchaseId} · 1`);
+    expect(previewPanel).toHaveTextContent('其他有据来源 · 1');
+    expect(posts[0]).toMatchObject({ action: 'attribute_purchase_shipment', targetId: target.id, sources: operation.sources });
+    fireEvent.click(within(previewPanel).getByRole('button', { name: '确认发货归属' }));
+    expect(await screen.findByText('查看已核对的发货归属')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '核对发货来源' })).not.toBeInTheDocument();
+    expect(posts[1]).toMatchObject({ stage: 'confirm', actionHash, requestId: posts[0].requestId });
   });
 
   it.each(['draft', 'approved', 'on_hold'] as const)('shows records without mutation controls to a read-only role (%s)', async status => {
