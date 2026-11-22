@@ -2,13 +2,14 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useAdminMfaStepUp, isAdminMfaStepUpResponse } from '@/components/admin/AdminMfaStepUpDialog';
-import type { previewPurchaseAction } from '@/lib/purchase-orders';
+import type { previewPurchaseAction, previewPurchaseShipment } from '@/lib/purchase-orders';
 import type { previewPurchaseStartAction } from '@/lib/purchase-start';
 import PurchaseLineForm, { button, field, primary, type Workspace } from './PurchaseLineForm';
 import PurchaseActions from './PurchaseActions';
 import PurchaseStartReview from './PurchaseStartReview';
+import PurchaseFulfillmentReview from './PurchaseFulfillmentReview';
 
-type Result = { permissions?:string[]; workspace?:Workspace; preview?:Awaited<ReturnType<typeof previewPurchaseAction | typeof previewPurchaseStartAction>>; error?:string;
+type Result = { permissions?:string[]; workspace?:Workspace; preview?:Awaited<ReturnType<typeof previewPurchaseAction | typeof previewPurchaseStartAction | typeof previewPurchaseShipment>>; error?:string;
   orders?:{id:string;status:string;prepared:number;purchases:number}[] };
 
 export type PurchaseRequest = (body: Record<string, unknown>) => Promise<Result | undefined>;
@@ -83,6 +84,8 @@ export default function PurchaseManager({initialOrder}:{initialOrder:string}) {
       <p className="text-sm">{workspace.eligibility.eligible?'已核实平台接单及本单采购启动依据':workspace.eligibility.reason}</p>
       {workspace.startReview && <PurchaseStartReview key={workspace.startReview.version} review={workspace.startReview}
         permissions={permissions} busy={busy} request={request} onError={setError}/>}
+      <PurchaseFulfillmentReview key={workspace.fulfillment.version} orderId={workspace.orderId} review={workspace.fulfillment}
+        canApprove={permissions.includes('purchases.approve')} busy={busy} request={request} onError={setError}/>
       {workspace.canPrepare&&permissions.includes('purchases.write')&&
         <button className={primary} disabled={busy} onClick={()=>void request({action:'prepare',orderId:workspace.orderId})}>从原订单准备采购</button>}
       {workspace.lines.length>0&&<section className="space-y-3"><h2 className="text-lg font-semibold">采购准备</h2>

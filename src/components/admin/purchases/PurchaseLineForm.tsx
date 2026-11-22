@@ -15,7 +15,8 @@ export const primary = 'rounded bg-slate-900 px-3 py-1.5 text-sm text-white hove
 export const statuses = { draft:'待独立批准',approved:'采购已批准',ordered:'已登记供应商订购',on_hold:'供货变化待处理',superseded:'草稿已归并' };
 export const actionNames = { approve:'批准采购单',approve_lead_time:'单独批准超长订货周期',register_order:'登记供应商订购结果',record_payment:'登记实际付款',
   report_change:'登记供货变化',resolve_change:'回填协调结果',prepare:'准备采购',save_line:'保存采购资料',
-  review_legacy_approval:'复核旧采购批准',approve_remaining:'核准原单剩余应付',record_late_order_exception:'登记取消后的订购异常' };
+  review_legacy_approval:'复核旧采购批准',approve_remaining:'核准原单剩余应付',record_late_order_exception:'登记取消后的订购异常',
+  reapprove_purchase:'重新核准本单后续动作' };
 
 const textFields = {
   supplier:'供货方全称',payee:'收款方全称',paymentTerms:'供应商付款条件',
@@ -49,6 +50,7 @@ export function LineDetails({line}:{line:Pick<Line,'source'|'terms'>}) {
     <p>运费及其他费用　{terms.freightTerms || '待核实'}{terms.amountBreakdown && ` · ${terms.amountBreakdown}`}</p>
     <p>供货期　{terms.leadTime || '待核实'}　报价有效至 {terms.validUntil ? new Date(terms.validUntil).toLocaleString('zh-CN') : '待核实'}</p>
     <p>书面报价依据　{terms.sourceReference || '待补'}</p>
+    {terms.sourceDocumentKind === 'multiple_items' && <p>报价原件商品行 {terms.sourceDocumentRow}</p>}
     {terms.writtenSupplier && <p>原函供货方　{terms.writtenSupplier}{terms.identityReference && ` · 法人核对 ${terms.identityReference}`}</p>}
     {terms.supplierConditions && <p>原函供货条件　{terms.supplierConditions}</p>}
     {terms.settlementReference && <p>结算依据　{terms.settlementReference}</p>}
@@ -66,6 +68,17 @@ export function PurchaseLineFields({line,values,onChange,lockedTerms}:{line:Pick
     {(Object.entries(textFields) as [TextKey,string][]).filter(([key]) => editable(key)).map(([k,label]) => <label key={k} className="grid gap-1 text-xs">{label}
       <input className={field} value={values[k] ?? ''} maxLength={2000} onChange={e => onChange({...values,[k]:e.target.value})}/></label>)}
     {editable('sourceSha256') && <DocumentDigestField label="供货书证摘要" value={values.sourceSha256 ?? ''} onChange={sourceSha256 => onChange({ ...values, sourceSha256 })}/>}
+    {editable('sourceDocumentKind') && <label className="grid gap-1 text-xs">供货书证覆盖范围
+      <select className={field} value={values.sourceDocumentKind ?? 'single_item'} onChange={event => onChange({
+        ...values, sourceDocumentKind: event.target.value as PurchaseTerms['sourceDocumentKind'], sourceDocumentRow: undefined,
+      })}>
+        <option value="single_item">本商品和数量的单项报价</option><option value="multiple_items">原件列明多项报价</option>
+      </select>
+    </label>}
+    {values.sourceDocumentKind === 'multiple_items' && editable('sourceDocumentRow') && <label className="grid gap-1 text-xs">商品在报价原件中的行序号
+      <input className={field} type="number" min={1} step={1} required value={values.sourceDocumentRow ?? ''}
+        onChange={event => onChange({ ...values, sourceDocumentRow: event.target.value ? Number(event.target.value) : undefined })}/>
+    </label>}
     {editable('settlementSha256') && <DocumentDigestField label="结算书证摘要" value={values.settlementSha256 ?? ''} onChange={settlementSha256 => onChange({ ...values, settlementSha256 })}/>}
     {editable('identitySha256') && values.writtenSupplier && values.supplier && values.writtenSupplier !== values.supplier &&
       <DocumentDigestField label="法人主体映射书证摘要" value={values.identitySha256 ?? ''} onChange={identitySha256 => onChange({ ...values, identitySha256 })}/>}

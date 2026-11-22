@@ -81,10 +81,11 @@ export default function PurchaseActions({ orderId, orderStatus, cancellation, po
     choices.push('approve');
   }
   if (po.needsLegacyReview && permit('approve')) choices.push('review_legacy_approval');
+  if (po.needsFundingReapproval && permit('approve')) choices.push('reapprove_purchase');
   if (po.needsRemainingReview && !po.openIncidentId && !po.needsLegacyReview && (!closed || po.orderedBefore) && permit('approve')) choices.push('approve_remaining');
-  if ((!closed ? po.status === 'approved' : po.canRegisterHistorical) && !po.orderedBefore && !po.needsLegacyReview && permit('write')) choices.push('register_order');
+  if ((po.canRegisterHistorical || (!closed && po.status === 'approved')) && !po.orderedBefore && !po.needsLegacyReview && permit('write')) choices.push('register_order');
   if (cancellation && (po.canRegisterHistorical || po.orderedBefore) && permit('approve')) choices.push('record_late_order_exception');
-  if (['approved', 'ordered'].includes(po.status) && !po.needsLegacyReview && (!closed || po.orderedBefore)
+  if (['approved', 'ordered'].includes(po.status) && !po.needsLegacyReview && !po.needsFundingReapproval && (!closed || po.orderedBefore)
     && po.dueCents !== null && Math.min(po.dueCents, po.totalCents - po.paidCents) > 0 && permit('pay')) choices.push('record_payment');
   if (po.openIncidentId && permit(committed ? 'approve' : 'write')) choices.push('resolve_change');
   if (!po.openIncidentId && permit('write')) choices.push('report_change');
@@ -137,6 +138,7 @@ export default function PurchaseActions({ orderId, orderStatus, cancellation, po
     {po.remainingScope && <p className="text-sm">核准的剩余商品应付 {money(po.remainingScope.totalCents)} · 经核实冲抵 {money(po.remainingScope.appliedPaidCents)} · 尚未付 {money(po.dueCents ?? undefined)}</p>}
     {po.needsRemainingReview && <p className="text-sm text-amber-900">部分商品已取消或转替代采购，须逐行核准原单剩余应付。</p>}
     {po.needsLegacyReview && <p className="text-sm text-amber-900">继续登记前须复核原批准、书证和已付凭据。</p>}
+    {po.needsFundingReapproval && <p className="text-sm text-amber-900">客户付款条件已变化。后续动作需重新核准，已实际发生的订购按原有效期补录。</p>}
     {cancellation && <p className="text-sm">客户订单{cancellation.status === 'closed' ? '关闭' : '取消'}时间 {new Date(cancellation.occurredAt).toLocaleString('zh-CN')}</p>}
     {po.orderReceipt && <p className="text-sm">供应商实际订购 {po.orderReceipt.occurredAt
       ? new Date(po.orderReceipt.occurredAt).toLocaleString('zh-CN') : '时间待核实'}　登记时间 {new Date(po.orderReceipt.registeredAt).toLocaleString('zh-CN')}
@@ -155,18 +157,24 @@ export default function PurchaseActions({ orderId, orderStatus, cancellation, po
     {!pending && <div className="flex flex-wrap gap-2">{choices.map(choice =>
       <button type="button" key={choice} className={button} disabled={busy} onClick={() => {
         setAction(choice); setOutcome(po.needsRemainingReview ? 'declined' : 'original_terms'); setRevisions({}); setDispositions({});
-      }}>{actionNames[choice]}</button>)}</div>}
+      }}>{choice === 'register_order' && po.status === 'on_hold' ? '补录暂停前实际订购' : actionNames[choice]}</button>)}</div>}
     {action && !pending && <form key={action} className="grid gap-3 border-t pt-3" onSubmit={event => {
       event.preventDefault();
       void preview(new FormData(event.currentTarget));
     }}>
       <strong className="text-sm">{actionNames[action]}</strong>
       {(action === 'register_order' || action === 'record_late_order_exception') && <>
+        {action === 'register_order' && po.status === 'on_hold' && <p className="text-sm">采购仍处于暂停。请按供方原件填写实际发生时间。</p>}
         {inputField('reference', action === 'register_order' ? '供应商已接受订购的单据或书面确认编号' : '取消后实际订购及处理结果的书面出处')}
         <label className="grid gap-1 text-sm">供应商实际确认订购时间（本地时间）
           <input className={field} type="datetime-local" step="1" name="occurredAt" required/>
         </label>
         <DocumentDigestField name="referenceSha256" label="实际订购凭据摘要" required/>
+      </>}
+      {action === 'reapprove_purchase' && <>
+        {inputField('reference', '客户付款条件变动的档案出处')}
+        <DocumentDigestField name="referenceSha256" label="新批准依据摘要" required/>
+        {inputField('description', '本次重新批准的后续动作与旧款归属')}
       </>}
       {action === 'record_late_order_exception' && <>
         <label className="grid gap-1 text-sm">异常处理结果<select name="exceptionOutcome" className={field} required>
@@ -263,6 +271,11 @@ export default function PurchaseActions({ orderId, orderStatus, cancellation, po
         {op.evidence.payments.map(payment => <p key={payment.id}>原付款 {money(payment.amountCents)} · 流水 {payment.receiptReference}</p>)}
         {'paymentReference' in op && <p>已付款凭证档案 {op.paymentReference}</p>}
         {op.checkedTerms.map(line => <LineDetails key={line.orderItemId} line={{ source: lineFor(line.orderItemId).source, terms: line.terms }}/>)}
+        <p>{op.description}</p>
+      </div>}
+      {op.action === 'reapprove_purchase' && <div className="space-y-1 text-sm">
+        <p>原批准 {op.originalApprovalId} · 现行约定预付 {money(op.fundingPlan?.requiredPrepayCents)}{op.fundingPlan?.balanceTerms && ` · ${op.fundingPlan.balanceTerms}`}</p>
+        {op.payments.map(payment => <p key={payment.id}>已付 {money(payment.amountCents ?? undefined)} · {payment.reference}</p>)}
         <p>{op.description}</p>
       </div>}
       {op.action === 'approve_remaining' && <div className="space-y-1 text-sm">
