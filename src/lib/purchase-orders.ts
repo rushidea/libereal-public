@@ -7,6 +7,7 @@ import {
 } from '@/lib/purchase-contract';
 import { previewShipmentAttribution, purchaseFulfillmentReview, type ShipmentAttributionInput } from '@/lib/purchase-fulfillment';
 import { agreedDocumentTerms, assertSupplierDocumentScopes, missingDocumentScopes, restoreDocumentScopes } from '@/lib/purchase-document-scope';
+import { decisionDocumentRow, previewDecisionDocuments, type DecisionDocumentInput } from '@/lib/purchase-decision-documents';
 import { pricingContentHash } from '@/lib/pricing-adjustment-approval';
 import { loadPurchaseOrderSource, loadPurchaseLines, type PurchaseSource, type SourceOrder } from '@/lib/purchase-source';
 import { creditExceptionMatches, paymentPlanAt, paymentPlanContent, paymentPlanFromReview, purchaseCreditVersion, purchaseStartReview, type PaymentPlan } from '@/lib/purchase-start';
@@ -25,9 +26,8 @@ type RequirementRow = {
 type OrderRow = { id: string; status: Status; revision: number; approvedHash: string | null };
 type LineEdit = { orderItemId: string; terms: PurchaseTerms };
 type ReplacementInput = { name?: unknown; brand?: unknown; catalogNumber?: unknown; spec?: unknown; unit?: unknown; terms?: unknown };
-type DispositionInput = { orderItemId: string; quantity: number; outcome: 'cancel' | 'replace'; replacement?: ReplacementInput;
+type DispositionInput = DecisionDocumentInput & { orderItemId: string; quantity: number; outcome: 'cancel' | 'replace'; replacement?: ReplacementInput;
   forwardingLossId?: string; shortfallId?: string; shortfallDecision?: ShortfallDecision; revisesResendApprovalId?: string;
-  supplierDocumentRow?: number; customerDocumentRow?: number;
 };
 export type PurchaseActionInput = {
   orderId: string; purchaseOrderId: string;
@@ -400,19 +400,8 @@ function activeReplacementQuantity(view: Workspace, orderItemId: string) {
   return view.orders.reduce((sum, purchase) => sum + pendingReplacementQuantity(view, purchase, orderItemId), 0);
 }
 
-function decisionDocumentRow(value: unknown) {
-  if (value === undefined) return undefined;
-  if (!positiveCents(value)) throw new PurchaseError('书面决定的行号须为原件所载的正整数', 400);
-  return value;
-}
-
-function sameDecisionDocument(sha256: string, row: number | undefined, previousSha256: unknown, previousRow: unknown) {
-  return sha256 === previousSha256 && (row === undefined || !positiveCents(previousRow) || row === previousRow);
-}
-
 function committedDispositions(
   view: Workspace, po: PO, input: PurchaseActionInput, customerLines: PurchaseSource[], remainingQuantities: ReadonlyMap<string, number>,
-  writtenEvidence: { supplierSha256: string; customerSha256: string },
 ): Disposition[] {
   const entries = input.dispositions;
   if (!Array.isArray(entries) || !entries.length || entries.some(entry => !entry || typeof entry.orderItemId !== 'string')
@@ -424,7 +413,9 @@ function committedDispositions(
     const { orderItemId, quantity, outcome, replacement, forwardingLossId } = entry;
     const revisesResendApprovalId = entry.revisesResendApprovalId === undefined ? undefined
       : requiredText(entry.revisesResendApprovalId, '原免费重发批准');
-    let revisedApproval: Pick<Disposition,'revisesResendApprovalId' | 'priorResend' | 'supplierDocumentRow' | 'customerDocumentRow'> = {};
+    const documentRows = { supplierDocumentRow: decisionDocumentRow(entry.supplierDocumentRow),
+      customerDocumentRow: decisionDocumentRow(entry.customerDocumentRow) };
+    let revisedApproval: Pick<Disposition,'revisesResendApprovalId' | 'priorResend'> = {};
     let contractSource: ContractDispatchSource | undefined;
     const shortfallId = entry.shortfallId ?? forwardingLossId;
     const shortfallDecision = entry.shortfallDecision ?? (forwardingLossId ? 'new_purchase' : undefined);
@@ -447,22 +438,12 @@ function committedDispositions(
         if (!resend || quantity > resend.available || shortfallDecision === 'free_resend') {
           throw new PurchaseError('改办数量须对应本行原免费重发批准中尚未发货或改办的部分');
         }
-        const supplierDocumentRow = decisionDocumentRow(entry.supplierDocumentRow);
-        const customerDocumentRow = decisionDocumentRow(entry.customerDocumentRow);
-        const usedDocuments = view.activities.filter(row => row.action === 'resolve_change').some(row => {
-          const operation = purchaseOperation(row.detail);
-          return Array.isArray(operation.dispositions) && operation.dispositions.some(applied =>
-            applied?.orderItemId === orderItemId && (applied.shortfallId || applied.forwardingLossId)
-            && (sameDecisionDocument(writtenEvidence.supplierSha256,supplierDocumentRow,operation.supplierSha256,applied.supplierDocumentRow)
-              || sameDecisionDocument(writtenEvidence.customerSha256,customerDocumentRow,operation.customerSha256,applied.customerDocumentRow)));
-        });
-        if (usedDocuments) throw new PurchaseError('改办须提供新的供应商书面决定和客户同意书证，或核对同份原件中尚未使用的独立行');
-        revisedApproval = { revisesResendApprovalId, supplierDocumentRow, customerDocumentRow,
+        revisedApproval = { revisesResendApprovalId,
           priorResend: { authorized: resend.quantity, dispatched: resend.dispatched, redirected: resend.redirected, available: resend.available } };
       } else if (quantity > loss.available) {
         throw new PurchaseError('短失处理须对应本行尚未使用的实际物流书证数量');
       }
-      if (shortfallDecision === 'free_resend') return { orderItemId, quantity, outcome: 'resend', replacement: null, shortfallId, shortfallDecision };
+      if (shortfallDecision === 'free_resend') return { orderItemId, quantity, outcome: 'resend', replacement: null, shortfallId, shortfallDecision, ...documentRows };
       if (shortfallDecision === 'change_contract') {
         if (!loss.contractSource || quantity + (prior.get(orderItemId) ?? 0) > line.source.quantity) {
           throw new PurchaseError('原合同变动须对应其中尚可核准的商品份额');
@@ -473,7 +454,7 @@ function committedDispositions(
     } else if (quantity + (prior.get(orderItemId) ?? 0) + supplierDispatchQuantity(view, po.id, orderItemId) > line.source.quantity) {
       throw new PurchaseError('替代或取消的累计数量不得超过原采购行尚未发出的数量，有短失或退回须先据实核对');
     }
-    const archivedOrigin = { ...revisedApproval, ...(contractSource ? { contractSource } : {}) };
+    const archivedOrigin = { ...documentRows, ...revisedApproval, ...(contractSource ? { contractSource } : {}) };
     if (outcome === 'cancel') return { orderItemId, quantity, outcome, replacement: null, shortfallId, shortfallDecision, ...archivedOrigin };
     const active = activeReplacementQuantity(view, orderItemId);
     const retained = active - Math.min(quantity, pendingReplacementQuantity(view, po, orderItemId));
@@ -779,7 +760,7 @@ function actionDetails(
       customerSha256: documentSha256(input.customerSha256, '客户书面回复摘要'),
     } : null;
     const dispositions = writtenEvidence && (input.outcome === 'declined' || input.outcome === 'replacement' || input.outcome === 'shortfall')
-      ? committedDispositions(view, po, input, customerLines, remainingQuantities, writtenEvidence) : undefined;
+      ? committedDispositions(view, po, input, customerLines, remainingQuantities) : undefined;
     if (dispositions?.some(line => line.replacement) && !view.eligibility.eligible) {
       throw new PurchaseError('另建替代采购前须先核实客户订单仍符合采购启动条件');
     }
@@ -821,7 +802,11 @@ export async function previewPurchaseAction(tx: Db, input: PurchaseActionInput, 
   const original = validateSource || commitment || input.action === 'resolve_change' ? await loadPurchaseOrderSource(tx, input.orderId) : null;
   const currentLines = original ? await loadPurchaseLines(tx, original) : [];
   const remaining = original ? remainingDemand(original) : new Map<string, number>();
-  const operation = commitment ? await previewCommitment(tx, original!, view, po, input, actor) : actionDetails(view, po, input, currentLines, remaining, actor);
+  const details = commitment ? await previewCommitment(tx, original!, view, po, input, actor) : actionDetails(view, po, input, currentLines, remaining, actor);
+  const operation = details.action === 'resolve_change' && details.dispositions && details.supplierSha256 && details.customerSha256
+    ? { ...details, decisionDocuments: await previewDecisionDocuments(tx, { orderId: view.orderId, purchaseOrderId: po.id,
+      supplierSha256: details.supplierSha256, customerSha256: details.customerSha256, dispositions: details.dispositions, documents: input.dispositions!,
+    }) } : details;
   await assertSupplierDocumentScopes(tx, supplyEvidenceFor(po, operation), operation.action === 'reapprove_purchase'
     ? { restoredLines: operation.documentScopes } : undefined);
   const scoped = operation.action === 'register_order' ? operation.execution.lines
