@@ -1,4 +1,4 @@
-import { confirmedCustomerDelivery } from '@/lib/fulfillment-accounting';
+import { confirmedCustomerDelivery, customerLineReceipts, customerLineReturnableAt } from '@/lib/fulfillment-accounting';
 import { disposeProcurementBatch, receiveProcurementBatch } from '@/lib/inventory';
 import { fulfillmentStatus, isInactiveOrderStatus } from '@/lib/order-domain';
 import { purchaseWorkspace } from '@/lib/purchase-orders';
@@ -102,16 +102,16 @@ async function eventPlan(tx: Db, orderId: string, parcelId: string, raw: unknown
       if (resolved.has(line.id) || (kind !== 'shortage' && kind !== 'loss' && kind !== 'return')) throw new PurchaseError('每个包裹行请核对一种实际短失或退回结果');
       resolved.add(line.id);
       if (row.quantity > (kind === 'return' ? balance.received : balance.pending)) throw new PurchaseError('处理数量超过该行实收可退或尚未签收的数量');
-      const lastReceipt = parcel.events.findLast(event => event.kind === (inbound ? 'warehouse_receipt' : 'customer_delivery') && event.status === 'applied');
-      if (kind === 'return' && (!lastReceipt || lastReceipt.occurredAt.getTime() > occurred)) throw new PurchaseError('退回日期须有此前的实际签收记录');
       let receipt = null;
       if (inbound && kind === 'return') {
         const chosen = receiptFor(parcel, requiredText(row.receiptId,'实际退回的入仓批次'), row.quantity, occurred);
         if (chosen.line.id !== line.id) throw new PurchaseError('退回批次须对应原包裹行');
-        receipt = { id: chosen.receipt.id, batch: chosen.receipt.inventoryBatch, available: availableReceipt(chosen.receipt) };
+        receipt = { id: chosen.receipt.id, batch: chosen.receipt.inventoryBatch, available: availableReceipt(chosen.receipt), receivedAt: chosen.receivedAt };
       } else if (row.receiptId) throw new PurchaseError('只有仓库实际退回时才指定原入仓批次');
+      const returnableAt = kind === 'return' && !inbound ? customerLineReturnableAt(parcel,line,occurred) : undefined;
+      if (returnableAt !== undefined && row.quantity > returnableAt) throw new PurchaseError('该商品行在实际退回时没有足够的有效签收数量');
       resolutions.push({ parcelLineId: line.id, orderItemId: line.orderItemId, purchaseOrderId: line.purchaseOrderId, kind, quantity: row.quantity,
-        previousShipped: balance.shipped, previousReceived: balance.received, receipt });
+        previousShipped: balance.shipped, previousReceived: balance.received, returnableAt, receipt });
       continue;
     }
     if (row.quantity > (remaining.get(line.id) ?? 0)) throw new PurchaseError('实际签收数量超过该包裹行尚未签收的数量');
@@ -205,10 +205,13 @@ export async function recordParcelEvent(tx: Db, orderId: string, parcelId: strin
   }
   const updated = await tx.fulfillmentParcel.findUniqueOrThrow({ where: { id: parcelId }, include: parcelInclude });
   const status = parcelProgress(updated);
-  if (parcel.shipmentId && (status === 'delivered' || status === 'shortfall') && (input.kind === 'customer_delivery' || input.kind === 'confirm_shortfall')) {
-    const deliveryEvents = await tx.fulfillmentEvent.aggregate({ where: { parcelId, kind: 'customer_delivery', status: 'applied' }, _max: { occurredAt: true } });
-    if (deliveryEvents._max.occurredAt) {
-      await tx.shipment.updateMany({ where: { id: parcel.shipmentId, status: 'shipped' }, data: { status: 'delivered', deliveredAt: deliveryEvents._max.occurredAt } });
+  if (parcel.shipmentId && (status === 'delivered' || status === 'shortfall')
+    && ['customer_delivery','confirm_shortfall','resolve_exception'].includes(input.kind)) {
+    const receipts = updated.lines.map(line => ({ line, evidence: customerLineReceipts(updated,line) }));
+    const lastReceipt = receipts.reduce((last,{evidence}) => evidence.reduce((max,row) => Math.max(max,row.at),last),0);
+    const verified = receipts.every(({line,evidence}) => evidence.reduce((sum,row) => sum+row.quantity,0) === line.receivedQuantity);
+    if (lastReceipt && verified && updated.lines.some(line => parcelLineBalance(line).received > 0)) {
+      await tx.shipment.updateMany({ where: { id: parcel.shipmentId, status: 'shipped' }, data: { status: 'delivered', deliveredAt: new Date(lastReceipt) } });
     }
     if (await confirmedCustomerDelivery(tx, orderId)) {
       const order = await tx.order.findUniqueOrThrow({ where: { id: orderId }, select: { status: true } });

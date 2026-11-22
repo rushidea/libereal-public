@@ -1,5 +1,43 @@
-import { parcelLineBalance, type FulfillmentDb as Db } from '@/lib/fulfillment-records';
+import { parcelLineBalance, type FulfillmentDb as Db, type FulfillmentParcelRecord } from '@/lib/fulfillment-records';
+import { jsonObject } from '@/lib/order-catalog-repricing';
 import { PurchaseError } from '@/lib/purchase-terms';
+
+export function customerLineReceipts(parcel: FulfillmentParcelRecord, line: FulfillmentParcelRecord['lines'][number]) {
+  return parcel.events.flatMap(event => {
+    if (event.status !== 'applied') return [];
+    const detail = jsonObject(event.details);
+    if (event.kind === 'link_legacy' && parcel.route === 'legacy_customer' && typeof detail.oldDelivery === 'string') {
+      const at = Date.parse(detail.oldDelivery);
+      return at >= parcel.dispatchedAt.getTime() && at <= Date.now() ? [{ at, quantity: line.quantity }] : [];
+    }
+    if (event.kind !== 'customer_delivery' || !Array.isArray(detail.lines) || event.occurredAt < parcel.dispatchedAt) return [];
+    return detail.lines.flatMap(row => row?.parcelLineId === line.id && Number.isSafeInteger(row.quantity) && row.quantity > 0
+      ? [{ at: event.occurredAt.getTime(), quantity: row.quantity as number }] : []);
+  });
+}
+
+export function customerLineReturnableAt(parcel: FulfillmentParcelRecord, line: FulfillmentParcelRecord['lines'][number], at: number) {
+  const changes = new Map<number,number>();
+  for (const receipt of customerLineReceipts(parcel,line)) {
+    changes.set(receipt.at,(changes.get(receipt.at) ?? 0)+receipt.quantity);
+  }
+  for (const resolution of line.resolutions) {
+    if (resolution.kind !== 'return') continue;
+    const event = parcel.events.find(row => row.id === resolution.eventId && row.status === 'applied');
+    if (!event) throw new PurchaseError('退回记录缺少原实际处理凭据');
+    const time = event.occurredAt.getTime();
+    changes.set(time,(changes.get(time) ?? 0)-resolution.quantity);
+  }
+  const entries = [...changes].sort(([left],[right]) => left-right);
+  let balance = entries.filter(([time]) => time <= at).reduce((sum,[,quantity]) => sum+quantity,0);
+  let available = balance;
+  for (const [time,quantity] of entries) {
+    if (time <= at) continue;
+    balance += quantity;
+    available = Math.min(available,balance);
+  }
+  return Math.max(0,available);
+}
 
 export async function customerShipmentRows(tx: Db, orderId: string) {
   const rows = await tx.shipmentItem.findMany({
