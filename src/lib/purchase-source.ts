@@ -1,8 +1,6 @@
 import type { Prisma } from '@prisma/client';
-import { isPostDeliveryPaymentMethod, normalizeOrderPaymentMethod } from '@/data/payment-methods';
-import { creditLimitForAccount } from '@/lib/customer-credit';
 import { jsonObject } from '@/lib/order-catalog-repricing';
-import { ORDER_APPROVAL_TERMS_INCLUDE, orderApprovalTerms } from '@/lib/order-approval';
+import { ORDER_APPROVAL_TERMS_INCLUDE } from '@/lib/order-approval';
 import { orderItemView } from '@/lib/commerce-records';
 import { pricingContentHash } from '@/lib/pricing-adjustment-approval';
 import { validateSupplierQuoteReply } from '@/lib/supplier-quote-review';
@@ -12,7 +10,7 @@ const include = {
   ...ORDER_APPROVAL_TERMS_INCLUDE, receivable: true, creditTransactions: true,
   paymentAttempts: true, statusHistory: { where: { toStatus: 'confirmed' } },
 } satisfies Prisma.OrderInclude;
-type SourceOrder = Prisma.OrderGetPayload<{ include: typeof include }>;
+export type SourceOrder = Prisma.OrderGetPayload<{ include: typeof include }>;
 type Item = SourceOrder['orderItems'][number];
 const object = (v: unknown): Record<string, unknown> =>
   v && typeof v === 'object' && !Array.isArray(v) ? v as Record<string, unknown> : {};
@@ -21,66 +19,6 @@ export async function loadPurchaseOrderSource(tx: Db, id: string) {
   const order = await tx.order.findUnique({ where: { id }, include });
   if (!order) throw new Error('未找到原客户订单');
   return order;
-}
-
-async function acceptance(tx: Db, order: SourceOrder) {
-  const confirmations = order.statusHistory.filter(entry => entry.fromStatus === 'pending' && entry.actorId);
-  if (confirmations.length !== 1) return null;
-  const history = confirmations[0];
-  const meta = jsonObject(history.metadata);
-  if (meta.action === 'accept_order' && meta.actorType === 'libereal_admin' && meta.version === 2
-    && typeof meta.orderVersion === 'string' && /^[a-f0-9]{64}$/.test(meta.orderVersion)) {
-    const terms = orderApprovalTerms(order);
-    const snapshot = object(meta.snapshot);
-    // Reserving credit can resolve an email-only customer's id inside the acceptance transaction.
-    const debtor = object(snapshot.credit).debtorId;
-    const expected = { ...terms, customerId: snapshot.customerId === null && debtor === order.customerId ? null : terms.customerId };
-    const recorded = Object.fromEntries(Object.keys(expected).map(key => [key, snapshot[key]]));
-    return pricingContentHash(recorded) === pricingContentHash(expected) ? history : null;
-  }
-  // Older personal credit orders have independent records written by the merchant quote route.
-  if (history.metadata || order.ownerScope !== 'personal' || history.reason !== 'quote_sent'
-    || !order.quoteSent || history.createdAt.getTime() !== order.quoteSentAt?.getTime()
-    || !isPostDeliveryPaymentMethod(order.paymentMethod) || !history.actorId || history.actorId === order.customerId) return null;
-  const actor = await tx.user.findUnique({ where: { id: history.actorId }, select: { email: true, role: true } });
-  const mail = await tx.backgroundTask.findUnique({ where: { dedupeKey: `order-confirmation-email:${order.id}` } });
-  const payload = jsonObject(mail?.payload);
-  return actor?.role === 'admin' && (!history.actorEmail || actor.email === history.actorEmail) && mail?.type === 'email.send'
-    && payload.kind === 'quote' && payload.subject === 'LIBEREAL · 订单确认' && payload.to === order.email
-    && order.creditTransactions.some(row => row.type === 'reserve' && row.actorId === history.actorId
-      && row.userId === order.customerId && row.amount === order.total) ? history : null;
-}
-
-export async function purchaseEligibility(tx: Db, order: SourceOrder) {
-  const hold = (reason: string) => ({ eligible: false, reason, basis: null });
-  if (order.archivedAt || !['confirmed', 'partially_shipped', 'shipped', 'completed'].includes(order.status)) return hold('原客户订单尚未由 Libereal 接受，或已关闭');
-  const history = await acceptance(tx, order);
-  if (!history) return hold('平台接单依据或已接受的订单内容需要人工核对');
-  if (isPostDeliveryPaymentMethod(order.paymentMethod)) {
-    const ar = order.receivable;
-    const reserves = order.creditTransactions.filter(row => row.type === 'reserve' && row.userId === order.customerId);
-    if (!order.customerId || !ar || ar.userId !== order.customerId || ar.amount !== order.total
-      || !['open','paid'].includes(ar.status) || reserves.length !== 1 || reserves[0].amount !== order.total
-      || order.creditTransactions.some(row => row.type === 'release' && ar.status !== 'paid')) return hold('需核实本单应收、授信占用及结清状态');
-    if (ar.status === 'open') {
-      const account = await tx.creditAccount.findUnique({ where: { userId: ar.userId } });
-      if (!account || !['active','credit_limited'].includes(account.status) || account.usedAmount > creditLimitForAccount(account)
-        || account.usedAmount < ar.amount) return hold('本单授信条件需由有权人员处理');
-    }
-    return { eligible: true, reason: null, basis: { acceptanceId: history.id, receivableId: ar.id, reserveId: reserves[0].id, amount: ar.amount } };
-  }
-  if (normalizeOrderPaymentMethod(order.paymentMethod) === 'alipay' && order.paidAt) {
-    const attempts = order.paymentAttempts.filter(row => row.provider === 'alipay' && row.status === 'paid'
-      && row.paidAt && row.tradeNo && row.amount === order.total);
-    if (attempts.length === 1) {
-      const attempt = attempts[0];
-      const receipts = await tx.orderEvent.findMany({ where: { orderId: order.id, type: 'payment_received' } });
-      if (receipts.some(row => { const meta = jsonObject(row.metadata); return meta.outTradeNo === attempt.outTradeNo && meta.tradeNo === attempt.tradeNo; })) {
-        return { eligible: true, reason: null, basis: { acceptanceId: history.id, paymentAttemptId: attempt.id, amount: attempt.amount } };
-      }
-    }
-  }
-  return hold('需核实本单约定的付款条件与实际收款记录');
 }
 
 async function acceptedQuoteLinks(tx: Db, order: SourceOrder) {
