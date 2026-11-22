@@ -3,6 +3,7 @@ import { NextRequest } from 'next/server';
 import { GET as orderGET, PATCH as orderPATCH } from '@/app/api/admin/orders/[id]/route';
 import { POST as quotePOST } from '@/app/api/orders/[id]/quote/route';
 import { PATCH as legacyOrderPATCH } from '@/app/api/orders/[id]/route';
+import { PATCH as creditPATCH } from '@/app/api/admin/users/[id]/credit/route';
 import { reserveOrderCredit } from '@/lib/customer-credit';
 import { prisma } from '@/lib/prisma';
 import { pricingContentHash } from '@/lib/pricing-adjustment-approval';
@@ -12,7 +13,8 @@ import {
   applyPurchaseAction, applyPurchaseShipment, prepareOrderPurchases, previewPurchaseAction, previewPurchaseShipment, purchaseWorkspace, savePurchaseLine,
 } from '@/lib/purchase-orders';
 import { applyPurchaseStartAction, previewPurchaseStartAction, type PurchaseStartInput } from '@/lib/purchase-start';
-import type { PurchaseTerms } from '@/lib/purchase-terms';
+import { creditLimitTerms } from '@/lib/purchase-credit-history';
+import { attestPurchaseTerms, type PurchaseTerms } from '@/lib/purchase-terms';
 import { clearAllTables, closeTestDb, getTestDb, seedAdmin, seedUser } from './db-helpers';
 
 const merchant = { id: 'test-merchant', email: 'merchant@example.test' };
@@ -27,6 +29,7 @@ vi.mock('@/lib/auth', () => ({
 }));
 vi.mock('@/lib/admin-mfa-settings', () => ({
   requiresAdminMfaForPermission: async () => false,
+  isAdminMfaScenarioEnabled: async () => false,
 }));
 
 type Workspace = Awaited<ReturnType<typeof purchaseWorkspace>>;
@@ -151,6 +154,13 @@ async function verifyBank(orderId: string, proof: ReturnType<typeof bankProof>) 
   const bank = (await readWorkspace(orderId)).startReview.bankReceipts.find(row => row.bank.bankTrace === proof.bankTrace);
   expect(bank).toBeDefined();
   return bank!;
+}
+
+async function adjustCredit(body: Record<string, unknown>) {
+  const response = await creditPATCH(new NextRequest(`http://localhost/api/admin/users/${buyer.id}/credit`, {
+    method: 'PATCH', body: JSON.stringify({ ...body, reason: '合成财务调额凭据' }),
+  }), { params: Promise.resolve({ id: buyer.id }) });
+  expect(response.status, JSON.stringify(await response.json())).toBe(200);
 }
 
 function activities(purchaseOrderId: string, action: string) {
@@ -958,6 +968,139 @@ describe('purchase order approval and execution records', () => {
 });
 
 describe('recorded customer acceptance and per-order funding', () => {
+  it('uses the actual commitment date across a finance adjustment and keeps an unauthorized event in the exception workflow', async () => {
+    await adjustCredit({ overrideLimit: 200 });
+    const order = await seedOrder('test-as-of-credit-reduction');
+    await acceptAsMerchant(order.id);
+    const [draft] = (await saveLine(await readWorkspace(order.id), 0, terms(2))).orders;
+    const [approved] = (await submit(order.id, draft, { action: 'approve', requestId: 'approval-before-decrease' })).orders;
+    const originalApproval = approved.ledger.find(row => row.action === 'approve')!;
+    const [deposited] = (await submit(order.id, approved, { action: 'record_payment', requestId: 'deposit-before-decrease',
+      amountCents: 900, reference: 'TEST-PRE-CREDIT-DEPOSIT', conditionReference: 'TEST-DEPOSIT-DUE' })).orders;
+    await adjustCredit({ overrideLimit: 199 });
+    const adjustment = await prisma.auditLog.findFirstOrThrow({ where: { action: 'customer.credit_changed' }, orderBy: { createdAt: 'desc' } });
+    expect(adjustment.createdAt.getTime()).toBeGreaterThan(Date.parse(originalApproval.createdAt));
+    const at = new Date(adjustment.createdAt.getTime() + 1).toISOString();
+    const proof = { reference: 'TEST-DATED-SUPPLIER-COMMITMENT', referenceSha256: 'e'.repeat(64), occurredAt: at };
+    const normal = { ...proof, action: 'register_order', requestId: 'register-as-original-approval' } as const;
+    const actualEarly = await prisma.$transaction(tx => previewPurchaseAction(tx, { ...normal, orderId: order.id, purchaseOrderId: deposited.id,
+      version: deposited.version, occurredAt: originalApproval.createdAt }, approver));
+    expect(actualEarly.snapshot.operation).toMatchObject({ credit: { status: 'within_limit', credit: { limitCents: 20000, occupiedCents: 20000 } } });
+    await expect(previewAction(order.id, deposited, { ...normal, occurredAt: adjustment.createdAt.toISOString() })).rejects.toThrow(/依据或先后无法确认/);
+    await expect(previewAction(order.id, deposited, normal)).rejects.toThrow(/超过授信额度.*当时适用/);
+    const [held] = (await submit(order.id, deposited, { ...proof, action: 'record_late_order_exception', requestId: 'register-actual-credit-exception',
+      exceptionOutcome: 'liability_review', description: '供方确认实际接受订购，核查原合同义务与定金。' })).orders;
+    const [exception] = held.commitmentExceptions;
+    expect(held).toMatchObject({ status: 'on_hold', orderedBefore: false, totalCents: 2750, paidCents: 900 });
+    expect(exception).toMatchObject({ reference: proof.reference, actorId: approver.id, resolution: null });
+    expect(activities(held.id, 'register_order')).toEqual([]);
+    await expect(submit(order.id, held, { ...normal, requestId: 'no-duplicate-established-fact' })).rejects.toThrow(/已有实际承诺异常/);
+    await expect(submit(order.id, held, { action: 'record_payment', requestId: 'payment-while-checking', amountCents: 100,
+      reference: 'TEST-UNVERIFIED-LIABILITY', conditionReference: 'TEST-SUPPLIER-CAUSE' })).rejects.toThrow();
+    const [checked] = (await submit(order.id, held, { action: 'resolve_order_exception', requestId: 'confirmed-original-liability',
+      exceptionId: exception.id, exceptionResolution: 'payable_verified', reference: 'TEST-SUPPLIER-LIABILITY-ARCHIVE', referenceSha256: 'f'.repeat(64),
+      description: '核对原合同应付和已付的900分，确认后续可按原合同处理。' })).orders;
+    expect(checked).toMatchObject({ status: 'ordered', orderedBefore: true, totalCents: 2750, paidCents: 900,
+      orderReceipt: { exception: true, occurredAt: at }, commitmentExceptions: [{ resolution: 'payable_verified' }] });
+    const [paid] = (await submit(order.id, checked, { action: 'record_payment', requestId: 'pay-after-documented-liability', amountCents: 100,
+      reference: 'TEST-AP-UNDER-REVIEWED-LIABILITY', conditionReference: 'TEST-ORIGINAL-CONTRACT-DUE' })).orders;
+    expect(paid.ledger.at(-1)?.detail).toMatchObject({ snapshot: { operation: { exceptionResolutionId: checked.commitmentExceptions[0].resolutionId } } });
+    expect(paid.ledger.find(row => row.id === originalApproval.id)).toEqual(originalApproval);
+  });
+
+  it('checks temporary expiry at the commitment instant and only uses a prior matching finance exception', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      vi.setSystemTime(new Date('2031-06-01T08:00:00.000Z'));
+      await adjustCredit({ overrideLimit: 199, temporaryLimit: 1, temporaryUntil: '2031-06-01' });
+      const order = await seedOrder('test-credit-expiry-at-supplier-commitment');
+      await acceptAsMerchant(order.id);
+      const [draft] = (await saveLine(await readWorkspace(order.id), 0, terms(2))).orders;
+      const [approved] = (await submit(order.id, draft, { action: 'approve', requestId: 'approved-with-temporary-limit' })).orders;
+      const account = await prisma.creditAccount.findUniqueOrThrow({ where: { userId: buyer.id } });
+      const expiresAt = account.temporaryUntil!.getTime();
+      expect(creditLimitTerms(account)).toMatchObject({ overrideLimit: 199, temporaryLimit: 1, temporaryUntil: account.temporaryUntil!.toISOString() });
+      vi.setSystemTime(new Date(expiresAt + 2_000));
+      const proof = { action: 'register_order', requestId: 'supplier-credit-expiry', reference: 'TEST-DATED-EXPIRY-ORDER', referenceSha256: 'd'.repeat(64) } as const;
+      await expect(previewAction(order.id, approved, { ...proof, occurredAt: new Date(expiresAt - 1).toISOString() })).resolves.toMatchObject({ actionHash: expect.any(String) });
+      const afterExpiry = new Date(expiresAt + 1).toISOString();
+      await expect(previewAction(order.id, approved, { ...proof, occurredAt: afterExpiry })).rejects.toThrow(/超过授信额度/);
+      const exception = await startReview(order.id, { ...reviewEvidence, action: 'approve_credit_exception', requestId: 'credit-exception-after-expiry' });
+      await applyStart(exception.input);
+      await expect(previewAction(order.id, approved, { ...proof, occurredAt: afterExpiry })).rejects.toThrow(/当时适用/);
+      vi.setSystemTime(new Date(expiresAt + 4_000));
+      const [registered] = (await submit(order.id, approved, { ...proof, occurredAt: new Date().toISOString() })).orders;
+      expect(registered.ledger.at(-1)?.detail).toMatchObject({ snapshot: { operation: { credit: { status: 'over_limit', exceptionId: expect.any(String) } } } });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('reopens a paid historical multi-line PDF only after explicit original document row review', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      vi.setSystemTime(new Date('2031-06-01T08:00:00.000Z'));
+      const order = await seedOrder('test-old-multiple-quote-lines', { quantities: [2, 1] });
+      await prisma.product.create({ data: { id: 'test-product-b', name: '第二种合成商品', catalogNumber: 'TEST-QUOTE-B', brand: '合成品牌',
+        price: 100, costPrice: 30, stockQuantity: 10 } });
+      await prisma.orderItem.update({ where: { id: order.orderItems[1].id }, data: { productId: 'test-product-b', name: '第二种合成商品', catalogNumber: 'TEST-QUOTE-B' } });
+      await acceptAsMerchant(order.id);
+      const finance = (id: string, balanceTerms: string) => startReview(order.id, { ...reviewEvidence, action: 'review_customer_terms',
+        requestId: id, paymentMode: 'credit', balanceTerms });
+      await applyStart((await finance('credit-origin', '原客户账期条件')).input);
+      const sha256 = 'e'.repeat(64);
+      const quoted = (quantity: number, row: number) => terms(quantity, { sourceSha256: sha256, sourceReference: 'TEST-LEGACY-MULTILINE-PDF',
+        sourceDocumentKind: 'multiple_items', sourceDocumentRow: row });
+      const first = await saveLine(await readWorkspace(order.id), 0, quoted(2, 1));
+      const [draft] = (await saveLine(first, 1, quoted(1, 2))).orders;
+      const [approved] = (await submit(order.id, draft, { action: 'approve', requestId: 'old-shared-doc-approve' })).orders;
+      const [deposited] = (await submit(order.id, approved, { action: 'record_payment', requestId: 'old-shared-doc-deposit', amountCents: 900,
+        reference: 'TEST-HISTORICAL-DOC-DEPOSIT', conditionReference: 'TEST-PREPAY-DUE' })).orders;
+      await prisma.$transaction(async tx => {
+        // The older format signed each line while retaining only the file reference and digest.
+        const archived = deposited.lines.map(line => {
+          const old = { ...line.terms, sourceDocumentKind: undefined, sourceDocumentRow: undefined };
+          const changed = attestPurchaseTerms(old, line.source, preparer, true, new Date(line.terms.verification!.verifiedAt));
+          return { orderItemId: line.orderItemId, source: line.source, terms: changed, revision: line.revision };
+        });
+        const hash = pricingContentHash({ orderId: order.id, purchaseOrderId: deposited.id, totalCents: deposited.totalCents, lines: archived });
+        for (const line of archived) await tx.purchaseRequirement.update({ where: { orderItemId: line.orderItemId }, data: { terms: JSON.stringify(line.terms) } });
+        await tx.purchaseOrder.update({ where: { id: deposited.id }, data: { approvedHash: hash } });
+        await tx.purchaseActivity.deleteMany({ where: { orderId: order.id, action: 'review_supplier_document_scope' } });
+        for (const row of deposited.ledger.filter(row => row.action === 'approve' || row.action === 'record_payment')) {
+          const detail = { ...row.detail };
+          const original = detail.snapshot as Record<string, unknown>;
+          detail.snapshot = { ...original, lines: archived.map(line => ({ ...line, fromPurchaseOrderId: null })) };
+          delete detail.fundingTermsVersion;
+          detail.contentHash = hash;
+          detail.actionHash = pricingContentHash(detail.snapshot);
+          await tx.purchaseActivity.update({ where: { id: row.id }, data: { detail: JSON.stringify(detail) } });
+        }
+      });
+      const oldRows = () => prisma.purchaseActivity.findMany({ where: { purchaseOrderId: deposited.id, action: { in: ['approve', 'record_payment'] } }, orderBy: { id: 'asc' } });
+      const original = await oldRows();
+      const linesBefore = await prisma.purchaseRequirement.findMany({ where: { orderId: order.id }, orderBy: { orderItemId: 'asc' } });
+      vi.setSystemTime(new Date('2031-06-01T09:00:00.000Z'));
+      await applyStart((await finance('credit-revised', '实质变更后的客户账期条件')).input);
+      const [old] = (await readWorkspace(order.id)).orders;
+      expect(old).toMatchObject({ needsFundingReapproval: true, paidCents: 900, documentReviewLines: order.orderItems.map(item => ({ orderItemId: item.id, sha256 })) });
+      const request = { action: 'reapprove_purchase', requestId: 'review-old-pdf', reference: 'TEST-CURRENT-CONDITIONS', referenceSha256: 'b'.repeat(64),
+        description: '同一原件中两项实价报价，按原文件逐行核对。' } as const;
+      await expect(submit(order.id, old, request)).rejects.toThrow(/逐行核对旧供货书证/);
+      const scopes = order.orderItems.map((item, i) => ({ orderItemId: item.id, sha256, kind: 'multiple_items', row: i + 1 }));
+      await expect(submit(order.id, old, { ...request, documentScopes: scopes.map(row => ({ ...row, row: 1 })) })).rejects.toThrow(/各自的报价行/);
+      await expect(submit(order.id, old, { ...request, documentScopes: scopes.map(row => ({ ...row, sha256: 'a'.repeat(64) })) })).rejects.toThrow(/同一供货文件/);
+      const [restored] = (await submit(order.id, old, { ...request, documentScopes: scopes })).orders;
+      expect(restored).toMatchObject({ paidCents: 900, totalCents: 4125, needsFundingReapproval: false, documentReviewLines: [] });
+      expect(restored.ledger.at(-1)?.detail).toMatchObject({ snapshot: { operation: { documentScopes: [
+        { terms: { sourceSha256: sha256, sourceDocumentRow: 1 } }, { terms: { sourceSha256: sha256, sourceDocumentRow: 2 } },
+      ] } } });
+      expect(await oldRows()).toEqual(original);
+      expect(await prisma.purchaseRequirement.findMany({ where: { orderId: order.id }, orderBy: { orderItemId: 'asc' } })).toEqual(linesBefore);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
   it.each([false, true])('keeps a paid deposit through equivalent finance review and explicitly reapproves changed future terms (prior digest=%s)', async olderDigest => {
     vi.useFakeTimers({ toFake: ['Date'] });
     try {

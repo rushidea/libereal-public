@@ -10,6 +10,7 @@ import { reserveOrderCredit } from '@/lib/customer-credit';
 import { resetEphemeralStoreForTests } from '@/lib/ephemeral-store';
 import { merchantAcceptanceMetadata, merchantOrderApprovalPreview, ORDER_APPROVAL_INCLUDE } from '@/lib/order-approval';
 import { prisma } from '@/lib/prisma';
+import { pricingContentHash } from '@/lib/pricing-adjustment-approval';
 import type { PurchaseActionInput } from '@/lib/purchase-orders';
 import { createMfaKeyRing, encryptMfaSecret } from '@/lib/security/mfa-crypto';
 import { generateTotpSecret, totpCodeAt } from '@/lib/security/mfa-totp';
@@ -205,6 +206,45 @@ afterEach(() => {
 });
 
 describe('admin purchase endpoint', () => {
+  it('keeps shipment session details out of new and historical responses while preserving the original audit bytes', async () => {
+    signIn(staff.approver);
+    const approval = await previewAction({ action: 'approve', requestId: 'approve-minimal-shipment-snapshot' });
+    await expectJson(await confirm(approval, await grant(staff.approver)), 200);
+    signIn(staff.operator);
+    const registration = await previewAction({ action: 'register_order', requestId: 'register-before-shipping', reference: 'TEST-PREVIOUS-SUPPLIER-ACK',
+      occurredAt: new Date().toISOString(), referenceSha256: 'b'.repeat(64) });
+    await expectJson(await confirm(registration, await grant(staff.operator)), 200);
+    await prisma.$transaction(async tx => {
+      await tx.shipment.create({ data: { id: 'TEST-SESSION-SHIPMENT', orderId, status: 'shipped', shippedAt: new Date(),
+        items: { create: { id: 'TEST-SESSION-SHIPMENT-ITEM', orderItemId, quantity: 1 } } } });
+      await tx.orderItem.update({ where: { id: orderItemId }, data: { shippedQty: 1, status: 'partially_shipped' } });
+      await tx.order.update({ where: { id: orderId }, data: { status: 'partially_shipped' } });
+    });
+    const { workspace } = await expectJson(await readPurchases(orderId), 200);
+    const evidence = { action: 'attribute_purchase_shipment', orderId, version: workspace.fulfillment.version,
+      requestId: 'minimal-actor-shipment', targetId: 'TEST-SESSION-SHIPMENT-ITEM', sources: [{ purchaseOrderId: registration.purchaseOrderId, quantity: 1 }],
+      reference: 'TEST-SHIPMENT-FILE', sha256: 'd'.repeat(64), description: '核对实际发出的商品数量。' };
+    await expectJson(await post({ ...evidence, stage: 'preview' }), 403);
+    signIn(staff.approver);
+    const { preview } = await expectJson(await post({ ...evidence, stage: 'preview' }), 200);
+    const actor = { id: staff.approver, email: email(staff.approver) };
+    expect(preview.snapshot.actor).toEqual(actor);
+    await expectJson(await post({ ...evidence, stage: 'confirm', actionHash: preview.actionHash }), 403);
+    await expectJson(await post({ ...evidence, stage: 'confirm', actionHash: preview.actionHash, stepUpToken: await grant(staff.approver) }), 200);
+    const row = await prisma.purchaseActivity.findFirstOrThrow({ where: { orderId, action: 'attribute_purchase_shipment' } });
+    const stored = JSON.parse(row.detail);
+    expect(stored.snapshot.actor).toEqual(actor);
+    expect(stored.authorization).toMatchObject({ permission: 'purchases.approve', action: 'admin_sensitive',
+      sessionFingerprint: pricingContentHash({ userId: staff.approver, sessionId: session(staff.approver) }) });
+    const original = JSON.stringify({ ...stored, snapshot: { ...stored.snapshot,
+      actor: { ...actor, role: 'admin', sessionId: 'synthetic-historical-session-marker' } } });
+    await prisma.purchaseActivity.update({ where: { id: row.id }, data: { detail: original } });
+    const result = await expectJson(await readPurchases(orderId), 200);
+    expect(result.workspace.activities.find((entry: { id: string }) => entry.id === row.id).detail.snapshot.actor).toEqual(actor);
+    expect(JSON.stringify(result)).not.toContain('synthetic-historical-session-marker');
+    expect(await prisma.purchaseActivity.findUnique({ where: { id: row.id } })).toMatchObject({ detail: original });
+  });
+
   it('requires an explicit finance approval of a bank original before its amount can be allocated', async () => {
     signIn(staff.approver);
     const before = await expectJson(await readPurchases(orderId), 200);

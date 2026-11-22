@@ -52,6 +52,7 @@ function makeWorkspace(status?: Purchase['status'], lineChanges: Partial<Line> =
     openIncidentId: status === 'on_hold' ? 'TEST-INCIDENT' : null, orderReceipt: null, leadTimeApproved: false,
     dueCents: 8642, remaining: [{ orderItemId, quantity: source.quantity }], remainingScope: null,
     needsRemainingReview: false, needsLegacyReview: false, needsFundingReapproval: false, canRegisterHistorical: false,
+    documentReviewLines: [], commitmentExceptions: [], canRecordCommitmentException: false,
   } : null;
   const payment = { receivedCents: 0, allocatedCents: 0, receipts: [], excludedReceiptIds: [], paymentAttemptId: null, nativePaidAt: null, settledReceivableId: null };
   const startReview: Workspace['startReview'] = {
@@ -284,6 +285,51 @@ describe('supplier purchasing page', () => {
     expect(await screen.findByText(/供应商实际订购.*TEST-BEFORE-HOLD/)).toBeInTheDocument();
     expect(screen.getByText('供货变化待处理')).toBeInTheDocument();
     expect(posts[1]).toMatchObject({ action: 'register_order', stage: 'confirm', requestId: posts[0].requestId, actionHash });
+  });
+
+  it('reviews two original quote rows in one approval without editing the archived contract prices', async () => {
+    const workspace = makeWorkspace('approved');
+    const [purchase] = workspace.orders;
+    const sha256 = 'd'.repeat(64);
+    const secondId = 'TEST-LEGACY-QUOTE-B';
+    purchase.lines = [{ ...purchase.lines[0], terms: { ...terms, sourceSha256: sha256 } },
+      { ...purchase.lines[0], orderItemId: secondId, source: { ...source, orderItemId: secondId, name: '第二种合成商品', catalogNumber: 'TEST-QUOTE-B', quantity: 1 },
+        terms: { ...terms, sourceSha256: sha256, unitPriceCents: 2500, linePayableCents: 2500 } }];
+    purchase.paidCents = 900;
+    purchase.needsFundingReapproval = true;
+    purchase.documentReviewLines = purchase.lines.map(line => ({ orderItemId: line.orderItemId, sha256, reference: terms.sourceReference }));
+    const posts = mockWorkspace(workspace, ['purchases.read', 'purchases.approve'], body => {
+      if (body.stage === 'preview') {
+        const result = preview(body, workspace);
+        const documents = purchase.lines.map((line, index) => ({ ...line, terms: { ...line.terms, sourceDocumentKind: 'multiple_items', sourceDocumentRow: index + 1 } }));
+        const operation = { ...result.preview.snapshot.operation, originalApprovalId: 'TEST-PRIOR-APPROVAL', fundingPlan: workspace.startReview.plan,
+          payments: [{ id: 'TEST-PAID-DEPOSIT', amountCents: 900, reference: 'TEST-ORIGINAL-DEPOSIT' }], documentScopes: documents };
+        return Response.json({ preview: { ...result.preview, snapshot: { ...result.preview.snapshot, operation } } });
+      }
+      return Response.json({ workspace: { ...workspace, orders: [{ ...purchase, version: 'a'.repeat(64), needsFundingReapproval: false, documentReviewLines: [] }] } });
+    });
+    render(<PurchaseManager initialOrder={orderId} />);
+    fireEvent.click(await screen.findByRole('button', { name: '重新核准本单后续动作' }));
+    expect(screen.getByText(/第二种合成商品.*TEST-QUOTE-B.*数量 1.*25\.00/)).toBeInTheDocument();
+    expect(screen.queryByLabelText('采购单价（元）')).not.toBeInTheDocument();
+    fill('旧供货原件摘要', sha256);
+    fill('原供货文件范围', 'multiple_items');
+    fill('TEST-SKU 对应原件行序号', '1');
+    fill('TEST-QUOTE-B 对应原件行序号', '2');
+    fill('客户付款条件变动的档案出处', 'TEST-CHANGED-AGREEMENT');
+    fill('新批准依据摘要', 'c'.repeat(64));
+    fill('本次重新批准的后续动作与旧款归属', '按原报价两行和定金核对新条件。');
+    fireEvent.click(screen.getByRole('button', { name: '查看完整预览' }));
+    const panel = await screen.findByRole('region', { name: '操作预览' });
+    expect(panel).toHaveTextContent('原件第 1 行');
+    expect(panel).toHaveTextContent('原件第 2 行');
+    expect(panel).toHaveTextContent(/已付.*9\.00.*TEST-ORIGINAL-DEPOSIT/);
+    expect(posts[0]).toMatchObject({ action: 'reapprove_purchase', documentScopes: [
+      { orderItemId, sha256, kind: 'multiple_items', row: 1 }, { orderItemId: secondId, sha256, kind: 'multiple_items', row: 2 },
+    ] });
+    fireEvent.click(within(panel).getByRole('button', { name: '确认重新核准本单后续动作' }));
+    await waitFor(() => expect(screen.queryByRole('region', { name: '操作预览' })).not.toBeInTheDocument());
+    expect(posts[1]).toMatchObject({ stage: 'confirm', actionHash, requestId: posts[0].requestId, documentScopes: posts[0].documentScopes });
   });
 
   it('previews the exact sources of a single customer shipment and confirms the same attribution once', async () => {
