@@ -45,11 +45,16 @@ function makeWorkspace(status?: Purchase['status'], lineChanges: Partial<Line> =
     missing: status ? [] : ['收款方', '供应商付款条件'], availableQuantity: source.quantity,
     ...lineChanges,
   };
+  const open = status === 'on_hold' ? {id:'TEST-INCIDENT',reference:'TEST-ORIGINAL-INCIDENT',changeKind:'unavailable',
+    previousStatus:'draft',reportedBy:'test-operator',description:'待人工核对原供货条件。',
+    responsibility:null,scope:null,outstanding:null,lastReviewedBy:null,factReview:null} : null;
   const purchase: Purchase | null = status ? {
     id: purchaseId, status, version, revision: 4, contentHash: 'd'.repeat(64),
-    approvedHash: status === 'draft' ? null : 'd'.repeat(64),
+    approvedHash: status === 'draft' || status === 'on_hold' ? null : 'd'.repeat(64),
     totalCents: 8642, paidCents: 0, lines: [line], ledger: [], orderedBefore: status === 'ordered',
-    openIncidentId: status === 'on_hold' ? 'TEST-INCIDENT' : null, incident: null, orderReceipt: null, leadTimeApproved: false,
+    openIncidentId: open?.id ?? null, incident: open, incidents: open ? [open] : [],
+    incidentSources:[{orderItemId,quantity:line.source.quantity,source:{kind:'unshipped'},reference:'TEST-ORDER-REFERENCED'}],
+    orderReceipt: null, leadTimeApproved: false,
     dueCents: 8642, remaining: [{ orderItemId, quantity: source.quantity }], remainingScope: null,
     needsRemainingReview: false, canApproveRemaining: false, needsLegacyReview: false, needsFundingReapproval: false, canRegisterOrder: status === 'approved',
     documentReviewLines: [], commitmentState: 'ordinary', commitmentExceptions: [], canRecordCommitmentException: false,
@@ -72,7 +77,7 @@ function makeWorkspace(status?: Purchase['status'], lineChanges: Partial<Line> =
     eligibility: { eligible: true, reason: null, basis: { acceptanceId: 'test-acceptance', receivableId: 'test-receivable',
       reserveId: 'test-credit-reserve', amount: 250, mode: 'credit', payment, planEvidenceId: null } },
     lines: [line], orders: purchase ? [purchase] : [], activities: [], customerRemaining:[{orderItemId,quantity:2}],
-    fulfillment: { version, targets: [], delivered: [], historicalDelivered: [], customerReceived: [], supplierReceived: [], warehouseReceived: [], warehouseTransit: [], supplierDispatched: [], shortfalls: [], freeResends: [], parcelLinesWithPriorHoldTransfer: [], replacementsWithPriorHoldTransfer: [], parcelLinesWithUnverifiedStockSource: [], replacementsWithUnverifiedStockSource: [], inconsistent: [], ledger: [] },
+    fulfillment: { version, targets: [], delivered: [], historicalDelivered: [], customerReceived: [], supplierReceived: [], warehouseReceived: [], warehouseTransit: [], supplierDispatched: [], incidentSources: [], shortfalls: [], freeResends: [], parcelLinesWithPriorHoldTransfer: [], replacementsWithPriorHoldTransfer: [], parcelLinesWithUnverifiedStockSource: [], replacementsWithUnverifiedStockSource: [], inconsistent: [], ledger: [] },
   };
 }
 
@@ -254,8 +259,7 @@ describe('supplier purchasing page', () => {
     const portion = [{orderItemId,quantity:1}];
     Object.assign(purchase,{
       orderedBefore:true,paidCents:900,dueCents:null,needsRemainingReview:true,
-      incident:{id:purchase.openIncidentId,reference:'TEST-TWO-DELAYED',changeKind:'delay',reportedBy:'test-operator',
-        responsibility:null,scope,outstanding:scope,lastReviewedBy:null},
+      incidents:[{...purchase.incidents[0],reference:'TEST-TWO-DELAYED',changeKind:'delay',scope,outstanding:scope}],
     });
     const posts = mockWorkspace(workspace,['purchases.read','purchases.approve'],body=>{
       const {preview:result} = preview(body,workspace);
@@ -284,6 +288,37 @@ describe('supplier purchasing page', () => {
     expect(posts[0]).not.toHaveProperty('affectedLines');
   });
 
+  it('opens the requested separate supply item and submits a fact review without a commercial outcome',async()=>{
+    const workspace = makeWorkspace('on_hold');
+    const [purchase] = workspace.orders;
+    purchase.orderedBefore = true;
+    const first = purchase.incidents[0];
+    purchase.incidents = [{...first,id:'INCIDENT-A',reference:'TEST-A',description:'A 原事项仍待答复。'},
+      {...first,id:'INCIDENT-B',reference:'TEST-B',description:'B 的旧邮件只需核实范围。'}];
+    const posts = mockWorkspace(workspace,['purchases.read','purchases.approve','purchases.write'],body=>{
+      const {preview:result} = preview(body,workspace);
+      return Response.json({preview:{...result,snapshot:{...result.snapshot,operation:{...result.snapshot.operation,
+        outstanding:body.affectedLines,
+      }}}});
+    });
+    render(<PurchaseManager initialOrder={orderId}/>);
+    const target = await screen.findByRole('region',{name:'供货事项 TEST-B'});
+    expect(screen.getByRole('button',{name:'登记供货变化'})).toBeInTheDocument();
+    fireEvent.click(within(target).getByRole('button',{name:'核对供货事项范围'}));
+    expect(screen.getByText('核对供货事项范围 · TEST-B')).toBeInTheDocument();
+    expect(screen.queryByLabelText('协调结果')).not.toBeInTheDocument();
+    fill('核对范围的原凭据出处','TEST-ORIGINAL-B-EMAIL');
+    fill('实际受影响的货物与仍待协调的情况','只核到一件待发货受影响。');
+    fireEvent.change(screen.getByLabelText(/核实后仍受影响的货物和数量 · 合成采购商品.*供方尚未发出的原货/),{target:{value:'1'}});
+    fireEvent.click(screen.getByRole('button',{name:'查看完整预览'}));
+    const panel = await screen.findByRole('region',{name:'操作预览'});
+    expect(panel).toHaveTextContent('仍待协调 1');
+    expect(posts[0]).toMatchObject({action:'review_change_scope',incidentId:'INCIDENT-B',
+      affectedLines:[{orderItemId,quantity:1,source:{kind:'unshipped'}}],reference:'TEST-ORIGINAL-B-EMAIL'});
+    expect(posts[0]).not.toHaveProperty('outcome');
+    expect(screen.getByRole('region',{name:'供货事项 TEST-A'})).toBeInTheDocument();
+  });
+
   it('offers customer document row and coverage on the existing replacement revision form', async () => {
     const workspace = makeWorkspace('on_hold',{fromPurchaseOrderId:'TEST-OLD-ORIGINAL-PURCHASE'});
     mockWorkspace(workspace,['purchases.read','purchases.write']);
@@ -303,7 +338,7 @@ describe('supplier purchasing page', () => {
     first.orderedBefore = true;
     const otherPurchase = 'PO-OTHER-COVERED';
     const otherLine = 'TEST-OTHER-CUSTOMER-LINE';
-    workspace.orders.push({...first,id:otherPurchase,version:'6'.repeat(64),status:'ordered',openIncidentId:null,
+    workspace.orders.push({...first,id:otherPurchase,version:'6'.repeat(64),status:'ordered',openIncidentId:null,incident:null,incidents:[],
       lines:[{...first.lines[0],orderItemId:otherLine,purchaseOrderId:otherPurchase,
         source:{...first.lines[0].source,orderItemId:otherLine,name:'另一采购商品'}}]});
     workspace.fulfillment.shortfalls = ['A','B','C'].map(name=>({
@@ -412,7 +447,7 @@ describe('supplier purchasing page', () => {
   it.each(['on_hold', 'ordered'] as const)('keeps the original contract and deposit visible during review of a %s purchase', async status => {
     const workspace = makeWorkspace(status);
     const [purchase] = workspace.orders;
-    Object.assign(purchase, { openIncidentId: null, dueCents: null, paidCents: 2300, needsRemainingReview: true, canApproveRemaining: true,
+    Object.assign(purchase, { openIncidentId: null, incident:null, incidents:[], dueCents: null, paidCents: 2300, needsRemainingReview: true, canApproveRemaining: true,
       remaining: [{ orderItemId, quantity: 1 }] });
     const scope = { lines: [{ orderItemId, quantity: 1, payableCents: 4000 }], totalCents: 4000, appliedPaidCents: 1000, dispositionIds: ['TEST-CANCEL'],
       payments: [{ id: 'TEST-DEPOSIT', amountCents: 2300 }] };
@@ -449,7 +484,7 @@ describe('supplier purchasing page', () => {
     const [purchase] = workspace.orders;
     const original = { id: 'TEST-EXCEPTION', actorId: 'test-owner', reference: 'TEST-CREDIT-COMMITMENT', occurredAt: '2031-06-01T09:00:00.000Z',
       outcome: 'liability_review', resolution: null, resolutionId: null, resolutionActorId: null };
-    Object.assign(purchase, { openIncidentId: null, dueCents: null, paidCents: 900, needsRemainingReview: true,
+    Object.assign(purchase, { openIncidentId: null, incident:null, incidents:[], dueCents: null, paidCents: 900, needsRemainingReview: true,
       remaining: [{ orderItemId, quantity: 1 }], commitmentState: 'pending', commitmentExceptions: [original] });
     const posts = mockWorkspace(workspace, ['purchases.read', 'purchases.approve', 'purchases.pay', 'purchases.write'], body => {
       const result = preview(body, workspace);
@@ -663,7 +698,7 @@ describe('supplier purchasing page', () => {
         outcome: 'revised_terms', supplierReference: 'TEST-SUPPLIER-REPLY-2', customerReference: 'TEST-CUSTOMER-REPLY-2',
         revisedTerms: [{ orderItemId, terms: { ...terms, unitPriceCents: 4550, linePayableCents: 9100 } }],
       },
-      absent: ['批准采购单', '登记实际付款', '登记供货变化'],
+      absent: ['批准采购单', '登记实际付款'],
     },
   ] as const)('previews and confirms $action only for its role and order status', async scenario => {
     const workspace = makeWorkspace(scenario.status);

@@ -313,6 +313,31 @@ describe('admin purchase endpoint', () => {
     ]}}}});
   });
 
+  it('requires authorized MFA to clarify an old active supply event independently of any commercial settlement', async () => {
+    await startActualSupply(orderId,'review-only-facts');
+    await noteChange(orderId,'old-no-structured-scope');
+    const {workspace:before} = await expectJson(await readPurchases(orderId),200);
+    const [purchase] = before.orders;
+    const [incident] = purchase.incidents;
+    expect(incident.outstanding).toBeNull();
+    const request = {action:'review_change_scope' as const,incidentId:incident.id,requestId:'keep-actual-affected-one-pending',
+      reference:'TEST-VERIFIED-OLD-SUPPLY-NOTICE',description:'原件仅列一件未发货，商务处理仍待双方确认。',
+      affectedLines:[{orderItemId,quantity:1,source:{kind:'unshipped' as const}}]};
+    await expectJson(await post({...request,stage:'preview',orderId,purchaseOrderId:purchase.id,version:purchase.version}),403);
+    signIn(staff.approver);
+    const first = await previewAction(request);
+    await expectJson(await confirm(first),403);
+    await expectJson(await confirm({...first,incidentId:'other-supply-event-id'},await grant(staff.approver)),409);
+    const {workspace:after} = await expectJson(await confirm(first,await grant(staff.approver)),200);
+    const [updated] = after.orders;
+    expect(updated).toMatchObject({status:'on_hold',totalCents:purchase.totalCents,paidCents:purchase.paidCents,
+      incidents:[{id:incident.id,outstanding:request.affectedLines,factReview:{actorId:staff.approver,reference:request.reference}}]});
+    expect(activity('resolve_change')).toEqual([]);
+    await expectJson(await confirm(first,await grant(staff.approver)),200);
+    expect(activity('review_change_scope')).toEqual([{actorId:staff.approver,amountCents:null}]);
+    expect(after.activities.find((row:{id:string})=>row.id===incident.id)).toEqual(before.activities.at(-1));
+  });
+
   it('records and resolves only the selected supply scope through the authorized preview and confirmation', async () => {
     await startActualSupply(orderId,'exact-supply-scope');
     const scope = [{orderItemId,quantity:2}];
