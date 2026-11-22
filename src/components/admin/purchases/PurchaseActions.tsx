@@ -72,6 +72,8 @@ export default function PurchaseActions({ orderId, orderStatus, cancellation, po
   const [fileKinds, setFileKinds] = useState<Record<string, string>>({});
   const [outcome, setOutcome] = useState<PurchaseActionInput['outcome']>('original_terms');
   const committed = po.orderedBefore || po.paidCents > 0 || po.commitmentExceptions.length > 0;
+  const supplierCancelled = po.commitmentState === 'supplier_cancelled';
+  const canContinueOriginal = !supplierCancelled && !po.needsRemainingReview;
   const openExceptions = po.commitmentExceptions.filter(row => !row.resolution);
   const legacyFiles = [...new Set(po.documentReviewLines.map(row => row.sha256))];
   const closed = orderStatus === 'cancelled' || orderStatus === 'closed';
@@ -86,7 +88,7 @@ export default function PurchaseActions({ orderId, orderStatus, cancellation, po
   if (po.needsLegacyReview && permit('approve')) choices.push('review_legacy_approval');
   if (po.needsFundingReapproval && permit('approve')) choices.push('reapprove_purchase');
   if (po.canApproveRemaining && permit('approve')) choices.push('approve_remaining');
-  if ((po.canRegisterHistorical || (!closed && po.status === 'approved')) && !po.orderedBefore && !po.needsLegacyReview && !po.commitmentExceptions.length && permit('write')) choices.push('register_order');
+  if (po.canRegisterOrder && permit('write')) choices.push('register_order');
   if (po.canRecordCommitmentException && permit('approve')) choices.push('record_late_order_exception');
   if (openExceptions.length && permit('approve')) choices.push('resolve_order_exception');
   if (['approved', 'ordered'].includes(po.status) && !po.needsLegacyReview && !po.needsFundingReapproval && (!closed || po.orderedBefore)
@@ -136,11 +138,11 @@ export default function PurchaseActions({ orderId, orderStatus, cancellation, po
   }
 
   const op = pending?.preview.snapshot.operation;
-  const hasRefundReview = po.ledger.some(row => row.action === 'resolve_change'
+  const hasRefundReview = po.ledger.some(row => (row.action === 'resolve_change' || row.action === 'resolve_order_exception')
     && (row.detail.snapshot as { operation?: { refund?: { status?: string } } } | undefined)?.operation?.refund?.status === 'pending_review');
   return <article className="space-y-3 rounded border border-slate-200 p-4">
     <div className="flex flex-wrap justify-between gap-2"><strong>{po.lines[0]?.terms.supplier}</strong>
-      <span>{po.status === 'on_hold' && !po.openIncidentId ? '采购暂停' : statuses[po.status]}</span></div>
+      <span>{supplierCancelled ? '供方整笔取消' : po.status === 'on_hold' && !po.openIncidentId ? '采购暂停' : statuses[po.status]}</span></div>
     <p className="break-all text-xs text-slate-600">{po.id} · 第 {po.revision} 版</p>
     {po.lines[0]?.fromPurchaseOrderId && <p className="break-all text-sm">替代采购 · 原采购单 {po.lines[0].fromPurchaseOrderId}</p>}
     <p className="text-sm">{po.remainingScope || po.dueCents === null ? '原合同应付' : '本单应付'} <strong>{money(po.totalCents)}</strong>　已登记实际付款 {money(po.paidCents)}</p>
@@ -148,6 +150,7 @@ export default function PurchaseActions({ orderId, orderStatus, cancellation, po
     {po.needsRemainingReview && <p className="text-sm text-amber-900">{openExceptions.length
       ? '核对实际承诺后，再逐行核准原单剩余应付。'
       : '部分商品已取消或转替代采购，须逐行核准原单剩余应付。'}</p>}
+    {supplierCancelled && !closed && <p className="text-sm">如仍需交付，请凭双方书面回复登记供货变化，另建采购并独立批准。</p>}
     {po.needsLegacyReview && <p className="text-sm text-amber-900">继续登记前须复核原批准、书证和已付凭据。</p>}
     {po.needsFundingReapproval && <p className="text-sm text-amber-900">客户付款条件已变化。后续动作需重新核准，已实际发生的订购按原有效期补录。</p>}
     {cancellation && <p className="text-sm">客户订单{cancellation.status === 'closed' ? '关闭' : '取消'}时间 {new Date(cancellation.occurredAt).toLocaleString('zh-CN')}</p>}
@@ -160,6 +163,7 @@ export default function PurchaseActions({ orderId, orderStatus, cancellation, po
     {po.commitmentExceptions.map(exception => <p key={exception.id} className="rounded bg-amber-50 p-2 text-sm text-amber-900">
       实际承诺 {exception.reference} · {new Date(exception.occurredAt).toLocaleString('zh-CN')} · 责任人 {exception.actorId}
       {' · '}{exception.resolution === 'payable_verified' ? '已核对原合同应付' : exception.resolution === 'supplier_cancelled' ? '供方取消结果已核对' : '承诺异常待处理'}
+      {exception.resolutionActorId && ` · 核对人 ${exception.resolutionActorId}`}
     </p>)}
     {hasRefundReview && <p className="rounded bg-amber-50 p-2 text-sm text-amber-900">原付款的退款安排待财务核对。</p>}
     <details><summary className="cursor-pointer text-sm">查看采购条款和操作记录</summary><div className="mt-3 space-y-3">
@@ -171,7 +175,7 @@ export default function PurchaseActions({ orderId, orderStatus, cancellation, po
       </li>)}</ol></div></details>
     {!pending && <div className="flex flex-wrap gap-2">{choices.map(choice =>
       <button type="button" key={choice} className={button} disabled={busy} onClick={() => {
-        setAction(choice); setOutcome(po.needsRemainingReview ? 'declined' : 'original_terms'); setRevisions({}); setDispositions({}); setFileKinds({});
+        setAction(choice); setOutcome(canContinueOriginal ? 'original_terms' : 'declined'); setRevisions({}); setDispositions({}); setFileKinds({});
       }}>{choice === 'register_order' && po.status === 'on_hold' ? '补录暂停前实际订购' : actionNames[choice]}</button>)}</div>}
     {action && !pending && <form key={action} className="grid gap-3 border-t pt-3" onSubmit={event => {
       event.preventDefault();
@@ -221,11 +225,11 @@ export default function PurchaseActions({ orderId, orderStatus, cancellation, po
           {openExceptions.map(row => <option key={row.id} value={row.id}>{row.reference} · {row.actorId}</option>)}
         </select></label>
         <label className="grid gap-1 text-sm">核对结果<select name="exceptionResolution" className={field} required>
-          <option value="">请选择</option><option value="supplier_cancelled">已核实供方取消</option><option value="payable_verified">已核实原合同应付</option>
+          <option value="">请选择</option><option value="supplier_cancelled">已核实供方整笔取消</option><option value="payable_verified">已核实原合同应付</option>
         </select></label>
         {inputField('reference', '供方书面处理结果及原合同应付核对依据')}
         <DocumentDigestField name="referenceSha256" label="异常处理结果书证摘要" required/>
-        {inputField('description', '核对结果及已付款的后续安排')}
+        {inputField('description', '核对结果及已付款、退款或取消费用的后续安排')}
       </>}
       {action === 'review_legacy_approval' && <>
         {inputField('reference', '原采购授权的档案出处')}
@@ -271,7 +275,7 @@ export default function PurchaseActions({ orderId, orderStatus, cancellation, po
       {action === 'resolve_change' && <>
         <label className="grid gap-1 text-sm">协调结果<select className={field} value={outcome}
           onChange={event => setOutcome(event.target.value as typeof outcome)}>
-          {!po.needsRemainingReview && <option value="original_terms">双方确认按原条款继续</option>}
+          {canContinueOriginal && <option value="original_terms">双方确认按原条款继续</option>}
           {committed ? (!closed && <option value="replacement">按书面确认另建替代采购</option>)
             : <option value="revised_terms">双方同意修订，提交新版本独立审核</option>}
           <option value="declined">{committed ? '取消受影响数量' : '客户未同意，结束本次采购准备'}</option>
@@ -313,8 +317,9 @@ export default function PurchaseActions({ orderId, orderStatus, cancellation, po
         <p>责任人 {op.responsibleActor} · {op.description}</p>
       </div>}
       {op.action === 'resolve_order_exception' && <div className="space-y-1 text-sm">
-        <p>核对 {op.resolution === 'payable_verified' ? '原合同应付' : '供方取消'} · 责任人 {op.responsibleActor} · {op.description}</p>
+        <p>核对 {op.resolution === 'payable_verified' ? '原合同应付' : '供方整笔取消'} · 责任人 {op.responsibleActor} · {op.description}</p>
         {op.remainingReviewPending && <p>部分商品的取消或替代已登记，剩余应付还需逐行核准。</p>}
+        {op.refund && <p>原单已付 {money(op.refund.paidCents)} · 退款待财务核对</p>}
       </div>}
       {op.action === 'review_legacy_approval' && <div className="space-y-2 text-sm">
         <p>原批准人 {op.evidence.approval.actorId} · 原批准时间 {new Date(op.evidence.approval.recordedAt).toLocaleString('zh-CN')}</p>
