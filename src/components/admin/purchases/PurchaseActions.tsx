@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import type { PurchaseActionInput, previewPurchaseAction } from '@/lib/purchase-orders';
 import type { PurchaseTerms } from '@/lib/purchase-terms';
-import type { DecisionCoverage, DecisionDocumentInput } from '@/lib/purchase-decision-documents';
+import type { DecisionCoverage, DecisionDocumentInput, LegacyDecisionLocation } from '@/lib/purchase-decision-documents';
 import type { ShortfallDecision } from '@/lib/purchase-shortfalls';
 import DocumentDigestField from './DocumentDigestField';
 import type { PurchaseRequest } from './PurchaseManager';
@@ -17,31 +17,39 @@ type Intervention = DecisionDocumentInput & {
   shortfallDecision?: ShortfallDecision; revisesResendApprovalId?: string;
 };
 type ScopeSubjects = Array<{ subject: DecisionCoverage; name: string }>;
+const scopeKey = (scope: DecisionCoverage) => JSON.stringify([scope.orderId,scope.purchaseOrderId,scope.orderItemId,scope.shortfallId ?? null]);
+const decisionPurposeLabels: Record<string,string> = {
+  free_resend:'书面同意免费补发',supplier_facts:'供方确认短失或缺货事实，保留原合同应付',new_purchase:'客户同意按以下条件另采',
+  amend_contract:'书面同意变更原合同',amend_and_replace:'书面同意变更原合同及另采',
+  cancel_unshipped:'书面同意取消未发货份额',replace_unshipped:'书面同意替代未发货份额',
+};
 type Pending = { input: PurchaseActionInput; preview: Preview };
 
 function inputField(name: string, label: string) {
   return <label className="grid gap-1 text-sm">{label}<input className={field} name={name} required maxLength={2000}/></label>;
 }
 
-function DecisionDocumentFields({ label, rowLabel, row, coverage, restore, current, choices, onChange }: {
-  label: string; rowLabel: string; row?: number; coverage?: DecisionCoverage[]; restore?: boolean;
+function DecisionDocumentFields({ label, rowLabel, row, coverage, restore, legacy, current, choices, onChange }: {
+  label: string; rowLabel: string; row?: number; coverage?: DecisionCoverage[]; restore?: boolean; legacy?: LegacyDecisionLocation[];
   current: DecisionCoverage; choices: ScopeSubjects;
-  onChange: (values: { row?: number; coverage?: DecisionCoverage[]; restore?: boolean }) => void;
+  onChange: (values: { row?: number; coverage?: DecisionCoverage[]; restore?: boolean; legacy?: LegacyDecisionLocation[] }) => void;
 }) {
-  const setCoverage = (entries: DecisionCoverage[]) => onChange({ row, coverage: entries.length ? entries : undefined, restore: entries.length ? restore : false });
-  const candidates = choices.filter(({subject}) => !coverage?.some(entry => subject.purchaseOrderId === entry.purchaseOrderId
-    && subject.orderItemId === entry.orderItemId));
+  const setCoverage = (entries: DecisionCoverage[]) => onChange({
+    row, coverage: entries.length ? entries : undefined, restore: entries.length ? restore : false, legacy,
+  });
+  const saveLegacy = (entries: LegacyDecisionLocation[]) => onChange({ row, coverage, restore, legacy: entries.length ? entries : undefined });
+  const candidates = choices.filter(({subject}) => !coverage?.some(entry => scopeKey(subject) === scopeKey(entry)));
   return <div className="grid gap-2">
     <label className="grid gap-1 text-sm">{rowLabel}
       <input className={field} type="number" min={1} step={1} value={row ?? ''}
-        onChange={event => onChange(event.target.value ? { row: Number(event.target.value), coverage, restore } : {})}/>
+        onChange={event => onChange(event.target.value ? { row: Number(event.target.value), coverage, restore, legacy } : {})}/>
     </label>
     {row && <details className="space-y-2 text-sm">
       <summary className="cursor-pointer">核对{label}覆盖范围</summary>
       {!coverage ? <button type="button" className={button} onClick={() => setCoverage([current])}>填写{label}覆盖的采购行及总量</button>
         : <>
           {coverage.map((entry,index) => {
-            const known = choices.find(({subject}) => subject.purchaseOrderId === entry.purchaseOrderId && subject.orderItemId === entry.orderItemId);
+            const known = choices.find(({subject}) => scopeKey(subject) === scopeKey(entry));
             const update = (change: Partial<DecisionCoverage>) => setCoverage(coverage.map((saved,slot) => slot === index ? { ...saved, ...change } : saved));
             return <fieldset key={index} className="grid gap-1 rounded border p-2">
               {known ? <legend>{known.name} · {entry.purchaseOrderId}</legend> : <>
@@ -51,6 +59,8 @@ function DecisionDocumentFields({ label, rowLabel, row, coverage, restore, curre
                   onChange={event => update({ purchaseOrderId: event.target.value })}/></label>
                 <label className="grid gap-1">原客户商品行编号<input className={field} required value={entry.orderItemId}
                   onChange={event => update({ orderItemId: event.target.value })}/></label>
+                <label className="grid gap-1">已核实的物流短失编号<input className={field} required={Boolean(current.shortfallId)} value={entry.shortfallId ?? ''}
+                  onChange={event => update({ shortfallId: event.target.value || undefined })}/></label>
               </>}
               <label className="grid gap-1">{label}核准总量
                 <input className={field} type="number" min={1} max={known?.subject.quantity} step={1} required value={entry.quantity || ''}
@@ -59,20 +69,38 @@ function DecisionDocumentFields({ label, rowLabel, row, coverage, restore, curre
               <button type="button" className="justify-self-start underline" onClick={() => setCoverage(coverage.filter((_,slot) => slot !== index))}>移除此范围</button>
             </fieldset>;
           })}
-          {candidates.length > 0 && <label className="grid gap-1">添加该原件覆盖的本订单采购行
+          {candidates.length > 0 && <label className="grid gap-1">{current.shortfallId ? '添加原件列明的物流短失' : '添加该原件覆盖的本订单采购行'}
             <select className={field} value="" onChange={event => {
               if (event.target.value) setCoverage([...coverage,{ ...candidates[Number(event.target.value)].subject, quantity: 1 }]);
             }}>
-              <option value="">选择书证列明的采购行</option>
-              {candidates.map(({subject,name},index) => <option key={subject.purchaseOrderId+subject.orderItemId} value={index}>
+              <option value="">{current.shortfallId ? '选择书证列明的短失' : '选择书证列明的采购行'}</option>
+              {candidates.map(({subject,name},index) => <option key={scopeKey(subject)} value={index}>
                 {name} · {subject.purchaseOrderId}
               </option>)}
             </select>
           </label>}
           <button type="button" className={button} onClick={() => setCoverage([...coverage,{ orderId: '',purchaseOrderId: '',orderItemId: '',quantity: 1 }])}>按编号添加其他订单的采购行</button>
           <label className="flex gap-2"><input type="checkbox" checked={restore ?? false}
-            onChange={event => onChange({ row, coverage, restore: event.target.checked })}/>已核对原件，补记此前已使用的原件行范围</label>
+            onChange={event => onChange({ row, coverage, legacy, restore: event.target.checked })}/>已核对原件，补记此前已使用的原件行范围</label>
         </>}
+      <button type="button" className={button} onClick={() => saveLegacy([...(legacy ?? []), {
+        activityId:'',orderItemId:current.orderItemId,row:0,quantity:0,
+      }])}>补记{label}的旧批准原件行</button>
+      {legacy?.map((entry,index) => {
+        const update = (change: Partial<LegacyDecisionLocation>) => saveLegacy(legacy.map((saved,slot) => slot === index ? {...saved,...change} : saved));
+        return <fieldset key={index} className="grid gap-1 rounded border p-2">
+          <legend>按原件核对旧批准占用的行和数量</legend>
+          <label>旧批准编号<input className={field} required value={entry.activityId}
+            onChange={event => update({ activityId:event.target.value })}/></label>
+          <label>旧批准商品行编号<input className={field} required value={entry.orderItemId}
+            onChange={event => update({ orderItemId:event.target.value })}/></label>
+          <label>旧批准实际原件行号<input className={field} type="number" min={1} step={1} required value={entry.row || ''}
+            onChange={event => update({ row:Number(event.target.value) })}/></label>
+          <label>旧批准该行已用数量<input className={field} type="number" min={1} step={1} required value={entry.quantity || ''}
+            onChange={event => update({ quantity:Number(event.target.value) })}/></label>
+          <button type="button" className="justify-self-start underline" onClick={() => saveLegacy(legacy.filter((_,slot) => slot !== index))}>移除这条旧批准定位</button>
+        </fieldset>;
+      })}
     </details>}
   </div>;
 }
@@ -92,6 +120,7 @@ function DispositionFields({ line, quantity, losses, resends, shortfall, value, 
   const selectedLoss = losses.find(row => row.resolutionId === value.shortfallId);
   const selectedResend = resends.find(row => row.approvalId === value.revisesResendApprovalId);
   const limit = shortfall ? selectedResend?.available ?? selectedLoss?.available ?? 0 : quantity;
+  const exactChoices = choices.filter(({subject}) => Boolean(subject.shortfallId) === shortfall);
 
   return <fieldset className="grid gap-2 rounded border p-3">
     <legend>{source.name} · 原数量 {source.quantity} · 尚未供货 {quantity}</legend>
@@ -113,11 +142,11 @@ function DispositionFields({ line, quantity, losses, resends, shortfall, value, 
     </label>}
     {(selectedResend || value.quantity > 0) && <>
       <DecisionDocumentFields label="供方书证" rowLabel="供方决定原件行号" row={value.supplierDocumentRow} coverage={value.supplierDocumentScope}
-        restore={value.supplierRestoreScope} choices={choices} current={{ ...current,...(selectedLoss ? { shortfallId: selectedLoss.resolutionId } : {}),quantity: Math.max(1,value.quantity) }}
-        onChange={document => onChange({ ...value,supplierDocumentRow: document.row,supplierDocumentScope: document.coverage,supplierRestoreScope: document.restore })}/>
+        restore={value.supplierRestoreScope} legacy={value.supplierLegacyLocations} choices={exactChoices} current={{ ...current,...(selectedLoss ? { shortfallId: selectedLoss.resolutionId } : {}),quantity: Math.max(1,value.quantity) }}
+        onChange={document => onChange({ ...value,supplierDocumentRow: document.row,supplierDocumentScope: document.coverage,supplierRestoreScope: document.restore,supplierLegacyLocations: document.legacy })}/>
       <DecisionDocumentFields label="客户书证" rowLabel="客户同意原件行号" row={value.customerDocumentRow} coverage={value.customerDocumentScope}
-        restore={value.customerRestoreScope} choices={choices} current={{ ...current,...(selectedLoss ? { shortfallId: selectedLoss.resolutionId } : {}),quantity: Math.max(1,value.quantity) }}
-        onChange={document => onChange({ ...value,customerDocumentRow: document.row,customerDocumentScope: document.coverage,customerRestoreScope: document.restore })}/>
+        restore={value.customerRestoreScope} legacy={value.customerLegacyLocations} choices={exactChoices} current={{ ...current,...(selectedLoss ? { shortfallId: selectedLoss.resolutionId } : {}),quantity: Math.max(1,value.quantity) }}
+        onChange={document => onChange({ ...value,customerDocumentRow: document.row,customerDocumentScope: document.coverage,customerRestoreScope: document.restore,customerLegacyLocations: document.legacy })}/>
     </>}
     {selectedLoss && <label className="grid gap-1 text-sm">双方书面决定
       <select className={field} value={value.shortfallDecision ?? ''} required={value.quantity > 0}
@@ -177,9 +206,14 @@ export default function PurchaseActions({ orderId, orderStatus, cancellation, po
   const [fileKinds, setFileKinds] = useState<Record<string, string>>({});
   const [outcome, setOutcome] = useState<PurchaseActionInput['outcome']>('original_terms');
   const committed = po.orderedBefore || po.paidCents > 0 || po.commitmentExceptions.length > 0;
-  const scopeSubjects = orders.flatMap(purchase => purchase.lines.map(line => ({
+  const orderedSubjects = orders.flatMap(purchase => purchase.lines.map(line => ({
     name: line.source.name, subject: { orderId, purchaseOrderId: purchase.id, orderItemId: line.orderItemId, quantity: line.source.quantity },
   })));
+  const scopeSubjects = [...orderedSubjects,...fulfillment.shortfalls.map(loss => ({
+    name: (orderedSubjects.find(row => row.subject.purchaseOrderId === loss.purchaseOrderId && row.subject.orderItemId === loss.orderItemId)?.name ?? loss.orderItemId)
+      +' · '+loss.reference,
+    subject: { orderId,purchaseOrderId:loss.purchaseOrderId,orderItemId:loss.orderItemId,shortfallId:loss.resolutionId,quantity:loss.quantity },
+  }))];
   const supplierCancelled = po.commitmentState === 'supplier_cancelled';
   const canContinueOriginal = !supplierCancelled && !po.needsRemainingReview;
   const openExceptions = po.commitmentExceptions.filter(row => !row.resolution);
@@ -286,7 +320,8 @@ export default function PurchaseActions({ orderId, orderStatus, cancellation, po
       <ol className="space-y-1 text-xs text-slate-700">{po.ledger.map(entry => <li key={entry.id}>
         {new Date(entry.createdAt).toLocaleString('zh-CN')} · {actionNames[entry.action as keyof typeof actionNames] ?? entry.action} · {entry.actorId}
         {entry.amountCents != null && ` · ${money(entry.amountCents)}`}
-        <details><summary className="cursor-pointer">查看当时记录</summary><pre className="overflow-auto whitespace-pre-wrap break-all rounded bg-slate-50 p-2">{JSON.stringify(entry.detail, null, 2)}</pre></details>
+        <details><summary className="cursor-pointer">查看当时记录</summary><p>操作记录编号 {entry.id}</p>
+          <pre className="overflow-auto whitespace-pre-wrap break-all rounded bg-slate-50 p-2">{JSON.stringify(entry.detail, null, 2)}</pre></details>
       </li>)}</ol></div></details>
     {!pending && <div className="flex flex-wrap gap-2">{choices.map(choice =>
       <button type="button" key={choice} className={button} disabled={busy} onClick={() => {
@@ -402,6 +437,8 @@ export default function PurchaseActions({ orderId, orderStatus, cancellation, po
           <DocumentDigestField name="supplierSha256" label="供方书面回复摘要" required/>
           <DocumentDigestField name="customerSha256" label="客户书面回复摘要" required/>
         </>}
+        {!committed && outcome === 'revised_terms' && po.lines.some(line => line.fromPurchaseOrderId) &&
+          <DocumentDigestField name="customerSha256" label="替代条件变更后客户同意的书证摘要"/>}
         {inputField('description', '双方确认的具体结果')}
         {outcome === 'revised_terms' && po.lines.map(line => <PurchaseLineFields key={line.orderItemId} line={line}
           values={revisions[line.orderItemId] ?? line.terms} onChange={terms => setRevisions({ ...revisions, [line.orderItemId]: terms })}/>)}
@@ -487,9 +524,15 @@ export default function PurchaseActions({ orderId, orderStatus, cancellation, po
         </div>)}
         {'decisionDocuments' in op && op.decisionDocuments?.map(document => <div key={document.role+document.sha256+document.row} className="text-sm">
           <p>{document.role === 'supplier' ? '供方书证' : '客户书证'} · {document.row ? '原件第 '+document.row+' 行' : '整份使用'}</p>
+          {document.authority && <p>{decisionPurposeLabels[document.authority.purpose]}
+            {document.authority.alternate && ' · 供方 '+document.authority.alternate.supplier+' · 货号 '+document.authority.alternate.catalogNumber}
+          </p>}
+          {document.legacyLocations?.map(row => <p key={[row.activityId,row.orderItemId,row.row].join('/')}>
+            旧批准 {row.activityId} · 原件第 {row.row} 行 · 原已使用 {row.quantity}
+          </p>)}
           <ul className="pl-4">
-            {document.balances.map(row => <li key={[row.orderId,row.purchaseOrderId,row.orderItemId,row.shortfallId].join('/')}>
-              {scopeSubjects.find(({subject}) => subject.purchaseOrderId === row.purchaseOrderId && subject.orderItemId === row.orderItemId)?.name ?? row.orderItemId}
+            {document.balances.map(row => <li key={scopeKey(row)}>
+              {scopeSubjects.find(({subject}) => scopeKey(subject) === scopeKey(row))?.name ?? (row.shortfallId ? row.orderItemId+' · '+row.shortfallId : row.orderItemId)}
               {' · 核准 '+row.quantity+' · 已用 '+row.usedBefore+' · 本次 '+row.using+' · 办理后剩余 '+row.remaining}
             </li>)}
           </ul>
