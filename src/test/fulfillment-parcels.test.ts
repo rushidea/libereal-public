@@ -2183,6 +2183,179 @@ describe('actual scope of a supply incident', () => {
     expect(await prisma.accountReceivable.findUniqueOrThrow({where:{orderId}})).toMatchObject({status:'open',amount:300,paidAt:null});
   });
 
+  async function shortfallAfterClosingEarlierNotice(quantity=1) {
+    await acceptCustomerOrder();
+    const {relay:id,direct}=await orderFromSuppliers();
+    await purchaseAction(id,{action:'record_payment',requestId:'actual-original-deposit-before-late-shortfall',
+      reference:'TEST-ORIGINAL-900-DEPOSIT',conditionReference:'TEST-ACTUAL-DEPOSIT-TERM',amountCents:900});
+    const reported=await report(id,'later-closed-original-notice','原供应通知包含后知误发的实际份额。',[waiting(relayLineId,quantity)]);
+    const issue=reported.orders.find(row=>row.id===id)!.incidents[0];
+    const actual=dispatchInput('late-evidenced-shipment-at-its-original-time','supplier_to_customer',[
+      {...goods(id,relayLineId,quantity),holdAssignments:[{incidentId:issue.id,quantity}]},
+    ]);
+    nextOccurrence();
+    await purchaseAction(id,{action:'review_change_scope',incidentId:issue.id,reviewResult:'no_impact',
+      requestId:'the-original-notice-was-justifiably-closed-then',reference:'TEST-THEN-NO-NEW-IMPACT',
+      description:'据当时已查书证，原通知无新增影响。'});
+    const parcel=await dispatch({...actual,holdReview:pendingDeviation('the-real-dispatch-came-to-light-later')});
+    const parcelLineId=parcel.lines[0].id;
+    const confirmed=await event(parcel.id,{...eventInput('actual-later-loss-not-an-old-commercial-decision','customer_delivery',[]),
+      ...agreement('actual-physical-later-loss'),kind:'confirm_shortfall',lines:[{parcelLineId,quantity,outcome:'loss'}]});
+    const resolutionId=confirmed.lines[0].resolutions[0].id;
+    const target={...line(relayLineId,quantity),source:{kind:'shortfall' as const,id:resolutionId}};
+    return {id,direct,issue,parcel,parcelLineId,resolutionId,target,quantity};
+  }
+
+  it('opens a named procurement follow-up when the original notice was legitimately closed before the real loss',async()=>{
+    const {id,direct,issue,parcel,parcelLineId,resolutionId,target}=await shortfallAfterClosingEarlierNotice();
+    const old=await current(id);
+    expect(old).toMatchObject({status:'ordered',incidents:[],paidCents:900,dueCents:4100});
+    const action=handOffShortfall('late-loss-still-needs-procurement-owner',parcelLineId,issue.id,resolutionId);
+    const check=await prisma.$transaction(tx=>previewParcelEvent(tx,orderId,parcel.id,action,operator));
+    expect(check.snapshot).toMatchObject({holdDecisions:[{purchaseFollowup:{reportQuantity:1,decisionLinks:[],transfers:[]}}]});
+    const apply=()=>prisma.$transaction(tx=>recordParcelEvent(tx,orderId,parcel.id,action,operator,check.actionHash));
+    await apply();
+    await apply();
+    const po=await current(id);
+    expect(po).toMatchObject({status:'on_hold',paidCents:900,dueCents:4100,incidents:[
+      {outstanding:[target],shortfallOrigin:{incidentId:issue.id,parcelId:parcel.id,parcelLineId,resolutionId},
+        responsibility:action.holdResponsibility},
+    ]});
+    expect(po.incidentHistory.find(row=>row.id===issue.id)).toEqual(old.incidentHistory.find(row=>row.id===issue.id));
+    expect(po.ledger.filter(row=>row.action==='report_change')).toHaveLength(2);
+    const tail={action:'record_payment' as const,requestId:'actual-part-of-tail-after-review',reference:'TEST-TAIL-1850',
+      conditionReference:'TEST-PROVED-ORIGINAL-TAIL-TERM',amountCents:1850};
+    await expect(purchaseAction(id,tail)).rejects.toThrow();
+    await purchaseAction(direct,{...tail,requestId:'independent-po-payment-remains-possible',reference:'TEST-SEPARATE-PAID'});
+    await purchaseAction(id,{action:'resolve_change',incidentId:po.incidents[0].id,outcome:'original_terms',
+      requestId:'proper-written-contract-settlement-later',...agreement('later-actual-original-payable'),coordinationLines:[target]});
+    await purchaseAction(id,tail);
+    expect(await current(id)).toMatchObject({paidCents:2750,dueCents:2250,incidents:[]});
+  });
+
+  it.each([1,2])('links exactly one independently settled quantity and only reports any remaining shares (loss = %d)',async quantity=>{
+    const {id,issue,parcel,parcelLineId,resolutionId,target}=await shortfallAfterClosingEarlierNotice(quantity);
+    const known={...target,quantity:1};
+    const reviewed=await purchaseAction(id,{action:'report_change',changeKind:'other',requestId:'separate-exact-contract-review-of-one',
+      affectedLines:[known],reference:'TEST-CONTRACT-EXACT-ONE-SHORTFALL',description:'同一短失原件，已查确切一件。'});
+    const priorIssue=reviewed.orders.find(row=>row.id===id)!.incidents[0];
+    const settled=await purchaseAction(id,{action:'resolve_change',incidentId:priorIssue.id,outcome:'original_terms',coordinationLines:[known],
+      requestId:'pre-existing-documented-exact-loss-liability',...agreement('already-confirmed-payable-for-exact-one-shortfall')});
+    const past=settled.orders.find(row=>row.id===id)!.ledger.findLast(row=>row.action==='resolve_change')!;
+    const action=handOffShortfall('subsequent-recognition-of-the-real-physical-shortfall',parcelLineId,issue.id,resolutionId,quantity);
+    const check=await prisma.$transaction(tx=>previewParcelEvent(tx,orderId,parcel.id,action,operator));
+    expect(check.snapshot).toMatchObject({holdDecisions:[{purchaseFollowup:{
+      reportQuantity:quantity-1,decisionLinks:[{activityId:past.id,quantity:1}],
+    }}]});
+    await event(parcel.id,action);
+    const po=await current(id);
+    expect(po.incidents.map(row=>row.outstanding)).toEqual(quantity===2 ? [[known]] : []);
+    expect(po.ledger.findLast(row=>row.action===(quantity===2 ? 'report_change' : 'link_dispatch_shortfall'))?.detail).toMatchObject({
+      snapshot:{operation:{shortfallHandoff:{resolutionId,parcelLineId,incidentId:issue.id,decisionLinks:[{activityId:past.id,quantity:1}]}}},
+    });
+    expect(po).toMatchObject({status:quantity===2?'on_hold':'ordered',paidCents:900,dueCents:4100});
+  });
+
+  it('tracks a first handed-off unit separately from a later, explicitly settled unit of the same resolution',async()=>{
+    const {id,issue,parcel,parcelLineId,resolutionId,target}=await shortfallAfterClosingEarlierNotice(2);
+    const one={...target,quantity:1};
+    await event(parcel.id,handOffShortfall('first-lost-piece-still-pending',parcelLineId,issue.id,resolutionId));
+    const [first]=(await current(id)).incidents;
+    const prepared=await purchaseAction(id,{action:'report_change',changeKind:'other',requestId:'independent-exact-other-piece',
+      reference:'TEST-OTHER-ONE-PIECE-CONTRACT-REVIEW',description:'独立核对尚未接续的另一件，原一件仍由原责任人办理。',affectedLines:[one]});
+    const other=prepared.orders.find(row=>row.id===id)!.incidents.find(row=>row.id!==first.id)!;
+    const settled=await purchaseAction(id,{action:'resolve_change',incidentId:other.id,outcome:'original_terms',coordinationLines:[one],
+      requestId:'authorize-only-the-other-one',...agreement('both-parties-verified-original-obligation-of-other-piece')});
+    const prior=settled.orders.find(row=>row.id===id)!.ledger.findLast(row=>row.action==='resolve_change')!;
+    const action=handOffShortfall('second-piece-has-its-own-exact-decision',parcelLineId,issue.id,resolutionId);
+    const check=await prisma.$transaction(tx=>previewParcelEvent(tx,orderId,parcel.id,action,operator));
+    expect(check.snapshot).toMatchObject({holdDecisions:[{purchaseFollowup:{
+      reportQuantity:0,decisionLinks:[{activityId:prior.id,quantity:1}],
+    }}]});
+    await event(parcel.id,action);
+    expect((await current(id)).incidents).toMatchObject([{id:first.id,outstanding:[one]}]);
+    expect((await current(id)).incidents).toHaveLength(1);
+  });
+
+  it('retains both original and linked notices when a later loss needs its own procurement follow-up',async()=>{
+    await acceptCustomerOrder();
+    const {relay:id}=await orderFromSuppliers();
+    const initial=await report(id,'earlier-notice-later-linked','当时暂停一件真实物品。',[waiting(relayLineId,1)]);
+    const original=initial.orders.find(row=>row.id===id)!.incidents[0];
+    const prepared=dispatchInput('mistaken-departure-before-the-duplicate-link','supplier_to_customer',[goods(id,relayLineId)]);
+    nextOccurrence();
+    const second=await report(id,'other-copy-of-the-same-event','原文件后来到达，核实与先前通知是同一件。',[waiting(relayLineId,1)]);
+    const matched=second.orders.find(row=>row.id===id)!.incidents.find(row=>row.id!==original.id)!;
+    await purchaseAction(id,{action:'review_change_scope',incidentId:original.id,reviewResult:'duplicate',
+      relatedIncidentId:matched.id,requestId:'same-notice-written-evidence',reference:'TEST-WRITTEN-LINK',
+      description:'原文件书证核实确实是同一份货物。'});
+    await purchaseAction(id,{action:'review_change_scope',incidentId:matched.id,reviewResult:'no_impact',
+      requestId:'no-impact-before-later-departure-discovered',reference:'TEST-FACTS-AT-THAT-POINT',
+      description:'按此刻资料确实无新增影响，晚报的运单此时未知。'});
+    const currentAt=await prisma.$transaction(tx=>fulfillmentWorkspace(tx,orderId,Date.parse(prepared.occurredAt),true));
+    const candidate=currentAt.purchases.find(row=>row.purchaseOrderId===id && row.orderItemId===relayLineId)!.holdAllowance!.assignable[0];
+    const departed=await dispatch({...prepared,lines:[{...prepared.lines[0],holdAssignments:[{incidentId:candidate.incidentId,quantity:1}]}],
+      holdReview:pendingDeviation('lost-despite-old-notices-having-been-reconciled')});
+    const parcelLineId=departed.lines[0].id;
+    const lost=await event(departed.id,{...eventInput('actual-loss-proven-after-both-reviews','customer_delivery',[]),
+      ...agreement('carrier-and-buyer-verify-real-loss-later'),kind:'confirm_shortfall',lines:[{parcelLineId,quantity:1,outcome:'loss'}]});
+    const resolutionId=lost.lines[0].resolutions[0].id;
+    await event(departed.id,handOffShortfall('named-followup-after-an-archived-merge',parcelLineId,candidate.incidentId,resolutionId));
+    const po=await current(id);
+    expect(po.incidents).toMatchObject([{shortfallOrigin:{incidentId:original.id,parcelId:departed.id,parcelLineId,resolutionId}}]);
+    expect(po.incidentHistory.find(row=>row.id===original.id)).toMatchObject({status:'duplicate',linkedTo:matched.id});
+    expect(po.incidentHistory.find(row=>row.id===matched.id)).toMatchObject({status:'no_impact'});
+  });
+
+  it('joins an existing open procurement case that already scopes the exact loss after the old notice closes',async()=>{
+    const {id,issue,parcel,parcelLineId,resolutionId,target}=await shortfallAfterClosingEarlierNotice();
+    const already=await purchaseAction(id,{action:'report_change',changeKind:'other',requestId:'later-open-case-on-the-real-shortfall',
+      reference:'TEST-ALREADY-BEING-HANDLED-ON-THE-SAME-PO',description:'已有采购经办范围涵盖该实际货件。',affectedLines:[target]});
+    const active=already.orders.find(row=>row.id===id)!.incidents[0];
+    const action=handOffShortfall('same-shortfall-with-existing-scope',parcelLineId,issue.id,resolutionId);
+    const check=await prisma.$transaction(tx=>previewParcelEvent(tx,orderId,parcel.id,action,operator));
+    expect(check.snapshot).toMatchObject({holdDecisions:[{purchaseFollowup:{
+      reportQuantity:0,transfers:[{incidentId:active.id,from:target}],
+    }}]});
+    await event(parcel.id,action);
+    expect(await current(id)).toMatchObject({incidents:[{id:active.id,outstanding:[target],shortfallFollowups:[
+      {quantity:1,resolutionId,responsibility:action.holdResponsibility},
+    ]}]});
+    expect((await current(id)).ledger.filter(row=>row.action==='report_change')).toHaveLength(2);
+  });
+
+  it('repairs an old fact-only closure through the original procurement entry without repeating the physical event',async()=>{
+    const {id,direct,issue,parcel,parcelLineId,resolutionId,target}=await shortfallAfterClosingEarlierNotice();
+    const oldPurchase=await current(id);
+    await event(parcel.id,handOffShortfall('old-shape-previously-lacked-procurement',parcelLineId,issue.id,resolutionId));
+    // Restore the procurement side to the released 6ae07c0 shape while keeping its real physical shortfall and applied review.
+    const added=(await current(id)).ledger.find(entry=>!oldPurchase.ledger.some(row=>row.id===entry.id))!;
+    await prisma.$executeRaw`DELETE FROM PurchaseActivity WHERE id=${added.id}`;
+    await prisma.$executeRaw`UPDATE PurchaseOrder SET status=${oldPurchase.status},revision=${oldPurchase.revision} WHERE id=${id}`;
+    const readOrder=()=>prisma.$transaction(tx=>purchaseWorkspace(tx,orderId));
+    const old=(await readOrder()).fulfillment.unlinkedDispatchShortfalls[0];
+    expect(old).toMatchObject({purchaseOrderId:id,parcelLineId,resolutionId,quantity:1,incidentId:issue.id});
+    const count=()=>prisma.fulfillmentEvent.count({where:{parcelId:parcel.id}});
+    const recorded=await count();
+    await expect(purchaseAction(id,{action:'record_payment',requestId:'not-before-recovery',reference:'TEST-NOT-PAID',
+      conditionReference:'TEST-REAL-TERM',amountCents:1850})).rejects.toThrow(/仍待采购接续/);
+    const recover={action:'report_change' as const,requestId:'recover-one-historical-part',
+      shortfallHandoffKey:old.key,reference:'TEST-ORIGINAL-FILE-WITH-NAMED-HANDOFF',description:'补接旧版已核实短失。',
+      responsibility:'合成原采购续办人'};
+    await expect(purchaseAction(direct,recover)).rejects.toThrow(/请选择本采购单/);
+    const input={...recover,orderId,purchaseOrderId:id,version:(await current(id)).version};
+    const res=await prisma.$transaction(tx=>previewPurchaseAction(tx,input,operator));
+    expect(res.snapshot.operation).toMatchObject({shortfallRecovery:{key:old.key,purchaseFollowup:{reportQuantity:1,target:{purchaseOrderId:id,parcelLineId,resolutionId,quantity:1,incidentId:issue.id}}}});
+    const confirm=()=>prisma.$transaction(tx=>applyPurchaseAction(tx,{...input,actionHash:res.actionHash},operator));
+    await confirm();
+    await confirm();
+    expect(await count()).toBe(recorded);
+    expect((await readOrder()).fulfillment.unlinkedDispatchShortfalls).toEqual([]);
+    expect(await current(id)).toMatchObject({paidCents:900,dueCents:4100,incidents:[
+      {outstanding:[target],shortfallOrigin:{incidentId:issue.id,parcelId:parcel.id,parcelLineId,resolutionId},responsibility:recover.responsibility},
+    ]});
+  });
+
   it('records actual direct signature before any buyer decision without closing the customer order or collecting money',async()=>{
     await acceptCustomerOrder();
     const {direct,relay:id}=await orderFromSuppliers();

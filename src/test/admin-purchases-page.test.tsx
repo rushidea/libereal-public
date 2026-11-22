@@ -77,7 +77,7 @@ function makeWorkspace(status?: Purchase['status'], lineChanges: Partial<Line> =
     eligibility: { eligible: true, reason: null, basis: { acceptanceId: 'test-acceptance', receivableId: 'test-receivable',
       reserveId: 'test-credit-reserve', amount: 250, mode: 'credit', payment, planEvidenceId: null } },
     lines: [line], orders: purchase ? [purchase] : [], activities: [], customerRemaining:[{orderItemId,quantity:2}],
-    fulfillment: { version, targets: [], delivered: [], historicalDelivered: [], customerReceived: [], supplierReceived: [], warehouseReceived: [], warehouseTransit: [], supplierDispatched: [], incidentSources: [], dispatchHolds: [], shortfalls: [], freeResends: [], parcelLinesWithPriorHoldTransfer: [], replacementsWithPriorHoldTransfer: [], parcelLinesWithUnverifiedStockSource: [], replacementsWithUnverifiedStockSource: [], inconsistent: [], ledger: [] },
+    fulfillment: { version, targets: [], delivered: [], historicalDelivered: [], customerReceived: [], supplierReceived: [], warehouseReceived: [], warehouseTransit: [], supplierDispatched: [], incidentSources: [], dispatchHolds: [], unlinkedDispatchShortfalls: [], shortfalls: [], freeResends: [], parcelLinesWithPriorHoldTransfer: [], replacementsWithPriorHoldTransfer: [], parcelLinesWithUnverifiedStockSource: [], replacementsWithUnverifiedStockSource: [], inconsistent: [], ledger: [] },
   };
 }
 
@@ -336,6 +336,25 @@ describe('supplier purchasing page', () => {
     expect(issue).toHaveTextContent('后续责任人 合成合同经办人');
     expect(issue).toHaveTextContent('仍待办理 1');
     expect(within(issue).getByRole('button',{name:'回填协调结果'})).toBeInTheDocument();
+  });
+
+  it('uses the existing supply report to attach a genuinely unlinked shortfall with a named owner',async()=>{
+    const workspace=makeWorkspace('ordered');
+    workspace.fulfillment.unlinkedDispatchShortfalls=[{key:'test-retained-handoff',reviewEventId:'test-original-review',
+      purchaseOrderId:purchaseId,orderItemId,parcelId:'test-old-parcel',parcelLineId:'test-lost-parcel-line',
+      resolutionId:'test-actual-shortfall',incidentId:'test-old-closed-issue',quantity:1,reference:'TEST-PROVEN-LEGACY-LOSS',
+      sha256:'d'.repeat(64),occurredAt:'2031-05-01T00:00:00.000Z'}];
+    const posts=mockWorkspace(workspace,['purchases.read','purchases.write','purchases.pay'],body=>Response.json(preview(body,workspace)));
+    render(<PurchaseManager initialOrder={orderId}/>);
+    expect(await screen.findByText(/已核实误发短失待采购接续/)).toHaveTextContent('TEST-PROVEN-LEGACY-LOSS');
+    fireEvent.click(screen.getByRole('button',{name:'接续已核实的误发短失'}));
+    fill('短失接续的档案出处','TEST-FOLLOW-UP-PROOF');
+    fill('已核实的接续经过和结果','旧实物记录真实，交原采购经办人续办。');
+    fill('采购后续责任人','合成后续责任人');
+    fireEvent.click(screen.getByRole('button',{name:'查看完整预览'}));
+    expect(await screen.findByRole('region',{name:'操作预览'})).toBeInTheDocument();
+    expect(posts[0]).toMatchObject({action:'report_change',shortfallHandoffKey:'test-retained-handoff',responsibility:'合成后续责任人'});
+    expect(posts[0]).not.toHaveProperty('affectedLines');
   });
 
   it('submits an independently written retained quote for one of two draft units',async()=>{
