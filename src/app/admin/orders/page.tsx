@@ -1623,7 +1623,7 @@ function OrderDetailPanel({
       </div>
       <ShipmentPanel order={order} orderItems={orderItems} fetchData={fetchData} canWriteOrders={canWriteOrders} beginMfaStepUp={beginMfaStepUp} />
       {['confirmed','partially_shipped','shipped','completed','cancelled','closed'].includes(order.status) &&
-        <FulfillmentPanel key={order.id} orderId={order.id} canWrite={canWriteOrders} stepUp={beginMfaStepUp} onUpdated={fetchData}/>}
+        <FulfillmentPanel key={order.id} orderId={order.id} canWrite={permissions?.includes('orders.write') === true} stepUp={beginMfaStepUp} onUpdated={fetchData}/>}
 
       {permissions?.includes('purchases.read') && ['confirmed','partially_shipped','shipped','completed'].includes(order.status) && (
         <Link href={`/admin/purchases?orderId=${encodeURIComponent(order.id)}`} className="inline-flex text-sm font-medium text-brand-700 underline">查看本单采购</Link>
