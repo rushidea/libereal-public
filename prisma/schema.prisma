@@ -586,6 +586,7 @@ model Order {
   pointsRefundedGroup Int      @default(0)
   pointsRefundedCash   Float    @default(0) // 已计入积分退款比例的现金（元）
   researchGroup       ResearchGroup? @relation(fields: [pointsGroupId], references: [id], onDelete: SetNull)
+  fulfillmentParcels FulfillmentParcel[]
 
   @@unique([inquiryId, inquiryOrderSeq])
   @@index([email])
@@ -689,6 +690,7 @@ model Shipment {
   updatedAt      DateTime @updatedAt
   order          Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
   items          ShipmentItem[]
+  fulfillmentParcel FulfillmentParcel?
 
   @@index([orderId, createdAt])
   @@index([trackingNumber])
@@ -956,6 +958,7 @@ model OrderItem {
   purchaseRequirement PurchaseRequirement?
   purchaseReplacementLines PurchaseReplacementLine[]
   inventoryReservation InventoryReservation?
+  fulfillmentParcelLines FulfillmentParcelLine[]
 
   @@unique([orderId, position])
   @@index([orderId])
@@ -977,6 +980,7 @@ model PurchaseOrder {
   replacements PurchaseReplacementLine[] @relation("ReplacementPurchase")
   replacedLines PurchaseReplacementLine[] @relation("OriginalPurchase")
   activities   PurchaseActivity[]
+  fulfillmentParcelLines FulfillmentParcelLine[]
 
   @@unique([id, orderId])
   @@index([orderId, status])
@@ -1464,6 +1468,7 @@ model InventoryBatch {
   account          InventoryAccount @relation(fields: [inventoryAccountId], references: [id], onDelete: Cascade)
   transactions     InventoryTransaction[]
   batchAllocations InventoryReservationBatch[]
+  fulfillmentReceipts FulfillmentReceipt[]
 
   @@unique([inventoryAccountId, batchNumber])
   @@index([expiryDate])
@@ -1475,6 +1480,7 @@ model InventoryReservationBatch {
   batchId       String
   quantity      Int
   fulfilledQuantity Int @default(0)
+  releasedQuantity Int @default(0)
   reservation   InventoryReservation @relation(fields: [reservationId], references: [id], onDelete: Cascade)
   batch         InventoryBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
 
@@ -1489,6 +1495,7 @@ model InventoryReservation {
   orderItemId      String   @unique
   quantity         Int
   fulfilledQuantity Int     @default(0)
+  releasedQuantity Int @default(0)
   status           String   @default("active")
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
@@ -1885,4 +1892,94 @@ model LegalDocument {
 
   @@index([published])
   @@index([sortOrder])
+}
+
+// A parcel follows one physical route. Customer-facing legs also use the existing Shipment record.
+model FulfillmentParcel {
+  id                 String   @id @default(cuid())
+  orderId            String
+  shipmentId         String?  @unique
+  route              String
+  carrier            String?
+  trackingNumber     String?
+  feedSource         String?
+  status             String
+  dispatchedAt       DateTime
+  reference          String
+  evidenceSha256     String
+  evidenceRow        Int
+  requestKey         String   @unique
+  businessKey        String   @unique
+  contentHash        String
+  actorId            String
+  createdAt          DateTime @default(now())
+  order              Order     @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  shipment           Shipment? @relation(fields: [shipmentId], references: [id], onDelete: Restrict)
+  lines              FulfillmentParcelLine[]
+  events             FulfillmentEvent[]
+
+  @@index([orderId, createdAt])
+  @@index([feedSource, carrier, trackingNumber])
+}
+
+model FulfillmentParcelLine {
+  id                String @id @default(cuid())
+  parcelId          String
+  purchaseOrderId   String?
+  orderItemId       String
+  sourceReceiptId   String?
+  catalogNumber     String?
+  productId         String?
+  variantId         String?
+  quantity          Int
+  receivedQuantity  Int    @default(0)
+  parcel            FulfillmentParcel  @relation(fields: [parcelId], references: [id], onDelete: Restrict)
+  purchase          PurchaseOrder?     @relation(fields: [purchaseOrderId], references: [id], onDelete: Restrict)
+  orderItem         OrderItem          @relation(fields: [orderItemId], references: [id], onDelete: Restrict)
+  sourceReceipt     FulfillmentReceipt? @relation("ForwardedReceipt", fields: [sourceReceiptId], references: [id], onDelete: Restrict)
+  receipts          FulfillmentReceipt[] @relation("ParcelLineReceipts")
+
+  @@index([parcelId])
+  @@index([purchaseOrderId, orderItemId])
+  @@index([sourceReceiptId])
+}
+
+model FulfillmentReceipt {
+  id                 String @id @default(cuid())
+  parcelLineId       String
+  eventId            String
+  inventoryBatchId   String
+  quantity           Int
+  forwardedQuantity  Int    @default(0)
+  parcelLine         FulfillmentParcelLine @relation("ParcelLineReceipts", fields: [parcelLineId], references: [id], onDelete: Restrict)
+  event              FulfillmentEvent      @relation(fields: [eventId], references: [id], onDelete: Restrict)
+  inventoryBatch     InventoryBatch        @relation(fields: [inventoryBatchId], references: [id], onDelete: Restrict)
+  forwardedLines     FulfillmentParcelLine[] @relation("ForwardedReceipt")
+
+  @@unique([parcelLineId, eventId, inventoryBatchId])
+  @@index([inventoryBatchId])
+}
+
+// Carrier reports are retained if a parcel has not been matched. Physical receipts are separate staff actions.
+model FulfillmentEvent {
+  id              String   @id @default(cuid())
+  parcelId        String?
+  source          String
+  kind            String
+  status          String
+  occurredAt      DateTime
+  requestKey      String   @unique
+  businessKey     String   @unique
+  contentHash     String
+  reference       String
+  evidenceSha256  String
+  evidenceRow     Int
+  details         String
+  actorId         String?
+  createdAt       DateTime @default(now())
+  parcel          FulfillmentParcel? @relation(fields: [parcelId], references: [id], onDelete: Restrict)
+  receipts        FulfillmentReceipt[]
+
+  @@index([parcelId, occurredAt])
+  @@index([source, status])
 }
