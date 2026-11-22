@@ -72,7 +72,7 @@ function makeWorkspace(status?: Purchase['status'], lineChanges: Partial<Line> =
     eligibility: { eligible: true, reason: null, basis: { acceptanceId: 'test-acceptance', receivableId: 'test-receivable',
       reserveId: 'test-credit-reserve', amount: 250, mode: 'credit', payment, planEvidenceId: null } },
     lines: [line], orders: purchase ? [purchase] : [], activities: [],
-    fulfillment: { version, targets: [], delivered: [], historicalDelivered: [], supplierDispatched: [], shortfalls: [], freeResends: [], parcelLinesWithPriorHoldTransfer: [], replacementsWithPriorHoldTransfer: [], inconsistent: [], ledger: [] },
+    fulfillment: { version, targets: [], delivered: [], historicalDelivered: [], supplierDispatched: [], shortfalls: [], freeResends: [], parcelLinesWithPriorHoldTransfer: [], replacementsWithPriorHoldTransfer: [], parcelLinesWithUnverifiedStockSource: [], replacementsWithUnverifiedStockSource: [], inconsistent: [], ledger: [] },
   };
 }
 
@@ -133,7 +133,7 @@ describe('supplier purchasing page', () => {
     purchase.paidCents=900;
     const loss={resolutionId:'TEST-TRACKED-SHORTFALL',purchaseOrderId:purchaseId,orderItemId,route:'supplier_to_customer',
       originalContract:true,quantity:1,available:1,reference:'TEST-ORIGINAL-LOSS-DOCUMENT',occurredAt:'2031-04-15T00:00:00.000Z',independentlyReplaced:0};
-    workspace.fulfillment.shortfalls=[loss];
+    workspace.fulfillment.shortfalls=[{...loss,contractSource:{purchaseOrderId:purchaseId,orderItemId,parcelLineId:'TEST-FIRST-SHIPMENT-LINE',reference:'TEST-FIRST-SUPPLIER-SHIPMENT'}}];
     workspace.fulfillment.supplierDispatched=[{purchaseOrderId:purchaseId,orderItemId,quantity:2}];
     const posts=mockWorkspace(workspace,['purchases.read','purchases.approve'],body=>{
       const result=preview(body,workspace);
@@ -172,13 +172,14 @@ describe('supplier purchasing page', () => {
     const approvalId = 'TEST-ORIGINAL-FREE-APPROVAL';
     const authorizedAt = '2031-04-15T00:00:00.000Z';
     workspace.fulfillment.shortfalls = [{resolutionId:shortfallId,purchaseOrderId:purchaseId,orderItemId,route:'supplier_to_customer',
-      originalContract:true,quantity:2,available:0,reference:'TEST-ORIGINAL-LOST-WAYBILL',occurredAt:authorizedAt,independentlyReplaced:0}];
+      originalContract:true,quantity:2,available:0,reference:'TEST-ORIGINAL-LOST-WAYBILL',occurredAt:authorizedAt,independentlyReplaced:0,
+      contractSource:{purchaseOrderId:purchaseId,orderItemId,parcelLineId:'TEST-CONTRACT-PARCEL-LINE',reference:'TEST-FIRST-CONTRACT-SHIPMENT'}}];
     workspace.fulfillment.freeResends = [{approvalId,purchaseOrderId:purchaseId,orderItemId,shortfallId,authorizedAt,kind:'free_resend',
       quantity:2,dispatched:1,redirected:0,available:1,originalHoldAlreadyMoved:true,revisesResendApprovalId:undefined}];
     const posts = mockWorkspace(workspace,['purchases.read','purchases.approve'],body=>{
       const result = preview(body,workspace);
       const operation = {...result.preview.snapshot.operation,dispositions:[{orderItemId,quantity:1,outcome:'cancel',shortfallId,
-        shortfallDecision:'change_contract',revisesResendApprovalId:approvalId,
+        shortfallDecision:'change_contract',revisesResendApprovalId:approvalId,supplierDocumentRow:2,customerDocumentRow:12,contractSource:workspace.fulfillment.shortfalls[0].contractSource,
         priorResend:{authorized:2,dispatched:1,redirected:0,available:1}}]};
       return body.stage === 'confirm' ? Response.json({workspace})
         : Response.json({preview:{...result.preview,snapshot:{...result.preview.snapshot,operation}}});
@@ -191,6 +192,9 @@ describe('supplier purchasing page', () => {
     expect(screen.queryByRole('option',{name:/供方同意免费重发/})).not.toBeInTheDocument();
     expect(screen.getByLabelText('本次受影响数量')).toHaveAttribute('max','1');
     fill('双方书面决定','change_contract');
+    fill('供方决定原件行号','2');
+    fill('客户同意原件行号','12');
+    expect(screen.getByText(/对应原合同发货凭据 TEST-FIRST-CONTRACT-SHIPMENT/)).toBeInTheDocument();
     fill('本次受影响数量','1');
     fill('人工与供应商协调的书面依据','TEST-NEW-SUPPLIER-DECISION');
     fill('客户对方案的回复依据','TEST-NEW-CUSTOMER-CONSENT');
@@ -200,8 +204,11 @@ describe('supplier purchasing page', () => {
     fireEvent.click(screen.getByRole('button',{name:'查看完整预览'}));
     const panel = await screen.findByRole('region',{name:'操作预览'});
     expect(panel).toHaveTextContent(/原免费批准.*核准 2.*本次改办 1/);
+    expect(panel).toHaveTextContent('供方决定原件第 2 行');
+    expect(panel).toHaveTextContent('客户同意原件第 12 行');
+    expect(panel).toHaveTextContent('对应原合同发货凭据 TEST-FIRST-CONTRACT-SHIPMENT');
     expect(posts[0]).toMatchObject({stage:'preview',dispositions:[{orderItemId,shortfallId,
-      revisesResendApprovalId:approvalId,quantity:1,shortfallDecision:'change_contract'}]});
+      revisesResendApprovalId:approvalId,quantity:1,shortfallDecision:'change_contract',supplierDocumentRow:2,customerDocumentRow:12}]});
     fireEvent.click(within(panel).getByRole('button',{name:/确认/}));
     await waitFor(()=>expect(posts[1]).toMatchObject({stage:'confirm',version,actionHash,
       requestId:posts[0].requestId,dispositions:posts[0].dispositions}));
