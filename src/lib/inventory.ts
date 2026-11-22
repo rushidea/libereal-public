@@ -423,9 +423,11 @@ export async function releaseProcurementInventoryHold(tx: Tx, orderId: string, o
 
 export async function receiveProcurementBatch(tx: Tx, input: {
   orderId: string; orderItemId: string; productId: string; variantId: string | null; batchNumber: string;
-  inventoryAccountId?: string | null; quantity: number; actorId: string;
+  inventoryAccountId?: string | null; quantity: number; originalHoldAlreadyMoved: boolean; actorId: string;
 }) {
-  await releaseProcurementInventoryHold(tx, input.orderId, input.orderItemId, input.quantity, input.actorId);
+  if (!input.originalHoldAlreadyMoved) {
+    await releaseProcurementInventoryHold(tx, input.orderId, input.orderItemId, input.quantity, input.actorId);
+  }
   const { account, batch } = await receiveInventoryBatch(tx, input, { orderId: input.orderId, inventoryAccountId: input.inventoryAccountId });
   const after = await claimReservationQuantity(tx, account, input.quantity);
   await tx.inventoryBatch.update({ where: { id: batch.id }, data: { reservedQuantity: { increment: input.quantity } } });

@@ -1,4 +1,4 @@
-import { confirmedCustomerDelivery, customerLineReceipts, customerLineReturnableAt } from '@/lib/fulfillment-accounting';
+import { customerLineReturnableAt, syncCustomerParcelDelivery } from '@/lib/fulfillment-accounting';
 import { disposeProcurementBatch, receiveProcurementBatch } from '@/lib/inventory';
 import { fulfillmentStatus, isInactiveOrderStatus } from '@/lib/order-domain';
 import { purchaseWorkspace } from '@/lib/purchase-orders';
@@ -139,6 +139,7 @@ async function eventPlan(tx: Db, orderId: string, parcelId: string, raw: unknown
     }
     lines.push({ parcelLineId: line.id, quantity: row.quantity, batchNumber: row.batchNumber, inventory: identity, orderItemId: line.orderItemId,
       productId: identity?.productId ?? null, variantId: identity?.variantId ?? null, purchaseOrderId: line.purchaseOrderId,
+      originalHoldAlreadyMoved: purchasing?.fulfillment.parcelLinesWithPriorHoldTransfer.includes(line.id) ?? false,
       catalogNumber: line.catalogNumber, priorReceived: line.receivedQuantity });
   }
   const snapshot = { orderId, orderStatus: order.status, parcelId, route: parcel.route, priorStatus: parcel.status,
@@ -194,7 +195,7 @@ export async function recordParcelEvent(tx: Db, orderId: string, parcelId: strin
     if (row.inventory) {
       const batchId = await receiveProcurementBatch(tx, { orderId, orderItemId: row.orderItemId, productId: row.inventory.productId,
         variantId: row.inventory.variantId, inventoryAccountId: row.inventory.inventoryAccountId,
-        batchNumber: row.batchNumber!, quantity: row.quantity, actorId: actor.id });
+        batchNumber: row.batchNumber!, quantity: row.quantity, originalHoldAlreadyMoved: row.originalHoldAlreadyMoved, actorId: actor.id });
       await tx.fulfillmentReceipt.create({ data: { eventId: event.id, parcelLineId: row.parcelLineId, inventoryBatchId: batchId, quantity: row.quantity } });
     }
   }
@@ -205,21 +206,8 @@ export async function recordParcelEvent(tx: Db, orderId: string, parcelId: strin
   }
   const updated = await tx.fulfillmentParcel.findUniqueOrThrow({ where: { id: parcelId }, include: parcelInclude });
   const status = parcelProgress(updated);
-  if (parcel.shipmentId && (status === 'delivered' || status === 'shortfall')
-    && ['customer_delivery','confirm_shortfall','resolve_exception'].includes(input.kind)) {
-    const receipts = updated.lines.map(line => ({ line, evidence: customerLineReceipts(updated,line) }));
-    const lastReceipt = receipts.reduce((last,{evidence}) => evidence.reduce((max,row) => Math.max(max,row.at),last),0);
-    const verified = receipts.every(({line,evidence}) => evidence.reduce((sum,row) => sum+row.quantity,0) === line.receivedQuantity);
-    if (lastReceipt && verified && updated.lines.some(line => parcelLineBalance(line).received > 0)) {
-      await tx.shipment.updateMany({ where: { id: parcel.shipmentId, status: 'shipped' }, data: { status: 'delivered', deliveredAt: new Date(lastReceipt) } });
-    }
-    if (await confirmedCustomerDelivery(tx, orderId)) {
-      const order = await tx.order.findUniqueOrThrow({ where: { id: orderId }, select: { status: true } });
-      if (order.status === 'shipped') await tx.order.update({ where: { id: orderId }, data: { status: 'completed',
-        statusHistory: { create: { fromStatus: 'shipped', toStatus: 'completed', actorId: actor.id, actorEmail: actor.email, reason: 'customer_delivery_confirmed' } },
-        events: { create: { type: 'customer_delivery_confirmed', message: '订单商品均已按实收凭据确认交付', actorId: actor.id, actorEmail: actor.email,
-          metadata: JSON.stringify({ shipmentId: parcel.shipmentId }) } } } });
-    }
+  if (['customer_delivery','confirm_shortfall','resolve_exception'].includes(input.kind)) {
+    await syncCustomerParcelDelivery(tx, updated, status, actor);
   }
   return tx.fulfillmentParcel.update({ where: { id: parcelId }, data: { status }, include: parcelInclude });
 }

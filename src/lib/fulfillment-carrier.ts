@@ -1,3 +1,4 @@
+import { syncCustomerParcelDelivery } from '@/lib/fulfillment-accounting';
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { pricingContentHash } from '@/lib/pricing-adjustment-approval';
 import { PurchaseError, requiredText } from '@/lib/purchase-terms';
@@ -51,7 +52,10 @@ async function attach(tx: Db, notice: Notice, parcel: Parcel) {
 async function refreshProgress(tx: Db, parcelId: string) {
   const parcel = await tx.fulfillmentParcel.findUniqueOrThrow({ where: { id: parcelId }, include: parcelInclude });
   const status = parcelProgress(parcel);
-  if (status !== parcel.status) await tx.fulfillmentParcel.update({ where: { id: parcelId }, data: { status } });
+  if (status !== parcel.status) {
+    await tx.fulfillmentParcel.update({ where: { id: parcelId }, data: { status } });
+    if (parcel.status === 'exception') await syncCustomerParcelDelivery(tx, parcel, status);
+  }
 }
 
 function waybillCandidates(tx: Db, notice: Notice, source: string, carrier: string, trackingNumber: string) {

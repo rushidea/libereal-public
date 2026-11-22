@@ -67,7 +67,9 @@ export async function fulfillmentWorkspace(tx: Db, orderId: string) {
       const available = Math.max(0, Math.min(ordered.quantity, remaining) - (dispatched.get(lineKey({ purchaseOrderId: po.id, orderItemId: line.orderItemId })) ?? 0));
       return [{ purchaseOrderId: po.id, orderItemId: line.orderItemId, name: line.source.name, supplier: line.terms.supplier ?? '',
         catalogNumber: line.source.catalogNumber, productId: line.source.productId, variantId: line.source.variantId,
-        orderedAt: receipt.occurredAt!, available, contractVersion: po.version }];
+        orderedAt: receipt.occurredAt!, available, contractVersion: po.version,
+        originalHoldAlreadyMoved: purchasing.fulfillment.replacementsWithPriorHoldTransfer.some(row =>
+          row.purchaseOrderId === po.id && row.orderItemId === line.orderItemId) }];
     });
   });
   const receipts = isInactiveOrderStatus(order.status) ? [] : parcels.flatMap(parcel =>
@@ -137,6 +139,7 @@ async function dispatchPlan(tx: Db, orderId: string, raw: unknown, actor: Fulfil
     }
     return { ...row, catalogNumber: purchased.catalogNumber, productId: receipt ? receipt.productId : purchased.productId,
       variantId: receipt ? receipt.variantId : purchased.variantId, inventoryAccountId: receipt?.inventoryAccountId, resend: resend ?? undefined,
+      originalHoldAlreadyMoved: resend?.originalHoldAlreadyMoved ?? purchased.originalHoldAlreadyMoved,
       supplier: purchased.supplier, name: purchased.name, contractVersion: purchased.contractVersion, batchNumber: receipt?.batchNumber ?? null };
   });
   if (input.route !== 'libereal_to_customer' && new Set(lines.map(line => line.supplier)).size !== 1) {
@@ -179,7 +182,7 @@ export async function dispatchParcel(tx: Db, orderId: string, raw: unknown, acto
     shipmentId = shipment.id;
     for (const line of lines) {
       if (line.sourceReceiptId) await shipProcurementBatch(tx, line.sourceReceiptId, orderId, line.quantity, actor.id);
-      else await releaseProcurementInventoryHold(tx, orderId, line.orderItemId, line.quantity, actor.id);
+      else if (!line.originalHoldAlreadyMoved) await releaseProcurementInventoryHold(tx, orderId, line.orderItemId, line.quantity, actor.id);
     }
     for (const row of byCustomerLine) {
       const item = order.orderItems.find(x => x.id === row.orderItemId)!;

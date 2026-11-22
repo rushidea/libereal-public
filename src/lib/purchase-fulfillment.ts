@@ -45,7 +45,8 @@ export async function purchaseFulfillmentReview(tx: Db, order: SourceOrder, acti
   const usedShipments = new Set<string>();
   const delivered: Array<{ purchaseOrderId: string; orderItemId: string; quantity: number }> = [];
   const historicalDelivered: typeof delivered = [];
-  const { supplierDispatched, shortfalls, freeResends } = await purchaseShortfalls(tx,order.id,activities);
+  const shortfallReview = await purchaseShortfalls(tx,order.id,activities);
+  const { supplierDispatched } = shortfallReview;
   for (const row of rows) {
     const parcel = row.shipment.fulfillmentParcel;
     if (!parcel || parcel.route === 'legacy_customer') continue;
@@ -98,7 +99,7 @@ export async function purchaseFulfillmentReview(tx: Db, order: SourceOrder, acti
     return quantity > 0 && (!orderedAt || !target.occurredAt || orderedAt <= target.occurredAt)
       ? [{ purchaseOrderId: po.id, quantity, orderedAt }] : [];
   }) }));
-  const state = { targets, delivered, historicalDelivered, supplierDispatched, shortfalls, freeResends, inconsistent, ledger };
+  const state = { targets, delivered, historicalDelivered, ...shortfallReview, inconsistent, ledger };
   return { ...state, version: pricingContentHash(state) };
 }
 

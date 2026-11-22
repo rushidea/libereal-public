@@ -1,4 +1,4 @@
-import { parcelLineBalance, type FulfillmentDb as Db, type FulfillmentParcelRecord } from '@/lib/fulfillment-records';
+import { parcelLineBalance, type FulfillmentActor, type FulfillmentDb as Db, type FulfillmentParcelRecord } from '@/lib/fulfillment-records';
 import { jsonObject } from '@/lib/order-catalog-repricing';
 import { PurchaseError } from '@/lib/purchase-terms';
 
@@ -77,4 +77,24 @@ export async function confirmedCustomerDelivery(tx: Db, orderId: string) {
     quantities.set(row.orderItemId, (quantities.get(row.orderItemId) ?? 0) + row.received);
   }
   return items.every(item => quantities.get(item.id) === item.quantity);
+}
+
+export async function syncCustomerParcelDelivery(tx: Db, parcel: FulfillmentParcelRecord, status: string, actor?: FulfillmentActor) {
+  const { shipmentId, orderId } = parcel;
+  if (!shipmentId || (status !== 'delivered' && status !== 'shortfall')) return;
+  const receipts = parcel.lines.map(line => ({ line, evidence: customerLineReceipts(parcel,line) }));
+  const lastReceipt = receipts.reduce((last,{evidence}) => evidence.reduce((max,row) => Math.max(max,row.at),last),0);
+  const verified = receipts.every(({line,evidence}) => evidence.reduce((sum,row) => sum+row.quantity,0) === line.receivedQuantity);
+  if (lastReceipt && verified && parcel.lines.some(line => parcelLineBalance(line).received > 0)) {
+    await tx.shipment.updateMany({ where: { id: shipmentId, status: 'shipped' },
+      data: { status: 'delivered', deliveredAt: new Date(lastReceipt) } });
+  }
+  if (!(await confirmedCustomerDelivery(tx, orderId))) return;
+  const order = await tx.order.findUniqueOrThrow({ where: { id: orderId }, select: { status: true } });
+  if (order.status === 'shipped') await tx.order.update({ where: { id: orderId }, data: { status: 'completed',
+    statusHistory: { create: { fromStatus: 'shipped', toStatus: 'completed', actorId: actor?.id, actorEmail: actor?.email,
+      reason: 'customer_delivery_confirmed' } },
+    events: { create: { type: 'customer_delivery_confirmed', message: '订单商品均已按实收凭据确认交付',
+      actorId: actor?.id, actorEmail: actor?.email, metadata: JSON.stringify({ shipmentId }) } },
+  } });
 }

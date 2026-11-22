@@ -26,7 +26,7 @@ type OrderRow = { id: string; status: Status; revision: number; approvedHash: st
 type LineEdit = { orderItemId: string; terms: PurchaseTerms };
 type ReplacementInput = { name?: unknown; brand?: unknown; catalogNumber?: unknown; spec?: unknown; unit?: unknown; terms?: unknown };
 type DispositionInput = { orderItemId: string; quantity: number; outcome: 'cancel' | 'replace'; replacement?: ReplacementInput;
-  forwardingLossId?: string; shortfallId?: string; shortfallDecision?: ShortfallDecision };
+  forwardingLossId?: string; shortfallId?: string; shortfallDecision?: ShortfallDecision; revisesResendApprovalId?: string };
 export type PurchaseActionInput = {
   orderId: string; purchaseOrderId: string;
   action: 'approve' | 'approve_lead_time' | 'register_order' | 'record_payment' | 'report_change' | 'resolve_change'
@@ -353,6 +353,8 @@ type Disposition = {
   orderItemId: string; quantity: number; outcome: 'cancel' | 'replace' | 'resend';
   replacement: { terms: PurchaseTerms; source: LineSource } | null;
   shortfallId?: string; shortfallDecision?: ShortfallDecision;
+  revisesResendApprovalId?: string;
+  priorResend?: { authorized: number; dispatched: number; redirected: number; available: number };
 };
 
 function checkedEdits(po: PO, input: PurchaseActionInput) {
@@ -395,6 +397,7 @@ function activeReplacementQuantity(view: Workspace, orderItemId: string) {
 
 function committedDispositions(
   view: Workspace, po: PO, input: PurchaseActionInput, customerLines: PurchaseSource[], remainingQuantities: ReadonlyMap<string, number>,
+  writtenEvidence: { supplierSha256: string; customerSha256: string },
 ): Disposition[] {
   const entries = input.dispositions;
   if (!Array.isArray(entries) || !entries.length || entries.some(entry => !entry || typeof entry.orderItemId !== 'string')
@@ -404,19 +407,40 @@ function committedDispositions(
   const prior = dispositionSummary(po.ledger).quantities;
   const dispositions = entries.map((entry): Disposition => {
     const { orderItemId, quantity, outcome, replacement, forwardingLossId } = entry;
+    const revisesResendApprovalId = entry.revisesResendApprovalId === undefined ? undefined
+      : requiredText(entry.revisesResendApprovalId, '原免费重发批准');
+    let priorResend: Disposition['priorResend'];
     const shortfallId = entry.shortfallId ?? forwardingLossId;
     const shortfallDecision = entry.shortfallDecision ?? (forwardingLossId ? 'new_purchase' : undefined);
     const line = po.lines.find(row => row.orderItemId === orderItemId);
     const original = customerLines.find(row => row.orderItemId === orderItemId);
     if (!line || !original || !positiveCents(quantity)) throw new PurchaseError('须核对本单采购行和实际处理数量');
-    if (input.outcome === 'shortfall' || shortfallId || shortfallDecision) {
+    if (input.outcome === 'shortfall' || shortfallId || shortfallDecision || revisesResendApprovalId) {
       if (!po.orderedBefore || po.commitmentState === 'supplier_cancelled'
         || (input.outcome !== 'shortfall' && !(forwardingLossId && shortfallDecision === 'new_purchase'))
         || !shortfallId || !shortfallDecision || !['free_resend','change_contract','new_purchase'].includes(shortfallDecision)) {
         throw new PurchaseError('请逐行选择已核实短失及双方书面处理决定');
       }
       const loss = view.fulfillment.shortfalls.find(row => row.resolutionId === shortfallId && row.purchaseOrderId === po.id && row.orderItemId === orderItemId);
-      if (!loss || quantity > loss.available || (forwardingLossId && loss.route !== 'libereal_to_customer')) {
+      if (!loss || (forwardingLossId && loss.route !== 'libereal_to_customer')) {
+        throw new PurchaseError('短失处理须对应本行尚未使用的实际物流书证数量');
+      }
+      if (revisesResendApprovalId) {
+        const resend = view.fulfillment.freeResends.find(row => row.approvalId === revisesResendApprovalId && row.purchaseOrderId === po.id
+          && row.orderItemId === orderItemId && row.shortfallId === shortfallId);
+        if (!resend || quantity > resend.available || shortfallDecision === 'free_resend') {
+          throw new PurchaseError('改办数量须对应本行原免费重发批准中尚未发货或改办的部分');
+        }
+        const priorDecisions = po.ledger.filter(row => row.action === 'resolve_change').map(row => ({
+          id: row.id, operation: purchaseOperation(row.detail),
+        })).filter(({id,operation}) => id === resend.approvalId || (Array.isArray(operation.dispositions)
+          && operation.dispositions.some(line => line?.orderItemId === orderItemId && line.revisesResendApprovalId === resend.approvalId)));
+        if (priorDecisions.some(({operation}) => writtenEvidence.supplierSha256 === operation.supplierSha256
+          || writtenEvidence.customerSha256 === operation.customerSha256)) {
+          throw new PurchaseError('改办须提供新的供应商书面决定和客户同意书证');
+        }
+        priorResend = { authorized: resend.quantity, dispatched: resend.dispatched, redirected: resend.redirected, available: resend.available };
+      } else if (quantity > loss.available) {
         throw new PurchaseError('短失处理须对应本行尚未使用的实际物流书证数量');
       }
       if (shortfallDecision === 'free_resend') return { orderItemId, quantity, outcome: 'resend', replacement: null, shortfallId, shortfallDecision };
@@ -427,7 +451,8 @@ function committedDispositions(
     } else if (quantity + (prior.get(orderItemId) ?? 0) + supplierDispatchQuantity(view, po.id, orderItemId) > line.source.quantity) {
       throw new PurchaseError('替代或取消的累计数量不得超过原采购行尚未发出的数量，有短失或退回须先据实核对');
     }
-    if (outcome === 'cancel') return { orderItemId, quantity, outcome, replacement: null, shortfallId, shortfallDecision };
+    const priorAuthorization = revisesResendApprovalId ? { revisesResendApprovalId, priorResend } : {};
+    if (outcome === 'cancel') return { orderItemId, quantity, outcome, replacement: null, shortfallId, shortfallDecision, ...priorAuthorization };
     const active = activeReplacementQuantity(view, orderItemId);
     const retained = active - Math.min(quantity, pendingReplacementQuantity(view, po, orderItemId));
     if (retained + quantity > (remainingQuantities.get(orderItemId) ?? 0)) {
@@ -445,7 +470,7 @@ function committedDispositions(
     const terms = normalizePurchaseTerms(replacement.terms);
     requireNewDocumentsForChangedTerms(line.terms, terms, line.source.quantity !== quantity);
     if (missingWrittenTerms(terms, source).length) throw new PurchaseError('替代行须具备当前有效的供货、收款和付款书证');
-    return { orderItemId, quantity, outcome, replacement: { terms, source }, shortfallId, shortfallDecision };
+    return { orderItemId, quantity, outcome, replacement: { terms, source }, shortfallId, shortfallDecision, ...priorAuthorization };
   });
   if (input.outcome === 'replacement' && !dispositions.some(line => line.outcome === 'replace')) {
     throw new PurchaseError('请填写至少一条待独立批准的替代采购行', 400);
@@ -727,18 +752,19 @@ function actionDetails(
     if (input.outcome === 'original_terms' && disposedBefore && (!po.remainingScope || !['approved', 'ordered'].includes(previousStatus))) {
       throw new PurchaseError('已经取消或交给替代单的数量不能恢复原单，请核对剩余商品');
     }
-    const dispositions = committed && (input.outcome === 'declined' || input.outcome === 'replacement' || input.outcome === 'shortfall')
-      ? committedDispositions(view, po, input, customerLines, remainingQuantities) : undefined;
+    const writtenEvidence = committed ? {
+      supplierSha256: documentSha256(input.supplierSha256, '供方书面回复摘要'),
+      customerSha256: documentSha256(input.customerSha256, '客户书面回复摘要'),
+    } : null;
+    const dispositions = writtenEvidence && (input.outcome === 'declined' || input.outcome === 'replacement' || input.outcome === 'shortfall')
+      ? committedDispositions(view, po, input, customerLines, remainingQuantities, writtenEvidence) : undefined;
     if (dispositions?.some(line => line.replacement) && !view.eligibility.eligible) {
       throw new PurchaseError('另建替代采购前须先核实客户订单仍符合采购启动条件');
     }
     return { action, outcome: input.outcome, incidentId: incident.id, previousStatus,
       supplierReference: requiredText(input.supplierReference, '人工协调供应商的书面依据'),
       customerReference: requiredText(input.customerReference, '客户对处理方案的书面回复'),
-      ...(committed ? {
-        supplierSha256: documentSha256(input.supplierSha256, '供方书面回复摘要'),
-        customerSha256: documentSha256(input.customerSha256, '客户书面回复摘要'),
-      } : {}),
+      ...writtenEvidence,
       description: requiredText(input.description, '双方确认的具体结果'), dispositions,
       refund: dispositions?.some(changesOriginalPurchase) && po.paidCents > 0 ? {
         status: 'pending_review', paidCents: po.paidCents, responsibleActor: actor.id,
