@@ -319,6 +319,25 @@ describe('supplier purchasing page', () => {
     expect(screen.getByRole('region',{name:'供货事项 TEST-A'})).toBeInTheDocument();
   });
 
+  it('shows the named follow-up on the original supply issue after the physical loss is closed',async()=>{
+    const workspace=makeWorkspace('on_hold');
+    const [purchase]=workspace.orders;
+    const outstanding=[{orderItemId,quantity:1,source:{kind:'shortfall' as const,id:'TEST-REAL-LOSS'}}];
+    purchase.orderedBefore=true;
+    purchase.paidCents=900;
+    purchase.incidents=[{...purchase.incidents[0],scope:outstanding,outstanding,shortfallFollowups:[{
+      activityId:'TEST-HANDOFF',resolutionId:'TEST-REAL-LOSS',quantity:1,reference:'TEST-ACTUAL-LOSS-HANDOFF',
+      responsibility:'合成合同经办人',description:'核对原应付与后续履约。',actorId:'test-logistics-reviewer',
+    }]}];
+    mockWorkspace(workspace,['purchases.read','purchases.approve','purchases.pay'],body=>Response.json(preview(body,workspace)));
+    render(<PurchaseManager initialOrder={orderId}/>);
+    const issue=await screen.findByRole('region',{name:'供货事项 TEST-ORIGINAL-INCIDENT'});
+    expect(issue).toHaveTextContent('已核对误发短失 1 件');
+    expect(issue).toHaveTextContent('后续责任人 合成合同经办人');
+    expect(issue).toHaveTextContent('仍待办理 1');
+    expect(within(issue).getByRole('button',{name:'回填协调结果'})).toBeInTheDocument();
+  });
+
   it('submits an independently written retained quote for one of two draft units',async()=>{
     const workspace=makeWorkspace('on_hold',{replacementId:'TEST-ALT-ROW',fromPurchaseOrderId:'TEST-PARENT-PO',authorizationId:'TEST-PARENT-AUTH'});
     const [purchase] = workspace.orders;

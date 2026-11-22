@@ -1,7 +1,7 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { NextRequest } from 'next/server';
 import { GET as orderGET, PATCH as orderPATCH } from '@/app/api/admin/orders/[id]/route';
-import { dispatchParcel, fulfillmentWorkspace, previewDispatchParcel, recordParcelEvent } from '@/lib/fulfillment-parcels';
+import { dispatchParcel, fulfillmentWorkspace, previewDispatchParcel, previewParcelEvent, recordParcelEvent } from '@/lib/fulfillment-parcels';
 import { receiveCarrierNotice } from '@/lib/fulfillment-carrier';
 import { linkLegacyShipment } from '@/lib/fulfillment-legacy';
 import { receiveInventoryBatch, reserveOrderInventory } from '@/lib/inventory';
@@ -34,7 +34,8 @@ vi.mock('@/lib/admin-mfa-settings', () => ({
 }));
 
 type Route = 'supplier_to_customer' | 'supplier_to_libereal' | 'libereal_to_customer';
-type DispatchLine = { purchaseOrderId: string; orderItemId: string; quantity: number; sourceReceiptId?: string; resendApprovalId?: string };
+type DispatchLine = { purchaseOrderId: string; orderItemId: string; quantity: number; sourceReceiptId?: string; resendApprovalId?: string;
+  holdAssignments?: {incidentId:string;quantity:number}[] };
 type EventLine = { parcelLineId: string; quantity: number; batchNumber?: string; productId?: string };
 type PurchaseAction = Omit<Parameters<typeof previewPurchaseAction>[1], 'orderId' | 'purchaseOrderId' | 'version'>;
 
@@ -2046,6 +2047,140 @@ describe('actual scope of a supply incident', () => {
       {id:a.id,outstanding:[{source:{kind:'parcel',id:aLine},quantity:1}]},
       {id:b.id,outstanding:[{source:{kind:'shortfall',id:originalReturn.id},quantity:1}]},
     ]});
+  });
+
+  const handOffShortfall = (tag:string, parcelLineId:string, incidentId:string, resolutionId:string, quantity=1) => ({
+    ...eventInput(tag,'customer_delivery',[]),kind:'review_dispatch_hold',
+    description:'原书证确认本次误发实物已经短失，由具名经办人继续核对原采购责任和应付。',
+    holdResponsibility:'合成原合同责任经办人',lines:[{parcelLineId,incidentId,resolutionId,quantity,outcome:'shortfall'}],
+  });
+
+  it.each([
+    ['supplier_to_customer','loss'],
+    ['supplier_to_libereal','shortage'],
+    ['libereal_to_customer','loss'],
+  ] as const)('hands off the confirmed shortfall on its actual route (%s, %s) and leaves the original payable independent',async(route,actualOutcome)=>{
+    await acceptCustomerOrder();
+    const {relay:id,direct}=await orderFromSuppliers();
+    await purchaseAction(id,{action:'record_payment',requestId:'original-deposit-before-real-shortfall',
+      reference:'TEST-EXISTING-DEPOSIT-RECEIPT',conditionReference:'TEST-ORIGINAL-DEPOSIT-CLAUSE',amountCents:900});
+    let sourceReceiptId:string|undefined;
+    if (route==='libereal_to_customer') {
+      const inbound=await dispatch(dispatchInput('original-carrier-arrived-at-libereal','supplier_to_libereal',[goods(id,relayLineId,2)]));
+      await event(inbound.id,eventInput('actual-lot-before-forwarding','warehouse_receipt',[
+        {parcelLineId:inbound.lines[0].id,quantity:2,batchNumber:receivedLotA},
+      ]));
+      sourceReceiptId=(await receipt(inbound.lines[0].id,receivedLotA)).id;
+    }
+    const source=sourceReceiptId ? {kind:'receipt' as const,id:sourceReceiptId} : {kind:'unshipped' as const};
+    const reported=await purchaseAction(id,{action:'report_change',changeKind:sourceReceiptId?'other':'delay',requestId:'real-dispatch-stop',
+      reference:'TEST-REAL-ONE-PIECE-STOP',description:'该实际来源的一件暂停。',affectedLines:[{...line(relayLineId,1),source}]},operator);
+    const issue=reported.orders.find(row=>row.id===id)!.incidents[0];
+    const parcel=await dispatch({...dispatchInput('held-piece-physically-entrusted-to-carrier',route,[goods(id,relayLineId)]),
+      lines:[{...goods(id,relayLineId),sourceReceiptId,holdAssignments:[{incidentId:issue.id,quantity:1}]}],holdReview:pendingDeviation('carrier-actually-took-held-piece')});
+    const parcelLineId=parcel.lines[0].id;
+    const earlyClaim=nextOccurrence();
+    const fact={...eventInput('actual-carrier-shortfall-precedes-handoff','customer_delivery',[]),...agreement('verified-shortfall-only'),
+      kind:'confirm_shortfall',lines:[{parcelLineId,quantity:1,outcome:actualOutcome}]};
+    const confirmed=await event(parcel.id,fact);
+    const resolution=confirmed.lines[0].resolutions[0];
+    if (route==='supplier_to_libereal') {
+      await purchaseAction(id,{action:'review_change_scope',incidentId:issue.id,requestId:'procurement-already-knows-the-exact-loss',
+        reference:'TEST-DOCUMENTED-EXACT-INBOUND-SHORTFALL',description:'采购事项已指向确实未到仓的那一件。',
+        affectedLines:[{...line(relayLineId,1),source:{kind:'shortfall',id:resolution.id}}]});
+    }
+    const action=handOffShortfall('keep-proven-shortfall-with-named-owner',parcelLineId,issue.id,resolution.id);
+    const before=await current(id);
+    expect((await workspace()).parcels.find(row=>row.id===parcel.id)?.holdFacts[0].pending).toBe(1);
+    await expect(event(parcel.id,{...action,occurredAt:earlyClaim})).rejects.toThrow(/已登记的实际短少或丢失/);
+    await expect(event(parcel.id,{...action,lines:[{...action.lines[0],resolutionId:'other-package-resolution'}]}))
+      .rejects.toThrow(/已登记的实际短少或丢失/);
+    await expect(event(parcel.id,{...action,lines:[{...action.lines[0],outcome:'return'}],
+      ...agreement('actually-lost-so-cannot-claim-a-return')})).rejects.toThrow(/实际退回/);
+    const preview=await prisma.$transaction(tx=>previewParcelEvent(tx,orderId,parcel.id,action,operator));
+    expect(preview.snapshot).toMatchObject({holdResponsibility:action.holdResponsibility,holdDecisions:[{
+      incidentId:issue.id,parcelLineId,quantity:1,resolutionId:resolution.id,shortfallEvidence:{
+        kind:actualOutcome,reference:fact.reference,sha256:fact.sha256,occurredAt:fact.occurredAt,
+      },
+    }]});
+    await expect(prisma.$transaction(tx=>recordParcelEvent(tx,orderId,parcel.id,
+      {...action,holdResponsibility:'预览后的不同经办人'},operator,preview.actionHash))).rejects.toThrow(/重新预览/);
+    const apply=()=>prisma.$transaction(tx=>recordParcelEvent(tx,orderId,parcel.id,action,operator,preview.actionHash));
+    await apply();
+    await apply();
+    await expect(event(parcel.id,{...action,requestId:'claim-the-same-physical-loss-twice',reference:'TEST-REPEATED-SHORTFALL',
+      sha256:pricingContentHash('renamed second claimed same quantity')})).rejects.toThrow(/尚未办结/);
+    const after=await current(id);
+    expect(after).toMatchObject({paidCents:before.paidCents,dueCents:before.dueCents,totalCents:before.totalCents,
+      incidents:[{id:issue.id,outstanding:[{...line(relayLineId,1),source:{kind:'shortfall',id:resolution.id}}],
+        shortfallFollowups:[{responsibility:action.holdResponsibility,quantity:1,resolutionId:resolution.id,
+          actorId:operator.id,reference:action.reference}]}]});
+    const view=await workspace();
+    expect(view.parcels.find(row=>row.id===parcel.id)).toMatchObject({status:'shortfall',holdFacts:[
+      {pending:0,decisions:[{incidentId:issue.id,outcome:'shortfall',quantity:1}]},
+    ]});
+    expect(await prisma.fulfillmentEvent.count({where:{parcelId:parcel.id,kind:'review_dispatch_hold'}})).toBe(1);
+    expect(await prisma.fulfillmentLineResolution.count({where:{parcelLineId}})).toBe(1);
+    expect(await prisma.shipment.count({where:{orderId,deliveredAt:{not:null}}})).toBe(0);
+    expect(await prisma.accountReceivable.findUniqueOrThrow({where:{orderId}})).toMatchObject({status:'open',amount:300,paidAt:null});
+    const balance={action:'record_payment' as const,requestId:'actual-approved-tail-after-independent-contract-result',
+      reference:'TEST-ACTUAL-CONTRACT-BALANCE-TRANSFER',conditionReference:'TEST-ORIGINAL-MATURE-BALANCE-TERM',amountCents:4100};
+    await expect(purchaseAction(id,balance)).rejects.toThrow();
+    await purchaseAction(direct,{...balance,requestId:'unrelated-purchase-may-record-its-real-payment',
+      reference:'TEST-OTHER-PURCHASE-PAYMENT',amountCents:100});
+    await purchaseAction(id,{action:'resolve_change',incidentId:issue.id,outcome:'original_terms',requestId:'both-parties-confirm-original-contract-payable',
+      ...agreement('independent-original-payable-confirmed'),coordinationLines:[{...line(relayLineId,1),source:{kind:'shortfall',id:resolution.id}}]});
+    expect(await current(id)).toMatchObject({status:'ordered',paidCents:900,dueCents:4100,incidents:[]});
+    await purchaseAction(id,balance);
+    expect(await current(id)).toMatchObject({paidCents:5000,dueCents:0});
+    const facts=await prisma.$transaction(tx=>purchaseWorkspace(tx,orderId));
+    expect(facts.orders).toHaveLength(2);
+    expect(facts.fulfillment.freeResends).toEqual([]);
+    expect(facts.fulfillment.shortfalls.find(row=>row.resolutionId===resolution.id)).toMatchObject({quantity:1,available:1});
+  });
+
+  it('clears only the lost share on a partly signed line and completes only after the independently approved unit is received',async()=>{
+    await acceptCustomerOrder();
+    const {relay:id,direct}=await orderFromSuppliers();
+    const a=await dispatch(dispatchInput('unchanged-direct-a','supplier_to_customer',[goods(direct,directLineId)]));
+    await event(a.id,eventInput('the-other-order-line-is-genuinely-signed','customer_delivery',[{parcelLineId:a.lines[0].id,quantity:1}]));
+    const stopped=await report(id,'two-b-were-actually-paused','停发两件，实际都误交承运人。',[waiting(relayLineId,2)]);
+    const issue=stopped.orders.find(row=>row.id===id)!.incidents[0];
+    const b=await dispatch({...dispatchInput('both-held-b-units-physically-left','supplier_to_customer',[goods(id,relayLineId,2)]),
+      holdReview:pendingDeviation('two-real-unreleased-units')});
+    const parcelLineId=b.lines[0].id;
+    const actualSignature=eventInput('real-signature-for-only-one-b','customer_delivery',[{parcelLineId,quantity:1}]);
+    await event(b.id,actualSignature);
+    const missing=await event(b.id,{...eventInput('other-b-confirmed-lost-with-evidence','customer_delivery',[]),
+      ...agreement('the-customer-only-confirms-the-physical-loss'),kind:'confirm_shortfall',lines:[{parcelLineId,quantity:1,outcome:'loss'}]});
+    const loss=missing.lines[0].resolutions[0];
+    const action=handOffShortfall('named-handoff-for-one-piece-only',parcelLineId,issue.id,loss.id);
+    await expect(event(b.id,{...action,lines:[{...action.lines[0],quantity:2}]})).rejects.toThrow(/实际短少或丢失与未核对数量/);
+    await event(b.id,action);
+    await expect(event(b.id,{...action,requestId:'a-different-document-cannot-count-that-same-unit',sha256:pricingContentHash('different followup paper')}))
+      .rejects.toThrow(/未核对数量/);
+    expect((await workspace()).parcels.find(row=>row.id===b.id)?.holdFacts[0]).toMatchObject({pending:1});
+    expect((await current(id)).incidents[0].outstanding).toEqual(expect.arrayContaining([
+      {...line(relayLineId,1),source:{kind:'parcel',id:parcelLineId}},
+      {...line(relayLineId,1),source:{kind:'shortfall',id:loss.id}},
+    ]));
+    expect(await prisma.order.findUniqueOrThrow({where:{id:orderId}})).toMatchObject({status:'partially_shipped',paidAt:null});
+    expect(await prisma.shipment.findUniqueOrThrow({where:{id:b.shipmentId!}})).toMatchObject({status:'delivered',
+      deliveredAt:new Date(actualSignature.occurredAt)});
+    await event(b.id,continuation('buyer-real-consent-for-the-part-already-received',parcelLineId,issue.id,1));
+    const separate=await purchaseAction(id,{action:'resolve_change',incidentId:issue.id,outcome:'shortfall',requestId:'new-independent-supplier-free-resend-approval',
+      ...agreement('parties-independently-agree-to-free-resend-the-missing-unit'),
+      dispositions:[{...line(relayLineId,1),outcome:'cancel',shortfallDecision:'free_resend',shortfallId:loss.id}]});
+    const {approvalId:resendApprovalId}=separate.fulfillment.freeResends[0];
+    const replacement=await dispatch(dispatchInput('only-actual-independent-replacement-is-shipped','supplier_to_customer',[
+      {...goods(id,relayLineId),resendApprovalId},
+    ]));
+    expect(await prisma.order.findUniqueOrThrow({where:{id:orderId}})).toMatchObject({status:'shipped',paidAt:null});
+    const lastSignature=eventInput('real-signature-for-the-independent-replacement','customer_delivery',[{parcelLineId:replacement.lines[0].id,quantity:1}]);
+    await event(replacement.id,lastSignature);
+    expect(await prisma.order.findUniqueOrThrow({where:{id:orderId}})).toMatchObject({status:'completed',paidAt:null});
+    expect(await prisma.shipment.findUniqueOrThrow({where:{id:b.shipmentId!}})).toMatchObject({deliveredAt:new Date(actualSignature.occurredAt)});
+    expect(await prisma.accountReceivable.findUniqueOrThrow({where:{orderId}})).toMatchObject({status:'open',amount:300,paidAt:null});
   });
 
   it('records actual direct signature before any buyer decision without closing the customer order or collecting money',async()=>{

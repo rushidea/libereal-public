@@ -36,6 +36,8 @@ const source = 'TEST-CARRIER-FEED';
 const lineId = 'TEST-INBOUND-LINE';
 const incidentId = 'TEST-PRIOR-HOLD';
 const incidentPaper = 'TEST-ORIGINAL-SUPPLIER-PAUSE';
+const resolutionId = 'TEST-ACTUALLY-LOST-SHARE';
+const carrierLossReference = 'TEST-VERIFIED-CARRIER-LOSS';
 const batchNumber = 'TEST-RECEIVED-LOT';
 const secondBatchNumber = 'TEST-NEXT-RECEIVED-LOT';
 const inboundReference = 'TEST-PRIVATE-INBOUND-PROOF';
@@ -92,7 +94,7 @@ type OperationRequest = {
   stepUpToken?: string;
 };
 
-function mockAdmin(permissions: string[] | Promise<string[]>, startingInbound = false, hold?: 'departure' | 'intake') {
+function mockAdmin(permissions: string[] | Promise<string[]>, startingInbound = false, hold?: 'departure' | 'intake' | 'shortfall') {
   const operations: OperationRequest[] = [];
   const reads = { workspace: 0, detail: 0 };
   const notice = {
@@ -113,8 +115,15 @@ function mockAdmin(permissions: string[] | Promise<string[]>, startingInbound = 
     if ((url === fulfillmentPath || url.startsWith(fulfillmentPath+'?dispatchAt=')) && !init?.method) {
       reads.workspace += 1;
       const inbound = parcel('supplier_to_libereal', operationApplied || hold==='intake' ? 2 : 0);
-      const heldInbound={...inbound,holdFacts:hold==='intake' ? [{parcelLineId:lineId,quantity:1,pending:1,
-        incidentIds:[incidentId],assignments:[{incidentId,quantity:1}],pendingAssignments:[{incidentId,quantity:1}],decisions:[]}] : []};
+      const physicalShortfall=hold==='shortfall' ? {
+        status:'shortfall',events:[{id:'test-shortfall-event',kind:'confirm_shortfall',status:'applied',source:'staff',
+          reference:carrierLossReference,occurredAt:'2031-05-01T01:12:10.000Z',details:'{}'}],
+        lines:[{...inbound.lines[0],quantity:1,receivedQuantity:0,balance:{pending:0,received:0,shipped:0},receipts:[],
+          resolutions:[{id:resolutionId,eventId:'test-shortfall-event',kind:'loss',quantity:1}]}],
+      } : {};
+      const heldInbound={...inbound,...physicalShortfall,holdFacts:hold==='intake' || (hold==='shortfall' && !operationApplied) ?
+        [{parcelLineId:lineId,quantity:1,pending:1,incidentIds:[incidentId],assignments:[{incidentId,quantity:1}],
+          pendingAssignments:[{incidentId,quantity:1}],decisions:[]}] : []};
 
       return Response.json({ capabilities: { warehouse: Array.isArray(permissions) && permissions.includes('inventory.write'),
         shortfall:Array.isArray(permissions) && permissions.includes('purchases.approve') }, workspace: {
@@ -318,6 +327,33 @@ describe('fulfillment in the existing order pages', () => {
       customerReference:'TEST-WRITTEN-CUSTOMER-DECISION',holdResponsibility:'合成复核职责人'}});
     await verifyWithDialog(operations);
     await waitFor(()=>expect(operations[1]).toMatchObject({stage:'confirm',input:operations[0].input,actionHash}));
+  });
+
+  it('hands the real loss to a named owner using the existing record and MFA',async()=>{
+    const {operations}=mockAdmin(['orders.read','orders.write','purchases.approve'],true,'shortfall');
+    const panel=await openAdminFulfillment();
+    fireEvent.click(await panel.findByText('办理本包裹',{selector:'summary'}));
+    const summary=await panel.findByText(/合成采购品 · 误发待处理 1 件/,{selector:'summary'});
+    fireEvent.click(summary);
+    const review=within(summary.parentElement!);
+    expect(review.getByLabelText('误发实物处理结果')).toHaveValue('shortfall');
+    expect(review.getByLabelText('已登记的实际短少或丢失')).toHaveValue(resolutionId);
+    expect(review.getByRole('option',{name:/TEST-VERIFIED-CARRIER-LOSS.*丢失.*1 件/})).toBeInTheDocument();
+    expect(review.queryByLabelText('客户书面处理决定')).toBeNull();
+    fill(review,'本次实际处理数量','1');
+    fill(review,'本次核对的责任人','合成采购责任人');
+    fill(review,'填写原件核对经过和实际结果','承运人原件已核实丢失，原合同应付交具名人员跟进。');
+    fillEvidence(review,'TEST-NAMED-HANDOFF-OF-VERIFIED-LOSS');
+    fireEvent.click(review.getByRole('button',{name:'预览误发处理结果'}));
+    await screen.findByRole('region',{name:'物流操作预览'});
+    expect(operations[0]).toMatchObject({action:'record_event',stage:'preview',input:{kind:'review_dispatch_hold',
+      holdResponsibility:'合成采购责任人',parcelId:'TEST-INBOUND-PARCEL',
+      lines:[{parcelLineId:lineId,incidentId,quantity:1,resolutionId,outcome:'shortfall'}],
+    }});
+    expect(operations[0].input).not.toHaveProperty('customerReference');
+    await verifyWithDialog(operations);
+    await waitFor(()=>expect(operations[1]).toMatchObject({stage:'confirm',input:operations[0].input,actionHash}));
+    await waitFor(()=>expect(panel.queryByText(/误发待处理 1 件/)).not.toBeInTheDocument());
   });
 
   it('shows the source, recipient, SKU, quantity and proof before dispatch, then rereads the confirmed waybill', async () => {
