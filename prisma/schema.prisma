@@ -1938,6 +1938,7 @@ model FulfillmentParcelLine {
   orderItem         OrderItem          @relation(fields: [orderItemId], references: [id], onDelete: Restrict)
   sourceReceipt     FulfillmentReceipt? @relation("ForwardedReceipt", fields: [sourceReceiptId], references: [id], onDelete: Restrict)
   receipts          FulfillmentReceipt[] @relation("ParcelLineReceipts")
+  resolutions       FulfillmentLineResolution[]
 
   @@index([parcelId])
   @@index([purchaseOrderId, orderItemId])
@@ -1951,6 +1952,7 @@ model FulfillmentReceipt {
   inventoryBatchId   String
   quantity           Int
   forwardedQuantity  Int    @default(0)
+  releasedQuantity   Int    @default(0)
   parcelLine         FulfillmentParcelLine @relation("ParcelLineReceipts", fields: [parcelLineId], references: [id], onDelete: Restrict)
   event              FulfillmentEvent      @relation(fields: [eventId], references: [id], onDelete: Restrict)
   inventoryBatch     InventoryBatch        @relation(fields: [inventoryBatchId], references: [id], onDelete: Restrict)
@@ -1979,7 +1981,21 @@ model FulfillmentEvent {
   createdAt       DateTime @default(now())
   parcel          FulfillmentParcel? @relation(fields: [parcelId], references: [id], onDelete: Restrict)
   receipts        FulfillmentReceipt[]
+  lineResolutions FulfillmentLineResolution[]
 
   @@index([parcelId, occurredAt])
   @@index([source, status])
+}
+
+model FulfillmentLineResolution {
+  id           String @id @default(cuid())
+  eventId      String
+  parcelLineId String
+  kind         String
+  quantity     Int
+  event        FulfillmentEvent @relation(fields: [eventId], references: [id], onDelete: Restrict)
+  parcelLine   FulfillmentParcelLine @relation(fields: [parcelLineId], references: [id], onDelete: Restrict)
+
+  @@unique([eventId, parcelLineId])
+  @@index([parcelLineId])
 }
