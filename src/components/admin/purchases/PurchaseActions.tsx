@@ -22,6 +22,8 @@ const decisionPurposeLabels: Record<string,string> = {
   free_resend:'书面同意免费补发',supplier_facts:'供方确认短失或缺货事实，保留原合同应付',new_purchase:'客户同意按以下条件另采',
   amend_contract:'书面同意变更原合同',amend_and_replace:'书面同意变更原合同及另采',
   cancel_unshipped:'书面同意取消未发货份额',replace_unshipped:'书面同意替代未发货份额',
+  reduce_contract:'供方同意减少原合同数量',continue_contract:'书面同意按原合同继续',
+  decline_preparation:'书面确认结束采购准备',reconfirm_terms:'客户同意修订后的替代采购条件',
 };
 type Pending = { input: PurchaseActionInput; preview: Preview };
 
@@ -105,6 +107,22 @@ function DecisionDocumentFields({ label, rowLabel, row, coverage, restore, legac
   </div>;
 }
 
+function LineDecisionDocuments({value,current,choices,customerOnly,onChange}: {
+  value: DecisionDocumentInput; current: DecisionCoverage; choices: ScopeSubjects; customerOnly?: boolean;
+  onChange: (value: DecisionDocumentInput) => void;
+}) {
+  return <>
+    {!customerOnly && <DecisionDocumentFields label="供方书证" rowLabel="供方决定原件行号" row={value.supplierDocumentRow} coverage={value.supplierDocumentScope}
+      restore={value.supplierRestoreScope} legacy={value.supplierLegacyLocations} choices={choices} current={current}
+      onChange={document => onChange({ ...value,supplierDocumentRow:document.row,supplierDocumentScope:document.coverage,
+        supplierRestoreScope:document.restore,supplierLegacyLocations:document.legacy })}/>}
+    <DecisionDocumentFields label="客户书证" rowLabel="客户同意原件行号" row={value.customerDocumentRow} coverage={value.customerDocumentScope}
+      restore={value.customerRestoreScope} legacy={value.customerLegacyLocations} choices={choices} current={current}
+      onChange={document => onChange({ ...value,customerDocumentRow:document.row,customerDocumentScope:document.coverage,
+        customerRestoreScope:document.restore,customerLegacyLocations:document.legacy })}/>
+  </>;
+}
+
 function DispositionFields({ line, quantity, losses, resends, shortfall, value, current, choices, allowReplacement, onChange }: {
   line: Pick<Line, 'source'>; quantity: number; losses: Workspace['fulfillment']['shortfalls'];
   resends: Workspace['fulfillment']['freeResends']; shortfall: boolean; current: DecisionCoverage; choices: ScopeSubjects;
@@ -140,14 +158,9 @@ function DispositionFields({ line, quantity, losses, resends, shortfall, value, 
         </option>)}
       </select>
     </label>}
-    {(selectedResend || value.quantity > 0) && <>
-      <DecisionDocumentFields label="供方书证" rowLabel="供方决定原件行号" row={value.supplierDocumentRow} coverage={value.supplierDocumentScope}
-        restore={value.supplierRestoreScope} legacy={value.supplierLegacyLocations} choices={exactChoices} current={{ ...current,...(selectedLoss ? { shortfallId: selectedLoss.resolutionId } : {}),quantity: Math.max(1,value.quantity) }}
-        onChange={document => onChange({ ...value,supplierDocumentRow: document.row,supplierDocumentScope: document.coverage,supplierRestoreScope: document.restore,supplierLegacyLocations: document.legacy })}/>
-      <DecisionDocumentFields label="客户书证" rowLabel="客户同意原件行号" row={value.customerDocumentRow} coverage={value.customerDocumentScope}
-        restore={value.customerRestoreScope} legacy={value.customerLegacyLocations} choices={exactChoices} current={{ ...current,...(selectedLoss ? { shortfallId: selectedLoss.resolutionId } : {}),quantity: Math.max(1,value.quantity) }}
-        onChange={document => onChange({ ...value,customerDocumentRow: document.row,customerDocumentScope: document.coverage,customerRestoreScope: document.restore,customerLegacyLocations: document.legacy })}/>
-    </>}
+    {(selectedResend || value.quantity > 0) && <LineDecisionDocuments value={value} choices={exactChoices}
+      current={{ ...current,...(selectedLoss ? { shortfallId:selectedLoss.resolutionId } : {}),quantity:Math.max(1,value.quantity) }}
+      onChange={documents => onChange({ ...value,...documents })}/>}
     {selectedLoss && <label className="grid gap-1 text-sm">双方书面决定
       <select className={field} value={value.shortfallDecision ?? ''} required={value.quantity > 0}
         onChange={event => {
@@ -203,9 +216,14 @@ export default function PurchaseActions({ orderId, orderStatus, cancellation, po
   const [pending, setPending] = useState<Pending | null>(null);
   const [revisions, setRevisions] = useState<Record<string, PurchaseTerms>>({});
   const [dispositions, setDispositions] = useState<Record<string, Intervention>>({});
+  const [coordinationDocuments, setCoordinationDocuments] = useState<Record<string,DecisionDocumentInput>>({});
   const [fileKinds, setFileKinds] = useState<Record<string, string>>({});
   const [outcome, setOutcome] = useState<PurchaseActionInput['outcome']>('original_terms');
   const committed = po.orderedBefore || po.paidCents > 0 || po.commitmentExceptions.length > 0;
+  const incident = po.ledger.find(row => row.id === po.openIncidentId)?.detail.snapshot as { operation?: { previousStatus?: string } } | undefined;
+  const wasApproved = incident?.operation?.previousStatus === 'approved';
+  const continueWithEvidence = (outcome === 'original_terms' && (committed || wasApproved)) || (outcome === 'declined' && !committed && wasApproved);
+  const revisingReplacement = outcome === 'revised_terms' && po.lines.some(line => line.fromPurchaseOrderId);
   const orderedSubjects = orders.flatMap(purchase => purchase.lines.map(line => ({
     name: line.source.name, subject: { orderId, purchaseOrderId: purchase.id, orderItemId: line.orderItemId, quantity: line.source.quantity },
   })));
@@ -263,6 +281,8 @@ export default function PurchaseActions({ orderId, orderStatus, cancellation, po
         dispositions: resolvable ? Object.entries(dispositions).flatMap(([orderItemId, entry]) => !entry.quantity ? [] : [{
           orderItemId, ...entry, outcome: outcome === 'declined' ? 'cancel' : entry.outcome,
         }]) : undefined,
+        decisionDocumentLines: action === 'resolve_change' && !resolvable
+          ? Object.entries(coordinationDocuments).map(([orderItemId,document]) => ({ orderItemId,...document })) : undefined,
         paymentReference: value('paymentReference'), paymentSha256: value('paymentSha256'),
         leadTimeReference: value('leadTimeReference'), leadTimeSha256: value('leadTimeSha256'),
         remainingLines: action === 'approve_remaining' ? po.remaining.map(line => ({
@@ -325,7 +345,7 @@ export default function PurchaseActions({ orderId, orderStatus, cancellation, po
       </li>)}</ol></div></details>
     {!pending && <div className="flex flex-wrap gap-2">{choices.map(choice =>
       <button type="button" key={choice} className={button} disabled={busy} onClick={() => {
-        setAction(choice); setOutcome(canContinueOriginal ? 'original_terms' : 'declined'); setRevisions({}); setDispositions({}); setFileKinds({});
+        setAction(choice); setOutcome(canContinueOriginal ? 'original_terms' : 'declined'); setRevisions({}); setDispositions({}); setCoordinationDocuments({}); setFileKinds({});
       }}>{choice === 'register_order' && po.status === 'on_hold' ? '补录暂停前实际订购' : actionNames[choice]}</button>)}</div>}
     {action && !pending && <form key={action} className="grid gap-3 border-t pt-3" onSubmit={event => {
       event.preventDefault();
@@ -424,7 +444,7 @@ export default function PurchaseActions({ orderId, orderStatus, cancellation, po
       </>}
       {action === 'resolve_change' && <>
         <label className="grid gap-1 text-sm">协调结果<select className={field} value={outcome}
-          onChange={event => { setOutcome(event.target.value as typeof outcome); setDispositions({}); }}>
+          onChange={event => { setOutcome(event.target.value as typeof outcome); setDispositions({}); setCoordinationDocuments({}); }}>
           {canContinueOriginal && <option value="original_terms">双方确认按原条款继续</option>}
           {canHandleShortfall && <option value="shortfall">按书面决定处理已核实短失</option>}
           {committed ? (!closed && <option value="replacement">按书面确认另建替代采购</option>)
@@ -433,12 +453,22 @@ export default function PurchaseActions({ orderId, orderStatus, cancellation, po
         </select></label>
         {inputField('supplierReference', '人工与供应商协调的书面依据')}
         {inputField('customerReference', '客户对方案的回复依据')}
-        {committed && <>
+        {(committed || continueWithEvidence) && <>
           <DocumentDigestField name="supplierSha256" label="供方书面回复摘要" required/>
           <DocumentDigestField name="customerSha256" label="客户书面回复摘要" required/>
         </>}
-        {!committed && outcome === 'revised_terms' && po.lines.some(line => line.fromPurchaseOrderId) &&
-          <DocumentDigestField name="customerSha256" label="替代条件变更后客户同意的书证摘要"/>}
+        {!committed && revisingReplacement && <DocumentDigestField name="customerSha256" label="替代条件变更后客户同意的书证摘要"/>}
+        {(continueWithEvidence || revisingReplacement) && po.lines.flatMap(line => {
+          const quantity = revisingReplacement ? (line.fromPurchaseOrderId ? line.source.quantity : 0)
+            : (po.remaining.find(row => row.orderItemId === line.orderItemId)?.quantity ?? 0);
+          if (!quantity) return [];
+          return [<fieldset key={line.orderItemId} className="space-y-2 rounded border p-3">
+            <legend>{line.source.name} · 书面决定范围 {quantity}</legend>
+            <LineDecisionDocuments value={coordinationDocuments[line.orderItemId] ?? {}} customerOnly={revisingReplacement}
+              current={{ orderId,purchaseOrderId:po.id,orderItemId:line.orderItemId,quantity }} choices={orderedSubjects}
+              onChange={document => setCoordinationDocuments(current => ({ ...current,[line.orderItemId]:document }))}/>
+          </fieldset>];
+        })}
         {inputField('description', '双方确认的具体结果')}
         {outcome === 'revised_terms' && po.lines.map(line => <PurchaseLineFields key={line.orderItemId} line={line}
           values={revisions[line.orderItemId] ?? line.terms} onChange={terms => setRevisions({ ...revisions, [line.orderItemId]: terms })}/>)}
