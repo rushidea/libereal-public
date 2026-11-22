@@ -5,7 +5,7 @@ import type { PurchaseActionInput, previewPurchaseAction } from '@/lib/purchase-
 import type { PurchaseTerms } from '@/lib/purchase-terms';
 import DocumentDigestField from './DocumentDigestField';
 import type { PurchaseRequest } from './PurchaseManager';
-import { actionNames, button, cents, field, LineDetails, money, primary, PurchaseLineFields, statuses, type Line, type Purchase } from './PurchaseLineForm';
+import { actionNames, button, cents, field, LineDetails, money, primary, PurchaseLineFields, statuses, type Line, type Purchase, type Workspace } from './PurchaseLineForm';
 
 type Action = PurchaseActionInput['action'];
 type Preview = Awaited<ReturnType<typeof previewPurchaseAction>>;
@@ -17,8 +17,8 @@ function inputField(name: string, label: string) {
   return <label className="grid gap-1 text-sm">{label}<input className={field} name={name} required maxLength={2000}/></label>;
 }
 
-function DispositionFields({ line, value, allowReplacement, onChange }: {
-  line: Line; value: Intervention; allowReplacement: boolean; onChange: (value: Intervention) => void;
+function DispositionFields({ line, quantity, value, allowReplacement, onChange }: {
+  line: Pick<Line, 'source'>; quantity: number; value: Intervention; allowReplacement: boolean; onChange: (value: Intervention) => void;
 }) {
   const source = line.source;
   const alternative = value.replacement ?? {
@@ -29,9 +29,9 @@ function DispositionFields({ line, value, allowReplacement, onChange }: {
   const replacing = allowReplacement && value.outcome === 'replace';
 
   return <fieldset className="grid gap-2 rounded border p-3">
-    <legend>{source.name} · 原数量 {source.quantity}</legend>
+    <legend>{source.name} · 原数量 {source.quantity} · 尚未处置 {quantity}</legend>
     <label className="grid gap-1 text-sm">本次受影响数量
-      <input className={field} type="number" min={0} max={source.quantity} step={1} value={value.quantity || ''}
+      <input className={field} type="number" min={0} max={quantity} step={1} value={value.quantity || ''}
         onChange={event => onChange({ ...value, quantity: Number(event.target.value) })}/>
     </label>
     {allowReplacement && <label className="grid gap-1 text-sm">本行处理方式
@@ -51,8 +51,19 @@ function DispositionFields({ line, value, allowReplacement, onChange }: {
   </fieldset>;
 }
 
-export default function PurchaseActions({ orderId, po, permissions, busy, request, onError }: {
-  orderId: string; po: Purchase; permissions: string[]; busy: boolean; request: PurchaseRequest; onError: (message: string) => void;
+const exceptionResults = {
+  supplier_cancelled: '供方已书面确认取消', supplier_resolution_pending: '仍需与供方协调', liability_review: '费用或责任待核',
+} as const;
+
+function legacyTerms(line: Purchase['lines'][number]): PurchaseTerms {
+  const reply = line.source.written;
+  if (!reply || line.terms.sourceReference !== reply.reference) return line.terms;
+  return { writtenSupplier: reply.supplier, supplierConditions: reply.conditions, sourceSha256: reply.replyHash, ...line.terms };
+}
+
+export default function PurchaseActions({ orderId, orderStatus, cancellation, po, permissions, busy, request, onError }: {
+  orderId: string; orderStatus: string; cancellation: Workspace['cancellation']; po: Purchase;
+  permissions: string[]; busy: boolean; request: PurchaseRequest; onError: (message: string) => void;
 }) {
   const [action, setAction] = useState<Action | null>(null);
   const [pending, setPending] = useState<Pending | null>(null);
@@ -60,14 +71,21 @@ export default function PurchaseActions({ orderId, po, permissions, busy, reques
   const [dispositions, setDispositions] = useState<Record<string, Intervention>>({});
   const [outcome, setOutcome] = useState<PurchaseActionInput['outcome']>('original_terms');
   const committed = po.orderedBefore || po.paidCents > 0;
+  const closed = orderStatus === 'cancelled' || orderStatus === 'closed';
+  const archiveTerms = (line: Purchase['lines'][number]) => revisions[line.orderItemId] ?? legacyTerms(line);
+  const lineFor = (id: string) => po.lines.find(line => line.orderItemId === id)!;
   const permit = (key: string) => permissions.includes(`purchases.${key}`);
   const choices: Action[] = [];
-  if (po.status === 'draft' && !committed && permit('approve')) {
+  if (!closed && po.status === 'draft' && !committed && permit('approve')) {
     if (po.lines.some(line => line.terms.leadTimeAssessment === 'exception_required') && !po.leadTimeApproved) choices.push('approve_lead_time');
     choices.push('approve');
   }
-  if (po.status === 'approved' && !po.orderedBefore && permit('write')) choices.push('register_order');
-  if (['approved', 'ordered'].includes(po.status) && po.paidCents < po.totalCents && permit('pay')) choices.push('record_payment');
+  if (po.needsLegacyReview && permit('approve')) choices.push('review_legacy_approval');
+  if (po.needsRemainingReview && !po.openIncidentId && !po.needsLegacyReview && (!closed || po.orderedBefore) && permit('approve')) choices.push('approve_remaining');
+  if ((!closed ? po.status === 'approved' : po.canRegisterHistorical) && !po.orderedBefore && !po.needsLegacyReview && permit('write')) choices.push('register_order');
+  if (cancellation && (po.canRegisterHistorical || po.orderedBefore) && permit('approve')) choices.push('record_late_order_exception');
+  if (['approved', 'ordered'].includes(po.status) && !po.needsLegacyReview && (!closed || po.orderedBefore)
+    && po.dueCents !== null && Math.min(po.dueCents, po.totalCents - po.paidCents) > 0 && permit('pay')) choices.push('record_payment');
   if (po.openIncidentId && permit(committed ? 'approve' : 'write')) choices.push('resolve_change');
   if (!po.openIncidentId && permit('write')) choices.push('report_change');
 
@@ -86,11 +104,19 @@ export default function PurchaseActions({ orderId, po, permissions, busy, reques
         changeKind: value('changeKind') as PurchaseActionInput['changeKind'], outcome: action === 'resolve_change' ? outcome : undefined,
         supplierReference: value('supplierReference'), supplierSha256: value('supplierSha256'),
         customerReference: value('customerReference'), customerSha256: value('customerSha256'), refundFollowup: value('refundFollowup'),
-        revisedTerms: action === 'resolve_change' && outcome === 'revised_terms'
-          ? po.lines.map(line => ({ orderItemId: line.orderItemId, terms: revisions[line.orderItemId] ?? line.terms })) : undefined,
+        revisedTerms: action === 'review_legacy_approval' ? po.lines.map(line => ({ orderItemId: line.orderItemId, terms: archiveTerms(line) }))
+          : action === 'resolve_change' && outcome === 'revised_terms'
+            ? po.lines.map(line => ({ orderItemId: line.orderItemId, terms: revisions[line.orderItemId] ?? line.terms })) : undefined,
         dispositions: resolvable ? Object.entries(dispositions).flatMap(([orderItemId, entry]) => !entry.quantity ? [] : [{
           orderItemId, ...entry, outcome: outcome === 'declined' ? 'cancel' : entry.outcome,
         }]) : undefined,
+        paymentReference: value('paymentReference'), paymentSha256: value('paymentSha256'),
+        leadTimeReference: value('leadTimeReference'), leadTimeSha256: value('leadTimeSha256'),
+        remainingLines: action === 'approve_remaining' ? po.remaining.map(line => ({
+          orderItemId: line.orderItemId, payableCents: cents(value(`payable-${line.orderItemId}`) ?? '', true),
+        })) : undefined,
+        appliedPaidCents: action === 'approve_remaining' && po.paidCents > 0 ? cents(value('appliedPaid') ?? '', true) : undefined,
+        exceptionOutcome: value('exceptionOutcome') as PurchaseActionInput['exceptionOutcome'],
       };
       const result = await request({ ...input, stage: 'preview' });
       if (result?.preview && 'purchaseOrderId' in result.preview.snapshot) setPending({ input, preview: result.preview as Preview });
@@ -107,10 +133,17 @@ export default function PurchaseActions({ orderId, po, permissions, busy, reques
       <span>{po.status === 'on_hold' && !po.openIncidentId ? '供货处理结果已登记' : statuses[po.status]}</span></div>
     <p className="break-all text-xs text-slate-600">{po.id} · 第 {po.revision} 版</p>
     {po.lines[0]?.fromPurchaseOrderId && <p className="break-all text-sm">替代采购 · 原采购单 {po.lines[0].fromPurchaseOrderId}</p>}
-    <p className="text-sm">本单应付 <strong>{money(po.totalCents)}</strong>　已登记实际付款 {money(po.paidCents)}</p>
+    <p className="text-sm">{po.remainingScope || po.dueCents === null ? '原合同应付' : '本单应付'} <strong>{money(po.totalCents)}</strong>　已登记实际付款 {money(po.paidCents)}</p>
+    {po.remainingScope && <p className="text-sm">核准的剩余商品应付 {money(po.remainingScope.totalCents)} · 经核实冲抵 {money(po.remainingScope.appliedPaidCents)} · 尚未付 {money(po.dueCents ?? undefined)}</p>}
+    {po.needsRemainingReview && <p className="text-sm text-amber-900">部分商品已取消或转替代采购，须逐行核准原单剩余应付。</p>}
+    {po.needsLegacyReview && <p className="text-sm text-amber-900">继续登记前须复核原批准、书证和已付凭据。</p>}
+    {cancellation && <p className="text-sm">客户订单{cancellation.status === 'closed' ? '关闭' : '取消'}时间 {new Date(cancellation.occurredAt).toLocaleString('zh-CN')}</p>}
     {po.orderReceipt && <p className="text-sm">供应商实际订购 {po.orderReceipt.occurredAt
       ? new Date(po.orderReceipt.occurredAt).toLocaleString('zh-CN') : '时间待核实'}　登记时间 {new Date(po.orderReceipt.registeredAt).toLocaleString('zh-CN')}
       {' · '}{po.orderReceipt.reference}</p>}
+    {po.orderReceipt && po.orderReceipt.lines.length > 0 && <ul className="text-sm">
+      {po.orderReceipt.lines.map(line => <li key={line.orderItemId}>{line.name} · 实际订购 {line.quantity} {line.unit ?? '件'} · {money(line.payableCents)}</li>)}
+    </ul>}
     {hasRefundReview && <p className="rounded bg-amber-50 p-2 text-sm text-amber-900">原付款的退款安排待财务核对。</p>}
     <details><summary className="cursor-pointer text-sm">查看采购条款和操作记录</summary><div className="mt-3 space-y-3">
       {po.lines.map(line => <LineDetails key={line.orderItemId} line={line}/>)}
@@ -121,19 +154,50 @@ export default function PurchaseActions({ orderId, po, permissions, busy, reques
       </li>)}</ol></div></details>
     {!pending && <div className="flex flex-wrap gap-2">{choices.map(choice =>
       <button type="button" key={choice} className={button} disabled={busy} onClick={() => {
-        setAction(choice); setOutcome('original_terms'); setRevisions({}); setDispositions({});
+        setAction(choice); setOutcome(po.needsRemainingReview ? 'declined' : 'original_terms'); setRevisions({}); setDispositions({});
       }}>{actionNames[choice]}</button>)}</div>}
     {action && !pending && <form key={action} className="grid gap-3 border-t pt-3" onSubmit={event => {
       event.preventDefault();
       void preview(new FormData(event.currentTarget));
     }}>
       <strong className="text-sm">{actionNames[action]}</strong>
-      {action === 'register_order' && <>
-        {inputField('reference', '供应商已接受订购的单据或书面确认编号')}
+      {(action === 'register_order' || action === 'record_late_order_exception') && <>
+        {inputField('reference', action === 'register_order' ? '供应商已接受订购的单据或书面确认编号' : '取消后实际订购及处理结果的书面出处')}
         <label className="grid gap-1 text-sm">供应商实际确认订购时间（本地时间）
           <input className={field} type="datetime-local" step="1" name="occurredAt" required/>
         </label>
         <DocumentDigestField name="referenceSha256" label="实际订购凭据摘要" required/>
+      </>}
+      {action === 'record_late_order_exception' && <>
+        <label className="grid gap-1 text-sm">异常处理结果<select name="exceptionOutcome" className={field} required>
+          <option value="">请选择</option>{Object.entries(exceptionResults).map(([key, label]) => <option key={key} value={key}>{label}</option>)}
+        </select></label>
+        {inputField('description', '异常处理结果和后续责任')}
+      </>}
+      {action === 'review_legacy_approval' && <>
+        {inputField('reference', '原采购授权的档案出处')}
+        <DocumentDigestField name="referenceSha256" label="原采购授权书证摘要" required/>
+        {po.paidCents > 0 && <>{inputField('paymentReference', '已付款凭证的档案出处')}
+          <DocumentDigestField name="paymentSha256" label="已付款凭证摘要" required/></>}
+        {po.lines.map(line => <div key={line.orderItemId} className="space-y-3 rounded border p-3">
+          <LineDetails line={line}/><PurchaseLineFields line={line} values={archiveTerms(line)} lockedTerms={line.terms}
+            onChange={terms => setRevisions(current => ({ ...current, [line.orderItemId]: terms }))}/>
+        </div>)}
+        {po.lines.some(line => archiveTerms(line).leadTimeAssessment === 'exception_required') && <>
+          {inputField('leadTimeReference', '原超长交期的独立批准依据')}
+          <DocumentDigestField name="leadTimeSha256" label="原超长交期批准书证摘要" required/>
+        </>}
+        {inputField('description', '核对原授权、付款及本次接续结果')}
+      </>}
+      {action === 'approve_remaining' && <>
+        {po.remaining.map(line => <div key={line.orderItemId} className="space-y-2 rounded border p-3">
+          <p className="text-sm">{lineFor(line.orderItemId).source.name} · 剩余 {line.quantity} {lineFor(line.orderItemId).source.unit ?? '件'}</p>
+          {inputField(`payable-${line.orderItemId}`, '本行核实应付（元）')}
+        </div>)}
+        {po.paidCents > 0 && inputField('appliedPaid', '已付款中确认抵扣剩余应付的金额（元，可填 0）')}
+        {inputField('reference', '供方确认剩余行金额及付款归属的书面依据')}
+        <DocumentDigestField name="referenceSha256" label="剩余应付确认书证摘要" required/>
+        {inputField('description', '逐行应付和原付款归属核对结果')}
       </>}
       {action === 'approve_lead_time' && <>
         {inputField('reference', '超长订货周期的书面批准依据')}
@@ -154,8 +218,8 @@ export default function PurchaseActions({ orderId, po, permissions, busy, reques
       {action === 'resolve_change' && <>
         <label className="grid gap-1 text-sm">协调结果<select className={field} value={outcome}
           onChange={event => setOutcome(event.target.value as typeof outcome)}>
-          <option value="original_terms">双方确认按原条款继续</option>
-          {committed ? <option value="replacement">按书面确认另建替代采购</option>
+          {!po.needsRemainingReview && <option value="original_terms">双方确认按原条款继续</option>}
+          {committed ? (!closed && <option value="replacement">按书面确认另建替代采购</option>)
             : <option value="revised_terms">双方同意修订，提交新版本独立审核</option>}
           <option value="declined">{committed ? '取消受影响数量' : '客户未同意，结束本次采购准备'}</option>
         </select></label>
@@ -169,7 +233,7 @@ export default function PurchaseActions({ orderId, po, permissions, busy, reques
         {outcome === 'revised_terms' && po.lines.map(line => <PurchaseLineFields key={line.orderItemId} line={line}
           values={revisions[line.orderItemId] ?? line.terms} onChange={terms => setRevisions({ ...revisions, [line.orderItemId]: terms })}/>)}
         {committed && (outcome === 'declined' || outcome === 'replacement') && <>
-          {po.lines.map(line => <DispositionFields key={line.orderItemId} line={line} allowReplacement={outcome === 'replacement'}
+          {po.remaining.map(line => <DispositionFields key={line.orderItemId} line={lineFor(line.orderItemId)} quantity={line.quantity} allowReplacement={outcome === 'replacement'}
             value={dispositions[line.orderItemId] ?? { quantity: 0, outcome: 'cancel' }}
             onChange={entry => setDispositions({ ...dispositions, [line.orderItemId]: entry })}/>)}
           {po.paidCents > 0 && inputField('refundFollowup', '原付款与未决退款的后续核对安排')}
@@ -181,9 +245,31 @@ export default function PurchaseActions({ orderId, po, permissions, busy, reques
     {pending && op && <section aria-label="操作预览" className="space-y-3 rounded border border-slate-300 bg-slate-50 p-4">
       <h3 className="font-semibold">{actionNames[op.action]} · 操作预览</h3>
       <p className="text-sm">客户订单 {orderId}　采购单 {po.id}</p>
+      {op.action === 'register_order' && op.execution && <p className="text-sm font-medium">原合同明细</p>}
       {pending.preview.snapshot.lines.map(line => <LineDetails key={line.orderItemId} line={line}/>)}
       {'reference' in op && op.reference && <p>业务凭证　{op.reference}</p>}
       {op.action === 'register_order' && <p>供应商实际确认订购时间 {new Date(op.occurredAt).toLocaleString('zh-CN')}</p>}
+      {op.action === 'register_order' && op.execution && <div className="space-y-1 text-sm">
+        <p>适用批准 {op.execution.approvalId} · 订购应付 {money(op.execution.totalCents)}</p>
+        {op.execution.lines.map(line => <p key={line.orderItemId}>{line.source.name} · 订购 {line.quantity} {line.source.unit ?? '件'} · 应付 {money(line.payableCents)}</p>)}
+        {op.priorCancellation && <p>该笔实际订购早于客户取消时间 {new Date(op.priorCancellation.occurredAt).toLocaleString('zh-CN')}</p>}
+      </div>}
+      {op.action === 'record_late_order_exception' && <div className="space-y-1 text-sm">
+        <p>实际发生于 {new Date(op.occurredAt).toLocaleString('zh-CN')} · {exceptionResults[op.exceptionOutcome]}</p>
+        <p>责任人 {op.responsibleActor} · {op.description}</p>
+      </div>}
+      {op.action === 'review_legacy_approval' && <div className="space-y-2 text-sm">
+        <p>原批准人 {op.evidence.approval.actorId} · 原批准时间 {new Date(op.evidence.approval.recordedAt).toLocaleString('zh-CN')}</p>
+        {op.evidence.payments.map(payment => <p key={payment.id}>原付款 {money(payment.amountCents)} · 流水 {payment.receiptReference}</p>)}
+        {'paymentReference' in op && <p>已付款凭证档案 {op.paymentReference}</p>}
+        {op.checkedTerms.map(line => <LineDetails key={line.orderItemId} line={{ source: lineFor(line.orderItemId).source, terms: line.terms }}/>)}
+        <p>{op.description}</p>
+      </div>}
+      {op.action === 'approve_remaining' && <div className="space-y-1 text-sm">
+        {op.scope.lines.map(line => <p key={line.orderItemId}>{lineFor(line.orderItemId).source.name} · 剩余 {line.quantity} · 应付 {money(line.payableCents)}</p>)}
+        <p>剩余商品应付 {money(op.scope.totalCents)} · 已付款确认抵扣 {money(op.scope.appliedPaidCents)} · 本次核实未付 {money(op.scope.totalCents - op.scope.appliedPaidCents)}</p>
+        <p>{op.description}</p>
+      </div>}
       {op.action === 'record_payment' && <p>本次实际付款　<strong>{money(op.amountCents)}</strong> · 收款方 {po.lines[0].terms.payee} · 条件依据 {op.conditionReference}</p>}
       {op.action === 'report_change' && <p>供货变化　{op.description}</p>}
       {op.action === 'resolve_change' && <>

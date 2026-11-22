@@ -62,6 +62,7 @@ export default function PurchaseStartReview({ review, permissions, busy, request
       {' · '}{new Date(review.acceptance.at).toLocaleString('zh-CN')}</p>}
     {review.plan && <p className="text-sm">{modes[review.plan.mode]} · 约定预付 {money(review.plan.requiredPrepayCents)}
       {' · '}已核实到账 {money(review.payment.receivedCents)} · 未收 {money(review.outstandingCents)}</p>}
+    {review.payment.excludedReceiptIds.length > 0 && <p className="text-sm text-amber-900">有人工分摊凭证与支付宝原生流水重复，财务核对前未计入本单实收。</p>}
     {review.credit && <p className="text-sm">授信应收 {money(review.credit.owedCents)} · 总占用 {money(review.credit.occupiedCents)}
       {' · '}当前可用总额度 {money(review.credit.limitCents)} · 账期 {review.credit.paymentTermDays} 天</p>}
     {review.plan?.balanceTerms && <p className="text-sm">余款条件 {review.plan.balanceTerms}</p>}
@@ -112,7 +113,8 @@ export default function PurchaseStartReview({ review, permissions, busy, request
       <ul>{pending.preview.snapshot.review.orderTerms.lines.map(line =>
         <li key={line.id}>{line.name} · {line.catalogNumber} · {line.quantity} {line.unit} · 单价 {money(Math.round(line.unitPrice * 100))}</li>)}</ul>
       <p>经办人 {pending.preview.snapshot.actor.email} · 档案出处 {pending.preview.snapshot.operation.reference}</p>
-      {'amountCents' in pending.preview.snapshot.operation && <p>本单实收分摊 {money(pending.preview.snapshot.operation.amountCents)}</p>}
+      {'amountCents' in pending.preview.snapshot.operation && <p>本单实收分摊 {money(pending.preview.snapshot.operation.amountCents)}
+        {' · '}该笔到账此前已分摊 {money(pending.preview.snapshot.operation.allocatedBeforeCents)}</p>}
       <p>{pending.preview.snapshot.operation.description}</p>
       <details><summary>查看完整依据与版本</summary><pre className="overflow-auto whitespace-pre-wrap break-all">{JSON.stringify(pending.preview.snapshot, null, 2)}</pre></details>
       <div className="flex gap-2"><button type="button" disabled={busy} className={primary} onClick={async () => {

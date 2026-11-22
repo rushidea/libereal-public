@@ -83,17 +83,18 @@ export default function PurchaseManager({initialOrder}:{initialOrder:string}) {
       <p className="text-sm">{workspace.eligibility.eligible?'已核实平台接单及本单采购启动依据':workspace.eligibility.reason}</p>
       {workspace.startReview && <PurchaseStartReview key={workspace.startReview.version} review={workspace.startReview}
         permissions={permissions} busy={busy} request={request} onError={setError}/>}
-      {workspace.lines.length===0&&workspace.eligibility.eligible&&permissions.includes('purchases.write')&&workspace.orderStatus==='confirmed'&&
+      {workspace.canPrepare&&permissions.includes('purchases.write')&&
         <button className={primary} disabled={busy} onClick={()=>void request({action:'prepare',orderId:workspace.orderId})}>从原订单准备采购</button>}
       {workspace.lines.length>0&&<section className="space-y-3"><h2 className="text-lg font-semibold">采购准备</h2>
         {workspace.lines.map(line=>{
           const po=workspace.orders.find(o=>o.id===line.purchaseOrderId);
-          const editable=workspace.eligibility.eligible&&permissions.includes('purchases.write')&&(!po||(po.status==='draft'&&!po.orderedBefore&&!po.paidCents));
+          const editable=line.availableQuantity>0&&workspace.eligibility.eligible&&permissions.includes('purchases.write')&&(!po||(po.status==='draft'&&!po.orderedBefore&&!po.paidCents));
           return <PurchaseLineForm key={`${line.orderItemId}-${line.revision}`} line={line} enabled={editable} busy={busy}
             save={async (line, terms, checkedEvidence) => { await request({ action: 'save_line', orderId: workspace.orderId, orderItemId: line.orderItemId, revision: line.revision, terms, checkedEvidence }); }}/>;
         })}</section>}
       {workspace.orders.length>0&&<section className="space-y-3"><h2 className="text-lg font-semibold">采购单</h2>
-        {workspace.orders.map(po=><PurchaseActions key={po.version} orderId={workspace.orderId} po={po} permissions={permissions} busy={busy} request={request} onError={setError}/>)}</section>}
+        {workspace.orders.map(po=><PurchaseActions key={po.version} orderId={workspace.orderId} orderStatus={workspace.orderStatus} cancellation={workspace.cancellation}
+          po={po} permissions={permissions} busy={busy} request={request} onError={setError}/>)}</section>}
     </>}
   </div>;
 }
