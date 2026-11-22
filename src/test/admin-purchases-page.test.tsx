@@ -51,7 +51,7 @@ function makeWorkspace(status?: Purchase['status'], lineChanges: Partial<Line> =
     totalCents: 8642, paidCents: 0, lines: [line], ledger: [], orderedBefore: status === 'ordered',
     openIncidentId: status === 'on_hold' ? 'TEST-INCIDENT' : null, orderReceipt: null, leadTimeApproved: false,
     dueCents: 8642, remaining: [{ orderItemId, quantity: source.quantity }], remainingScope: null,
-    needsRemainingReview: false, needsLegacyReview: false, needsFundingReapproval: false, canRegisterHistorical: false,
+    needsRemainingReview: false, canApproveRemaining: false, needsLegacyReview: false, needsFundingReapproval: false, canRegisterHistorical: false,
     documentReviewLines: [], commitmentExceptions: [], canRecordCommitmentException: false,
   } : null;
   const payment = { receivedCents: 0, allocatedCents: 0, receipts: [], excludedReceiptIds: [], paymentAttemptId: null, nativePaidAt: null, settledReceivableId: null };
@@ -192,10 +192,11 @@ describe('supplier purchasing page', () => {
     await waitFor(() => expect(screen.queryByRole('button', { name: '从原订单准备采购' })).not.toBeInTheDocument());
   });
 
-  it('keeps the original contract and deposit visible during explicit review of the unaffected payable', async () => {
-    const workspace = makeWorkspace('on_hold');
+  it.each(['on_hold', 'ordered'] as const)('keeps the original contract and deposit visible during review of a %s purchase', async status => {
+    const workspace = makeWorkspace(status);
     const [purchase] = workspace.orders;
-    Object.assign(purchase, { openIncidentId: null, dueCents: null, paidCents: 2300, needsRemainingReview: true, remaining: [{ orderItemId, quantity: 1 }] });
+    Object.assign(purchase, { openIncidentId: null, dueCents: null, paidCents: 2300, needsRemainingReview: true, canApproveRemaining: true,
+      remaining: [{ orderItemId, quantity: 1 }] });
     const scope = { lines: [{ orderItemId, quantity: 1, payableCents: 4000 }], totalCents: 4000, appliedPaidCents: 1000, dispositionIds: ['TEST-CANCEL'],
       payments: [{ id: 'TEST-DEPOSIT', amountCents: 2300 }] };
     const posts = mockWorkspace(workspace, ['purchases.read', 'purchases.approve', 'purchases.pay'], body => {
@@ -203,8 +204,8 @@ describe('supplier purchasing page', () => {
         const result = preview(body, workspace);
         return Response.json({ preview: { ...result.preview, snapshot: { ...result.preview.snapshot, operation: { ...result.preview.snapshot.operation, scope } } } });
       }
-      return Response.json({ workspace: { ...workspace, orders: [{ ...purchase, status: 'approved', revision: 5, version: 'e'.repeat(64),
-        dueCents: 3000, needsRemainingReview: false, remainingScope: scope }] } });
+      return Response.json({ workspace: { ...workspace, orders: [{ ...purchase, status: status === 'ordered' ? 'ordered' : 'approved', revision: 5, version: 'e'.repeat(64),
+        dueCents: 3000, needsRemainingReview: false, canApproveRemaining: false, remainingScope: scope }] } });
     });
     render(<PurchaseManager initialOrder={orderId} />);
     expect(await screen.findByText(/原合同应付/)).toHaveTextContent(/86\.42.*已登记实际付款.*23\.00/);
@@ -222,7 +223,25 @@ describe('supplier purchasing page', () => {
     fireEvent.click(within(panel).getByRole('button', { name: '确认核准原单剩余应付' }));
     expect(await screen.findByText(/核准的剩余商品应付.*40\.00.*尚未付.*30\.00/)).toBeInTheDocument();
     expect(screen.getByText(/原合同应付/)).toHaveTextContent(/86\.42.*已登记实际付款.*23\.00/);
+    expect(screen.getByRole('button', { name: '登记实际付款' })).toBeInTheDocument();
     expect(posts[1]).toMatchObject({ stage: 'confirm', actionHash, requestId: posts[0].requestId });
+  });
+
+  it('offers the actual commitment review before review or payment of the remaining amount', async () => {
+    const workspace = makeWorkspace('on_hold');
+    const [purchase] = workspace.orders;
+    Object.assign(purchase, { openIncidentId: null, dueCents: null, paidCents: 900, needsRemainingReview: true,
+      remaining: [{ orderItemId, quantity: 1 }], commitmentExceptions: [{
+        id: 'TEST-EXCEPTION', actorId: 'test-owner', reference: 'TEST-CREDIT-COMMITMENT', occurredAt: '2031-06-01T09:00:00.000Z',
+        outcome: 'liability_review', resolution: null, resolutionId: null,
+      }] });
+    const posts = mockWorkspace(workspace, ['purchases.read', 'purchases.approve', 'purchases.pay']);
+    render(<PurchaseManager initialOrder={orderId} />);
+    expect(await screen.findByText('核对实际承诺后，再逐行核准原单剩余应付。')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '核对订购异常处理结果' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '核准原单剩余应付' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '登记实际付款' })).not.toBeInTheDocument();
+    expect(posts).toEqual([]);
   });
 
   it('requires legacy proof on the same paid purchase before it can be registered', async () => {
@@ -287,21 +306,21 @@ describe('supplier purchasing page', () => {
     expect(posts[1]).toMatchObject({ action: 'register_order', stage: 'confirm', requestId: posts[0].requestId, actionHash });
   });
 
-  it('reviews two original quote rows in one approval without editing the archived contract prices', async () => {
+  it.each([{ rows: [1, 2] }, { rows: [3] }])('reviews original quote rows $rows without editing archived prices', async ({ rows }) => {
     const workspace = makeWorkspace('approved');
     const [purchase] = workspace.orders;
     const sha256 = 'd'.repeat(64);
     const secondId = 'TEST-LEGACY-QUOTE-B';
     purchase.lines = [{ ...purchase.lines[0], terms: { ...terms, sourceSha256: sha256 } },
       { ...purchase.lines[0], orderItemId: secondId, source: { ...source, orderItemId: secondId, name: '第二种合成商品', catalogNumber: 'TEST-QUOTE-B', quantity: 1 },
-        terms: { ...terms, sourceSha256: sha256, unitPriceCents: 2500, linePayableCents: 2500 } }];
+        terms: { ...terms, sourceSha256: sha256, unitPriceCents: 2500, linePayableCents: 2500 } }].slice(0, rows.length);
     purchase.paidCents = 900;
     purchase.needsFundingReapproval = true;
     purchase.documentReviewLines = purchase.lines.map(line => ({ orderItemId: line.orderItemId, sha256, reference: terms.sourceReference }));
     const posts = mockWorkspace(workspace, ['purchases.read', 'purchases.approve'], body => {
       if (body.stage === 'preview') {
         const result = preview(body, workspace);
-        const documents = purchase.lines.map((line, index) => ({ ...line, terms: { ...line.terms, sourceDocumentKind: 'multiple_items', sourceDocumentRow: index + 1 } }));
+        const documents = purchase.lines.map((line, index) => ({ ...line, terms: { ...line.terms, sourceDocumentKind: 'multiple_items', sourceDocumentRow: rows[index] } }));
         const operation = { ...result.preview.snapshot.operation, originalApprovalId: 'TEST-PRIOR-APPROVAL', fundingPlan: workspace.startReview.plan,
           payments: [{ id: 'TEST-PAID-DEPOSIT', amountCents: 900, reference: 'TEST-ORIGINAL-DEPOSIT' }], documentScopes: documents };
         return Response.json({ preview: { ...result.preview, snapshot: { ...result.preview.snapshot, operation } } });
@@ -310,23 +329,22 @@ describe('supplier purchasing page', () => {
     });
     render(<PurchaseManager initialOrder={orderId} />);
     fireEvent.click(await screen.findByRole('button', { name: '重新核准本单后续动作' }));
-    expect(screen.getByText(/第二种合成商品.*TEST-QUOTE-B.*数量 1.*25\.00/)).toBeInTheDocument();
+    expect(screen.getByText(/本单只采用一项/)).toBeInTheDocument();
+    if (rows.length > 1) expect(screen.getByText(/第二种合成商品.*TEST-QUOTE-B.*数量 1.*25\.00/)).toBeInTheDocument();
     expect(screen.queryByLabelText('采购单价（元）')).not.toBeInTheDocument();
     fill('旧供货原件摘要', sha256);
     fill('原供货文件范围', 'multiple_items');
-    fill('TEST-SKU 对应原件行序号', '1');
-    fill('TEST-QUOTE-B 对应原件行序号', '2');
+    purchase.lines.forEach((line, index) => fill(`${line.source.catalogNumber} 对应原件行序号`, String(rows[index])));
     fill('客户付款条件变动的档案出处', 'TEST-CHANGED-AGREEMENT');
     fill('新批准依据摘要', 'c'.repeat(64));
-    fill('本次重新批准的后续动作与旧款归属', '按原报价两行和定金核对新条件。');
+    fill('本次重新批准的后续动作与旧款归属', '按对应原报价行和定金核对新条件。');
     fireEvent.click(screen.getByRole('button', { name: '查看完整预览' }));
     const panel = await screen.findByRole('region', { name: '操作预览' });
-    expect(panel).toHaveTextContent('原件第 1 行');
-    expect(panel).toHaveTextContent('原件第 2 行');
+    rows.forEach(row => expect(panel).toHaveTextContent(`原件第 ${row} 行`));
     expect(panel).toHaveTextContent(/已付.*9\.00.*TEST-ORIGINAL-DEPOSIT/);
-    expect(posts[0]).toMatchObject({ action: 'reapprove_purchase', documentScopes: [
-      { orderItemId, sha256, kind: 'multiple_items', row: 1 }, { orderItemId: secondId, sha256, kind: 'multiple_items', row: 2 },
-    ] });
+    expect(posts[0]).toMatchObject({ action: 'reapprove_purchase', documentScopes: purchase.lines.map((line, index) => ({
+      orderItemId: line.orderItemId, sha256, kind: 'multiple_items', row: rows[index],
+    })) });
     fireEvent.click(within(panel).getByRole('button', { name: '确认重新核准本单后续动作' }));
     await waitFor(() => expect(screen.queryByRole('region', { name: '操作预览' })).not.toBeInTheDocument());
     expect(posts[1]).toMatchObject({ stage: 'confirm', actionHash, requestId: posts[0].requestId, documentScopes: posts[0].documentScopes });

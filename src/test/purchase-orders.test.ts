@@ -169,6 +169,30 @@ function activities(purchaseOrderId: string, action: string) {
   ).all(purchaseOrderId, action);
 }
 
+async function omitDocumentRowsFromArchivedPurchase(orderId: string, purchase: Workspace['orders'][number]) {
+  await prisma.$transaction(async tx => {
+    // The older format signed each line while retaining only the file reference and digest.
+    const archived = purchase.lines.map(line => {
+      const old = { ...line.terms, sourceDocumentKind: undefined, sourceDocumentRow: undefined };
+      const terms = attestPurchaseTerms(old, line.source, preparer, true, new Date(line.terms.verification!.verifiedAt));
+      return { orderItemId: line.orderItemId, source: line.source, terms, revision: line.revision };
+    });
+    const hash = pricingContentHash({ orderId, purchaseOrderId: purchase.id, totalCents: purchase.totalCents, lines: archived });
+    for (const line of archived) await tx.purchaseRequirement.update({ where: { orderItemId: line.orderItemId }, data: { terms: JSON.stringify(line.terms) } });
+    await tx.purchaseOrder.update({ where: { id: purchase.id }, data: { approvedHash: hash } });
+    await tx.purchaseActivity.deleteMany({ where: { orderId, action: 'review_supplier_document_scope' } });
+    for (const row of purchase.ledger.filter(row => row.action === 'approve' || row.action === 'record_payment')) {
+      const detail = { ...row.detail };
+      const original = detail.snapshot as Record<string, unknown>;
+      detail.snapshot = { ...original, lines: archived.map(line => ({ ...line, fromPurchaseOrderId: null })) };
+      delete detail.fundingTermsVersion;
+      detail.contentHash = hash;
+      detail.actionHash = pricingContentHash(detail.snapshot);
+      await tx.purchaseActivity.update({ where: { id: row.id }, data: { detail: JSON.stringify(detail) } });
+    }
+  });
+}
+
 beforeAll(() => { getTestDb(); });
 afterAll(() => { closeTestDb(); });
 
@@ -407,6 +431,81 @@ describe('supplier commitments and customer fulfilment stay bound to actual evid
     expect(activities(final.id, 'register_order')).toHaveLength(1);
     expect(activities(final.id, 'record_payment')).toHaveLength(2);
   });
+
+  it.each(['before the change', 'during the change', 'after cancellation', 'an archived ordered header'])(
+    'reconciles the surviving quantity when actual commitment liability is verified %s',
+    async (sequence) => {
+      vi.useFakeTimers({ toFake: ['Date'] });
+      try {
+        vi.setSystemTime(new Date('2031-07-01T08:00:00.000Z'));
+        await adjustCredit({ overrideLimit: 200 });
+        const order = await seedOrder('test-credit-exception-partial-cancellation');
+        const [item] = order.orderItems;
+        await acceptAsMerchant(order.id);
+        const [draft] = (await saveLine(await readWorkspace(order.id), 0, terms(2))).orders;
+        const [approved] = (await submit(order.id, draft, { action: 'approve', requestId: 'approve-before-credit-change' })).orders;
+        const [deposited] = (await submit(order.id, approved, payment('credit-case-deposit', 900))).orders;
+        const original = await prisma.purchaseActivity.findMany({ where: { purchaseOrderId: approved.id, action: { in: ['approve', 'record_payment'] } },
+          orderBy: { id: 'asc' } });
+        vi.setSystemTime(new Date('2031-07-01T09:00:00.000Z'));
+        await adjustCredit({ overrideLimit: 199 });
+        vi.setSystemTime(new Date('2031-07-01T10:00:00.000Z'));
+        const [exception] = (await submit(order.id, deposited, {
+          action: 'record_late_order_exception', requestId: 'actual-commitment-after-credit-change', ...registrationEvidence(),
+          reference: 'TEST-SUPPLIER-COMMITMENT', exceptionOutcome: 'liability_review', description: '供方已承诺，原合同责任待核。',
+        })).orders;
+        const verifyLiability = (current: typeof exception) => submit(order.id, current, {
+          action: 'resolve_order_exception', requestId: 'verify-archived-liability', exceptionId: exception.commitmentExceptions[0].id,
+          exceptionResolution: 'payable_verified', reference: 'TEST-CONTRACT-LIABILITY', referenceSha256: 'e'.repeat(64),
+          description: '已核实实际承诺和原应付，原定金留存。',
+        });
+        const review = {
+          action: 'approve_remaining', requestId: 'approve-surviving-unit', reference: 'TEST-SIGNED-SURVIVING-UNIT', referenceSha256: 'f'.repeat(64),
+          description: '核实原单剩余一件的应付与定金抵扣。', remainingLines: [{ orderItemId: item.id, payableCents: 1375 }], appliedPaidCents: 500,
+        } satisfies ActionRequest;
+
+        const [prior] = sequence === 'before the change' ? (await verifyLiability(exception)).orders : [exception];
+        const [incident] = (await hold(order.id, prior, 'report-quantity-reduction')).orders;
+        expect(incident).toMatchObject({ status: 'on_hold', canApproveRemaining: false, paidCents: 900 });
+        const [beforeCancellation] = sequence === 'during the change' ? (await verifyLiability(incident)).orders : [incident];
+        const [cancelled] = (await submit(order.id, beforeCancellation, { action: 'resolve_change', requestId: 'agree-cancel-one',
+          outcome: 'declined', ...written, refundFollowup: '定金单据继续留存，未抵扣款列入退款待核。',
+          dispositions: [{ orderItemId: item.id, quantity: 1, outcome: 'cancel' }],
+        })).orders;
+        const liabilityPending = sequence === 'after cancellation' || sequence === 'an archived ordered header';
+        expect(cancelled).toMatchObject({ status: 'on_hold', dueCents: null, paidCents: 900, needsRemainingReview: true,
+          canApproveRemaining: !liabilityPending, remaining: [{ orderItemId: item.id, quantity: 1 }] });
+        if (liabilityPending) {
+          await expect(previewAction(order.id, cancelled, review)).rejects.toThrow();
+        }
+        const [confirmed] = liabilityPending ? (await verifyLiability(cancelled)).orders : [cancelled];
+        expect(confirmed).toMatchObject({ status: 'on_hold', orderedBefore: true, totalCents: 2750, paidCents: 900, dueCents: null,
+          canApproveRemaining: true, orderReceipt: { exception: true }, commitmentExceptions: [{ resolution: 'payable_verified' }] });
+        if (sequence === 'an archived ordered header') {
+          // The prior version stored ordered even though the current dispositions had no approval.
+          await prisma.purchaseOrder.update({ where: { id: confirmed.id }, data: { status: 'ordered' } });
+        }
+        const [readyForReview] = (await readWorkspace(order.id)).orders;
+        await expect(previewAction(order.id, readyForReview, payment('unreviewed-original-balance', 1850))).rejects.toThrow();
+        const [reviewed] = (await submit(order.id, readyForReview, review)).orders;
+        expect(reviewed).toMatchObject({ status: 'ordered', orderedBefore: true, totalCents: 2750, paidCents: 900, dueCents: 875,
+          needsRemainingReview: false, canApproveRemaining: false, remainingScope: {
+            lines: [{ orderItemId: item.id, quantity: 1, payableCents: 1375 }], totalCents: 1375, appliedPaidCents: 500,
+          } });
+        expect(reviewed.ledger.find(row => row.action === 'resolve_change')?.detail).toMatchObject({ snapshot: { operation: {
+          refund: { status: 'pending_review', paidCents: 900 },
+        } } });
+        expect(await prisma.purchaseActivity.findMany({ where: { id: { in: original.map(row => row.id) } }, orderBy: { id: 'asc' } })).toEqual(original);
+        await expect(previewAction(order.id, reviewed, payment('over-surviving-balance', 876))).rejects.toThrow(/未付合计/);
+        const [paid] = (await submit(order.id, reviewed, payment('pay-surviving-balance', 875))).orders;
+        expect(paid).toMatchObject({ paidCents: 1775, dueCents: 0 });
+        expect(activities(paid.id, 'register_order')).toEqual([]);
+        expect(activities(paid.id, 'record_payment')).toHaveLength(2);
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+  );
 
   it('prepares only the outstanding quantities of a historically partially shipped customer order', async () => {
     const order = await seedOrder('test-historic-partial-shipment', { quantities: [5, 2, 1] });
@@ -1056,27 +1155,7 @@ describe('recorded customer acceptance and per-order funding', () => {
       const [approved] = (await submit(order.id, draft, { action: 'approve', requestId: 'old-shared-doc-approve' })).orders;
       const [deposited] = (await submit(order.id, approved, { action: 'record_payment', requestId: 'old-shared-doc-deposit', amountCents: 900,
         reference: 'TEST-HISTORICAL-DOC-DEPOSIT', conditionReference: 'TEST-PREPAY-DUE' })).orders;
-      await prisma.$transaction(async tx => {
-        // The older format signed each line while retaining only the file reference and digest.
-        const archived = deposited.lines.map(line => {
-          const old = { ...line.terms, sourceDocumentKind: undefined, sourceDocumentRow: undefined };
-          const changed = attestPurchaseTerms(old, line.source, preparer, true, new Date(line.terms.verification!.verifiedAt));
-          return { orderItemId: line.orderItemId, source: line.source, terms: changed, revision: line.revision };
-        });
-        const hash = pricingContentHash({ orderId: order.id, purchaseOrderId: deposited.id, totalCents: deposited.totalCents, lines: archived });
-        for (const line of archived) await tx.purchaseRequirement.update({ where: { orderItemId: line.orderItemId }, data: { terms: JSON.stringify(line.terms) } });
-        await tx.purchaseOrder.update({ where: { id: deposited.id }, data: { approvedHash: hash } });
-        await tx.purchaseActivity.deleteMany({ where: { orderId: order.id, action: 'review_supplier_document_scope' } });
-        for (const row of deposited.ledger.filter(row => row.action === 'approve' || row.action === 'record_payment')) {
-          const detail = { ...row.detail };
-          const original = detail.snapshot as Record<string, unknown>;
-          detail.snapshot = { ...original, lines: archived.map(line => ({ ...line, fromPurchaseOrderId: null })) };
-          delete detail.fundingTermsVersion;
-          detail.contentHash = hash;
-          detail.actionHash = pricingContentHash(detail.snapshot);
-          await tx.purchaseActivity.update({ where: { id: row.id }, data: { detail: JSON.stringify(detail) } });
-        }
-      });
+      await omitDocumentRowsFromArchivedPurchase(order.id, deposited);
       const oldRows = () => prisma.purchaseActivity.findMany({ where: { purchaseOrderId: deposited.id, action: { in: ['approve', 'record_payment'] } }, orderBy: { id: 'asc' } });
       const original = await oldRows();
       const linesBefore = await prisma.purchaseRequirement.findMany({ where: { orderId: order.id }, orderBy: { orderItemId: 'asc' } });
@@ -1097,6 +1176,72 @@ describe('recorded customer acceptance and per-order funding', () => {
       ] } } });
       expect(await oldRows()).toEqual(original);
       expect(await prisma.purchaseRequirement.findMany({ where: { orderId: order.id }, orderBy: { orderItemId: 'asc' } })).toEqual(linesBefore);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it.each([false, true])('restores the sole selected row of a historical multi-item PDF (another old order uses it=%s)', async shared => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      vi.setSystemTime(new Date('2031-06-02T08:00:00.000Z'));
+      const sha256 = 'a'.repeat(64);
+      const finance = async (orderId: string, revised = false) => applyStart((await startReview(orderId, { ...reviewEvidence,
+        action: 'review_customer_terms', requestId: revised ? 'revised-customer-credit' : 'initial-customer-credit',
+        paymentMode: 'credit', balanceTerms: revised ? '更改后的合成账期' : '原合成客户账期' })).input);
+      const create = async (label: string, row: number, unitPriceCents: number) => {
+        const order = await seedOrder(`test-old-document-${label}`, { quantities: [1] });
+        const [item] = order.orderItems;
+        const product = await prisma.product.create({ data: { id: `test-doc-sku-${label}`, name: `合成商品 ${label}`, catalogNumber: `TEST-QUOTE-${label}`,
+          brand: '合成品牌', price: 100, costPrice: 30, stockQuantity: 10 } });
+        await prisma.orderItem.update({ where: { id: item.id }, data: { productId: product.id, name: product.name, catalogNumber: product.catalogNumber } });
+        await acceptAsMerchant(order.id);
+        await finance(order.id);
+        const [draft] = (await saveLine(await readWorkspace(order.id), 0, terms(1, {
+          sourceSha256: sha256, sourceReference: 'TEST-ORIGINAL-QUOTE-FILE', sourceDocumentKind: 'multiple_items', sourceDocumentRow: row,
+          unitPriceCents, linePayableCents: unitPriceCents,
+        }))).orders;
+        const [approved] = (await submit(order.id, draft, { action: 'approve', requestId: 'approve-archival-purchase' })).orders;
+        const [purchase] = (await submit(order.id, approved, { action: 'record_payment', requestId: 'record-archival-deposit', amountCents: 900,
+          reference: `TEST-ARCHIVAL-DEPOSIT-${label}`, conditionReference: 'TEST-DEPOSIT-DUE' })).orders;
+        return { order, item, purchase, row, unitPriceCents };
+      };
+      const first = await create('FIRST', 3, 3673);
+      const second = shared ? await create('SECOND', 7, 2500) : null;
+      for (const evidence of second ? [first, second] : [first]) {
+        await omitDocumentRowsFromArchivedPurchase(evidence.order.id, evidence.purchase);
+      }
+      vi.setSystemTime(new Date('2031-06-02T09:00:00.000Z'));
+      await finance(first.order.id, true);
+      if (second) await finance(second.order.id, true);
+      const request = (evidence: typeof first, row = evidence.row): ActionRequest => ({
+        action: 'reapprove_purchase', requestId: 'review-selected-original-row', reference: 'TEST-REVISED-CREDIT', referenceSha256: 'f'.repeat(64),
+        description: '比对原件中的对应报价行，定金及原批准继续留存。',
+        documentScopes: [{ orderItemId: evidence.item.id, sha256, kind: 'multiple_items', row }],
+      });
+      const [firstPending] = (await readWorkspace(first.order.id)).orders;
+      expect(firstPending.documentReviewLines).toMatchObject([{ orderItemId: first.item.id, sha256 }]);
+      const proposedConflict = second
+        ? await previewAction(second.order.id, (await readWorkspace(second.order.id)).orders[0], request(second, 3))
+        : null;
+      const [firstChecked] = (await submit(first.order.id, firstPending, request(first))).orders;
+      expect(firstChecked).toMatchObject({ needsFundingReapproval: false, documentReviewLines: [], totalCents: first.unitPriceCents, paidCents: 900 });
+      expect(firstChecked.ledger).toContainEqual(expect.objectContaining({
+        action: 'review_supplier_document_scope', purchaseOrderId: first.purchase.id, orderItemId: first.item.id, actorId: approver.id,
+        detail: expect.objectContaining({ document: expect.objectContaining({ sha256, row: 3 }) }),
+      }));
+      if (second) {
+        const [stillPending] = (await readWorkspace(second.order.id)).orders;
+        expect(stillPending).toMatchObject({ needsFundingReapproval: true, documentReviewLines: [{ orderItemId: second.item.id, sha256 }], paidCents: 900 });
+        await expect(apply(proposedConflict!)).rejects.toThrow(/该供货书证行已对应其他商品/);
+        await expect(submit(second.order.id, stillPending, request(second, 3))).rejects.toThrow(/该供货书证行已对应其他商品/);
+        expect((await readWorkspace(second.order.id)).orders[0].version).toBe(stillPending.version);
+        const [secondChecked] = (await submit(second.order.id, stillPending, request(second))).orders;
+        expect(secondChecked).toMatchObject({ needsFundingReapproval: false, documentReviewLines: [], totalCents: second.unitPriceCents, paidCents: 900 });
+        expect(secondChecked.ledger.at(-1)?.detail).toMatchObject({ snapshot: { operation: { documentScopes: [
+          { terms: { sourceSha256: sha256, sourceDocumentRow: 7, unitPriceCents: second.unitPriceCents } },
+        ] } } });
+      }
     } finally {
       vi.useRealTimers();
     }
