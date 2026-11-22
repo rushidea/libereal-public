@@ -80,16 +80,21 @@ function currentIncident(ledger: PurchaseActivity[]) {
   return undefined;
 }
 
-function creditExceptions(ledger: PurchaseActivity[]) {
-  return ledger.flatMap(row => {
+function supplierCommitmentReview(ledger: PurchaseActivity[]) {
+  const exceptions = ledger.flatMap(row => {
     if (row.action !== 'record_late_order_exception') return [];
     const operation = purchaseOperation(row.detail);
     if (operation.category !== 'credit') return [];
-    const resolution = ledger.find(event => event.action === 'resolve_order_exception' && purchaseOperation(event.detail).exceptionId === row.id);
+    const decision = ledger.find(event => event.action === 'resolve_order_exception' && purchaseOperation(event.detail).exceptionId === row.id);
+    const outcome = decision && purchaseOperation(decision.detail).resolution;
+    const resolution = outcome === 'supplier_cancelled' || outcome === 'payable_verified' ? outcome : null;
     return [{ id: row.id, actorId: row.actorId, occurredAt: String(operation.occurredAt), reference: String(operation.reference),
-      outcome: String(operation.exceptionOutcome), resolution: resolution ? String(purchaseOperation(resolution.detail).resolution) : null,
-      resolutionId: resolution?.id ?? null }];
+      outcome: String(operation.exceptionOutcome), resolution,
+      resolutionId: resolution ? decision?.id ?? null : null, resolutionActorId: resolution ? decision?.actorId ?? null : null }];
   });
+  const state = exceptions.some(row => row.resolution === 'supplier_cancelled') ? 'supplier_cancelled'
+    : exceptions.some(row => !row.resolution) ? 'pending' : exceptions.length ? 'payable_verified' : 'ordinary';
+  return { exceptions, state, payable: state === 'payable_verified' ? exceptions[0] : undefined };
 }
 
 function remainingDemand(order: SourceOrder) {
@@ -158,12 +163,11 @@ export async function purchaseWorkspace(tx: Db, orderId: string) {
   const rowsByPosition = rows.map(rowView).sort((a, b) => a.source.position - b.source.position);
   const orders = headers.map(header => {
     const ledger = activities.filter(row => row.purchaseOrderId === header.id);
-    const exceptions = creditExceptions(ledger);
-    const verifiedException = exceptions.find(row => row.resolution === 'payable_verified');
+    const commitment = supplierCommitmentReview(ledger);
     const committed = ledger.find(row => row.action === 'register_order' || row.action === 'record_payment'
-      || exceptions.some(exception => exception.id === row.id));
+      || commitment.exceptions.some(exception => exception.id === row.id));
     const normalRegistration = ledger.find(row => row.action === 'register_order');
-    const registration = normalRegistration ?? ledger.find(row => row.id === verifiedException?.id);
+    const registration = normalRegistration ?? ledger.find(row => row.id === commitment.payable?.id);
     const registered = snapshot(registration);
     const execution = registered?.operation?.execution;
     const lines = contractLines(rowsByPosition.filter(line => line.purchaseOrderId === header.id), header.id, committed);
@@ -177,9 +181,11 @@ export async function purchaseWorkspace(tx: Db, orderId: string) {
       const quantity = line.source.quantity - (disposed.quantities.get(line.orderItemId) ?? 0);
       return quantity > 0 ? [{ orderItemId: line.orderItemId, quantity }] : [];
     });
-    const remainingDecision = remainingApproval(ledger, disposed.ids);
+    const supplierCancelled = commitment.state === 'supplier_cancelled';
+    const hasGoodsPayable = commitment.state === 'ordinary' || commitment.state === 'payable_verified';
+    const remainingDecision = supplierCancelled ? undefined : remainingApproval(ledger, disposed.ids);
     const reviewedScope = snapshot(remainingDecision)?.operation.scope;
-    const dueCents = disposed.ids.length ? (reviewedScope
+    const dueCents = !hasGoodsPayable ? null : disposed.ids.length ? (reviewedScope
       ? Math.max(0, reviewedScope.totalCents - reviewedScope.appliedPaidCents - (paidCents - snapshot(remainingDecision)!.paidCents)) : null)
       : Math.max(0, totalCents - paidCents);
     const legacy = legacyApproval(ledger);
@@ -192,21 +198,23 @@ export async function purchaseWorkspace(tx: Db, orderId: string) {
       return { source: line.source, terms: agreedDocumentTerms({ source: line.source, terms }, ledger) };
     });
     const openIncidentId = currentIncident(ledger)?.id ?? null;
-    const needsRemainingReview = disposed.ids.length > 0 && !reviewedScope && remaining.length > 0;
+    const needsRemainingReview = !supplierCancelled && disposed.ids.length > 0 && !reviewedScope && remaining.length > 0;
     const needsLegacyReview = Boolean(legacy && !legacyReview && header.approvedHash === contentHash);
-    const canApproveRemaining = needsRemainingReview && !openIncidentId && !needsLegacyReview
-      && !exceptions.some(row => !row.resolution)
+    const canApproveRemaining = hasGoodsPayable && needsRemainingReview && !openIncidentId && !needsLegacyReview
       && (header.status === 'on_hold' || (header.status === 'ordered' && Boolean(registration)))
       && (Boolean(registration) || eligibility.eligible);
+    const canRegisterOrder = commitment.state === 'ordinary' && !registration && !needsLegacyReview && Boolean(latestApproval)
+      && (startReview.active || Boolean(cancellation)) && (header.status === 'approved' || header.status === 'on_hold');
     const revision = Number(header.revision);
     return { ...header, revision, totalCents, contentHash, lines, ledger, paidCents, dueCents, remaining,
-      remainingScope: reviewedScope ?? null, needsRemainingReview, canApproveRemaining, needsLegacyReview,
-      needsFundingReapproval: !registration && header.status === 'approved' && eligibility.eligible && Boolean(fundingApproval && latestApproval
+      remainingScope: hasGoodsPayable ? reviewedScope ?? null : null, needsRemainingReview, canApproveRemaining, needsLegacyReview,
+      needsFundingReapproval: commitment.state === 'ordinary' && !registration && header.status === 'approved'
+        && eligibility.eligible && Boolean(fundingApproval && latestApproval
         && (!approvalMatchesFunding(fundingApproval, startReview, activities)
           || !fundingUnchangedSince(latestApproval, startReview, activities, startReview.plan, Date.now()))),
-      canRegisterHistorical: !registration && !exceptions.length && (Boolean(cancellation) || header.status === 'on_hold') && Boolean(latestApproval),
-      canRecordCommitmentException: Boolean(latestApproval && (!registration || cancellation) && (cancellation || !exceptions.length)),
-      commitmentExceptions: exceptions,
+      canRegisterOrder,
+      canRecordCommitmentException: Boolean(latestApproval && (!registration || cancellation) && (cancellation || commitment.state === 'ordinary')),
+      commitmentState: commitment.state, commitmentExceptions: commitment.exceptions,
       documentReviewLines: missingDocumentScopes(supply),
       version: pricingContentHash({ contentHash, status: header.status, revision }),
       orderedBefore: Boolean(registration),
@@ -364,12 +372,15 @@ function attributedQuantity(view: Workspace, purchaseOrderId: string, orderItemI
   return view.fulfillment.delivered.reduce((sum, row) => sum + (row.purchaseOrderId === purchaseOrderId && row.orderItemId === orderItemId ? row.quantity : 0), 0);
 }
 
+function pendingReplacementQuantity(view: Workspace, purchase: PO, orderItemId: string) {
+  if (purchase.status === 'superseded' || purchase.commitmentState === 'supplier_cancelled'
+    || !purchase.lines.some(line => line.orderItemId === orderItemId && line.fromPurchaseOrderId)) return 0;
+  const quantity = purchase.remaining.find(line => line.orderItemId === orderItemId)?.quantity ?? 0;
+  return Math.max(0, quantity - attributedQuantity(view, purchase.id, orderItemId));
+}
+
 function activeReplacementQuantity(view: Workspace, orderItemId: string) {
-  return view.orders.reduce((sum, purchase) => {
-    if (purchase.status === 'superseded' || !purchase.lines.some(line => line.orderItemId === orderItemId && line.fromPurchaseOrderId)) return sum;
-    const quantity = purchase.remaining.find(line => line.orderItemId === orderItemId)?.quantity ?? 0;
-    return sum + Math.max(0, quantity - attributedQuantity(view, purchase.id, orderItemId));
-  }, 0);
+  return view.orders.reduce((sum, purchase) => sum + pendingReplacementQuantity(view, purchase, orderItemId), 0);
 }
 
 function committedDispositions(
@@ -390,7 +401,7 @@ function committedDispositions(
     }
     if (outcome === 'cancel') return { orderItemId, quantity, outcome, replacement: null };
     const active = activeReplacementQuantity(view, orderItemId);
-    const retained = line.fromPurchaseOrderId ? active - quantity : active;
+    const retained = active - Math.min(quantity, pendingReplacementQuantity(view, po, orderItemId));
     if (retained + quantity > (remainingQuantities.get(orderItemId) ?? 0)) {
       throw new PurchaseError('累计有效替代采购不得超过客户订单行未发货数量');
     }
@@ -518,7 +529,7 @@ function approveRemaining(po: PO, input: PurchaseActionInput) {
 
 function registrationDetails(view: Workspace, po: PO, input: PurchaseActionInput) {
   if (po.orderedBefore) throw new PurchaseError('原采购单已登记过供应商订购结果');
-  if (po.commitmentExceptions.length) throw new PurchaseError('本单已有实际承诺异常，请沿用原异常记录跟进');
+  if (po.commitmentState !== 'ordinary') throw new PurchaseError('本单已有实际承诺异常，请沿用原异常记录跟进');
   if (!['approved', 'on_hold'].includes(po.status)) conflict();
   const occurredAt = purchaseTimestamp(input.occurredAt, '供应商实际确认订购时间');
   const at = Date.parse(occurredAt);
@@ -626,11 +637,15 @@ function actionDetails(
       throw new PurchaseError('此前已登记供方取消，须按书面取消结果核对费用或退款');
     }
     const prior = po.ledger.find(row => row.id === exception.id)!;
+    const description = requiredText(input.description, '核对结果及已付款的后续安排');
     return { action, exceptionId: exception.id, resolution, responsibleActor: actor.id, actualCommitment: purchaseOperation(prior.detail),
-      remainingReviewPending: po.needsRemainingReview,
+      remainingReviewPending: resolution === 'payable_verified' && po.needsRemainingReview,
       reference: requiredText(input.reference, '供方书面处理结果及原合同应付核对依据'),
       referenceSha256: documentSha256(input.referenceSha256, '异常处理结果书证摘要'),
-      description: requiredText(input.description, '核对结果及已付款的后续安排') };
+      description,
+      refund: resolution === 'supplier_cancelled' && po.paidCents > 0 ? {
+        status: 'pending_review' as const, paidCents: po.paidCents, responsibleActor: actor.id, followup: description,
+      } : null };
   }
   if (action === 'approve' || action === 'approve_lead_time') {
     if (po.status !== 'draft' || po.orderedBefore || po.paidCents || !po.lines.length || !view.eligibility.eligible
@@ -675,6 +690,9 @@ function actionDetails(
     const committed = po.orderedBefore || po.paidCents > 0 || po.commitmentExceptions.length > 0;
     const disposedBefore = po.ledger.some(row => row.action === 'resolve_change' && snapshot(row)?.operation.dispositions?.length);
     if (input.outcome === 'replacement' && !committed) throw new PurchaseError('尚未订购或付款的采购单应按修订条款重新批准');
+    if (input.outcome === 'original_terms' && po.commitmentState === 'supplier_cancelled') {
+      throw new PurchaseError('供方已整笔取消。尚需订购的商品须另建采购并独立批准');
+    }
     if (input.outcome === 'original_terms' && disposedBefore && (!po.remainingScope || !['approved', 'ordered'].includes(previousStatus))) {
       throw new PurchaseError('已经取消或交给替代单的数量不能恢复原单，请核对剩余商品');
     }
@@ -813,11 +831,14 @@ export async function applyPurchaseAction(tx: Db, input: PurchaseActionInput, ac
   if (op.action === 'approve_remaining') { status = po.orderedBefore ? 'ordered' : 'approved'; approvedHash = po.contentHash; }
   if (op.action === 'register_order' && status === 'approved') status = 'ordered';
   if (op.action === 'record_late_order_exception' && op.category === 'credit') status = 'on_hold';
-  if (op.action === 'resolve_order_exception' && op.resolution === 'payable_verified' && !po.openIncidentId && po.dueCents !== null) status = 'ordered';
+  if (op.action === 'resolve_order_exception') {
+    status = op.resolution === 'payable_verified' && !po.openIncidentId && !op.remainingReviewPending && po.remaining.length
+      ? 'ordered' : 'on_hold';
+  }
   if (op.action === 'report_change') status = 'on_hold';
   if (op.action === 'resolve_change' && op.outcome === 'original_terms') {
-    if (po.commitmentExceptions.some(row => !row.resolution || row.resolution === 'supplier_cancelled')) status = 'on_hold';
-    else status = po.orderedBefore && (op.previousStatus === 'approved' || po.commitmentExceptions.some(row => row.resolution === 'payable_verified'))
+    if (po.commitmentState === 'pending') status = 'on_hold';
+    else status = po.orderedBefore && (op.previousStatus === 'approved' || po.commitmentState === 'payable_verified')
       ? 'ordered' : op.previousStatus!;
   }
   if (op.action === 'resolve_change' && op.outcome === 'declined' && !op.dispositions) status = 'superseded';

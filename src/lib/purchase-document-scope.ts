@@ -1,7 +1,7 @@
 import type { Prisma } from '@prisma/client';
 import { jsonObject } from '@/lib/order-catalog-repricing';
 import { pricingContentHash } from '@/lib/pricing-adjustment-approval';
-import { addPurchaseActivity, purchaseObject, type PurchaseActivity, type PurchaseActor } from '@/lib/purchase-activity';
+import { addPurchaseActivity, purchaseObject, purchaseOperation, readPurchaseActivities, type PurchaseActivity, type PurchaseActor } from '@/lib/purchase-activity';
 import type { PurchaseSource } from '@/lib/purchase-source';
 import { documentSha256, positiveCents, PurchaseError, type PurchaseTerms } from '@/lib/purchase-terms';
 
@@ -21,15 +21,26 @@ function sameOffer(left: Scope, right: Scope) {
   return left.sha256 === right.sha256 && pricingContentHash({ goods: left.goods, offer: left.offer }) === pricingContentHash({ goods: right.goods, offer: right.offer });
 }
 
-function previouslyCheckedScope(previous: Scope[], intended: Scope) {
-  const matches = previous.filter(row => sameOffer(row, intended));
-  return matches.length === 1 ? matches[0] : undefined;
+function documentedScope(line: SupplyLine, ledger: PurchaseActivity[]) {
+  const intended = documentLine(line);
+  if (!intended.sha256) return undefined;
+  if (line.terms.sourceDocumentKind || line.source.written?.replyHash === intended.sha256) return intended;
+  const verified = ledger.flatMap(row => {
+    if (row.action === 'review_supplier_document_scope' && row.orderItemId === line.source.orderItemId) {
+      return [row.detail.document as Scope];
+    }
+    if (row.action !== 'reapprove_purchase') return [];
+    const scopes = purchaseOperation(row.detail).documentScopes as Array<SupplyLine & { orderItemId: string }> | undefined;
+    return Array.isArray(scopes) ? scopes.flatMap(entry => entry?.orderItemId === line.source.orderItemId
+      && entry.source?.orderItemId === line.source.orderItemId && entry.terms?.sourceDocumentKind ? [documentLine(entry)] : []) : [];
+  }).filter(scope => scope && sameOffer(scope, intended));
+  const [first] = verified;
+  return first && verified.every(scope => scope.kind === first.kind && scope.row === first.row) ? first : undefined;
 }
 
 export function agreedDocumentTerms(line: SupplyLine, ledger: PurchaseActivity[]) {
   if (line.terms.sourceDocumentKind || !line.terms.sourceSha256 || line.source.written?.replyHash === line.terms.sourceSha256) return line.terms;
-  const known = previouslyCheckedScope(ledger.filter(row => row.action === 'review_supplier_document_scope' && row.orderItemId === line.source.orderItemId)
-    .map(row => row.detail.document as Scope), documentLine(line));
+  const known = documentedScope(line, ledger);
   return known ? { ...line.terms, sourceDocumentKind: known.kind, sourceDocumentRow: known.kind === 'multiple_items' ? known.row : undefined } : line.terms;
 }
 
@@ -71,6 +82,7 @@ export async function assertSupplierDocumentScopes(tx: Db, lines: SupplyLine[], 
   attestation?: { orderId: string; purchaseOrderId?: string; actor: PurchaseActor }; restoredLines?: SupplyLine[];
 }) {
   const checked: Scope[] = [];
+  const history = new Map<string, PurchaseActivity[]>();
   for (const line of lines) {
     const intended = documentLine(line);
     if (!intended.sha256) continue;
@@ -91,11 +103,11 @@ export async function assertSupplierDocumentScopes(tx: Db, lines: SupplyLine[], 
       SELECT detail FROM PurchaseActivity WHERE action='review_supplier_document_scope'
         AND json_extract(detail,'$.document.sha256')=${intended.sha256}`;
     const previous = receipts.map(row => jsonObject(row.detail).document as Scope);
-    const legacy = await tx.$queryRaw<{ source: string; terms: string }[]>`
-      SELECT r.source,r.terms FROM PurchaseRequirement r JOIN PurchaseOrder p ON p.id=r.purchaseOrderId
+    const legacy = await tx.$queryRaw<{ source: string; terms: string; orderId: string; purchaseOrderId: string }[]>`
+      SELECT r.source,r.terms,r.orderId,r.purchaseOrderId FROM PurchaseRequirement r JOIN PurchaseOrder p ON p.id=r.purchaseOrderId
       WHERE p.approvedHash IS NOT NULL AND json_extract(r.terms,'$.sourceSha256')=${intended.sha256}
         AND json_type(r.terms,'$.verification')='object'
-      UNION ALL SELECT r.source,r.terms FROM PurchaseReplacementLine r JOIN PurchaseOrder p ON p.id=r.purchaseOrderId
+      UNION ALL SELECT r.source,r.terms,r.orderId,r.purchaseOrderId FROM PurchaseReplacementLine r JOIN PurchaseOrder p ON p.id=r.purchaseOrderId
       WHERE p.approvedHash IS NOT NULL AND json_extract(r.terms,'$.sourceSha256')=${intended.sha256}
         AND json_type(r.terms,'$.verification')='object'`;
     for (const known of previous) compareScope(known, intended);
@@ -104,9 +116,17 @@ export async function assertSupplierDocumentScopes(tx: Db, lines: SupplyLine[], 
     const restoring = options?.restoredLines?.some(row => row.source.orderItemId === line.source.orderItemId && row.terms.sourceSha256 === intended.sha256);
     for (const row of legacy) {
       const historical: SupplyLine = { source: JSON.parse(row.source), terms: JSON.parse(row.terms) };
-      if (historical.terms.sourceDocumentKind || (native && historical.source.written?.replyHash === intended.sha256)) {
-        compareScope(documentLine(historical), intended);
-      } else if (!restoring && !alreadyVerified) {
+      let scope = documentedScope(historical, []);
+      if (!scope) {
+        let ledger = history.get(row.orderId);
+        if (!ledger) {
+          ledger = await readPurchaseActivities(tx, row.orderId);
+          history.set(row.orderId, ledger);
+        }
+        scope = documentedScope(historical, ledger.filter(event => event.purchaseOrderId === row.purchaseOrderId));
+      }
+      if (scope) compareScope(scope, intended);
+      else if (!restoring && !alreadyVerified) {
         throw new PurchaseError('旧供货书证须先以原件逐行核对适用的商品和数量');
       }
     }
