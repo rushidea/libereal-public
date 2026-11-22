@@ -7,7 +7,7 @@ import {
 } from '@/lib/purchase-contract';
 import { previewShipmentAttribution, purchaseFulfillmentReview, type ShipmentAttributionInput } from '@/lib/purchase-fulfillment';
 import { agreedDocumentTerms, assertSupplierDocumentScopes, missingDocumentScopes, restoreDocumentScopes } from '@/lib/purchase-document-scope';
-import { decisionDocumentRow, decisionMaterialTerms, previewDecisionDocuments, type DecisionDocumentInput } from '@/lib/purchase-decision-documents';
+import { decisionDocumentRow, decisionTermsChanged, previewDecisionDocuments, type DecisionDocumentInput, type DecisionEffect } from '@/lib/purchase-decision-documents';
 import { pricingContentHash } from '@/lib/pricing-adjustment-approval';
 import { loadPurchaseOrderSource, loadPurchaseLines, type PurchaseSource, type SourceOrder } from '@/lib/purchase-source';
 import { creditExceptionMatches, paymentPlanAt, paymentPlanContent, paymentPlanFromReview, purchaseCreditVersion, purchaseStartReview, type PaymentPlan } from '@/lib/purchase-start';
@@ -39,6 +39,7 @@ export type PurchaseActionInput = {
   outcome?: 'original_terms' | 'revised_terms' | 'declined' | 'replacement' | 'shortfall';
   supplierReference?: string; supplierSha256?: string; customerReference?: string; customerSha256?: string;
   revisedTerms?: LineEdit[]; dispositions?: DispositionInput[]; refundFollowup?: string;
+  decisionDocumentLines?: Array<DecisionDocumentInput & { orderItemId: string }>;
   paymentReference?: string; paymentSha256?: string; leadTimeReference?: string; leadTimeSha256?: string;
   remainingLines?: Array<{ orderItemId: string; payableCents: number }>;
   appliedPaidCents?: number;
@@ -755,11 +756,14 @@ function actionDetails(
     if (input.outcome === 'original_terms' && disposedBefore && (!po.remainingScope || !['approved', 'ordered'].includes(previousStatus))) {
       throw new PurchaseError('已经取消或交给替代单的数量不能恢复原单，请核对剩余商品');
     }
-    const writtenEvidence = committed ? {
+    const changesContinuation = input.outcome === 'original_terms' || input.outcome === 'declined';
+    const needsWrittenDecision = committed || (changesContinuation
+      && (previousStatus === 'approved' || Boolean(input.supplierSha256 || input.customerSha256)));
+    const writtenEvidence = needsWrittenDecision ? {
       supplierSha256: documentSha256(input.supplierSha256, '供方书面回复摘要'),
       customerSha256: documentSha256(input.customerSha256, '客户书面回复摘要'),
     } : null;
-    const dispositions = writtenEvidence && (input.outcome === 'declined' || input.outcome === 'replacement' || input.outcome === 'shortfall')
+    const dispositions = committed && (input.outcome === 'declined' || input.outcome === 'replacement' || input.outcome === 'shortfall')
       ? committedDispositions(view, po, input, customerLines, remainingQuantities) : undefined;
     if (dispositions?.some(line => line.replacement) && !view.eligibility.eligible) {
       throw new PurchaseError('另建替代采购前须先核实客户订单仍符合采购启动条件');
@@ -790,6 +794,34 @@ function supplyEvidenceFor(po: PO, operation: ReturnType<typeof actionDetails> |
   return [];
 }
 
+async function prepareCoordinationEvidence(
+  tx: Db, po: PO, input: PurchaseActionInput, details: Extract<ReturnType<typeof actionDetails>, { action: 'resolve_change' }>,
+) {
+  const { orderId, purchaseOrderId } = input;
+  const { supplierSha256 } = details;
+  let { customerSha256 } = details;
+  const effects: DecisionEffect[] = details.dispositions ?? [];
+  if (details.revisedTerms) {
+    for (const edit of details.revisedTerms) {
+      const prior = po.lines.find(row => row.orderItemId === edit.orderItemId);
+      if (!prior?.replacementId) continue;
+      const replacement = { source:prior.source, terms:edit.terms };
+      if (!decisionTermsChanged(prior.source,prior.terms,edit.terms)) continue;
+      effects.push({ orderItemId:edit.orderItemId, quantity:prior.source.quantity, outcome:'reconfirm_terms', replacement });
+    }
+    if (effects.length) customerSha256 = documentSha256(input.customerSha256,'替代条件变更后客户同意的书证摘要');
+  } else if (!details.dispositions && supplierSha256 && customerSha256) {
+    const outcome = details.outcome === 'original_terms' ? 'continue_contract' : 'decline_preparation';
+    effects.push(...po.remaining.map(line => ({...line,outcome})));
+    if (!effects.length) throw new PurchaseError('请核对书面决定所涉及的原采购行和剩余数量');
+  }
+  if (!effects.length) return { ...details, decisionDocuments: undefined };
+  const decisionDocuments = await previewDecisionDocuments(tx, { orderId,purchaseOrderId,supplierSha256,customerSha256,effects,
+    documents: details.dispositions ? input.dispositions! : input.decisionDocumentLines ?? [],
+  });
+  return { ...details,customerSha256,decisionDocuments };
+}
+
 export async function previewPurchaseAction(tx: Db, input: PurchaseActionInput, actor: PurchaseActor) {
   const view = await purchaseWorkspace(tx, input.orderId);
   const po = view.orders.find(order => order.id === input.purchaseOrderId);
@@ -803,21 +835,9 @@ export async function previewPurchaseAction(tx: Db, input: PurchaseActionInput, 
   const currentLines = original ? await loadPurchaseLines(tx, original) : [];
   const remaining = original ? remainingDemand(original) : new Map<string, number>();
   const details = commitment ? await previewCommitment(tx, original!, view, po, input, actor) : actionDetails(view, po, input, currentLines, remaining, actor);
-  if (details.action === 'resolve_change' && details.revisedTerms?.some(edit => {
-    const prior = po.lines.find(row => row.orderItemId === edit.orderItemId);
-    return prior?.replacementId && pricingContentHash(decisionMaterialTerms({source:prior.source,terms:prior.terms}))
-      !== pricingContentHash(decisionMaterialTerms({source:prior.source,terms:edit.terms}));
-  })) {
-    const customerSha256 = documentSha256(input.customerSha256,'替代条件变更后客户同意的书证摘要');
-    const used = await tx.$queryRaw<{ id: string }[]>`SELECT id FROM PurchaseActivity WHERE action='resolve_change'
-      AND json_extract(detail,'$.snapshot.operation.customerSha256')=${customerSha256} LIMIT 1`;
-    if (used.length) throw new PurchaseError('替代采购的供方或实质条件已变更，须核对客户新的书面同意');
-    details.customerSha256 = customerSha256;
-  }
-  const operation = details.action === 'resolve_change' && details.dispositions && details.supplierSha256 && details.customerSha256
-    ? { ...details, decisionDocuments: await previewDecisionDocuments(tx, { orderId: view.orderId, purchaseOrderId: po.id,
-      supplierSha256: details.supplierSha256, customerSha256: details.customerSha256, dispositions: details.dispositions, documents: input.dispositions!,
-    }) } : details;
+  const operation = details.action === 'resolve_change'
+    ? await prepareCoordinationEvidence(tx, po, input, details)
+    : details;
   await assertSupplierDocumentScopes(tx, supplyEvidenceFor(po, operation), operation.action === 'reapprove_purchase'
     ? { restoredLines: operation.documentScopes } : undefined);
   const scoped = operation.action === 'register_order' ? operation.execution.lines

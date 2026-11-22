@@ -16,8 +16,9 @@ export type DecisionDocumentInput = {
   supplierRestoreScope?: boolean; customerRestoreScope?: boolean;
   supplierLegacyLocations?: LegacyDecisionLocation[]; customerLegacyLocations?: LegacyDecisionLocation[];
 };
-type Purpose = 'free_resend' | 'supplier_facts' | 'new_purchase' | 'amend_contract' | 'amend_and_replace' | 'cancel_unshipped' | 'replace_unshipped' | 'reconfirm_terms';
-type DecisionEffect = {
+type Purpose = 'free_resend' | 'supplier_facts' | 'new_purchase' | 'amend_contract' | 'amend_and_replace' | 'cancel_unshipped' | 'replace_unshipped'
+  | 'reduce_contract' | 'continue_contract' | 'decline_preparation' | 'reconfirm_terms';
+export type DecisionEffect = {
   orderItemId: string; quantity: number; shortfallId?: string; shortfallDecision?: string; forwardingLossId?: string; outcome: string;
   replacement?: { terms: PurchaseTerms; source: { brand?: string | null; catalogNumber?: string | null; spec?: string | null; unit?: string | null; quantity: number } } | null;
 };
@@ -35,17 +36,28 @@ export function decisionMaterialTerms(replacement: NonNullable<DecisionEffect['r
   return { brand: source.brand, catalogNumber: source.catalogNumber, spec: source.spec, unit: source.unit,
     supplier,writtenSupplier,payee,unitPriceCents,currency,taxBasis,freightTerms,paymentTerms,leadTime,validUntil,supplierConditions,adjustment };
 }
+export function decisionTermsChanged(source: NonNullable<DecisionEffect['replacement']>['source'], before: PurchaseTerms, after: PurchaseTerms) {
+  return !sameVersion(decisionMaterialTerms({source,terms:before}),decisionMaterialTerms({source,terms:after}));
+}
 
 type Authority = { purpose: Purpose; alternate?: ReturnType<typeof decisionMaterialTerms> };
+function authorityForParty(role: Party, authority: Authority | undefined) {
+  if (role !== 'supplier' || !authority) return authority;
+  return ['amend_contract','amend_and_replace','cancel_unshipped','replace_unshipped'].includes(authority.purpose)
+    ? { purpose:'reduce_contract' as const } : authority;
+}
+
 function commercialAuthority(role: Party, line: DecisionEffect): Authority {
+  if (line.outcome === 'continue_contract' || line.outcome === 'decline_preparation') return { purpose:line.outcome };
   let purpose: Purpose;
   switch (line.shortfallDecision ?? (line.forwardingLossId ? 'new_purchase' : undefined)) {
     case 'free_resend': purpose = 'free_resend'; break;
     case 'new_purchase': purpose = role === 'supplier' ? 'supplier_facts' : 'new_purchase'; break;
     case 'change_contract': purpose = line.replacement ? 'amend_and_replace' : 'amend_contract'; break;
-    default: purpose = line.outcome === 'replace' ? 'replace_unshipped' : 'cancel_unshipped';
+    default: purpose = line.outcome === 'reconfirm_terms' ? 'reconfirm_terms' : line.outcome === 'replace' ? 'replace_unshipped' : 'cancel_unshipped';
   }
-  return role === 'customer' && line.replacement ? { purpose, alternate: decisionMaterialTerms(line.replacement) } : { purpose };
+  const authority = role === 'customer' && line.replacement ? { purpose, alternate: decisionMaterialTerms(line.replacement) } : { purpose };
+  return authorityForParty(role,authority)!;
 }
 type DocumentUse = { role: Party; sha256: string; row?: number; coverage: DecisionCoverage[]; allocations: DecisionCoverage[];
   scopeConfirmed: boolean; authority: Authority; legacyLocations?: LegacyDecisionLocation[] };
@@ -110,27 +122,50 @@ function readLocations(value: unknown): LegacyDecisionLocation[] {
   });
 }
 
+function historicalRevisions(
+  record: { id: string; orderId: string; purchaseOrderId: string },
+  snapshot: Record<string,unknown>,
+  operation: Record<string,unknown>,
+): PriorUse[] {
+  if (operation.outcome !== 'revised_terms' || typeof operation.customerSha256 !== 'string'
+    || !Array.isArray(snapshot.lines) || !Array.isArray(operation.revisedTerms)) return [];
+  const revisions = operation.revisedTerms as Array<{ orderItemId: string; terms: PurchaseTerms }>;
+  const lines = snapshot.lines as Array<NonNullable<DecisionEffect['replacement']> & { orderItemId: string; fromPurchaseOrderId?: string }>;
+  return revisions.flatMap(edit => {
+    const prior = lines.find(line => line.orderItemId === edit.orderItemId);
+    if (!prior?.fromPurchaseOrderId || !positiveCents(prior.source?.quantity) || !decisionTermsChanged(prior.source,prior.terms,edit.terms)) return [];
+    const target = { orderId:record.orderId,purchaseOrderId:record.purchaseOrderId,orderItemId:edit.orderItemId,quantity:prior.source.quantity };
+    const authority = commercialAuthority('customer',{ ...target,outcome:'reconfirm_terms',replacement:{ source:prior.source,terms:edit.terms } });
+    return [{ role:'customer',sha256:operation.customerSha256 as string,activityId:record.id,unlocated:true,authority,allocations:[target] }];
+  });
+}
+
 async function priorUses(tx: Db, digests: string[]) {
   const rows = await tx.$queryRaw<Array<{ id: string; orderId: string; purchaseOrderId: string; detail: string }>>`
     SELECT id,orderId,purchaseOrderId,detail FROM PurchaseActivity WHERE action='resolve_change'
       AND (json_extract(detail,'$.snapshot.operation.supplierSha256') IN (${Prisma.join(digests)})
         OR json_extract(detail,'$.snapshot.operation.customerSha256') IN (${Prisma.join(digests)})) ORDER BY rowid`;
   return rows.flatMap(record => {
-    const operation = purchaseOperation(JSON.parse(record.detail));
-    if (!Array.isArray(operation.dispositions)) {
-      return operation.outcome === 'revised_terms' && typeof operation.customerSha256 === 'string'
-        ? [{ role:'customer' as const, sha256:operation.customerSha256, activityId:record.id,
-          authority:{ purpose:'reconfirm_terms' as const }, allocations:[] }]
-        : [];
-    }
-    const dispositions = operation.dispositions as DecisionEffect[];
+    const detail = purchaseObject(JSON.parse(record.detail));
+    const operation = purchaseOperation(detail);
+    const dispositions = Array.isArray(operation.dispositions) ? operation.dispositions as DecisionEffect[] : undefined;
     if (Array.isArray(operation.decisionDocuments)) return (operation.decisionDocuments as DocumentUse[]).map(document => {
-      const effects = document.allocations.map(allocation => dispositions.find(line => line.orderItemId === allocation.orderItemId));
+      const effects = document.allocations.map(allocation => dispositions?.find(line => line.orderItemId === allocation.orderItemId));
       const first = effects[0] && commercialAuthority(document.role,effects[0]);
       const inferred = first && effects.every(line => line && sameVersion(first,commercialAuthority(document.role,line))) ? first : undefined;
-      return { ...document, authority: document.authority ?? inferred,
+      return { ...document, authority: authorityForParty(document.role,document.authority) ?? inferred,
         coverage: document.scopeConfirmed ? document.coverage : undefined, activityId: record.id };
     });
+    if (!dispositions) {
+      const locatedChanges = historicalRevisions(record,purchaseObject(detail.snapshot),operation);
+      if (locatedChanges.length) return locatedChanges;
+      const knownPurpose = operation.outcome === 'original_terms' ? 'continue_contract' : operation.outcome === 'declined' ? 'decline_preparation'
+        : operation.outcome === 'revised_terms' ? 'reconfirm_terms' : undefined;
+      return !knownPurpose ? [] : parties.flatMap(role => {
+        const sha256 = operation[digestField(role)];
+        return typeof sha256 === 'string' ? [{ role, sha256, activityId:record.id, authority:{ purpose:knownPurpose }, allocations:[] }] : [];
+      });
+    }
     return parties.flatMap(role => {
       const sha256 = operation[digestField(role)];
       if (typeof sha256 !== 'string' || !digests.includes(sha256)) return [];
@@ -207,24 +242,30 @@ async function verifyCoverage(tx: Db, coverage: DecisionCoverage[]) {
 }
 
 export async function previewDecisionDocuments(tx: Db, input: {
-  orderId: string; purchaseOrderId: string; supplierSha256: string; customerSha256: string;
-  dispositions: DecisionEffect[];
+  orderId: string; purchaseOrderId: string; supplierSha256?: string; customerSha256?: string;
+  effects: DecisionEffect[];
   documents: Array<DecisionDocumentInput & { orderItemId: string }>;
 }) {
+  if (!Array.isArray(input.documents) || input.documents.some(row => !row || typeof row.orderItemId !== 'string')
+    || new Set(input.documents.map(row => row.orderItemId)).size !== input.documents.length) {
+    throw new PurchaseError('请逐行填写书证原件范围', 400);
+  }
   const requested = new Map<string,RequestedUse>();
-  for (const use of input.dispositions) {
-    const selected = input.documents.find(row => row.orderItemId === use.orderItemId)!;
+  for (const use of input.effects) {
+    const selected = input.documents.find(row => row.orderItemId === use.orderItemId);
     const {orderId,purchaseOrderId} = input;
     const allocation = { orderId, purchaseOrderId, orderItemId: use.orderItemId, ...(use.shortfallId ? { shortfallId: use.shortfallId } : {}), quantity: use.quantity };
     for (const role of parties) {
-      const row = decisionDocumentRow(selected[rowField(role)]);
-      const coverage = normalizeCoverage(selected[scopeField(role)]);
-      const restore = selected[restoreField(role)] === true;
-      const legacyLocations = readLocations(selected[legacyField(role)]);
+      const sha256 = input[digestField(role)];
+      if (!sha256) continue;
+      const row = decisionDocumentRow(selected?.[rowField(role)]);
+      const coverage = normalizeCoverage(selected?.[scopeField(role)]);
+      const restore = selected?.[restoreField(role)] === true;
+      const legacyLocations = readLocations(selected?.[legacyField(role)]);
       if (((coverage || legacyLocations.length) && !row) || (restore && !coverage)) {
         throw new PurchaseError('分次使用或补录范围时，须核对原件行号与明确的覆盖数量',400);
       }
-      const current = { role, sha256: input[digestField(role)], row, coverage, restore, legacyLocations,
+      const current = { role, sha256, row, coverage, restore, legacyLocations,
         authority: commercialAuthority(role,use), allocations: [allocation] };
       const key = documentKey(current);
       const previous = requested.get(key);
@@ -241,6 +282,7 @@ export async function previewDecisionDocuments(tx: Db, input: {
       }
     }
   }
+  if (!requested.size) return [];
   const history = await priorUses(tx,[...new Set([...requested.values()].map(row => row.sha256))]);
   const result = [];
   for (const current of requested.values()) {

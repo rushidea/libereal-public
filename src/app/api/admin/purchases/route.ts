@@ -120,6 +120,7 @@ export async function POST(req: NextRequest) {
       description: body.description, outcome: body.outcome, supplierReference: body.supplierReference,
       supplierSha256: body.supplierSha256, customerReference: body.customerReference, customerSha256: body.customerSha256,
       revisedTerms: body.revisedTerms, dispositions: body.dispositions, refundFollowup: body.refundFollowup,
+      decisionDocumentLines: body.decisionDocumentLines,
       paymentReference: body.paymentReference, paymentSha256: body.paymentSha256, leadTimeReference: body.leadTimeReference,
       leadTimeSha256: body.leadTimeSha256, remainingLines: body.remainingLines, appliedPaidCents: body.appliedPaidCents,
       exceptionOutcome: body.exceptionOutcome,
