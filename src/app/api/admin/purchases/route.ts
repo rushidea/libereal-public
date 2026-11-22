@@ -50,7 +50,7 @@ const purchasePermissions = {
   approve: 'purchases.approve', approve_lead_time: 'purchases.approve', register_order: 'purchases.write',
   record_payment: 'purchases.pay', report_change: 'purchases.write', resolve_change: 'purchases.read',
   review_legacy_approval: 'purchases.approve', approve_remaining: 'purchases.approve', record_late_order_exception: 'purchases.approve',
-  reapprove_purchase: 'purchases.approve',
+  reapprove_purchase: 'purchases.approve', resolve_order_exception: 'purchases.approve',
 } as const satisfies Record<PurchaseActionInput['action'], AdminPermissionKey>;
 
 const startPermissions = {
@@ -62,7 +62,8 @@ async function requireResolutionPermission(tx: Prisma.TransactionClient, order: 
   if (order?.action !== 'resolve_change') return null;
   const [commitment] = await tx.$queryRaw<Array<{ id: string }>>`SELECT id FROM PurchaseActivity
     WHERE orderId=${order.orderId} AND purchaseOrderId=${order.purchaseOrderId}
-      AND action IN ('register_order','record_payment') LIMIT 1`;
+      AND (action IN ('register_order','record_payment') OR (action='record_late_order_exception'
+        AND json_extract(detail,'$.snapshot.operation.category')='credit')) LIMIT 1`;
   const permission = commitment ? 'purchases.approve' : 'purchases.write';
   if (!permissions.includes(permission)) {
     throw new PurchaseError(commitment ? '已订购或已付款的处理结果须由采购审批人员核对' : '当前账号没有采购经办权限', 403);
@@ -83,17 +84,18 @@ export async function POST(req: NextRequest) {
         : start ? startPermissions[body.action as PurchaseStartInput['action']] : purchasePermissions[body.action as PurchaseActionInput['action']];
     const user = await requireAdmin(permission, { skipStepUp: true });
     if (user instanceof NextResponse) return user;
+    const actor = { id: user.id, email: user.email };
     const permissions = await getAdminPermissions(user);
     if (!permissions.includes('purchases.read')) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     const orderId = requiredText(body.orderId, '原订单编号');
     if (draft) {
       const workspace = await prisma.$transaction(async tx => {
-        if (body.action === 'prepare') return prepareOrderPurchases(tx, orderId, user);
+        if (body.action === 'prepare') return prepareOrderPurchases(tx, orderId, actor);
         if (!Number.isSafeInteger(body.revision)) throw new PurchaseError('请重新加载采购行版本');
         return savePurchaseLine(tx, {
           orderId, orderItemId: requiredText(body.orderItemId, '原订单行编号'), revision: body.revision,
           terms: body.terms, checkedEvidence: body.checkedEvidence === true,
-        }, user);
+        }, actor);
       }, { isolationLevel: 'Serializable' });
       return NextResponse.json({ workspace });
     }
@@ -121,13 +123,15 @@ export async function POST(req: NextRequest) {
       paymentReference: body.paymentReference, paymentSha256: body.paymentSha256, leadTimeReference: body.leadTimeReference,
       leadTimeSha256: body.leadTimeSha256, remainingLines: body.remainingLines, appliedPaidCents: body.appliedPaidCents,
       exceptionOutcome: body.exceptionOutcome,
+      exceptionId: body.exceptionId, exceptionResolution: body.exceptionResolution,
+      documentScopes: body.documentScopes,
     };
     if (body.stage === 'preview') {
       const preview = await prisma.$transaction(async tx => {
-        if (shipment) return previewPurchaseShipment(tx, shipment, user);
+        if (shipment) return previewPurchaseShipment(tx, shipment, actor);
         await requireResolutionPermission(tx, purchase, permissions);
-        if (orderReview) return previewPurchaseStartAction(tx, orderReview, user);
-        return previewPurchaseAction(tx, purchase!, user);
+        if (orderReview) return previewPurchaseStartAction(tx, orderReview, actor);
+        return previewPurchaseAction(tx, purchase!, actor);
       });
       return NextResponse.json({ preview });
     }
@@ -142,10 +146,10 @@ export async function POST(req: NextRequest) {
       const approvalPermission = await requireResolutionPermission(tx, purchase, permissions) ?? permission;
       const authorization = { action: 'admin_sensitive' as const, permission: approvalPermission,
         sessionFingerprint: pricingContentHash({ userId: user.id, sessionId: user.sessionId }), verifiedAt: new Date().toISOString() };
-      if (shipment) return applyPurchaseShipment(tx, shipment, user, authorization);
-      if (purchase) return applyPurchaseAction(tx, purchase, user, authorization);
-      await applyPurchaseStartAction(tx, orderReview!, user, authorization);
-      return prepareOrderPurchases(tx, orderId, user);
+      if (shipment) return applyPurchaseShipment(tx, shipment, actor, authorization);
+      if (purchase) return applyPurchaseAction(tx, purchase, actor, authorization);
+      await applyPurchaseStartAction(tx, orderReview!, actor, authorization);
+      return prepareOrderPurchases(tx, orderId, actor);
     }, { isolationLevel: 'Serializable' });
     return NextResponse.json({ workspace });
   } catch (error) { return failure(error); }

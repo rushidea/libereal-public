@@ -1,15 +1,16 @@
 import { randomUUID } from 'node:crypto';
 import type { Prisma } from '@prisma/client';
-import { addPurchaseActivity, findPurchaseActivityByRequest, readPurchaseActivities, type PurchaseActor, type PurchaseActivity, type PurchaseAuthorization } from '@/lib/purchase-activity';
+import { addPurchaseActivity, findPurchaseActivityByRequest, purchaseObject, purchaseOperation, readPurchaseActivities, type PurchaseActor, type PurchaseActivity, type PurchaseAuthorization } from '@/lib/purchase-activity';
 import {
   approvalAt, contractContent, dispositionSummary, isPurchaseApproval, legacyApproval, legacyApprovalReview, legacyArchiveEvidence, purchaseSnapshot as snapshot, remainingApproval,
   type PurchaseLineSource as LineSource, type PurchaseStatus as Status, type RemainingScope,
 } from '@/lib/purchase-contract';
 import { previewShipmentAttribution, purchaseFulfillmentReview, type ShipmentAttributionInput } from '@/lib/purchase-fulfillment';
-import { assertSupplierDocumentScopes } from '@/lib/purchase-document-scope';
+import { agreedDocumentTerms, assertSupplierDocumentScopes, missingDocumentScopes, restoreDocumentScopes } from '@/lib/purchase-document-scope';
 import { pricingContentHash } from '@/lib/pricing-adjustment-approval';
 import { loadPurchaseOrderSource, loadPurchaseLines, type PurchaseSource, type SourceOrder } from '@/lib/purchase-source';
-import { paymentPlanAt, paymentPlanContent, paymentPlanFromReview, purchaseStartReview, type PaymentPlan } from '@/lib/purchase-start';
+import { creditExceptionMatches, paymentPlanAt, paymentPlanContent, paymentPlanFromReview, purchaseCreditVersion, purchaseStartReview, type PaymentPlan } from '@/lib/purchase-start';
+import { purchaseCreditAt } from '@/lib/purchase-credit-history';
 import {
   attestPurchaseTerms, documentSha256, initialPurchaseTerms, missingPurchaseTerms, missingWrittenTerms, normalizePurchaseTerms, positiveCents, PurchaseError,
   purchaseTimestamp, requireNewDocumentsForChangedTerms, requiredText, type PurchaseTerms,
@@ -27,7 +28,7 @@ type DispositionInput = { orderItemId: string; quantity: number; outcome: 'cance
 export type PurchaseActionInput = {
   orderId: string; purchaseOrderId: string;
   action: 'approve' | 'approve_lead_time' | 'register_order' | 'record_payment' | 'report_change' | 'resolve_change'
-    | 'review_legacy_approval' | 'approve_remaining' | 'record_late_order_exception' | 'reapprove_purchase';
+    | 'review_legacy_approval' | 'approve_remaining' | 'record_late_order_exception' | 'resolve_order_exception' | 'reapprove_purchase';
   version: string; requestId: string; actionHash?: string; reference?: string; amountCents?: number; conditionReference?: string;
   occurredAt?: string; referenceSha256?: string; description?: string;
   changeKind?: 'delay' | 'price' | 'unavailable' | 'other';
@@ -37,7 +38,10 @@ export type PurchaseActionInput = {
   paymentReference?: string; paymentSha256?: string; leadTimeReference?: string; leadTimeSha256?: string;
   remainingLines?: Array<{ orderItemId: string; payableCents: number }>;
   appliedPaidCents?: number;
+  documentScopes?: unknown;
   exceptionOutcome?: 'supplier_cancelled' | 'supplier_resolution_pending' | 'liability_review';
+  exceptionId?: string;
+  exceptionResolution?: 'supplier_cancelled' | 'payable_verified';
 };
 
 const group = (terms: PurchaseTerms) => pricingContentHash({
@@ -74,6 +78,18 @@ function currentIncident(ledger: PurchaseActivity[]) {
   const report = ledger.findLast(row => row.action === 'report_change');
   if (report && !ledger.some(row => row.action === 'resolve_change' && snapshot(row)?.operation.incidentId === report.id)) return report;
   return undefined;
+}
+
+function creditExceptions(ledger: PurchaseActivity[]) {
+  return ledger.flatMap(row => {
+    if (row.action !== 'record_late_order_exception') return [];
+    const operation = purchaseOperation(row.detail);
+    if (operation.category !== 'credit') return [];
+    const resolution = ledger.find(event => event.action === 'resolve_order_exception' && purchaseOperation(event.detail).exceptionId === row.id);
+    return [{ id: row.id, actorId: row.actorId, occurredAt: String(operation.occurredAt), reference: String(operation.reference),
+      outcome: String(operation.exceptionOutcome), resolution: resolution ? String(purchaseOperation(resolution.detail).resolution) : null,
+      resolutionId: resolution?.id ?? null }];
+  });
 }
 
 function remainingDemand(order: SourceOrder) {
@@ -138,12 +154,16 @@ export async function purchaseWorkspace(tx: Db, orderId: string) {
   const headers = await tx.$queryRaw<OrderRow[]>`SELECT id,status,revision,approvedHash FROM PurchaseOrder
     WHERE orderId=${orderId} AND (status <> 'superseded' OR EXISTS(
       SELECT 1 FROM PurchaseActivity a WHERE a.purchaseOrderId=PurchaseOrder.id
-        AND a.action IN ('register_order','record_payment'))) ORDER BY createdAt,id`;
+        AND a.action IN ('register_order','record_payment','record_late_order_exception'))) ORDER BY createdAt,id`;
   const rowsByPosition = rows.map(rowView).sort((a, b) => a.source.position - b.source.position);
   const orders = headers.map(header => {
     const ledger = activities.filter(row => row.purchaseOrderId === header.id);
-    const committed = ledger.find(row => row.action === 'register_order' || row.action === 'record_payment');
-    const registration = ledger.find(row => row.action === 'register_order');
+    const exceptions = creditExceptions(ledger);
+    const verifiedException = exceptions.find(row => row.resolution === 'payable_verified');
+    const committed = ledger.find(row => row.action === 'register_order' || row.action === 'record_payment'
+      || exceptions.some(exception => exception.id === row.id));
+    const normalRegistration = ledger.find(row => row.action === 'register_order');
+    const registration = normalRegistration ?? ledger.find(row => row.id === verifiedException?.id);
     const registered = snapshot(registration);
     const execution = registered?.operation?.execution;
     const lines = contractLines(rowsByPosition.filter(line => line.purchaseOrderId === header.id), header.id, committed);
@@ -166,6 +186,11 @@ export async function purchaseWorkspace(tx: Db, orderId: string) {
     const legacyReview = legacy && legacyApprovalReview(ledger, legacy.id);
     const latestApproval = ledger.findLast(isPurchaseApproval);
     const fundingApproval = latestApproval?.id === legacy?.id ? legacyReview : latestApproval;
+    const checkedTerms = snapshot(fundingApproval)?.operation.checkedTerms;
+    const supply = lines.map(line => {
+      const terms = checkedTerms?.find(checked => checked.orderItemId === line.orderItemId)?.terms ?? line.terms;
+      return { source: line.source, terms: agreedDocumentTerms({ source: line.source, terms }, activities) };
+    });
     const revision = Number(header.revision);
     return { ...header, revision, totalCents, contentHash, lines, ledger, paidCents, dueCents, remaining,
       remainingScope: reviewedScope ?? null, needsRemainingReview: disposed.ids.length > 0 && !reviewedScope && remaining.length > 0,
@@ -173,7 +198,10 @@ export async function purchaseWorkspace(tx: Db, orderId: string) {
       needsFundingReapproval: !registration && header.status === 'approved' && eligibility.eligible && Boolean(fundingApproval && latestApproval
         && (!approvalMatchesFunding(fundingApproval, startReview, activities)
           || !fundingUnchangedSince(latestApproval, startReview, activities, startReview.plan, Date.now()))),
-      canRegisterHistorical: !registration && (Boolean(cancellation) || header.status === 'on_hold') && Boolean(latestApproval),
+      canRegisterHistorical: !registration && !exceptions.length && (Boolean(cancellation) || header.status === 'on_hold') && Boolean(latestApproval),
+      canRecordCommitmentException: Boolean(latestApproval && (!registration || cancellation) && (cancellation || !exceptions.length)),
+      commitmentExceptions: exceptions,
+      documentReviewLines: missingDocumentScopes(supply),
       version: pricingContentHash({ contentHash, status: header.status, revision }),
       orderedBefore: Boolean(registration),
       leadTimeApproved: ledger.some(row => row.action === 'approve_lead_time'
@@ -183,6 +211,7 @@ export async function purchaseWorkspace(tx: Db, orderId: string) {
       orderReceipt: registration ? {
         occurredAt: registered?.operation?.occurredAt ?? null, registeredAt: registration.createdAt,
         reference: registered?.operation?.reference ?? null,
+        exception: !normalRegistration,
         lines: execution?.lines.map(line => ({ orderItemId: line.orderItemId, name: line.source.name, unit: line.source.unit,
           quantity: line.quantity, payableCents: line.payableCents })) ?? registered?.lines?.map(line => ({
           orderItemId: line.orderItemId, name: line.source.name, unit: line.source.unit, quantity: line.source.quantity,
@@ -310,7 +339,7 @@ type Disposition = {
 };
 
 function checkedEdits(po: PO, input: PurchaseActionInput) {
-  if (po.orderedBefore || po.paidCents > 0) throw new PurchaseError('已有订购或付款，请选择取消受影响数量或另建替代采购');
+  if (po.orderedBefore || po.paidCents > 0 || po.commitmentExceptions.length) throw new PurchaseError('已有订购或付款，请选择取消受影响数量或另建替代采购');
   const edits = input.revisedTerms;
   if (!Array.isArray(edits) || edits.length !== po.lines.length || new Set(edits.map(edit => edit?.orderItemId)).size !== edits.length) conflict();
   const values = po.lines.map(line => {
@@ -414,7 +443,7 @@ function assertApprovedTerms(po: PO, approval: ReturnType<typeof checkedApproval
 function reviewLegacyApproval(view: Workspace, po: PO, input: PurchaseActionInput) {
   const approval = legacyApproval(po.ledger);
   if (!approval || !po.needsLegacyReview || !view.startReview.acceptance
-    || (!view.eligibility.eligible && !view.cancellation)) conflict();
+    || (!view.startReview.active && !view.cancellation)) conflict();
   const evidence = legacyArchiveEvidence(view.orderId, po.id, po.contentHash, approval, po.ledger);
   const at = Date.parse(approval.createdAt);
   if (view.cancellation && Date.parse(view.cancellation.occurredAt) <= at) conflict();
@@ -447,7 +476,7 @@ function reviewLegacyApproval(view: Workspace, po: PO, input: PurchaseActionInpu
 
 function approveRemaining(view: Workspace, po: PO, input: PurchaseActionInput) {
   if (po.status !== 'on_hold' || po.openIncidentId || !po.needsRemainingReview || po.needsLegacyReview
-    || (!po.orderedBefore && !view.eligibility.eligible)) conflict();
+    || po.commitmentExceptions.some(row => !row.resolution) || (!po.orderedBefore && !view.eligibility.eligible)) conflict();
   const legacy = legacyApproval(po.ledger);
   const archived = legacy && legacyApprovalReview(po.ledger, legacy.id);
   const checkedTerms = snapshot(archived)?.operation.checkedTerms;
@@ -484,6 +513,7 @@ function approveRemaining(view: Workspace, po: PO, input: PurchaseActionInput) {
 
 function registrationDetails(view: Workspace, po: PO, input: PurchaseActionInput) {
   if (po.orderedBefore) throw new PurchaseError('原采购单已登记过供应商订购结果');
+  if (po.commitmentExceptions.length) throw new PurchaseError('本单已有实际承诺异常，请沿用原异常记录跟进');
   if (!['approved', 'on_hold'].includes(po.status)) conflict();
   const occurredAt = purchaseTimestamp(input.occurredAt, '供应商实际确认订购时间');
   const at = Date.parse(occurredAt);
@@ -499,11 +529,57 @@ function registrationDetails(view: Workspace, po: PO, input: PurchaseActionInput
   const fundingPlan = paymentPlanAt(review.orderTerms, view.activities, review.termsVersion, at);
   if (!review.acceptance || !fundingPlan) throw new PurchaseError('无法核实实际订购时的客户接单与付款条件');
   const execution = assertApprovedTerms(po, checkedApproval(view, po, approval, fundingPlan, at), at);
-  const receivedAt = review.payment.nativePaidAt && Date.parse(review.payment.nativePaidAt) <= at ? review.principal
-    : review.payment.receipts.reduce((sum, row) => sum + (row.counted && typeof row.occurredAt === 'string' && Date.parse(row.occurredAt) <= at ? row.amountCents : 0), 0);
+  const timelyReceipts = review.payment.receipts.filter(row => row.counted && typeof row.occurredAt === 'string' && Date.parse(row.occurredAt) <= at);
+  const nativePaid = review.payment.nativePaidAt && Date.parse(review.payment.nativePaidAt) <= at;
+  const receivedAt = nativePaid ? review.principal : timelyReceipts.reduce((sum, row) => sum + row.amountCents, 0);
   if (receivedAt < fundingPlan.requiredPrepayCents) throw new PurchaseError('须核实实际订购前本单已经满足的到账条件');
-  return { action: 'register_order' as const, occurredAt, execution, fundingPlan, receivedAt, priorCancellation: view.cancellation,
+  return { action: 'register_order' as const, occurredAt, execution, fundingPlan, receivedAt, receiptIds: timelyReceipts.map(row => row.id), priorCancellation: view.cancellation,
     reference: requiredText(input.reference, '供应商确认订购的单据编号'), referenceSha256: documentSha256(input.referenceSha256, '实际订购凭据摘要') };
+}
+
+async function previewCommitment(tx: Db, original: SourceOrder, view: Workspace, po: PO, input: PurchaseActionInput, actor: PurchaseActor) {
+  if (po.version !== input.version) conflict();
+  const exceptional = input.action === 'record_late_order_exception';
+  const occurredAt = purchaseTimestamp(input.occurredAt, '供应商实际接受订购时间');
+  const at = Date.parse(occurredAt);
+  if (at > Date.now()) throw new PurchaseError('实际订购时间不能晚于登记时间');
+  const cancellation = view.cancellation && at >= Date.parse(view.cancellation.occurredAt) ? view.cancellation : null;
+  if (exceptional && cancellation) {
+    if (!po.ledger.some(isPurchaseApproval)) conflict();
+    return commitmentException(input, actor, occurredAt, { category: 'cancellation', cancellation });
+  }
+  const order = registrationDetails(view, po, input);
+  const approval = po.ledger.find(row => row.id === order.execution.approvalId)!;
+  const basis = purchaseObject(snapshot(approval)?.eligibility).basis;
+  const credit = await purchaseCreditAt(tx, original, basis, Date.parse(approval.createdAt), at, Math.max(0, view.startReview.principal - order.receivedAt));
+  const review = view.startReview;
+  const version = credit.credit && purchaseCreditVersion(view.orderId, review.termsVersion, review.acceptance, order.fundingPlan,
+    { receiptIds: order.receiptIds, receivedCents: order.receivedAt }, credit.credit);
+  const exception = view.activities.findLast(row => row.action === 'approve_credit_exception' && Date.parse(row.createdAt) < at);
+  const exceptionId = credit.status === 'over_limit' && creditExceptionMatches(exception, version) ? exception?.id ?? null : null;
+  const applicable = { ...credit, exceptionId };
+  const allowed = credit.status === 'not_required' || credit.status === 'within_limit' || Boolean(exceptionId);
+  if (exceptional) {
+    if (allowed) throw new PurchaseError('实际承诺时的授信依据已核实，请补录正式订购');
+    return { ...commitmentException(input, actor, occurredAt, { category: 'credit', cancellation: null }), execution: order.execution, credit: applicable };
+  }
+  if (!allowed) {
+    const issue = credit.status === 'over_limit' ? '实际承诺时超过授信额度，且无当时适用的逐单批准'
+      : credit.status === 'restricted' ? '实际承诺时授信处于限制状态' : '实际承诺时的授信依据或先后无法确认';
+    throw new PurchaseError(`${issue}，请登记实际承诺异常`);
+  }
+  return { ...order, credit: applicable };
+}
+
+function commitmentException<Category extends 'credit' | 'cancellation'>(input: PurchaseActionInput, actor: PurchaseActor, occurredAt: string,
+  classification: { category: Category; cancellation: Workspace['cancellation'] }) {
+  const exceptionOutcome = input.exceptionOutcome;
+  if (exceptionOutcome !== 'supplier_cancelled' && exceptionOutcome !== 'supplier_resolution_pending' && exceptionOutcome !== 'liability_review') {
+    throw new PurchaseError('请选择供方取消、继续协调或责任待核的处理结果', 400);
+  }
+  return { action: 'record_late_order_exception' as const, occurredAt, ...classification, responsibleActor: actor.id, exceptionOutcome,
+    reference: requiredText(input.reference, '实际订购及处理结果的书面出处'), referenceSha256: documentSha256(input.referenceSha256, '订购异常书证摘要'),
+    description: requiredText(input.description, '异常处理结果和后续责任') };
 }
 
 function reapprovePurchase(view: Workspace, po: PO, input: PurchaseActionInput) {
@@ -513,9 +589,13 @@ function reapprovePurchase(view: Workspace, po: PO, input: PurchaseActionInput) 
   if (!approval) conflict();
   const legacy = legacyApproval(po.ledger);
   const archived = legacy?.id === approval.id ? legacyApprovalReview(po.ledger, approval.id) : undefined;
-  const execution = assertApprovedTerms(po, { approval, archived }, Date.now());
-  const checkedTerms = snapshot(archived)?.operation.checkedTerms ?? snapshot(approval)?.operation.checkedTerms;
-  return { action: 'reapprove_purchase' as const, originalApprovalId: approval.id, execution,
+  const verified = assertApprovedTerms(po, { approval, archived }, Date.now());
+  const supply = verified.lines.map(line => ({ ...line, terms: agreedDocumentTerms(line, view.activities) }));
+  const lines = restoreDocumentScopes(supply, input.documentScopes);
+  const checkedTerms = lines.map(line => ({ orderItemId: line.orderItemId, terms: line.terms }));
+  const documentScopes = lines.filter(line => po.documentReviewLines.some(row => row.orderItemId === line.orderItemId))
+    .map(line => ({ orderItemId: line.orderItemId, source: line.source, terms: line.terms }));
+  return { action: 'reapprove_purchase' as const, originalApprovalId: approval.id, execution: { ...verified, lines }, documentScopes,
     scope: po.remainingScope ?? undefined, checkedTerms, fundingPlan: view.startReview.plan,
     payments: po.ledger.filter(row => row.action === 'record_payment').map(row => ({
       id: row.id, amountCents: row.amountCents, reference: snapshot(row)?.operation.reference, recordedAt: row.createdAt,
@@ -533,19 +613,18 @@ function actionDetails(
   if (action === 'review_legacy_approval') return reviewLegacyApproval(view, po, input);
   if (action === 'reapprove_purchase') return reapprovePurchase(view, po, input);
   if (action === 'approve_remaining') return approveRemaining(view, po, input);
-  if (action === 'register_order') return registrationDetails(view, po, input);
-  if (action === 'record_late_order_exception') {
-    if (!view.cancellation || !po.ledger.some(row => row.action === 'approve')) conflict();
-    const occurredAt = purchaseTimestamp(input.occurredAt, '供应商实际接受订购时间');
-    const at = Date.parse(occurredAt);
-    if (at < Date.parse(view.cancellation.occurredAt) || at > Date.now()) throw new PurchaseError('本处理只登记客户取消后实际发生的订购异常');
-    const exceptionOutcome = input.exceptionOutcome;
-    if (exceptionOutcome !== 'supplier_cancelled' && exceptionOutcome !== 'supplier_resolution_pending' && exceptionOutcome !== 'liability_review') {
-      throw new PurchaseError('请选择供方取消、继续协调或责任待核的处理结果', 400);
+  if (action === 'resolve_order_exception') {
+    const exception = po.commitmentExceptions.find(row => row.id === input.exceptionId && !row.resolution);
+    const resolution = input.exceptionResolution;
+    if (!exception || (resolution !== 'supplier_cancelled' && resolution !== 'payable_verified')) conflict();
+    if (exception.outcome === 'supplier_cancelled' && resolution === 'payable_verified') {
+      throw new PurchaseError('此前已登记供方取消，须按书面取消结果核对费用或退款');
     }
-    return { action, occurredAt, cancellation: view.cancellation, responsibleActor: actor.id, exceptionOutcome,
-      reference: requiredText(input.reference, '取消后实际订购及处理结果的书面出处'), referenceSha256: documentSha256(input.referenceSha256, '订购异常书证摘要'),
-      description: requiredText(input.description, '异常处理结果和后续责任') };
+    const prior = po.ledger.find(row => row.id === exception.id)!;
+    return { action, exceptionId: exception.id, resolution, responsibleActor: actor.id, actualCommitment: purchaseOperation(prior.detail),
+      reference: requiredText(input.reference, '供方书面处理结果及原合同应付核对依据'),
+      referenceSha256: documentSha256(input.referenceSha256, '异常处理结果书证摘要'),
+      description: requiredText(input.description, '核对结果及已付款的后续安排') };
   }
   if (action === 'approve' || action === 'approve_lead_time') {
     if (po.status !== 'draft' || po.orderedBefore || po.paidCents || !po.lines.length || !view.eligibility.eligible
@@ -574,7 +653,8 @@ function actionDetails(
     }
     return { action, reference: requiredText(input.reference, '本次实际付款的流水凭证'), amountCents: input.amountCents,
       conditionReference: requiredText(input.conditionReference, '本次付款条件已满足的依据'),
-      approvalId: approval?.id ?? null, authorizedDueCents: po.dueCents };
+      approvalId: approval?.id ?? null, exceptionResolutionId: po.commitmentExceptions.find(row => row.resolution === 'payable_verified')?.resolutionId ?? null,
+      authorizedDueCents: po.dueCents };
   }
   if (action === 'report_change') {
     if (po.openIncidentId || !['unavailable', 'delay', 'price', 'other'].includes(input.changeKind ?? '')) conflict();
@@ -586,7 +666,7 @@ function actionDetails(
     const previousStatus = snapshot(incident)?.operation.previousStatus;
     if (po.status !== 'on_hold' || !incident || !previousStatus || !input.outcome
       || !['original_terms', 'revised_terms', 'declined', 'replacement'].includes(input.outcome)) conflict();
-    const committed = po.orderedBefore || po.paidCents > 0;
+    const committed = po.orderedBefore || po.paidCents > 0 || po.commitmentExceptions.length > 0;
     const disposedBefore = po.ledger.some(row => row.action === 'resolve_change' && snapshot(row)?.operation.dispositions?.length);
     if (input.outcome === 'replacement' && !committed) throw new PurchaseError('尚未订购或付款的采购单应按修订条款重新批准');
     if (input.outcome === 'original_terms' && disposedBefore && (!po.remainingScope || !['approved', 'ordered'].includes(previousStatus))) {
@@ -614,7 +694,7 @@ function actionDetails(
   throw new PurchaseError('无法识别的采购操作', 400);
 }
 
-function supplyEvidenceFor(po: PO, operation: ReturnType<typeof actionDetails>) {
+function supplyEvidenceFor(po: PO, operation: ReturnType<typeof actionDetails> | Awaited<ReturnType<typeof previewCommitment>>) {
   if (operation.action === 'approve' || operation.action === 'approve_lead_time') return po.lines;
   if (operation.action === 'reapprove_purchase') return operation.execution.lines;
   if (operation.action === 'review_legacy_approval' || operation.action === 'resolve_change') {
@@ -633,12 +713,13 @@ export async function previewPurchaseAction(tx: Db, input: PurchaseActionInput, 
   requiredText(input.requestId, '操作编号');
   const validateDemand = input.action === 'approve' || input.action === 'approve_lead_time' || input.action === 'reapprove_purchase'
     || (!po.orderedBefore && (input.action === 'record_payment' || input.action === 'approve_remaining'));
+  const commitment = input.action === 'register_order' || input.action === 'record_late_order_exception';
   const validateSource = validateDemand || input.action === 'register_order' || input.action === 'review_legacy_approval';
-  const original = validateSource || input.action === 'resolve_change' ? await loadPurchaseOrderSource(tx, input.orderId) : null;
+  const original = validateSource || commitment || input.action === 'resolve_change' ? await loadPurchaseOrderSource(tx, input.orderId) : null;
   const currentLines = original ? await loadPurchaseLines(tx, original) : [];
   const remaining = original ? remainingDemand(original) : new Map<string, number>();
-  const operation = actionDetails(view, po, input, currentLines, remaining, actor);
-  await assertSupplierDocumentScopes(tx, supplyEvidenceFor(po, operation));
+  const operation = commitment ? await previewCommitment(tx, original!, view, po, input, actor) : actionDetails(view, po, input, currentLines, remaining, actor);
+  await assertSupplierDocumentScopes(tx, supplyEvidenceFor(po, operation), operation.action === 'reapprove_purchase' ? { restoredPurchaseId: po.id } : undefined);
   const scoped = operation.action === 'register_order' ? operation.execution.lines
     : operation.action === 'approve_remaining' ? operation.scope.lines
     : operation.action === 'reapprove_purchase' ? operation.execution.lines
@@ -713,7 +794,8 @@ export async function applyPurchaseAction(tx: Db, input: PurchaseActionInput, ac
   const po = view.orders.find(row => row.id === input.purchaseOrderId)!;
   const op = preview.operation;
   if (op.action !== 'resolve_change' || op.dispositions?.some(line => line.replacement)) {
-    await assertSupplierDocumentScopes(tx, supplyEvidenceFor(po, op), { orderId: input.orderId, actor });
+    await assertSupplierDocumentScopes(tx, supplyEvidenceFor(po, op), { attestation: { orderId: input.orderId, actor },
+      restoredPurchaseId: op.action === 'reapprove_purchase' ? po.id : undefined });
   }
   let status = po.status;
   let approvedHash = po.approvedHash;
@@ -721,9 +803,13 @@ export async function applyPurchaseAction(tx: Db, input: PurchaseActionInput, ac
   if (op.action === 'approve') { status = 'approved'; approvedHash = po.contentHash; }
   if (op.action === 'approve_remaining') { status = po.orderedBefore ? 'ordered' : 'approved'; approvedHash = po.contentHash; }
   if (op.action === 'register_order' && status === 'approved') status = 'ordered';
+  if (op.action === 'record_late_order_exception' && op.category === 'credit') status = 'on_hold';
+  if (op.action === 'resolve_order_exception' && op.resolution === 'payable_verified' && !po.openIncidentId) status = 'ordered';
   if (op.action === 'report_change') status = 'on_hold';
   if (op.action === 'resolve_change' && op.outcome === 'original_terms') {
-    status = po.orderedBefore && op.previousStatus === 'approved' ? 'ordered' : op.previousStatus!;
+    if (po.commitmentExceptions.some(row => !row.resolution || row.resolution === 'supplier_cancelled')) status = 'on_hold';
+    else status = po.orderedBefore && (op.previousStatus === 'approved' || po.commitmentExceptions.some(row => row.resolution === 'payable_verified'))
+      ? 'ordered' : op.previousStatus!;
   }
   if (op.action === 'resolve_change' && op.outcome === 'declined' && !op.dispositions) status = 'superseded';
   if (op.action === 'resolve_change' && op.revisedTerms) {

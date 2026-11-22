@@ -7,6 +7,7 @@ import { pricingContentHash } from '@/lib/pricing-adjustment-approval';
 import { addPurchaseActivity, findPurchaseActivityByRequest, readPurchaseActivities, type PurchaseActivity, type PurchaseActor, type PurchaseAuthorization } from '@/lib/purchase-activity';
 import { loadPurchaseOrderSource, type SourceOrder } from '@/lib/purchase-source';
 import { previewBankAllocation, previewBankReceipt, purchaseReceiptAllocations } from '@/lib/purchase-receipts';
+import { creditLimitTerms, type PurchaseCreditEvidence } from '@/lib/purchase-credit-history';
 import { documentSha256, positiveCents, PurchaseError, purchaseTimestamp, requiredText } from '@/lib/purchase-terms';
 
 type Db = Prisma.TransactionClient;
@@ -172,12 +173,18 @@ async function creditEvidence(tx: Db, order: SourceOrder, outstandingCents: numb
     || order.creditTransactions.some(row => row.type === 'release')) return null;
   const account = await tx.creditAccount.findUnique({ where: { userId: ar.userId } });
   if (!account || !['active', 'credit_limited'].includes(account.status) || cents(account.usedAmount) < outstandingCents) return null;
-  return { receivableId: ar.id, reserveId: reserves[0].id, accountId: account.id, userId: ar.userId,
+  const credit: PurchaseCreditEvidence = { receivableId: ar.id, reserveId: reserves[0].id, accountId: account.id, userId: ar.userId,
     owedCents: outstandingCents, occupiedCents: cents(account.usedAmount), limitCents: cents(creditLimitForAccount(account)),
     paymentTermDays: ar.paymentTermDaysSnapshot, dueAt: ar.dueAt?.toISOString() ?? null };
+  return { credit, terms: creditLimitTerms(account) };
 }
 
-function creditExceptionMatches(exception: PurchaseActivity | undefined, creditVersion: string | null) {
+export function purchaseCreditVersion(orderId: string, termsVersion: string, accepted: unknown, plan: PaymentPlan | null,
+  payment: { receiptIds: string[]; receivedCents: number }, credit: PurchaseCreditEvidence) {
+  return pricingContentHash({ orderId, termsVersion, accepted, plan: paymentPlanContent(plan), payment, credit });
+}
+
+export function creditExceptionMatches(exception: PurchaseActivity | undefined, creditVersion: string | null) {
   if (!exception || !creditVersion) return false;
   const approved = operation(exception).creditVersion;
   if (approved === creditVersion) return true;
@@ -201,9 +208,10 @@ export async function purchaseStartReview(tx: Db, order: SourceOrder, activities
   const plan = paymentPlanAt(order, activities, termsVersion);
   const { payment, bankReceipts } = await receiptEvidence(tx, order, activities, principal);
   const outstandingCents = Math.max(0, principal - payment.receivedCents);
-  const credit = outstandingCents > 0 && plan?.mode !== 'prepay' ? await creditEvidence(tx, order, outstandingCents) : null;
-  const creditVersion = credit && pricingContentHash({ orderId: order.id, termsVersion, accepted: accepted.proof, plan: paymentPlanContent(plan),
-    payment: { receiptIds: payment.receipts.filter(row => row.counted).map(row => row.id), receivedCents: payment.receivedCents }, credit });
+  const creditState = outstandingCents > 0 && plan?.mode !== 'prepay' ? await creditEvidence(tx, order, outstandingCents) : null;
+  const credit = creditState?.credit ?? null;
+  const creditVersion = credit && purchaseCreditVersion(order.id, termsVersion, accepted.proof, plan,
+    { receiptIds: payment.receipts.filter(row => row.counted).map(row => row.id), receivedCents: payment.receivedCents }, credit);
   const exception = lastActivity(activities, 'approve_credit_exception');
   const overCredit = Boolean(credit && credit.occupiedCents > credit.limitCents);
   const start = !active ? '原客户订单尚未由 Libereal 接受，或已关闭'
@@ -217,7 +225,7 @@ export async function purchaseStartReview(tx: Db, order: SourceOrder, activities
   const eligibility = { eligible, reason: start, basis: eligible && accepted.proof && plan ? {
     acceptanceId: accepted.proof.id, amount: order.total, mode: plan.mode, payment, planEvidenceId: plan.evidenceId,
     ...(payment.paymentAttemptId ? { paymentAttemptId: payment.paymentAttemptId } : {}),
-    ...(credit ? { receivableId: credit.receivableId, reserveId: credit.reserveId, credit } : {}),
+    ...(credit ? { receivableId: credit.receivableId, reserveId: credit.reserveId, credit, creditTerms: creditState?.terms } : {}),
     ...(overCredit ? { exceptionId: exception?.id } : {}),
   } : null };
   const review = {

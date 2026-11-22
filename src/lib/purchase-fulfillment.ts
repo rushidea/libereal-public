@@ -114,6 +114,6 @@ export function previewShipmentAttribution(orderId: string, state: Awaited<Retur
     reference: requiredText(input.reference, '发货来源书面凭据档案'), description: requiredText(input.description, '发货归属核对结果') };
   const referenceKey = target.shipmentId ? pricingContentHash({ purpose: 'purchase_shipment_attribution', shipmentItemId: target.id })
     : pricingContentHash({ purpose: 'purchase_shipment_archive', sha256, documentRow });
-  const snapshot = { orderId, actor, requestId: input.requestId, version: input.version, operation, referenceKey };
+  const snapshot = { orderId, actor: { id: actor.id, email: actor.email }, requestId: input.requestId, version: input.version, operation, referenceKey };
   return { snapshot, actionHash: pricingContentHash(snapshot) };
 }

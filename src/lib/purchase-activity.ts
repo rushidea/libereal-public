@@ -16,7 +16,7 @@ type ActivityRow = {
 export async function readPurchaseActivities(tx: Db, orderId: string) {
   const rows = await tx.$queryRaw<ActivityRow[]>`SELECT id,purchaseOrderId,orderItemId,actorId,action,requestKey,referenceKey,amountCents,detail,createdAt
     FROM PurchaseActivity WHERE orderId=${orderId} ORDER BY rowid`;
-  return rows.map(row => ({ ...row, amountCents: row.amountCents == null ? null : Number(row.amountCents), detail: jsonObject(row.detail) }));
+  return rows.map(row => ({ ...row, amountCents: row.amountCents == null ? null : Number(row.amountCents), detail: publicPurchaseDetail(row) }));
 }
 
 export type PurchaseActivity = Awaited<ReturnType<typeof readPurchaseActivities>>[number];
@@ -27,6 +27,14 @@ export function purchaseObject(value: unknown): Record<string, unknown> {
 
 export function purchaseOperation(detail: Record<string, unknown>) {
   return purchaseObject(purchaseObject(detail.snapshot).operation);
+}
+
+function publicPurchaseDetail(row: ActivityRow) {
+  const detail = jsonObject(row.detail);
+  if (row.action !== 'attribute_purchase_shipment') return detail;
+  const stored = purchaseObject(detail.snapshot);
+  const actor = purchaseObject(stored.actor);
+  return { ...detail, snapshot: { ...stored, actor: { id: row.actorId, email: typeof actor.email === 'string' ? actor.email : undefined } } };
 }
 
 export async function addPurchaseActivity(tx: Db, input: {
