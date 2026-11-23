@@ -88,7 +88,7 @@ export default function FinanceManager({ initialOrder }: { initialOrder: string 
       && (view.customerInvoiceFamilies?.length || view.originalInvoiceLines?.some(row => row.unverifiedQuantity > 0))) {
       actions.push('verify_customer_invoice_scope');
     }
-    if (canArrangeCustomerInvoice && (view.principalCents > 0 || view.customerInvoiceScopes?.length)
+    if (canArrangeCustomerInvoice && (view.principalCents > 0 || view.customerInvoiceScopes?.some(row => (row.remainingCents ?? 0) > 0))
       || view.purchases.some(row => row.agreedCents !== null)) actions.push('create_plan');
     const active = view.invoicePlans.filter(row => !row.closed);
     if (view.invoicePlans.some(row => row.recordable)) actions.push('record_invoice');
@@ -136,11 +136,15 @@ export default function FinanceManager({ initialOrder }: { initialOrder: string 
       {view.postingPrincipal?.reviewId && <p>原应收金额已核对 {money(view.postingPrincipal.cents)} · 核对记录 {view.postingPrincipal.reviewId}</p>}
       {view.customerInvoiceScopes?.map(scope => {
         const amounts = view.customerInvoiceFamilies?.find(row => row.id === scope.id);
+        const cumulative = scope.change?.mode === 'restate' ? scope.change.amountCents : null;
         return <div key={scope.id}>
-          <p>{scope.familyId && scope.familyId !== scope.id ? '历史客户开票补证' : '历史客户可开票范围'} {money(scope.grossCents)}
+          <p>{cumulative !== null ? '历史客户开票累计书证' : amounts ? '历史客户可开票范围' : '历史客户开票补证'}
+            {' ' + money(cumulative ?? scope.grossCents)}
             {' · ' + scope.issuer + ' 开给 ' + scope.recipient + ' · 原书证 ' + scope.reference}
-            {scope.documentRow && ' · 第 ' + scope.documentRow + ' 行'}</p>
+            {scope.documentRow && ' · 第 ' + scope.documentRow + ' 行'}
+            {scope.occurredAt && ' · 生效 ' + dateLabel(scope.occurredAt)}</p>
           <p>{scope.lines.map(line => line.name + ' ' + line.quantity + ' 件').join('、')}</p>
+          {scope.remainingCents != null && scope.remainingCents > 0 && <p>这份书证尚可安排 {money(scope.remainingCents)}</p>}
           {amounts && <>
             <p>累计可开 {money(amounts.authorizedCents ?? undefined)} · 已开及更正中 {money(amounts.issuedCents)}
               {' · 尚可安排 ' + money(amounts.availableCents ?? undefined)}</p>

@@ -917,8 +917,12 @@ export default function PurchaseActions({ orderId, orderStatus, cancellation, po
       {op.action === 'review_payment_time' && <p>原付款 {op.original.reference} · {money(op.original.amountCents)} · 原登记 {new Date(op.original.recordedAt).toLocaleString('zh-CN')}</p>}
       {op.action === 'record_payment_exception' && <p>待核对付款 {money(op.amountCents)} · 负责人 {op.responsibleActorId} · {op.description}</p>}
       {op.action === 'review_payment_exception' && <p>原待办 {op.paymentIssueId} · 本次核对人 {op.responsibleActorId} · {op.description}</p>}
-      {op.action === 'review_payment_exception' && op.sourcePaymentId && <p>核对本单已有付款 {op.sourcePaymentId}
-        {' · 原流水 ' + op.original.paymentEvidence.bankTrace + ' · 原实付 ' + money(op.original.amountCents)} · 本次仅核对原账</p>}
+      {op.action === 'review_payment_exception' && op.sourcePaymentId && <>
+        <p>核对本单已有付款 {op.sourcePaymentId}
+          {' · 原流水 ' + op.original.paymentEvidence.bankTrace + ' · 原实付 ' + money(op.original.amountCents)} · 本次仅核对原账</p>
+        <p>实际付款 {new Date(op.original.paymentEvidence.occurredAt).toLocaleString('zh-CN')} · 原收款方 {op.original.paymentEvidence.payee}</p>
+        {op.attributionProofId && <p>归属核对记录 {op.attributionProofId} · 原独立归属审批 {op.attributionApprovalId}</p>}
+      </>}
       {op.action === 'review_payment_exception' && op.previousTarget && <p>此前核对目标 {op.previousTarget.purchaseOrderId}</p>}
       {op.action === 'review_payment_exception' && op.target && <p>转交采购单 {op.target.purchaseOrderId} · 原流水 {op.original.paymentEvidence.bankTrace}
         {' · 收款方 ' + op.original.paymentEvidence.payee} · 实际转账 {money(op.original.amountCents)}</p>}

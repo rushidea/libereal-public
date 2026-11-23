@@ -47,10 +47,13 @@ export default function FinanceForm({ view, action, busy, onPreview, onCancel, o
   onPreview: (input: FinanceInput) => Promise<void>; onCancel: () => void; onError: (message: string) => void;
 }) {
   const scopes = view.customerInvoiceScopes ?? [];
-  const customerCanPlan = view.acceptanceId && (view.principalCents > 0 || scopes.length > 0);
+  const availableScopes = scopes.filter(row => (row.remainingCents ?? 0) > 0);
+  const customerCanPlan = view.acceptanceId && (view.principalCents > 0 || availableScopes.length > 0);
   const [side, setSide] = useState(customerCanPlan ? 'customer' : 'supplier');
-  const [scopeId, setScopeId] = useState(scopes[0]?.id ?? '');
-  const selectedScope = scopes.find(row => row.id === scopeId);
+  const [scopeId, setScopeId] = useState(availableScopes[0]?.id ?? '');
+  const selectedScope = availableScopes.find(row => row.id === scopeId);
+  const [additionalPlanEvidence, setAdditionalPlanEvidence] = useState(false);
+  const usesVerifiedScope = action === 'create_plan' && side === 'customer' && Boolean(selectedScope);
   const openLines = view.originalInvoiceLines?.filter(line => line.unverifiedQuantity > 0) ?? [];
   const families = view.customerInvoiceFamilies ?? [];
   const [basisId, setBasisId] = useState(openLines.length ? '' : families[0]?.id ?? '');
@@ -193,10 +196,11 @@ export default function FinanceForm({ view, action, busy, onPreview, onCancel, o
           {customerCanPlan && <option value="customer">Libereal 给客户开票</option>}
           {view.purchases.some(row => row.agreedCents !== null) && <option value="supplier">向供应商收票</option>}</select></label>
         {side === 'supplier' && poSelect}
-        {side === 'customer' && scopes.length > 0 && <label className="grid gap-1">本次开票对应的已核书证
+        {side === 'customer' && availableScopes.length > 0 && <label className="grid gap-1">本次开票对应的已核书证
           <select name="invoiceScopeId" value={scopeId} onChange={e => setScopeId(e.target.value)} className={field} required>
-            {scopes.map(row => <option key={row.id} value={row.id}>{row.reference}{row.documentRow && ' · 第 ' + row.documentRow + ' 行'}
-              {' · ' + row.lines.map(line => line.name + ' ' + line.quantity + ' 件').join('、') + ' · ' + money(row.grossCents)}</option>)}
+            {availableScopes.map(row => <option key={row.id} value={row.id}>{row.reference}{row.documentRow && ' · 第 ' + row.documentRow + ' 行'}
+              {' · 生效 ' + dateLabel(row.occurredAt) + ' · ' + row.lines.map(line => line.name + ' ' + line.quantity + ' 件').join('、')
+                + ' · 可安排 ' + money(row.remainingCents ?? undefined)}</option>)}
           </select></label>}
         <Text key={side + poId + scopeId} name="issuer" label="约定开票方全称" initial={side === 'supplier' ? po?.supplier ?? '' : selectedScope?.issuer}/>
         <Text key={'recipient-' + side + scopeId} name="recipient" label="约定受票方全称" initial={side === 'customer' ? selectedScope?.recipient : undefined}/>
@@ -242,10 +246,14 @@ export default function FinanceForm({ view, action, busy, onPreview, onCancel, o
         <option value="" disabled>按已有书证选择</option>
         {Object.entries(paymentCaseProgressLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
       </select></label>}
-      <Text name="reference" label="书面依据或原件编号" initial={action === 'restore_term' ? view.acceptanceId ?? '' : ''}/>
-      {action === 'restore_term' && view.acceptanceEvidenceHash
-        ? <label className="grid gap-1">平台接单资料摘要<input className={field} readOnly name="sha256" value={view.acceptanceEvidenceHash}/></label>
-        : <DocumentDigestField name="sha256" label="原件 SHA-256 摘要" required/>}
+      {usesVerifiedScope && <label className="flex items-center gap-2 sm:col-span-2"><input type="checkbox" checked={additionalPlanEvidence}
+        onChange={event => setAdditionalPlanEvidence(event.target.checked)}/>另有本次安排的书面依据</label>}
+      {usesVerifiedScope && !additionalPlanEvidence ? <p className="sm:col-span-2">沿用已核书证 {selectedScope?.reference}</p> : <>
+        <Text name="reference" label="书面依据或原件编号" initial={action === 'restore_term' ? view.acceptanceId ?? '' : ''}/>
+        {action === 'restore_term' && view.acceptanceEvidenceHash
+          ? <label className="grid gap-1">平台接单资料摘要<input className={field} readOnly name="sha256" value={view.acceptanceEvidenceHash}/></label>
+          : <DocumentDigestField name="sha256" label="原件 SHA-256 摘要" required/>}
+      </>}
       <label className="grid gap-1 sm:col-span-2">核对结果或书面约定<textarea className={field} rows={2} name="description" required maxLength={2000}/></label>
     </fieldset>
     <div className="flex gap-2"><button className={primary} disabled={busy}>查看完整预览</button>

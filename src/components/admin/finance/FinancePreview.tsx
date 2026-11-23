@@ -15,7 +15,11 @@ export default function FinancePreview({ preview, busy, onConfirm, onBack }: {
     <h3 className="text-base font-semibold">{actionLabels[op.action]}</h3>
     <p>订单 {snapshot.orderId} · 经办人 {snapshot.actor.email}</p>
     {op.action === 'create_plan' && <><p>{op.side === 'customer' ? '客户开票' : '供应商来票'} · {op.issuer} 开给 {op.recipient}</p>
-      <p>含税金额 {money(op.grossCents)} · 办理条件 {triggerLabels[op.trigger]} {op.purchaseOrderId && ' · ' + op.purchaseOrderId}</p></>}
+      <p>含税金额 {money(op.grossCents)} · 办理条件 {triggerLabels[op.trigger]} {op.purchaseOrderId && ' · ' + op.purchaseOrderId}</p>
+      {op.invoiceEvidence && <><p>原书证 {op.invoiceEvidence.reference}{op.invoiceEvidence.documentRow && ' · 第 ' + op.invoiceEvidence.documentRow + ' 行'}
+        {' · 生效 ' + dateLabel(op.invoiceEvidence.occurredAt) + ' · 可安排 ' + money(op.invoiceEvidence.remainingCents ?? undefined)}</p>
+        <p>{op.invoiceEvidence.lines.map(line => line.name + ' ' + line.quantity + ' 件').join('、')}</p></>}
+    </>}
     {op.action === 'amend_plan' && <><p>原安排 {money(op.original.grossCents)} · 已占用 {money(op.original.usedCents)}
       {' · 生效后原条件尚余 ' + money(op.retainedCents)}</p>
       <p>本次按新条件办理 {money(op.amountCents)} · {triggerLabels[op.trigger]} · 生效 {dateLabel(op.effectiveAt)}</p>
