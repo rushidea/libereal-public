@@ -84,6 +84,7 @@ function parcel(route: 'supplier_to_customer' | 'supplier_to_libereal', received
 
 type OperationInput = {
   requestId: string;
+  holdReview?: { status?: string; customerReference?: string };
   lines: Array<{ quantity: number; purchaseOrderId?: string; orderItemId?: string }>;
 };
 type OperationRequest = {
@@ -146,8 +147,9 @@ function mockAdmin(permissions: string[] | Promise<string[]>, startingInbound = 
         }));
         return Response.json({ preview: { actionHash, snapshot: {
           orderId, actorId: 'test-operator', ...body.input,
+          ...(body.input.holdReview?.customerReference ? { holdReview: { ...body.input.holdReview, status: 'confirmed' } } : {}),
           ...(body.action === 'dispatch' ? { recipient: { party: 'customer', email: customerEmail, deliveryAddress: { address: customerAddress } } } :
-            { route: 'supplier_to_libereal', priorStatus: 'dispatched' }),
+            { orderStatus: order.status, route: 'supplier_to_libereal', priorStatus: hold === 'shortfall' ? 'shortfall' : 'dispatched' }),
           lines,
         } } });
       }
@@ -263,14 +265,16 @@ describe('fulfillment in the existing order pages', () => {
     fill(panel,'物流凭据出处','TEST-ORIGINAL-UNRELEASED-WAYBILL');
     fill(panel,'物流凭据摘要',digest);
     fill(panel,'供方对实际发运的书面确认','TEST-SUPPLIER-PROVES-PHYSICAL');
-    fill(panel,'客户对接续履约的书面回复','TEST-CUSTOMER-CONFIRMS-CONTINUATION');
+    fill(panel,'客户对接续履约的书面回复','pending');
     fill(panel,'发运偏差的责任人','合成审批经办人');
     fill(panel,'已核实的偏差与后续处理结果','实际发运早于放行，双方确认继续按原运单跟踪。');
     fill(panel,'双方核对结论的书证摘要',digest);
     fireEvent.click(panel.getByRole('button',{name:'预览发货'}));
-    await screen.findByRole('region',{name:'物流操作预览'});
+    const preview=within(await screen.findByRole('region',{name:'物流操作预览'}));
+    previewField(preview,'办理状态','已收到书面回复');
+    previewField(preview,'客户书面回复','pending');
     expect(operations[0]).toMatchObject({action:'dispatch',stage:'preview',input:{occurredAt:new Date(localTime).toISOString(),
-      holdReview:{supplierReference:'TEST-SUPPLIER-PROVES-PHYSICAL',customerReference:'TEST-CUSTOMER-CONFIRMS-CONTINUATION',
+      holdReview:{supplierReference:'TEST-SUPPLIER-PROVES-PHYSICAL',customerReference:'pending',
         responsibility:'合成审批经办人',sha256:digest}}});
     await verifyWithDialog(operations);
     await waitFor(()=>expect(operations[1]).toMatchObject({stage:'confirm',input:operations[0].input,actionHash}));
@@ -343,9 +347,12 @@ describe('fulfillment in the existing order pages', () => {
     fill(review,'本次实际处理数量','1');
     fill(review,'本次核对的责任人','合成采购责任人');
     fill(review,'填写原件核对经过和实际结果','承运人原件已核实丢失，原合同应付交具名人员跟进。');
-    fillEvidence(review,'TEST-NAMED-HANDOFF-OF-VERIFIED-LOSS');
+    fillEvidence(review,'confirmed');
     fireEvent.click(review.getByRole('button',{name:'预览误发处理结果'}));
-    await screen.findByRole('region',{name:'物流操作预览'});
+    const preview=within(await screen.findByRole('region',{name:'物流操作预览'}));
+    previewField(preview,'原订单状态','已确认');
+    previewField(preview,'当前进度','短少或退回已核实');
+    previewField(preview,'凭据出处','confirmed');
     expect(operations[0]).toMatchObject({action:'record_event',stage:'preview',input:{kind:'review_dispatch_hold',
       holdResponsibility:'合成采购责任人',parcelId:'TEST-INBOUND-PARCEL',
       lines:[{parcelLineId:lineId,incidentId,quantity:1,resolutionId,outcome:'shortfall'}],
