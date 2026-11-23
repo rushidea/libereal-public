@@ -50,6 +50,7 @@ const purchasePermissions = {
   approve: 'purchases.approve', approve_lead_time: 'purchases.approve', register_order: 'purchases.write',
   record_payment: 'purchases.pay', review_payment_time: 'purchases.pay', report_change: 'purchases.write', review_change_scope: 'purchases.read', resolve_change: 'purchases.read',
   record_payment_exception: 'purchases.pay', review_payment_exception: 'purchases.pay',
+  approve_payment_attribution: 'purchases.approve', correct_payment_attribution: 'purchases.pay',
   review_legacy_approval: 'purchases.approve', approve_remaining: 'purchases.approve', record_late_order_exception: 'purchases.approve',
   reapprove_purchase: 'purchases.approve', resolve_order_exception: 'purchases.approve',
 } as const satisfies Record<PurchaseActionInput['action'], AdminPermissionKey>;
@@ -63,7 +64,7 @@ async function requireResolutionPermission(tx: Prisma.TransactionClient, order: 
   if (order?.action !== 'resolve_change' && order?.action !== 'review_change_scope') return null;
   const [commitment] = await tx.$queryRaw<Array<{ id: string }>>`SELECT id FROM PurchaseActivity
     WHERE orderId=${order.orderId} AND purchaseOrderId=${order.purchaseOrderId}
-      AND (action IN ('register_order','record_payment') OR (action='record_late_order_exception'
+      AND (action IN ('register_order','record_payment','correct_payment_attribution') OR (action='record_late_order_exception'
         AND json_extract(detail,'$.snapshot.operation.category')='credit')) LIMIT 1`;
   const permission = commitment ? 'purchases.approve' : 'purchases.write';
   if (!permissions.includes(permission)) {

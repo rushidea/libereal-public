@@ -4,7 +4,7 @@ import { jsonObject } from '@/lib/order-catalog-repricing';
 import { purchaseObject, purchaseOperation, type PurchaseActivity } from '@/lib/purchase-activity';
 import { documentSha256, positiveCents, PurchaseError, purchaseTimestamp, requiredText } from '@/lib/purchase-terms';
 
-type PaymentEvidence = {
+export type PaymentEvidence = {
   reference: string; bankTrace: string; traceKey: string; sha256: string; payee: string; occurredAt: string;
   documentKind: 'single_receipt' | 'statement'; statementRow: number;
 };
@@ -20,6 +20,21 @@ type PaymentIssue = {
   id: string; purchaseOrderId: string; ownerId: string; recordedAt: string; original: OriginalPaymentIssue;
   review: { id: string; actorId: string; operation: PaymentIssueDecision } | null;
 };
+
+type PaymentCorrectionOperation = {
+  source: { orderId: string; purchaseOrderId: string; paymentId: string };
+  amountCents: number; paymentEvidence: PaymentEvidence;
+};
+
+export async function supplierPaymentCorrections(tx: Prisma.TransactionClient, orderId: string) {
+  const rows = await tx.$queryRaw<Array<{ id: string; purchaseOrderId: string; actorId: string; createdAt: string; detail: string }>>`
+    SELECT id,purchaseOrderId,actorId,createdAt,detail FROM PurchaseActivity WHERE action='correct_payment_attribution'
+      AND (orderId=${orderId} OR json_extract(detail,'$.snapshot.operation.source.orderId')=${orderId}) ORDER BY rowid`;
+  return rows.map(row => ({ id: row.id, targetPurchaseOrderId: row.purchaseOrderId, actorId: row.actorId, recordedAt: row.createdAt,
+    operation: purchaseOperation(jsonObject(row.detail)) as PaymentCorrectionOperation }));
+}
+
+export type PaymentCorrection = Awaited<ReturnType<typeof supplierPaymentCorrections>>[number];
 
 export function supplierPaymentEvidence(input: PaymentEvidenceInput, payee: string | null | undefined): PaymentEvidence {
   const originalPayee = requiredText(input.payee, '银行凭证所列收款方');
@@ -38,12 +53,13 @@ export async function assertUnusedSupplierPayment(
 ) {
   const candidates = await tx.$queryRaw<Array<{ action: string; detail: string }>>`SELECT action,detail FROM PurchaseActivity
     WHERE id NOT IN (${sourcePaymentId ?? ''},${paymentIssueId ?? ''})
-    AND action IN ('record_payment','review_payment_time','record_payment_exception')
+    AND action IN ('record_payment','review_payment_time','record_payment_exception','correct_payment_attribution')
     AND (json_extract(detail,'$.snapshot.operation.paymentEvidence.traceKey')=${evidence.traceKey}
       OR json_extract(detail,'$.snapshot.operation.paymentEvidence.sha256')=${evidence.sha256}
       OR (action='record_payment' AND json_type(detail,'$.snapshot.operation.paymentEvidence') IS NULL))`;
   for (const row of candidates) {
     const op = purchaseOperation(jsonObject(row.detail));
+    if (sourcePaymentId && row.action === 'review_payment_time' && op.sourcePaymentId === sourcePaymentId) continue;
     const prior = purchaseObject(op.paymentEvidence);
     if (prior.traceKey === evidence.traceKey || sameBankDocumentRow({ sha256: prior.sha256, documentKind: prior.documentKind,
       statementRow: prior.statementRow }, evidence)
@@ -83,10 +99,11 @@ export function supplierPaymentExceptions(ledger: PurchaseActivity[], purchaseOr
     const followup = targetDecision ? { id: targetDecision.id, actorId: targetDecision.actorId,
       operation: purchaseOperation(targetDecision.detail) as PaymentIssueDecision } : null;
     const decision = incoming ? followup : row.review;
-    const posted = ledger.find(entry => (entry.action === 'record_payment' || entry.action === 'review_payment_time')
+    const posted = ledger.find(entry => (entry.action === 'record_payment' || entry.action === 'review_payment_time' || entry.action === 'correct_payment_attribution')
       && purchaseOperation(entry.detail).paymentIssueId === row.id);
+    const approval = ledger.findLast(entry => entry.action === 'approve_payment_attribution' && purchaseOperation(entry.detail).paymentIssueId === row.id);
     const pending = !posted && (!decision || decision.operation.outcome === 'awaiting_disposition');
-    return { ...row, incoming, followup, pending, postingId: posted?.id ?? null };
+    return { ...row, incoming, followup, pending, postingId: posted?.id ?? null, attributionApprovalId: approval?.id ?? null };
   });
 }
 
@@ -98,10 +115,12 @@ function originalPaymentPayee(row: PurchaseActivity) {
   return payees.size === 1 && typeof payee === 'string' && payee ? payee : null;
 }
 
-export function purchasePaymentRecords(ledger: PurchaseActivity[]) {
+export function purchasePaymentRecords(ledger: PurchaseActivity[], purchaseOrderId: string, corrections: PaymentCorrection[]) {
   const reviews = new Map(ledger.filter(row => row.action === 'review_payment_time')
     .map(row => [purchaseOperation(row.detail).sourcePaymentId, row]));
-  return ledger.filter(row => row.action === 'record_payment').map(row => {
+  const movedAway = new Set(corrections.filter(row => row.operation.source.purchaseOrderId === purchaseOrderId)
+    .map(row => row.operation.source.paymentId));
+  const recorded = ledger.filter(row => row.action === 'record_payment' && !movedAway.has(row.id)).map(row => {
     const original = purchaseOperation(row.detail);
     const review = reviews.get(row.id);
     const proof = purchaseObject((review ? purchaseOperation(review.detail) : original).paymentEvidence);
@@ -111,7 +130,16 @@ export function purchasePaymentRecords(ledger: PurchaseActivity[]) {
     return { id: row.id, actorId: row.actorId, amountCents: row.amountCents ?? 0, reference, payee, recordedAt: row.createdAt,
       occurredAt, bankTrace: typeof proof.bankTrace === 'string' ? proof.bankTrace : null,
       evidenceSha256: typeof proof.sha256 === 'string' ? proof.sha256 : null,
+      paymentEvidence: occurredAt ? proof as PaymentEvidence : null,
+      sourcePaymentId: null as string | null,
       reviewId: review?.id ?? null, reviewedBy: review?.actorId ?? null,
       canReviewTime: !occurredAt && Boolean(payee && reference && positiveCents(row.amountCents) && original.amountCents === row.amountCents) };
   });
+  const corrected = corrections.filter(row => row.targetPurchaseOrderId === purchaseOrderId).map(row => {
+    const { amountCents, paymentEvidence: proof, source } = row.operation;
+    return { id: row.id, actorId: row.actorId, amountCents, reference: proof.reference, payee: proof.payee, recordedAt: row.recordedAt,
+      occurredAt: proof.occurredAt, bankTrace: proof.bankTrace, evidenceSha256: proof.sha256, paymentEvidence: proof,
+      reviewId: row.id, reviewedBy: row.actorId, canReviewTime: false, sourcePaymentId: source.paymentId };
+  });
+  return [...recorded, ...corrected];
 }

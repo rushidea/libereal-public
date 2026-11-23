@@ -4,6 +4,7 @@ import { writeAuditLog } from '@/lib/audit';
 import { releaseOrderReceivableOnCancellation } from '@/lib/customer-credit';
 import { releaseOrderInventory } from '@/lib/inventory';
 import { canTransitionOrder, isInactiveOrderStatus, isOrderStatus, requiresPaidAlipayRefund } from '@/lib/order-domain';
+import { recordOrderChangeDuringAlipayReview } from '@/lib/order-payment-review';
 import { refundOrderPointsProportionally } from '@/lib/points-checkout-service';
 
 type Tx = Prisma.TransactionClient;
@@ -47,7 +48,7 @@ export async function withdrawAdminOrders(
   orderIds: string[],
   actor: { id: string; email: string },
   now = new Date(),
-): Promise<number> {
+): Promise<{ count: number; blockedOrderId?: string }> {
   const uniqueIds = [...new Set(orderIds.map((id) => (typeof id === 'string' ? id.trim() : '')).filter(Boolean))];
   if (uniqueIds.length === 0) throw new AdminOrderWithdrawalError('ORDER_NOT_FOUND', 404);
 
@@ -69,11 +70,23 @@ export async function withdrawAdminOrders(
   });
   if (orders.length !== uniqueIds.length) throw new AdminOrderWithdrawalError('ORDER_NOT_FOUND', 404);
 
+  const blocked = await recordWithdrawalsAwaitingAlipayReview(tx, uniqueIds, actor, 'removed');
+  if (blocked) return { count: 0, blockedOrderId: blocked };
   const byId = new Map(orders.map((order) => [order.id, order]));
   for (const id of uniqueIds) {
     await withdrawOne(tx, byId.get(id)!, actor, now);
   }
-  return uniqueIds.length;
+  return { count: uniqueIds.length };
+}
+
+export async function recordWithdrawalsAwaitingAlipayReview(
+  tx: Tx, orderIds: string[], actor: { id: string; email: string }, action: 'archived' | 'removed',
+) {
+  const blocked: string[] = [];
+  for (const id of new Set(orderIds)) {
+    if (await recordOrderChangeDuringAlipayReview(tx, id, actor, action)) blocked.push(id);
+  }
+  return blocked[0];
 }
 
 async function withdrawOne(

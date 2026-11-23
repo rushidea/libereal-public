@@ -5,6 +5,7 @@ import { writeAuditLog } from '@/lib/audit';
 import { reserveOrderInventory } from '@/lib/inventory';
 import { jsonObject, pendingOrderRepricing } from '@/lib/order-catalog-repricing';
 import { AUTO_CLOSEABLE_ORDER_STATUSES } from '@/lib/order-domain';
+import { alipayCancellationRequest } from '@/lib/order-payment-review';
 import { alipayReceiptWhere, settlePaymentPoints } from '@/lib/payment-concurrency';
 import { POINTS_SETTLEMENT_BUSY_ERROR } from '@/lib/points-checkout-service';
 import { readPurchaseActivities, type PurchaseActor } from '@/lib/purchase-activity';
@@ -84,12 +85,14 @@ export async function previewStockHeldAlipayPayment(tx: Db, orderId: string, pay
       && (!Object.hasOwn(data, 'firstNotifiedAt') || data.firstNotifiedAt === receivedAt);
   });
   if (proofs.length !== 1) throw new AlipayStockReceiptDeferred('缺少可唯一确认的支付宝验签原记录');
+  const cancellationRequest = await alipayCancellationRequest(tx, orderId, attempt.id);
   return { id: attempt.id, auditId: proofs[0].id, orderId, priorStatus: order.status, amount: attempt.amount, orderTotal: order.total, amountCents,
-    outTradeNo: attempt.outTradeNo, tradeNo: attempt.tradeNo, providerPaidAt, receivedAt,
+    outTradeNo: attempt.outTradeNo, tradeNo: attempt.tradeNo, providerPaidAt, receivedAt, cancellationRequest,
     lines: order.orderItems, points: { applied: order.pointsApplied, personal: order.pointsPersonal, group: order.pointsGroup } };
 }
 
 export async function applyStockHeldAlipayPayment(tx: Db, op: Awaited<ReturnType<typeof previewStockHeldAlipayPayment>>, actor?: PurchaseActor) {
+  if (op.cancellationRequest && !actor) throw new AlipayStockReceiptDeferred('订单已有人提出取消或移除，请先由财务核对该意愿和原到账');
   try {
     await reserveOrderInventory(tx, op.orderId, actor?.id ?? null, '支付宝原回执核对后预占库存');
   } catch (error) {

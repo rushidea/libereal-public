@@ -231,7 +231,7 @@ export async function purchaseShortfalls(tx: Db, orderId: string, activities: Pu
   const dispatchHolds=parcels.flatMap(parcel=>dispatchHoldFacts(parcel.events).flatMap(hold=>{
     const line=parcel.lines.find(row=>row.id===hold.parcelLineId);
     return line?.purchaseOrderId ? [{...hold,purchaseOrderId:line.purchaseOrderId,orderItemId:line.orderItemId,
-      parcelId:parcel.id,sourceReceiptId:line.sourceReceiptId}] : [];
+      parcelId:parcel.id,sourceReceiptId:line.sourceReceiptId, startedAt:parcel.dispatchedAt?.toISOString() ?? null}] : [];
   }));
   const usedHandoffs=new Map<string,number>();
   const unlinkedDispatchShortfalls=dispatchHolds.flatMap(hold=>hold.decisions.flatMap(decision=>{

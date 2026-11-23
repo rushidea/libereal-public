@@ -16,6 +16,8 @@ import { assertOrderTransition, isAutoCloseableOrderStatus, isInactiveOrderStatu
 import { restoreRedeemedOrderCoupons } from '@/lib/coupon-service';
 import { releaseOrderInventory, reserveOrderInventory } from '@/lib/inventory';
 import { orderStatusRequiresFinanceWrite, receivableOccupiesCredit } from '@/lib/order-finance-access';
+import { alipayCancellationPending, recordOrderChangeDuringAlipayReview } from '@/lib/order-payment-review';
+import { alipayReceiptWhere } from '@/lib/payment-concurrency';
 import { requireAdmin } from '@/lib/session';
 import { getLatestAlipayAttempt, merchantOrderApprovalPreview, ORDER_APPROVAL_INCLUDE, orderApprovalConflict, verifyMerchantOrderAcceptance } from '@/lib/order-approval';
 import { authorizeAdminOrderMutation, consumeAdminOrderStepUp, extractStepUpToken } from '@/lib/admin-order-step-up';
@@ -156,17 +158,18 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     if (stepUpFailure) return stepUpFailure;
 
     const updated = await prisma.$transaction(async (tx) => {
+      if ((status === 'cancelled' || status === 'closed')
+        && await recordOrderChangeDuringAlipayReview(tx, id, admin, status, reason)) return null;
       await requirePhysicalStatus(tx, id, existing.status, status);
       if (accepting) await assertOrderPricingResolved(tx, id);
       const acceptance = accepting ? await verifyMerchantOrderAcceptance(tx, id, body.approvalVersion) : null;
-      if (status === 'cancelled') {
-        // Claim cancellation before any history or resource releases. The payment
-        // callback competes on the same row, so a stale unpaid snapshot cannot win.
-        const cancelled = await tx.order.updateMany({
-          where: { id, status: existing.status, paidAt: null },
-          data: { status: 'cancelled', autoCloseAt: null },
+      if ((status === 'cancelled' || status === 'closed') && status !== existing.status) {
+        const inactive = await tx.order.updateMany({
+          where: { id, status: existing.status, ...(status === 'cancelled' || normalizedPaymentMethod === 'alipay' ? { paidAt: null } : {}),
+            NOT: { paymentAttempts: { some: alipayReceiptWhere } } },
+          data: { status, autoCloseAt: null },
         });
-        if (cancelled.count !== 1) throw new Error('ORDER_CANCELLATION_CONFLICT');
+        if (inactive.count !== 1) throw new Error('ORDER_CANCELLATION_CONFLICT');
       }
       const result = await tx.order.update({ where: { id, ...(acceptance ? { status: 'pending', archivedAt: null } : {}) }, data: {
         ...updateData,
@@ -214,6 +217,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       if (status && status !== existing.status) await writeAuditLog({ actorId: admin.id, actorEmail: admin.email, action: 'order.status_changed', resource: 'orders', targetType: 'Order', targetId: id, before: { status: existing.status }, after: { status }, reason }, tx);
       return result;
     }, { isolationLevel: 'Serializable' });
+    if (!updated) return NextResponse.json(alipayCancellationPending, { status: 409 });
     return NextResponse.json({ order: updated });
   } catch (err) {
     console.error('[admin/orders/[id] PATCH] error:', err);

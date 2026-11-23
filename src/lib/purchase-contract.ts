@@ -57,12 +57,17 @@ export function dispositionSummary(ledger: PurchaseActivity[]) {
   return { ids, quantities };
 }
 
-export function remainingApproval(ledger: PurchaseActivity[], dispositionIds: string[]) {
+export function remainingApproval(ledger: PurchaseActivity[], dispositionIds: string[],
+  payments?: Array<{ id: string; occurredAt: string | null; recordedAt: string; sourcePaymentId: string | null }>,
+) {
   const key = pricingContentHash(dispositionIds);
   const approval = ledger.findLast(row => row.action === 'approve_remaining'
     && pricingContentHash(purchaseSnapshot(row)?.operation.scope?.dispositionIds ?? []) === key);
   const considered = purchaseSnapshot(approval)?.operation.scope?.payments;
   if (!approval || !considered) return approval;
+  if (payments && considered.some(row => !payments.some(payment => payment.id === row.id))) return undefined;
+  if (payments?.some(row => row.sourcePaymentId && row.occurredAt && Date.parse(row.occurredAt) < Date.parse(approval.createdAt)
+    && !considered.some(payment => payment.id === row.id))) return undefined;
   const newlyAttributed = ledger.some(row => {
     if (row.action !== 'record_payment' || considered.some(payment => payment.id === row.id)) return false;
     const payment = purchaseSnapshot(row)?.operation;

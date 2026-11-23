@@ -10,6 +10,8 @@ import { orderItemView, toOrderItemCreates } from '@/lib/commerce-records';
 import { customerShipmentFields, requirePhysicalStatus } from '@/lib/fulfillment-legacy';
 import { releaseOrderReceivableOnCancellation, reserveOrderCredit } from '@/lib/customer-credit';
 import { orderStatusRequiresFinanceWrite, receivableOccupiesCredit } from '@/lib/order-finance-access';
+import { alipayCancellationPending, recordOrderChangeDuringAlipayReview } from '@/lib/order-payment-review';
+import { alipayReceiptWhere } from '@/lib/payment-concurrency';
 import { assertOrderTransition, calculateOrderAmounts, isAutoCloseableOrderStatus, isInactiveOrderStatus, ORDER_STATUS_LABELS, requiresPaidAlipayRefund } from '@/lib/order-domain';
 import { restoreRedeemedOrderCoupons } from '@/lib/coupon-service';
 import { releaseOrderInventory, reserveOrderInventory } from '@/lib/inventory';
@@ -290,21 +292,22 @@ export async function PATCH(
         const consumedFailure = await consumeAdminOrderStepUp(user, stepUpToken);
         if (consumedFailure) return consumedFailure;
       }
-      confirmedInquiryId = await prisma.$transaction(async (tx) => {
+      const result = await prisma.$transaction(async (tx) => {
+        if ((body.status === 'cancelled' || body.status === 'closed')
+          && await recordOrderChangeDuringAlipayReview(tx, id, user, body.status, body.reason)) return { blocked: true } as const;
         if (accepting || body.items !== undefined) await assertOrderPricingResolved(tx, id, prospectiveItems);
         if (accepting && (body.items !== undefined || body.paymentMethod !== undefined)) {
           throw new Error('ORDER_APPROVAL_SAVE_CHANGES_FIRST');
         }
         await requirePhysicalStatus(tx, id, order.status, body.status);
         const acceptance = accepting ? await verifyMerchantOrderAcceptance(tx, id, body.approvalVersion) : null;
-        if (body.status === 'cancelled') {
-          // Claim cancellation before any history or resource releases. The payment
-          // callback competes on the same row, so a stale unpaid snapshot cannot win.
-          const cancelled = await tx.order.updateMany({
-            where: { id, status: order.status, paidAt: null },
-            data: { status: 'cancelled', autoCloseAt: null },
+        if ((body.status === 'cancelled' || body.status === 'closed') && body.status !== order.status) {
+          const inactive = await tx.order.updateMany({
+            where: { id, status: order.status, ...(body.status === 'cancelled' || normalizedEffectivePaymentMethod === 'alipay' ? { paidAt: null } : {}),
+              NOT: { paymentAttempts: { some: alipayReceiptWhere } } },
+            data: { status: body.status, autoCloseAt: null },
           });
-          if (cancelled.count !== 1) throw new Error('ORDER_CANCELLATION_CONFLICT');
+          if (inactive.count !== 1) throw new Error('ORDER_CANCELLATION_CONFLICT');
         }
         const eventCreates = [
           ...(body.status && body.status !== order.status ? [{
@@ -376,8 +379,10 @@ export async function PATCH(
             reason: body.status === 'closed' ? '订单关闭退回积分' : '订单取消退回积分',
           }));
         }
-        return acceptance?.order.inquiryId ?? null;
+        return { blocked: false, confirmedInquiryId: acceptance?.order.inquiryId ?? null } as const;
       }, { isolationLevel: 'Serializable' });
+      if (result.blocked) return NextResponse.json(alipayCancellationPending, { status: 409 });
+      confirmedInquiryId = result.confirmedInquiryId;
     }
 
     // On confirm: clear user's isNewUser flag

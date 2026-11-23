@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { AdminOrderWithdrawalError, withdrawAdminOrders } from '@/lib/admin-order-withdrawal';
+import { AdminOrderWithdrawalError, recordWithdrawalsAwaitingAlipayReview, withdrawAdminOrders } from '@/lib/admin-order-withdrawal';
+import { alipayCancellationPending } from '@/lib/order-payment-review';
 import { isAdminMfaScenarioEnabled } from '@/lib/admin-mfa-settings';
 import { prisma } from '@/lib/prisma';
 import { authorizeAdminOrderMutation, consumeAdminOrderStepUp, extractStepUpToken } from '@/lib/admin-order-step-up';
@@ -28,10 +29,14 @@ export async function PATCH(req: NextRequest) {
     if (action === 'archive') {
       const stepUpFailure = await consumeAdminOrderStepUp(session, stepUpToken);
       if (stepUpFailure) return stepUpFailure;
-      await prisma.order.updateMany({
-        where: { id: { in: orderIds } },
-        data: { archivedAt: now, autoCloseAt: null }, // 归档即退出自动关闭
+      const blocked = await prisma.$transaction(async tx => {
+        const blocked = await recordWithdrawalsAwaitingAlipayReview(tx, orderIds, session, 'archived');
+        if (!blocked) await tx.order.updateMany({
+          where: { id: { in: orderIds } }, data: { archivedAt: now, autoCloseAt: null },
+        });
+        return blocked;
       });
+      if (blocked) return NextResponse.json({ ...alipayCancellationPending, orderId: blocked }, { status: 409 });
     } else if (action === 'unarchive') {
       const stepUpFailure = await consumeAdminOrderStepUp(session, stepUpToken);
       if (stepUpFailure) return stepUpFailure;
@@ -59,10 +64,11 @@ export async function PATCH(req: NextRequest) {
       }
       const stepUpFailure = await consumeAdminOrderStepUp(session, stepUpToken);
       if (stepUpFailure) return stepUpFailure;
-      const count = await prisma.$transaction((tx) => withdrawAdminOrders(tx, orderIds, {
+      const { count, blockedOrderId } = await prisma.$transaction((tx) => withdrawAdminOrders(tx, orderIds, {
         id: session.id,
         email: session.email,
       }));
+      if (blockedOrderId) return NextResponse.json({ ...alipayCancellationPending, orderId: blockedOrderId }, { status: 409 });
       return NextResponse.json({ success: true, count });
     } else {
       return NextResponse.json({ error: "无效操作" }, { status: 400 });
