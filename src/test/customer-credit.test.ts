@@ -104,6 +104,39 @@ describe('membership and customer credit', () => {
     expect(await prisma.accountReceivable.findUnique({ where: { orderId: 'order_1' } })).toMatchObject({ status: 'cancelled' });
   });
 
+  it('cancels only the net reservation proved for this order when the original receivable amount differs', async () => {
+    seedOrder('order_1', 'buyer@test.com', 2500);
+    seedOrder('order_2', 'buyer@test.com', 900);
+    await prisma.$transaction(async tx => {
+      await reserveOrderCredit(tx, 'order_1', 'admin_1');
+      await reserveOrderCredit(tx, 'order_2', 'admin_1');
+      await syncUnsettledReceivableAmount(tx, 'order_1', 2100, 'admin_1');
+    });
+    await prisma.accountReceivable.update({ where: { orderId: 'order_1' }, data: { amount: 3400 } });
+
+    await prisma.$transaction(tx => releaseOrderReceivableOnCancellation(tx, 'order_1', 'admin_1'));
+    await prisma.$transaction(tx => releaseOrderReceivableOnCancellation(tx, 'order_1', 'admin_1'));
+
+    expect(await prisma.creditAccount.findUniqueOrThrow({ where: { userId: 'user_1' } })).toMatchObject({ usedAmount: 900 });
+    expect(await prisma.creditTransaction.findMany({ where: { type: 'release' }, select: { orderId: true, amount: true, balanceAfter: true } }))
+      .toEqual([{ orderId: 'order_1', amount: -2100, balanceAfter: 900 }]);
+    expect(await prisma.accountReceivable.findUnique({ where: { orderId: 'order_1' } })).toMatchObject({ status: 'cancelled', amount: 3400 });
+    expect(await prisma.accountReceivable.findUnique({ where: { orderId: 'order_2' } })).toMatchObject({ status: 'open', amount: 900 });
+  });
+
+  it('preserves the other order when an older receivable has no reservation evidence of its own', async () => {
+    seedOrder('order_1', 'buyer@test.com', 200);
+    seedOrder('order_2', 'buyer@test.com', 900);
+    await prisma.$transaction(tx => reserveOrderCredit(tx, 'order_2', 'admin_1'));
+    await prisma.accountReceivable.create({ data: { orderId: 'order_1', userId: 'user_1', confirmedAt: new Date(), amount: 200 } });
+
+    await expect(prisma.$transaction(tx => releaseOrderReceivableOnCancellation(tx, 'order_1', 'admin_1')))
+      .rejects.toThrow('CREDIT_RESERVATION_REVIEW_REQUIRED');
+    expect(await prisma.creditAccount.findUniqueOrThrow({ where: { userId: 'user_1' } })).toMatchObject({ usedAmount: 900 });
+    expect(await prisma.creditTransaction.count({ where: { type: 'release' } })).toBe(0);
+    expect(await prisma.accountReceivable.findUnique({ where: { orderId: 'order_1' } })).toMatchObject({ status: 'open' });
+  });
+
   it('rejects orders above the available credit limit', async () => {
     seedOrder('order_1', 'buyer@test.com', 6000);
     await expect(prisma.$transaction((tx) => reserveOrderCredit(tx, 'order_1'))).rejects.toThrow('CREDIT_LIMIT_EXCEEDED');

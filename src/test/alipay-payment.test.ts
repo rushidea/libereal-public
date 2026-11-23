@@ -43,6 +43,10 @@ describe('Alipay payment window', () => {
     expect(getAlipayPaymentSummary(order, null, now)?.status).toBe('pending');
     expect(getAlipayPaymentSummary(order, { status: 'notified' }, now)?.status).toBe('processing');
     expect(getAlipayPaymentSummary(order, { status: 'TRADE_CLOSED' }, now)?.status).toBe('closed');
+    for (const status of ['paid_terminal_reconciliation_required', 'paid_superseded_reconciliation_required',
+      'paid_stock_shortfall_reconciliation_required', 'rejected_order_cancelled', 'rejected_amount_mismatch']) {
+      expect(getAlipayPaymentSummary(order, { status, paidAt: now }, now)).toMatchObject({ status: 'reconciliation', paidAt: null });
+    }
     expect(getAlipayPaymentSummary(order, { status: 'failed' }, now)?.status).toBe('failed');
     expect(getAlipayPaymentSummary(order, { status: 'paid', paidAt: now }, now)?.status).toBe('paid');
     expect(getAlipayPaymentSummary({ createdAt, paymentMethod: 'alipay', paidAt: null, status: 'closed' }, null, now)?.status).toBe('closed');

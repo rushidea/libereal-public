@@ -820,8 +820,12 @@ describe('purchase preparation from an accepted customer order', () => {
   it('starts an internal review on each exact order line, then groups complete terms into persistent drafts', async () => {
     const order = await seedOrder('test-order-group', { quantities: [2, 3, 4] });
     await acceptAsMerchant(order.id);
+    const accepted = await prisma.orderStatusHistory.findFirstOrThrow({
+      where: { orderId: order.id, actorId: merchant.id, fromStatus: 'pending', toStatus: 'confirmed' },
+    });
     expect(await prisma.accountReceivable.findUniqueOrThrow({ where: { orderId: order.id } })).toMatchObject({
-      userId: buyer.id, amount: 900, status: 'open', paymentTermDaysSnapshot: 30, termStartedAt: null, dueAt: null,
+      userId: buyer.id, amount: 900, status: 'open', paymentTermDaysSnapshot: 30,
+      confirmedAt: accepted.createdAt, termStartedAt: accepted.createdAt, dueAt: new Date(accepted.createdAt.getTime() + 30 * 86400000),
     });
     expect(await prisma.creditTransaction.findFirst({ where: { orderId: order.id, type: 'reserve' } })).toMatchObject({
       userId: buyer.id, amount: 900, actorId: merchant.id,

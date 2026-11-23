@@ -16,13 +16,13 @@ vi.mock('@/lib/alipay', async (importOriginal) => {
 
 import { POST } from '@/app/api/payments/alipay/notify/route';
 
-function notify(outTradeNo: string, amount = '100.00') {
+function notify(outTradeNo: string, amount = '100.00', tradeStatus = 'TRADE_SUCCESS') {
   const body = new URLSearchParams({
     app_id: '9021000000000000',
     seller_id: '2088000000000000',
     out_trade_no: outTradeNo,
     total_amount: amount,
-    trade_status: 'TRADE_SUCCESS',
+    trade_status: tradeStatus,
     trade_no: `trade-${outTradeNo}`,
     sign_type: 'RSA2',
     sign: 'signed-value',
@@ -118,6 +118,12 @@ describe('Alipay payment inventory reservation', () => {
     const repeat = await POST(notify('LP-SHORT', '200.00'));
     expect(repeat.status).toBe(200);
     expect(await prisma.auditLog.count({ where: { action: 'payment.alipay_stock_shortfall_reconciliation_required' } })).toBe(1);
+
+    const delayed = await POST(notify('LP-SHORT', '200.00', 'TRADE_CLOSED'));
+    await expect(delayed.text()).resolves.toBe('success');
+    expect(await prisma.paymentAttempt.findUnique({ where: { outTradeNo: 'LP-SHORT' } })).toMatchObject({
+      status: 'paid_stock_shortfall_reconciliation_required', tradeNo: 'trade-LP-SHORT',
+    });
 
     getTestDb().prepare('UPDATE Product SET stockQuantity = 5 WHERE id = ?').run('p1');
     const recovered = await POST(notify('LP-SHORT', '200.00'));

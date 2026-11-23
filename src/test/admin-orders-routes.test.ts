@@ -284,6 +284,10 @@ describe('PATCH /api/admin/orders/archive', () => {
       ) VALUES ('ar1', 'o1', 'buyer_1', 180, 'open', datetime('now'), 30, datetime('now'), datetime('now'))
     `).run();
     db.prepare(`
+      INSERT INTO CreditTransaction (id, userId, orderId, type, amount, balanceAfter, actorId, createdAt)
+      VALUES ('ct1', 'buyer_1', 'o1', 'reserve', 180, 180, 'admin_test_id', datetime('now'))
+    `).run();
+    db.prepare(`
       INSERT INTO PaymentAttempt (id, orderId, provider, outTradeNo, amount, status, createdAt, updatedAt)
       VALUES ('pa1', 'o1', 'bank_transfer', 'out-o1', 180, 'created', datetime('now'), datetime('now'))
     `).run();

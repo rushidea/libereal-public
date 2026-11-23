@@ -56,6 +56,7 @@ const order = {
   paidAt: null,
   status: 'pending',
   orderItems: [],
+  _count: { paymentAttempts: 0 },
   createdAt: new Date('2099-07-16T00:00:00.000Z'),
 };
 
@@ -74,6 +75,20 @@ describe('Alipay order payment routes', () => {
     mocks.paymentAttemptFindFirst.mockResolvedValue(null);
     mocks.paymentAttemptCreate.mockImplementation(async ({ data }) => ({ ...data }));
     mocks.writeAuditLog.mockResolvedValue(undefined);
+  });
+
+  it('keeps a late provider receipt out of a second checkout or redirect', async () => {
+    const unsettled = { ...order, _count: { paymentAttempts: 1 } };
+    mocks.orderFindUnique.mockResolvedValue(unsettled);
+    mocks.paymentAttemptFindUnique.mockResolvedValue({ orderId: order.id, order: unsettled, provider: 'alipay', status: 'created', amount: order.total });
+    const params = Promise.resolve({ id: order.id });
+    const created = await createPayment(new Request('https://example.test/api/orders/order-1/alipay', { method: 'POST' }), { params });
+    expect(created.status).toBe(409);
+    expect((await created.json()).code).toBe('PAYMENT_RECONCILIATION_REQUIRED');
+    const redirect = await redirectToAlipay(new Request('https://example.test/api/orders/order-1/alipay/redirect?attemptId=unsettled'), { params });
+    expect(redirect.status).toBe(409);
+    expect(mocks.pageExecute).not.toHaveBeenCalled();
+    expect(mocks.paymentAttemptCreate).not.toHaveBeenCalled();
   });
 
   it('does not open another payment while the original order needs price confirmation', async () => {

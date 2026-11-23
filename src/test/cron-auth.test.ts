@@ -31,6 +31,7 @@ vi.mock('@/lib/customer-credit', () => ({
     limitedCreditLimit: 0,
   },
   creditRestrictionForOverdueDays: vi.fn(),
+  overdueReceivableWhere: vi.fn(),
   overdueDaysFromDueAt: vi.fn(),
   runDailyTierReview: mocks.runDailyTierReview,
 }));

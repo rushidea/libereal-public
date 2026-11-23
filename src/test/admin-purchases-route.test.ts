@@ -1,12 +1,13 @@
 // @vitest-environment node
 
-import { createHash, randomBytes } from 'node:crypto';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { NextRequest } from 'next/server';
 import { GET, POST } from '@/app/api/admin/purchases/route';
+import { GET as financeGET, POST as financePOST } from '@/app/api/admin/finance/route';
 import { ADMIN_ROLE_DEFINITIONS, type AdminRoleKey } from '@/lib/admin-permissions';
-import { reserveOrderCredit } from '@/lib/customer-credit';
+import { releaseOrderReceivableOnCancellation, reserveOrderCredit } from '@/lib/customer-credit';
 import { resetEphemeralStoreForTests } from '@/lib/ephemeral-store';
 import { merchantAcceptanceMetadata, merchantOrderApprovalPreview, ORDER_APPROVAL_INCLUDE } from '@/lib/order-approval';
 import { prisma } from '@/lib/prisma';
@@ -28,6 +29,7 @@ const staff = {
   operator: 'test-purchase-operator',
   approver: 'test-purchase-approver',
   finance: 'test-purchase-finance',
+  accountant: 'office-financial-accountant',
 } as const;
 const buyer = 'test-buyer';
 const staffRole = {
@@ -35,6 +37,7 @@ const staffRole = {
   [staff.operator]: 'purchase_operator',
   [staff.approver]: 'purchase_approver',
   [staff.finance]: 'purchase_finance',
+  [staff.accountant]: 'finance_staff',
 } as const satisfies Record<string, AdminRoleKey>;
 const email = (id: string) => `${id}@example.test`;
 const session = (id: string) => `session-${id}`;
@@ -832,5 +835,207 @@ describe('admin purchase endpoint', () => {
     expect(activity('record_payment')).toHaveLength(1);
     expect(activity('resolve_change')).toEqual([{ actorId: staff.approver, amountCents: null }]);
     expect(cancelled.workspace.orders[0].ledger.at(-1).detail.snapshot.operation.refund.status).toBe('pending_review');
+  });
+
+  describe('commercial finance', () => {
+    const endpoint = 'http://localhost/api/admin/finance';
+    function financeRead(id = orderId) {
+      return financeGET(new NextRequest(endpoint + '?orderId=' + encodeURIComponent(id)));
+    }
+    function financeAttention() {
+      return financeGET(new NextRequest(endpoint + '?attention=1'));
+    }
+    function financePost(input: object) {
+      return financePOST(new NextRequest(endpoint, { method: 'POST', body: JSON.stringify(input),
+        headers: { 'Content-Type': 'application/json' } }));
+    }
+    function paper(ref: string) {
+      return { reference: ref, sha256: pricingContentHash({ original: ref }), description: '已核对办公室用品本地演练原件 ' + ref };
+    }
+    async function financePreview(action: string, data: object, id = orderId) {
+      const { workspace } = await expectJson(await financeRead(id), 200);
+      const input = { orderId: id, action, requestId: randomUUID(), version: workspace.version, data };
+      const { preview } = await expectJson(await financePost({ ...input, stage: 'preview' }), 200);
+      return { input, preview };
+    }
+    async function finish(checked: Awaited<ReturnType<typeof financePreview>>) {
+      // These separate bookkeeping visits use normal MFA and its real rate-limit rules.
+      vi.setSystemTime(Date.now() + 3 * 60_000);
+      return expectJson(await financePost({ ...checked.input, stage: 'confirm', actionHash: checked.preview.actionHash,
+        stepUpToken: await grant(staff.accountant) }), 200);
+    }
+    async function record(action: string, data: object, id = orderId) {
+      return (await finish(await financePreview(action, data, id))).workspace;
+    }
+    async function bank(trace: string, total: number, id = orderId) {
+      const view = await record('verify_bank_receipt', { ...paper('bank-' + trace), documentKind: 'single_receipt', payer: 'Office buyer',
+        bankTrace: trace, receiptTotalCents: total, receivingAccount: 'Office settlement account', occurredAt: new Date().toISOString() }, id);
+      return view.banks.find((entry: { bankTrace: string }) => entry.bankTrace === trace).id as string;
+    }
+    function allocation(id: string, amount: number, ref: string) {
+      return { ...paper(ref), bankReceiptId: id, amountCents: amount, allocationReference: ref };
+    }
+
+    it('settles two orders from two actual bank transactions across finance and purchasing with partial credit release', async () => {
+      const other = 'office-second-order';
+      await seedAcceptedOrder(other, 'office-second-line');
+      signIn(staff.operator);
+      await expectJson(await financeRead(), 403);
+      await expectJson(await financePost({ action: 'verify_bank_receipt', role: 'finance_staff', data: {} }), 403);
+      signIn(staff.accountant);
+      await expectJson(await readPurchases(orderId), 403);
+      const bankOne = await bank('OFFICE-TRANSFER-1', 30000);
+      const bankTwo = await bank('OFFICE-TRANSFER-2', 20000, other);
+      expect((await expectJson(await financeRead(), 200)).workspace.receivable.outstandingCents).toBe(25000);
+      const first = await financePreview('record_customer_receipt', allocation(bankOne, 8000, 'office-allocation-A'));
+      expect(first.preview.snapshot.operation.accounting).toMatchObject({ releaseCents: 8000, remainingCents: 17000, accountUsedAfter: 420 });
+      const confirmData = { ...first.input, stage: 'confirm', actionHash: first.preview.actionHash };
+      await expectJson(await financePost(confirmData), 403);
+      await expectJson(await financePost({ ...confirmData, data: { ...first.input.data, amountCents: 7900 }, stepUpToken: await grant(staff.accountant) }), 409);
+      const part = await finish(first);
+      expect(part.workspace).toMatchObject({ orderId, status: 'confirmed', paidAt: null, settlementCents: 8000,
+        receivable: { outstandingCents: 17000, status: 'open' } });
+      expect((await finish(first)).eventId).toBe(part.eventId);
+      expect(await prisma.customerCashPosting.count({ where: { orderId } })).toBe(1);
+      await expect(prisma.$transaction(tx => releaseOrderReceivableOnCancellation(tx, orderId, staff.accountant))).rejects.toThrow('PAID_ORDER_REFUND_REQUIRED');
+      signIn(staff.operator);
+      expect((await expectJson(await readPurchases(orderId), 200)).workspace.eligibility.eligible).toBe(true);
+      signIn(staff.accountant);
+      const otherView = (await expectJson(await financeRead(other), 200)).workspace;
+      await expectJson(await financePost({ action: 'record_customer_receipt', orderId: other, requestId: randomUUID(), version: otherView.version,
+        stage: 'preview', data: allocation(bankOne, 22001, 'over-receipt') }), 409);
+      await record('record_customer_receipt', allocation(bankOne, 22000, 'office-allocation-B'), other);
+      const paid = await record('record_customer_receipt', allocation(bankTwo, 17000, 'office-allocation-C'));
+      expect(paid).toMatchObject({ status: 'confirmed', settlementCents: 25000, receivable: { outstandingCents: 0, status: 'paid' } });
+      const second = await record('record_customer_receipt', allocation(bankTwo, 3000, 'office-allocation-D'), other);
+      expect(second.receivable).toMatchObject({ status: 'paid', outstandingCents: 0 });
+      expect(await prisma.creditAccount.findUniqueOrThrow({ where: { userId: buyer } })).toMatchObject({ usedAmount: 0 });
+      expect(await prisma.customerCashPosting.count()).toBe(4);
+      expect(await prisma.creditTransaction.count({ where: { type: 'release' } })).toBe(4);
+    });
+
+    it('binds original invoices, parties and a cross-order correction to all affected allocations without recording cash', async () => {
+      const other = 'invoice-second-office-order';
+      await seedAcceptedOrder(other, 'invoice-second-office-line');
+      signIn(staff.accountant);
+      const parties = { issuer: 'Office seller', recipient: 'Office buyer' };
+      const plan = { action: 'create_plan', side: 'customer', trigger: 'accepted', ...parties };
+      const planA = (await record('create_plan', { ...plan, ...paper('customer-invoice-A'), grossCents: 10000 })).invoicePlans[0];
+      const planB = (await record('create_plan', { ...plan, ...paper('customer-invoice-B'), grossCents: 15000 }, other)).invoicePlans[0];
+      const doc = { ...paper('one-original-invoice'), ...parties, number: 'OFFICE-INV-2026-01', grossCents: 25000, issuedAt: new Date().toISOString() };
+      const a = await record('record_invoice', { ...doc, planId: planA.id, amountCents: 10000 });
+      const invoiceId = a.invoicePlans[0].allocations[0].invoiceId;
+      const beforeSecond = await financePreview('open_correction', { ...paper('open-correction'), invoiceId, occurredAt: new Date().toISOString() });
+      await record('record_invoice', { ...doc, planId: planB.id, amountCents: 15000 }, other);
+      await expectJson(await financePost({ ...beforeSecond.input, stage: 'confirm', actionHash: beforeSecond.preview.actionHash,
+        stepUpToken: await grant(staff.accountant) }), 409);
+      const opened = await financePreview('open_correction', { ...paper('open-correction'), invoiceId, occurredAt: new Date().toISOString() });
+      expect(opened.preview.snapshot.operation.affected).toHaveLength(2);
+      await finish(opened);
+      const voided = await record('resolve_correction', { ...paper('actual-original-void-document'), invoiceId, outcome: 'voided',
+        occurredAt: new Date().toISOString() });
+      expect(voided.invoicePlans[0]).toMatchObject({ usedCents: 0, allocations: [{ status: 'voided', number: doc.number }] });
+      expect((await expectJson(await financeRead(other), 200)).workspace.invoicePlans[0].usedCents).toBe(0);
+      expect(await prisma.financeInvoice.count()).toBe(1);
+      expect(await prisma.customerCashPosting.count()).toBe(0);
+      expect(await prisma.creditAccount.findUniqueOrThrow({ where: { userId: buyer } })).toMatchObject({ usedAmount: 500 });
+      const reissue = await record('record_invoice', { ...doc, ...paper('actual-new-invoice'), number: 'OFFICE-INV-2026-02',
+        grossCents: 10000, amountCents: 10000, planId: planA.id, issuedAt: new Date().toISOString() });
+      expect(reissue.invoicePlans[0].allocations).toHaveLength(2);
+      expect(reissue.receivable).toMatchObject({ outstandingCents: 25000, status: 'open' });
+    });
+
+    it('keeps a customer invoice conditional on actual delivery and restores an old term from merchant acceptance only', async () => {
+      signIn(staff.accountant);
+      await prisma.accountReceivable.update({ where: { orderId }, data: { termStartedAt: null, dueAt: null } });
+      const restored = await record('restore_term', paper('original-merchant-history'));
+      expect(restored.receivable.termStartedAt).toBe(restored.acceptedAt);
+      expect(Date.parse(restored.receivable.dueAt) - Date.parse(restored.acceptedAt)).toBe(30 * 86400000);
+      const other = await record('set_term', { ...paper('individually-agreed-dates'), startedAt: restored.acceptedAt, days: 45 });
+      expect(other.receivable.terms).toBe(45);
+      const plan = await record('create_plan', { ...paper('invoice-on-delivery'), side: 'customer',
+        issuer: 'Office seller', recipient: 'Office buyer', trigger: 'delivered', grossCents: 25000 });
+      await expectJson(await financePost({ action: 'record_invoice', orderId, version: plan.version, requestId: randomUUID(), stage: 'preview',
+        data: { ...paper('invoice-without-customer-receipt'), planId: plan.invoicePlans[0].id, issuer: 'Office seller', recipient: 'Office buyer',
+          number: 'NOT-ISSUED', issuedAt: new Date().toISOString(), amountCents: 25000, grossCents: 25000 } }), 409);
+      expect(await prisma.financeInvoice.count()).toBe(0);
+    });
+
+    it('keeps a late verified Alipay receipt pending through named evidence updates and rejects an unsupported financial closure', async () => {
+      const lateOrder = 'office-alipay-mismatch';
+      await prisma.order.create({ data: { id: lateOrder, email: email(buyer), customerId: buyer, subtotal: 250, total: 250,
+        status: 'unpaid', paymentMethod: 'alipay' } });
+      const trade = await prisma.paymentAttempt.create({ data: { orderId: lateOrder, provider: 'alipay',
+        outTradeNo: 'OFFICE-ORIGINAL-PAY', tradeNo: 'OFFICE-VERIFIED-PROVIDER-PAY', status: 'rejected_amount_mismatch',
+        amount: 240, notifiedAt: new Date() } });
+      signIn(staff.accountant);
+      expect((await expectJson(await financeGET(new NextRequest(endpoint)), 200)).orders).toEqual(expect.arrayContaining([expect.objectContaining({ id: lateOrder })]));
+
+      const initial = (await expectJson(await financeRead(lateOrder), 200)).workspace;
+      expect(initial.latePayments).toMatchObject([{ id: trade.id, review: null }]);
+      await expectJson(await financePost({ action: 'update_payment_case', orderId: lateOrder, version: initial.version,
+        requestId: randomUUID(), stage: 'preview', data: { ...paper('unclaimed-provider-result'), sourceId: trade.id,
+          occurredAt: new Date().toISOString(), outcome: 'awaiting_authorized_disposition' } }), 409);
+      const claim = await financePreview('review_payment_case', { ...paper('original-payment-notice'), sourceId: trade.id, occurredAt: new Date().toISOString() }, lateOrder);
+      expect(claim.preview.snapshot.operation).toMatchObject({ ownerId: staff.accountant, source: {
+        id: trade.id, kind: 'alipay', amountCents: 24000, outTradeNo: trade.outTradeNo, tradeNo: trade.tradeNo,
+      } });
+      const claimed = await finish(claim);
+      const alleged = { ...paper('unsupported-refund-assertion'), sourceId: trade.id, occurredAt: new Date().toISOString(), outcome: 'refunded' };
+      for (const action of ['resolve_payment_case', 'update_payment_case']) {
+        await expectJson(await financePost({ action, orderId: lateOrder, version: claimed.workspace.version,
+          requestId: randomUUID(), stage: 'preview', data: alleged }), 400);
+      }
+      const progress = await financePreview('update_payment_case', { ...paper('gateway-reply-pending-authorized-disposition'),
+        sourceId: trade.id, occurredAt: new Date().toISOString(), outcome: 'awaiting_authorized_disposition' }, lateOrder);
+      expect(progress.preview.snapshot.operation).toMatchObject({ claimId: claimed.eventId, ownerId: staff.accountant, source: {
+        id: trade.id, kind: 'alipay', tradeNo: trade.tradeNo,
+      } });
+      const pending = await finish(progress);
+      expect((await finish(progress)).eventId).toBe(pending.eventId);
+      expect(pending.workspace).toMatchObject({ paidAt: null, settlementCents: 0, latePayments: [{ id: trade.id, review: {
+        ownerId: staff.accountant, claimId: claimed.eventId, lastRecord: { action: 'update_payment_case', actorId: staff.accountant },
+      } }] });
+      expect(await prisma.customerCashPosting.count({ where: { orderId: lateOrder } })).toBe(0);
+      expect(await prisma.paymentAttempt.findUnique({ where: { id: trade.id } })).toMatchObject({
+        status: 'rejected_amount_mismatch', tradeNo: trade.tradeNo, amount: 240,
+      });
+      expect(await prisma.financeEvent.count({ where: { orderId: lateOrder } })).toBe(2);
+    });
+
+    it('chases the supplier invoice and matches it against the approved purchase and separately registered deposit', async () => {
+      await startActualSupply(orderId, 'finance-voucher');
+      signIn(staff.finance);
+      const payable = await previewAction({ action: 'record_payment', requestId: 'actual-office-deposit', amountCents: 900,
+        reference: 'office-deposit-9', conditionReference: 'Office supplier accepted split payment' });
+      await expectJson(await confirm(payable, await grant(staff.finance)), 200);
+      signIn(staff.accountant);
+      const po = (await expectJson(await financeRead(), 200)).workspace.purchases[0];
+      expect(po).toMatchObject({ originalCents: 7346, paidCents: 900, dueCents: 6446 });
+      const first = await record('create_plan', { ...paper('supplier-invoice-request'), side: 'supplier', purchaseOrderId: po.id,
+        trigger: 'accepted', issuer: procurementTerms.supplier, recipient: 'Office seller', grossCents: 7346 });
+      const planId = first.invoicePlans[0].id;
+      const discrepancy = await record('reconcile_supplier', { ...paper('invoice-difference'), purchaseOrderId: po.id, outcome: 'followup' });
+      expect(discrepancy.purchases[0]).toMatchObject({ reconciled: false, supplierFollowup: { actorId: staff.accountant } });
+      const nextReview = new Date(Date.now() + 86400000);
+      const traced = await record('chase_invoice', { ...paper('manual-follow-up'), planId, occurredAt: new Date().toISOString(),
+        nextReviewAt: nextReview.toISOString() });
+      expect(traced.invoicePlans[0].lastFollowup.actorId).toBe(staff.accountant);
+      let attention = (await expectJson(await financeAttention(), 200)).orders;
+      expect(attention).toMatchObject([{ id: orderId, attention: { supplierDifferences: 1, invoiceFollowups: 0 } }]);
+      vi.setSystemTime(nextReview);
+      attention = (await expectJson(await financeAttention(), 200)).orders;
+      expect(attention).toMatchObject([{ id: orderId, attention: { supplierDifferences: 1, invoiceFollowups: 1 } }]);
+      const actual = await record('record_invoice', { ...paper('original-supplier-invoice'), planId, issuer: procurementTerms.supplier,
+        recipient: 'Office seller', number: 'OFFICE-SUPPLIER-1', issuedAt: new Date().toISOString(), grossCents: 7346, amountCents: 7346 });
+      expect(actual.purchases[0]).toMatchObject({ paidCents: 900, dueCents: 6446, pendingInvoiceCents: 0, reconciled: false });
+      expect((await expectJson(await financeAttention(), 200)).orders)
+        .toMatchObject([{ id: orderId, attention: { supplierDifferences: 1, invoiceFollowups: 0 } }]);
+      const matched = await record('reconcile_supplier', { ...paper('three-way-reconciliation'), purchaseOrderId: po.id, outcome: 'matched' });
+      expect(matched.purchases[0]).toMatchObject({ paidCents: 900, dueCents: 6446, reconciled: true,
+        payments: [{ reference: 'office-deposit-9', amountCents: 900 }], invoices: [{ amountCents: 7346, status: 'recorded' }] });
+      expect(matched.cashCents).toBe(0);
+      expect((await expectJson(await financeAttention(), 200)).orders).toEqual([]);
+    });
   });
 });
