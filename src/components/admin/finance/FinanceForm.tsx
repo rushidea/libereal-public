@@ -55,8 +55,14 @@ export default function FinanceForm({ view, action, busy, onPreview, onCancel, o
   const families = view.customerInvoiceFamilies ?? [];
   const [basisId, setBasisId] = useState(openLines.length ? '' : families[0]?.id ?? '');
   const [restateCeiling, setRestateCeiling] = useState(false);
+  const [clarifyingAt, setClarifyingAt] = useState('');
   const scopeBasis = scopes.find(row => row.id === basisId);
   const scopeAmounts = families.find(row => row.id === basisId);
+  const unresolved = scopeAmounts?.timeline?.filter(row => row.needsReview) ?? [];
+  const clarification = unresolved.find(row => row.at === clarifyingAt);
+  const restates = Boolean(clarification || restateCeiling);
+  const eligibleLines = scopeBasis ? scopeBasis.lines.map(line => ({ ...line, unverifiedQuantity: line.quantity })) : openLines;
+  const chooseLines = !scopeBasis || !restates && (eligibleLines.length > 1 || eligibleLines[0]?.unverifiedQuantity > 1);
   const [documentKind, setDocumentKind] = useState('single_receipt');
   const plans = view.invoicePlans.filter(plan => action === 'record_invoice'
     ? plan.recordable
@@ -90,16 +96,23 @@ export default function FinanceForm({ view, action, busy, onPreview, onCancel, o
       const form = new FormData(event.currentTarget);
       for (const [key, entry] of form) {
         if (typeof entry !== 'string' || !entry.trim()) continue;
-        if (key.startsWith('invoiceQuantity:')) continue;
+        if (key.startsWith('invoiceQuantity:') || key.startsWith('confirmedProof:')) continue;
         data[key] = key === 'confirmContinueAfterCancellation' || key === 'restateInvoiceCeiling' ? true
-          : moneyFields.has(key) ? cents(entry, key === 'grossCents' && action === 'verify_customer_invoice_scope' && restateCeiling)
+          : moneyFields.has(key) ? cents(entry, key === 'grossCents' && action === 'verify_customer_invoice_scope' && restates)
           : timeFields.has(key) ? new Date(entry).toISOString()
           : key === 'days' || key === 'statementRow' || key === 'documentRow' ? Number(entry) : entry.trim();
       }
-      if (action === 'verify_customer_invoice_scope' && !scopeBasis) data.invoiceLines = openLines.flatMap(line => {
-        const quantity = Number(form.get('invoiceQuantity:' + line.id));
-        return quantity > 0 ? [{ orderItemId: line.id, quantity }] : [];
-      });
+      if (action === 'verify_customer_invoice_scope') {
+        if (chooseLines) data.invoiceLines = eligibleLines.flatMap(line => {
+          const quantity = Number(form.get('invoiceQuantity:' + line.id));
+          return quantity > 0 ? [{ orderItemId: line.id, quantity }] : [];
+        });
+        if (clarification) {
+          data.restateInvoiceCeiling = true;
+          data.clarifiesInvoiceEvidenceAt = clarification.at;
+          data.confirmedInvoiceEvidenceIds = clarification.evidenceIds.filter(id => form.has('confirmedProof:' + id));
+        }
+      }
       await onPreview({ orderId: view.orderId, version: view.version, requestId: crypto.randomUUID(), action, data });
     } catch (error) { onError(error instanceof Error ? error.message : '请核对填写内容'); }
   }}>
@@ -112,32 +125,43 @@ export default function FinanceForm({ view, action, busy, onPreview, onCancel, o
       {action === 'verify_customer_invoice_scope' && <>
         {families.length > 0 && <label className="grid gap-1 sm:col-span-2">开票书证对应范围
           <select name="invoiceScopeBasisId" className={field} value={basisId}
-            onChange={event => { setBasisId(event.target.value); setRestateCeiling(false); }}>
+            onChange={event => { setBasisId(event.target.value); setRestateCeiling(false); setClarifyingAt(''); }}>
             {openLines.length > 0 && <option value="">核对尚无依据的商品份额</option>}
             {families.map(row => {
               const original = scopes.find(scope => scope.id === row.id);
               return <option key={row.id} value={row.id}>{original?.reference} · {original?.lines.map(line =>
-                line.name + ' ' + line.quantity + ' 件').join('、')} · 已核 {money(row.authorizedCents)}</option>;
+                line.name + ' ' + line.quantity + ' 件').join('、')} · 已核 {money(row.authorizedCents ?? undefined)}</option>;
             })}
           </select>
         </label>}
         <Text key={'proof-issuer-' + basisId} name="issuer" label="原书证开票方全称" initial={scopeBasis?.issuer}/>
         <Text key={'proof-recipient-' + basisId} name="recipient" label="原书证受票方全称" initial={scopeBasis?.recipient}/>
         {scopeAmounts && <>
-          <p className="sm:col-span-2">原累计可开 {money(scopeAmounts.authorizedCents)} · 已开及更正中 {money(scopeAmounts.issuedCents)}
-            {' · 尚可安排 ' + money(scopeAmounts.availableCents)}</p>
-          <label className="flex items-center gap-2 sm:col-span-2"><input type="checkbox" name="restateInvoiceCeiling" checked={restateCeiling}
-            onChange={event => setRestateCeiling(event.target.checked)}/>书证重新核定累计可开额</label>
+          <p className="sm:col-span-2">当前累计可开 {money(scopeAmounts.authorizedCents ?? undefined)} · 已开及更正中 {money(scopeAmounts.issuedCents)}
+            {' · 尚可安排 ' + money(scopeAmounts.availableCents ?? undefined)}</p>
+          {unresolved.length > 0 && <label className="grid gap-1 sm:col-span-2">已有书证的待核时间<select className={field}
+            value={clarifyingAt} onChange={event => setClarifyingAt(event.target.value)}>
+            <option value="">登记新的书证</option>
+            {unresolved.map(row => <option key={row.at} value={row.at}>{dateLabel(row.at)}</option>)}
+          </select></label>}
+          {clarification ? <fieldset key={clarification.at} className="space-y-1 sm:col-span-2">
+            <legend>澄清书证确认当时生效的原件</legend>
+            {clarification.evidenceIds.map(id => <label key={id} className="flex items-center gap-2">
+              <input type="checkbox" name={'confirmedProof:' + id}/>{scopeAmounts.evidence.find(proof => proof.id === id)?.reference}
+            </label>)}
+          </fieldset> : <label className="flex items-center gap-2 sm:col-span-2"><input type="checkbox" name="restateInvoiceCeiling" checked={restateCeiling}
+            onChange={event => setRestateCeiling(event.target.checked)}/>书证重新核定累计可开额</label>}
         </>}
         <Amount name="grossCents" label={!scopeBasis ? '原书证可开的含税金额'
-          : restateCeiling ? '原书证核定的新累计可开额' : '原书证明确补充的含税金额'} allowZero={restateCeiling}/>
-        <Time name="occurredAt" label="原书证载明的实际确认时间"/>
+          : clarification ? '澄清书证确认当时的累计可开额'
+            : restateCeiling ? '原书证核定的新累计可开额' : '原书证明确补充的含税金额'} allowZero={restates}/>
+        <Time name="occurredAt" label={clarification ? '澄清书证的实际确认时间' : '原书证载明的实际确认时间'}/>
         <label className="grid gap-1">书证分行核对时填写原件行号
           <input name="documentRow" type="number" min="1" step="1" className={field}/>
         </label>
-        {scopeBasis ? <p className="sm:col-span-2">已核商品与数量 {scopeBasis.lines.map(line => line.name + ' ' + line.quantity + ' 件').join('、')}</p>
-          : <fieldset className="space-y-1 sm:col-span-2"><legend>原书证覆盖的实际订单行</legend>
-          {openLines.map(line => <label key={line.id} className="flex items-center gap-2">
+        {scopeBasis && !chooseLines ? <p className="sm:col-span-2">已核商品与数量 {scopeBasis.lines.map(line => line.name + ' ' + line.quantity + ' 件').join('、')}</p>
+          : <fieldset key={basisId} className="space-y-1 sm:col-span-2"><legend>原书证覆盖的实际订单行</legend>
+          {eligibleLines.map(line => <label key={line.id} className="flex items-center gap-2">
             {line.unverifiedQuantity === 1
               ? <><input name={'invoiceQuantity:' + line.id} type="checkbox" value="1"/>{line.name} · 1 件</>
               : <>{line.name} · 可核实 {line.unverifiedQuantity} 件

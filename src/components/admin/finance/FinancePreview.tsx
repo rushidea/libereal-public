@@ -24,6 +24,8 @@ export default function FinancePreview({ preview, busy, onConfirm, onBack }: {
     {op.action === 'record_invoice' && <><p>票号 {op.number} · {op.issuer} 开给 {op.recipient}</p>
       <p>票面 {money(op.grossCents)} · 已分 {money(op.allocatedBeforeCents)} · 本次归入 {money(op.amountCents)}</p>
       <p>开票时间 {dateLabel(op.issuedAt)} · 约定条件达成 {dateLabel(op.readyAt)}</p>
+      {op.invoiceAuthority && <p>票面日期适用的累计额度 {money(op.invoiceAuthority.authorizedCents ?? undefined)}
+        {' · 书证生效 ' + dateLabel(op.invoiceAuthority.at)}</p>}
       {op.adjustedPlans?.map(row => <p key={row.planId}>同一原安排 {row.reference} · 原可用 {money(row.previousCents)} · 回填后额度 {money(row.effectiveCents)}</p>)}
     </>}
     {op.action === 'verify_bank_receipt' && <><p>付款人 {op.bank.payer} · 收款账户 {op.bank.receivingAccount}</p>
@@ -37,11 +39,17 @@ export default function FinancePreview({ preview, busy, onConfirm, onBack }: {
       <p>{op.issuer} 开给 {op.recipient} · {op.scopeChange
         ? '原接单记录 ' + op.acceptanceId
         : '书证可开含税金额 ' + money(op.grossCents) + ' · 原接单记录 ' + op.acceptanceId}</p>
-      {op.scopeChange && <><p>原累计可开 {money(op.scopeChange.beforeCents)}
-        {' · 本次' + (op.scopeChange.deltaCents > 0 ? '增加 ' : '调减 ') + money(Math.abs(op.scopeChange.deltaCents))}
-        {' · 新累计可开 ' + money(op.scopeChange.afterCents)}</p>
+      {op.scopeChange && <><p>原累计可开 {money(op.scopeChange.beforeCents ?? undefined)}
+        {op.scopeChange.deltaCents !== null && (' · 本次' + (op.scopeChange.deltaCents >= 0 ? '增加 ' : '调减 ')
+          + money(Math.abs(op.scopeChange.deltaCents)))}
+        {' · 新累计可开 ' + money(op.scopeChange.afterCents ?? undefined)}</p>
+        {op.scopeChange.effectiveAt && <p>该书证适用时间 {dateLabel(op.scopeChange.effectiveAt)}
+          {' · 当前累计可开 ' + money(op.scopeChange.currentCents ?? undefined)}</p>}
+        {op.scopeChange.afterCents === null && <p>本次原件登记后需要具名核对该时点的开票书证。</p>}
+        {op.scopeChange.mode === 'clarify' && <p>澄清依据确认的原件 {op.scopeChange.confirmedEvidenceIds.join('、')}</p>}
+        {op.scopeChange.invoiceConflicts?.map(row => <p key={row.id}>待核原票 {row.number} · 票面日期 {dateLabel(row.issuedAt)}</p>)}
         <p>已开及更正中 {money(op.scopeChange.issuedCents)} · 已占额度 {money(op.scopeChange.plannedCents)}
-          {' · 尚可安排 ' + money(op.scopeChange.availableCents)}</p></>}
+          {' · 尚可安排 ' + money(op.scopeChange.availableCents ?? undefined)}</p></>}
       {op.documentRow && <p>本次核对原件第 {op.documentRow} 行</p>}
       <ul>{op.lines.map(line => <li key={line.id}>{line.name} · {line.quantity} 件</li>)}</ul>
     </>}

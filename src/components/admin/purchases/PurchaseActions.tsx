@@ -337,7 +337,8 @@ export default function PurchaseActions({ orderId, orderStatus, cancellation, po
   const stillHeld = waitingForDeliveryDecision || unlinkedShortfalls.length > 0 || po.incidents.length > 0;
   const oldPayments = po.payments?.filter(row => row.canReviewTime) ?? [];
   const paymentIssues = po.paymentExceptions?.filter(row => row.pending) ?? [];
-  const linkedPayment = paymentIssues.find(row => row.id === paymentIssueId);
+  const linkedPayment = po.paymentExceptions.find(row => row.id === paymentIssueId
+    && (row.pending || action === 'approve_payment_attribution' && row.canReviewAttribution));
   const routingIssues = po.paymentExceptions?.filter(row => row.canRoute) ?? [];
   const selectedRouting = routingIssues.find(row => row.id === paymentIssueId) ?? routingIssues[0];
   const recordedProof = (issue: typeof paymentIssues[number]) => !issue.incoming && issue.pending
@@ -483,7 +484,7 @@ export default function PurchaseActions({ orderId, orderStatus, cancellation, po
           if (confirmOwn) setPaymentIssueOutcome('confirmed_current');
         }}>{confirmOwn ? '核对本单已有付款' : correction ? actionNames.correct_payment_attribution
           : attachExisting ? '关联本单已有付款' : '凭原待办核销付款'}</button>}
-        {issue.pending && !pending && !stillHeld && permit('approve') && <button type="button" className={button} disabled={busy} onClick={() => {
+        {issue.canReviewAttribution && !pending && !stillHeld && permit('approve') && <button type="button" className={button} disabled={busy} onClick={() => {
           choose('approve_payment_attribution'); setPaymentIssueId(issue.id);
         }}>{actionNames.approve_payment_attribution}</button>}
       </section>;
@@ -682,8 +683,9 @@ export default function PurchaseActions({ orderId, orderStatus, cancellation, po
       </>}
       {action === 'approve_payment_attribution' && linkedPayment && <>
         <input type="hidden" name="paymentIssueId" value={linkedPayment.id}/>
-        <p>暂停期间原转账 {linkedPayment.original.paymentEvidence.bankTrace} · {money(linkedPayment.original.amountCents)}</p>
-        {inputField('reference', '暂停处理及原合同的书证出处')}
+        <p>原实际转账 {linkedPayment.original.paymentEvidence.bankTrace} · {money(linkedPayment.original.amountCents)}
+          {linkedPayment.noEffectiveApprovalId && ' · 原付款当日无有效批准'}</p>
+        {inputField('reference', '付款归属及原合同的书证出处')}
         <DocumentDigestField name="referenceSha256" label="处理结果书证摘要" required/>
         {inputField('description', '现批准的准确归属及原待办处理结果')}
       </>}
@@ -910,6 +912,7 @@ export default function PurchaseActions({ orderId, orderStatus, cancellation, po
       {op.action === 'correct_payment_attribution' && <p>原采购单 {op.source.purchaseOrderId} · 原账所记批准 {op.source.recordedApprovalId ?? '档案未记'}
         {' · 原付款 ' + op.source.paymentId} · 本次等额归属更正 {money(op.amountCents)} · {op.description}</p>}
       {op.action === 'approve_payment_attribution' && <p>现有效采购批准 {op.basis.currentApprovalId} · 原转账 {op.basis.paymentEvidence.bankTrace}
+        {op.basis.noEffectiveApprovalId && ' · 付款当日无有效批准的核对记录 ' + op.basis.noEffectiveApprovalId}
         {' · 收款方 ' + op.basis.paymentEvidence.payee} · 审核归属金额 {money(op.basis.amountCents)} · 仍由财务继续登记</p>}
       {op.action === 'review_payment_time' && <p>原付款 {op.original.reference} · {money(op.original.amountCents)} · 原登记 {new Date(op.original.recordedAt).toLocaleString('zh-CN')}</p>}
       {op.action === 'record_payment_exception' && <p>待核对付款 {money(op.amountCents)} · 负责人 {op.responsibleActorId} · {op.description}</p>}

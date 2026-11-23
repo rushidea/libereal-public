@@ -141,7 +141,16 @@ export default function FinanceManager({ initialOrder }: { initialOrder: string 
             {' · ' + scope.issuer + ' 开给 ' + scope.recipient + ' · 原书证 ' + scope.reference}
             {scope.documentRow && ' · 第 ' + scope.documentRow + ' 行'}</p>
           <p>{scope.lines.map(line => line.name + ' ' + line.quantity + ' 件').join('、')}</p>
-          {amounts && <p>累计可开 {money(amounts.authorizedCents)} · 已开及更正中 {money(amounts.issuedCents)} · 尚可安排 {money(amounts.availableCents)}</p>}
+          {amounts && <>
+            <p>累计可开 {money(amounts.authorizedCents ?? undefined)} · 已开及更正中 {money(amounts.issuedCents)}
+              {' · 尚可安排 ' + money(amounts.availableCents ?? undefined)}</p>
+            {amounts.timeline?.some(row => row.needsReview) && <p className="text-amber-900">书证生效顺序待核
+              {' · ' + amounts.timeline.filter(row => row.needsReview).map(row => dateLabel(row.at)).join('、')}
+              {' · 请凭明确的澄清书证核对历史客户可开票范围。'}</p>}
+            {amounts.invoiceConflicts?.map(row => <p key={row.id} className="text-amber-900">
+              原票 {row.number} · 票面日期 {dateLabel(row.issuedAt)} · 请核对当日书证或登记发票更正待办。
+            </p>)}
+          </>}
         </div>;
       })}
       {view.receivable?.needsTermReview && <p>旧账期的起算日期与平台接单日期不同，请核对本单书面约定。</p>}
