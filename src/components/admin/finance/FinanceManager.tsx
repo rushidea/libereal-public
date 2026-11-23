@@ -84,7 +84,8 @@ export default function FinanceManager({ initialOrder }: { initialOrder: string 
       actions.push('set_term');
     }
     const canArrangeCustomerInvoice = view.acceptanceId && !view.archived && !['closed', 'cancelled'].includes(view.status);
-    if (canArrangeCustomerInvoice && view.principalCents <= 0 && view.originalInvoiceLines?.some(row => row.unverifiedQuantity > 0)) {
+    if (canArrangeCustomerInvoice && view.principalCents <= 0
+      && (view.customerInvoiceFamilies?.length || view.originalInvoiceLines?.some(row => row.unverifiedQuantity > 0))) {
       actions.push('verify_customer_invoice_scope');
     }
     if (canArrangeCustomerInvoice && (view.principalCents > 0 || view.customerInvoiceScopes?.length)
@@ -133,11 +134,16 @@ export default function FinanceManager({ initialOrder }: { initialOrder: string 
       {view.receivable && <p>账期 {view.receivable.terms} 天 · 起算 {dateLabel(view.receivable.termStartedAt)} · 到期 {dateLabel(view.receivable.dueAt)}</p>}
       {view.receivable?.needsPrincipalReview && <p>保留原应收余额。订单面额待财务核对后再核销。</p>}
       {view.postingPrincipal?.reviewId && <p>原应收金额已核对 {money(view.postingPrincipal.cents)} · 核对记录 {view.postingPrincipal.reviewId}</p>}
-      {view.customerInvoiceScopes?.map(scope => <div key={scope.id}>
-        <p>历史客户可开票范围 {money(scope.grossCents)} · {scope.issuer} 开给 {scope.recipient} · 原书证 {scope.reference}
-          {scope.documentRow && ' · 第 ' + scope.documentRow + ' 行'}</p>
-        <p>{scope.lines.map(line => line.name + ' ' + line.quantity + ' 件').join('、')}</p>
-      </div>)}
+      {view.customerInvoiceScopes?.map(scope => {
+        const amounts = view.customerInvoiceFamilies?.find(row => row.id === scope.id);
+        return <div key={scope.id}>
+          <p>{scope.familyId && scope.familyId !== scope.id ? '历史客户开票补证' : '历史客户可开票范围'} {money(scope.grossCents)}
+            {' · ' + scope.issuer + ' 开给 ' + scope.recipient + ' · 原书证 ' + scope.reference}
+            {scope.documentRow && ' · 第 ' + scope.documentRow + ' 行'}</p>
+          <p>{scope.lines.map(line => line.name + ' ' + line.quantity + ' 件').join('、')}</p>
+          {amounts && <p>累计可开 {money(amounts.authorizedCents)} · 已开及更正中 {money(amounts.issuedCents)} · 尚可安排 {money(amounts.availableCents)}</p>}
+        </div>;
+      })}
       {view.receivable?.needsTermReview && <p>旧账期的起算日期与平台接单日期不同，请核对本单书面约定。</p>}
       <p>平台接单 {dateLabel(view.acceptedAt)} · 客户已签收 {dateLabel(view.shipmentDates.delivered)}</p>
       {view.authorityConflict && <p role="alert">到账来源有重叠，须由财务核对原件。</p>}
@@ -156,11 +162,12 @@ export default function FinanceManager({ initialOrder }: { initialOrder: string 
       {view.purchases.map(po => <article key={po.id} className="space-y-1 rounded border border-slate-200 p-3 text-sm">
         <h3 className="font-semibold">{po.supplier ?? '供方须核对'} · {po.id}</h3>
         <p>收款方 {po.payees.join('、')} · 原采购 {money(po.originalCents)} · 已登记付款 {money(po.paidCents)} · 余款 {money(po.dueCents ?? undefined)}</p>
+        {po.disputedPaidCents > 0 && <p>已登记付款中 {money(po.disputedPaidCents)} 归属待核。请到采购页处理原付款。</p>}
         <p>有效来票 {money(po.invoicedCents)} · 更正中 {money(po.underCorrectionCents)} · 待收票 {money(po.pendingInvoiceCents ?? undefined)} · {po.reconciled ? '已记录本版对账结果' : '待对账'}</p>
         {po.supplierFollowup && <p>供方差异待跟进 · 经办人 {po.supplierFollowup.actorId} · {String(po.supplierFollowup.reference)}</p>}
         {po.paymentExceptions.filter(row => row.pending || row.awaitingTarget).map(row => <p key={row.id}>
           {row.awaitingTarget ? '原付款待确定目标采购单' : '付款待核对'} {money(row.original.amountCents)}
-          {' · 原流水 ' + row.original.paymentEvidence.bankTrace + ' · 负责人 ' + row.ownerId} · {row.followup?.operation.description ?? row.original.description}</p>)}
+          {' · 原流水 ' + row.original.paymentEvidence.bankTrace + ' · 跟进人 ' + row.currentOwnerId} · {row.followup?.operation.description ?? row.original.description}</p>)}
         {po.paymentCorrections.map(row => <p key={row.id}>已记实付等额归属更正 {money(row.operation.amountCents)}
           {' · 原采购单 ' + row.operation.source.purchaseOrderId + ' · 目标采购单 ' + row.targetPurchaseOrderId + ' · 原流水 ' + row.operation.paymentEvidence.bankTrace}</p>)}
         {po.payments.map(row => <p key={row.id}>付款凭据 {row.reference} · {money(row.amountCents)} · 实际付款 {dateLabel(row.occurredAt)}

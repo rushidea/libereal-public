@@ -34,7 +34,14 @@ export default function FinancePreview({ preview, busy, onConfirm, onBack }: {
     {'accounting' in op && op.accounting.creditReservationUnverified && <p>原授信预占凭据待核对。本次仅核销应收。</p>}
     {op.action === 'verify_receivable_principal' && <p>原应收 {op.receivableId} · 原书证金额 {money(op.amountCents)} · 订单面额 {money(op.orderFaceCents)}</p>}
     {op.action === 'verify_customer_invoice_scope' && <>
-      <p>{op.issuer} 开给 {op.recipient} · 书证可开含税金额 {money(op.grossCents)} · 原接单记录 {op.acceptanceId}</p>
+      <p>{op.issuer} 开给 {op.recipient} · {op.scopeChange
+        ? '原接单记录 ' + op.acceptanceId
+        : '书证可开含税金额 ' + money(op.grossCents) + ' · 原接单记录 ' + op.acceptanceId}</p>
+      {op.scopeChange && <><p>原累计可开 {money(op.scopeChange.beforeCents)}
+        {' · 本次' + (op.scopeChange.deltaCents > 0 ? '增加 ' : '调减 ') + money(Math.abs(op.scopeChange.deltaCents))}
+        {' · 新累计可开 ' + money(op.scopeChange.afterCents)}</p>
+        <p>已开及更正中 {money(op.scopeChange.issuedCents)} · 已占额度 {money(op.scopeChange.plannedCents)}
+          {' · 尚可安排 ' + money(op.scopeChange.availableCents)}</p></>}
       {op.documentRow && <p>本次核对原件第 {op.documentRow} 行</p>}
       <ul>{op.lines.map(line => <li key={line.id}>{line.name} · {line.quantity} 件</li>)}</ul>
     </>}
