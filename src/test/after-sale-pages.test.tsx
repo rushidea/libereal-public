@@ -37,7 +37,7 @@ describe('客户与经办人从原订单进入售后',()=>{
   it('第二张订单直接使用第一张办理的整票红冲回执，重开另选实际发票',async()=>{
     const receipt={id:'CORRECTION-FROM-A',orderId:'OFFICE-ORDER-A',outcome:'voided',reference:'跨单整票红冲原件',sha256:hash,
       occurredAt:'2026-11-02T01:01:01.123Z'};
-    const original={id:'PART-B-ORIGINAL',invoiceId:'SHARED-OLD',number:'整票原号',issuer:'办公开票方',amountCents:4000,
+    const original={id:'PART-B-ORIGINAL',invoiceId:'SHARED-OLD',number:'整票原号',issuer:'办公开票方',amountCents:4000,planReference:'原开票安排乙',
       issuedAt:'2026-11-01T01:01:01Z',correction:receipt};
     const replacement={...original,id:'PART-B-REISSUE',invoiceId:'NEW',number:'实际重开票号',correction:null};
     const agreement={id:'AGREED',action:'agreement',actorId:'clerk',occurredAt:'2026-11-01T03:00:00Z',operation:{
@@ -81,7 +81,10 @@ describe('客户与经办人从原订单进入售后',()=>{
     fireEvent.click(screen.getByRole('button',{name:'核对该商品的票面分摊'}));
     fireEvent.click(screen.getByLabelText('凭补充原件核对前序红冲和本商品承接份额'));
     fireEvent.change(screen.getByLabelText('须凭原件核对的发票分摊'),{target:{value:replacement.id}});
-    fireEvent.change(screen.getByLabelText('前序红冲票的实际分摊'),{target:{value:original.id}});
+    fireEvent.change(screen.getByLabelText('这份金额实际所属的开票安排'),{target:{value:'other_plan'}});
+    const predecessor=screen.getByLabelText('前序红冲票的实际分摊');
+    expect(within(predecessor).getByRole('option',{name:/整票原号.*原开票安排乙/})).toBeTruthy();
+    fireEvent.change(predecessor,{target:{value:original.id}});
     expect(screen.getByText(/正式红冲回执 跨单整票红冲原件/)).toBeTruthy();
     for(const [label,value] of [
       ['本商品从前序红冲承接的实际金额（元）','40'],['办理说明','补到的原件明确这40元对应前序票'],
@@ -90,7 +93,7 @@ describe('客户与经办人从原订单进入售后',()=>{
     fireEvent.click(screen.getByRole('button',{name:'预览本次内容'}));
     await waitFor(()=>expect(submissions).toHaveLength(2));
     expect(submissions[1]).toMatchObject({action:'verify_invoice_line',caseId:sale.id,data:{
-      invoiceAllocationId:replacement.id,reissueParentAllocationId:original.id,sourceCorrectionEventId:receipt.id,amountCents:4000,
+      invoiceAllocationId:replacement.id,reissueParentAllocationId:original.id,sourceCorrectionEventId:receipt.id,amountCents:4000,reissueScope:'other_plan',
     }});
     fireEvent.click(screen.getByRole('button',{name:'刷新本单'}));
     await screen.findByRole('button',{name:'登记客户书面决定'});
