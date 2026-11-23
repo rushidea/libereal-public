@@ -2040,6 +2040,7 @@ model FulfillmentParcelLine {
   purchaseOrderId   String?
   orderItemId       String
   sourceReceiptId   String?
+  afterSaleApprovalId String?
   catalogNumber     String?
   productId         String?
   variantId         String?
@@ -2049,12 +2050,14 @@ model FulfillmentParcelLine {
   purchase          PurchaseOrder?     @relation(fields: [purchaseOrderId], references: [id], onDelete: Restrict)
   orderItem         OrderItem          @relation(fields: [orderItemId], references: [id], onDelete: Restrict)
   sourceReceipt     FulfillmentReceipt? @relation("ForwardedReceipt", fields: [sourceReceiptId], references: [id], onDelete: Restrict)
+  afterSaleApproval AfterSaleEvent?    @relation(fields: [afterSaleApprovalId], references: [id], onDelete: Restrict)
   receipts          FulfillmentReceipt[] @relation("ParcelLineReceipts")
   resolutions       FulfillmentLineResolution[]
 
   @@index([parcelId])
   @@index([purchaseOrderId, orderItemId])
   @@index([sourceReceiptId])
+  @@index([afterSaleApprovalId])
 }
 
 model FulfillmentReceipt {
@@ -2161,6 +2164,7 @@ model AfterSaleEvent {
   detail         String
   createdAt      DateTime @default(now())
   case           AfterSaleCase @relation(fields: [caseId], references: [id], onDelete: Restrict)
+  exchangeParcels FulfillmentParcelLine[]
 
   @@index([caseId, createdAt])
 }
