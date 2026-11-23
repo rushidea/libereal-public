@@ -59,9 +59,23 @@ function dateValue(value: unknown) {
 }
 
 function invoicePlanViews(plans: InvoicePlanRow[], events: FinanceEventView[], now: Date) {
+  const creation = new Map(events.filter(row => row.action === 'create_plan').map(row => [row.planId, row.operation.invoiceScopeId]));
+  const amendments = new Map(events.filter(row => row.action === 'amend_plan' && row.replacementPlanId)
+    .map(row => [row.replacementPlanId, row]));
+  function scopeOf(planId: string) {
+    const seen = new Set<string>();
+    let id: string | null = planId;
+    while (id && !seen.has(id)) {
+      seen.add(id);
+      const proof = creation.get(id);
+      if (typeof proof === 'string') return proof;
+      id = amendments.get(id)?.planId ?? null;
+    }
+    return null;
+  }
   const invoices = plans.map(plan => {
     const history = events.filter(row => row.planId === plan.id);
-    const amendment = events.find(row => row.action === 'amend_plan' && row.replacementPlanId === plan.id);
+    const amendment = amendments.get(plan.id);
     const close = history.findLast(row => row.action === 'close_plan');
     const allocations = plan.allocations.map(allocation => {
       const doc = allocation.invoice;
@@ -72,6 +86,7 @@ function invoicePlanViews(plans: InvoicePlanRow[], events: FinanceEventView[], n
     return { id: plan.id, orderId: plan.orderId, side: plan.side, purchaseOrderId: plan.purchaseOrderId, partyKey: plan.partyKey,
       issuer: plan.issuer, recipient: plan.recipient, grossCents: Number(plan.grossCents), trigger: plan.trigger,
       ownerId: plan.ownerId, reference: plan.reference, sha256: plan.sha256, allocations,
+      invoiceScopeId: scopeOf(plan.id),
       usedCents: allocations.filter(row => row.status !== 'voided').reduce((sum, row) => sum + row.amountCents, 0),
       amendedFromPlanId: amendment?.planId ?? null, effectiveAt: dateValue(amendment?.operation.effectiveAt ?? amendment?.operation.occurredAt),
       closed: Boolean(close), closedAt: dateValue(close?.operation.occurredAt) ?? close?.occurredAt ?? null,
@@ -131,25 +146,49 @@ function lastDate(dates: (string | Date | null | undefined)[]) {
 
 type CustomerInvoiceLine = { id: string; name: string | null; quantity: number; unitPrice: number };
 
+function invoiceQuantity(value: unknown) {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value > 0;
+}
+
+export function coveredCustomerInvoiceLines(originalLines: CustomerInvoiceLine[], requested: unknown) {
+  if (!Array.isArray(requested) || !requested.length) return null;
+  const quantities = new Map<string, number>();
+  for (const row of requested) {
+    const { orderItemId, quantity } = purchaseObject(row);
+    if (typeof orderItemId !== 'string' || quantities.has(orderItemId) || !invoiceQuantity(quantity)) return null;
+    quantities.set(orderItemId, Number(quantity));
+  }
+  const lines = originalLines.flatMap(line => {
+    const quantity = quantities.get(line.id);
+    return quantity !== undefined && quantity <= line.quantity ? [{ id: line.id, name: line.name, unitPrice: line.unitPrice, quantity }] : [];
+  });
+  return lines.length === quantities.size ? lines : null;
+}
+
 export function customerInvoiceScopeVersion(orderId: string, customerKey: string, acceptanceId: string, lines: CustomerInvoiceLine[]) {
   return pricingContentHash({ orderId, customerKey, acceptanceId, lines });
 }
 
-function customerInvoiceReview(events: EventRow[], orderId: string, customerKey: string, acceptanceId: string | null, originalLines: CustomerInvoiceLine[]) {
-  const event = events.findLast(row => row.action === 'verify_customer_invoice_scope');
-  if (!event?.approvedHash || !acceptanceId) return null;
-  const detail = jsonObject(event.detail);
-  const op = purchaseObject(detail.operation);
-  const authorization = purchaseObject(detail.authorization);
-  const { grossCents, issuer, recipient, reference, sha256, lineIds, occurredAt } = op;
-  if (!Array.isArray(lineIds) || typeof grossCents !== 'number' || !Number.isSafeInteger(grossCents) || grossCents <= 0
-    || typeof issuer !== 'string' || typeof recipient !== 'string' || typeof reference !== 'string' || typeof sha256 !== 'string'
-    || typeof occurredAt !== 'string' || !dateValue(occurredAt) || authorization.permission !== 'finance.write'
-    || authorization.action !== 'admin_sensitive' || op.ownerId !== event.actorId) return null;
-  const lines = originalLines.filter(row => lineIds.includes(row.id));
-  if (!lines.length || lines.length !== lineIds.length
-    || op.scopeVersion !== customerInvoiceScopeVersion(orderId, customerKey, acceptanceId, lines)) return null;
-  return { id: event.id, actorId: event.actorId, grossCents, issuer, recipient, occurredAt, reference, sha256, lines };
+function customerInvoiceReviews(events: EventRow[], orderId: string, customerKey: string, acceptanceId: string | null, originalLines: CustomerInvoiceLine[]) {
+  if (!acceptanceId) return [];
+  return events.flatMap(event => {
+    if (event.action !== 'verify_customer_invoice_scope' || !event.approvedHash) return [];
+    const detail = jsonObject(event.detail);
+    const op = purchaseObject(detail.operation);
+    const authorization = purchaseObject(detail.authorization);
+    const { grossCents, issuer, recipient, reference, sha256, lineIds, occurredAt } = op;
+    if (typeof grossCents !== 'number' || !invoiceQuantity(grossCents)
+      || typeof issuer !== 'string' || typeof recipient !== 'string' || typeof reference !== 'string' || typeof sha256 !== 'string'
+      || typeof occurredAt !== 'string' || !dateValue(occurredAt) || authorization.permission !== 'finance.write'
+      || authorization.action !== 'admin_sensitive' || op.ownerId !== event.actorId) return [];
+    const scopeLines = op.invoiceLines ?? (Array.isArray(lineIds) ? lineIds.map(orderItemId => ({
+      orderItemId, quantity: originalLines.find(line => line.id === orderItemId)?.quantity,
+    })) : null);
+    const lines = coveredCustomerInvoiceLines(originalLines, scopeLines);
+    if (!lines || op.scopeVersion !== customerInvoiceScopeVersion(orderId, customerKey, acceptanceId, lines)) return [];
+    return [{ id: event.id, actorId: event.actorId, grossCents, issuer, recipient, occurredAt, reference, sha256,
+      documentRow: typeof op.documentRow === 'number' ? op.documentRow : null, lines }];
+  });
 }
 
 export async function financeWorkspace(tx: Db, orderId: string) {
@@ -173,7 +212,11 @@ export async function financeWorkspace(tx: Db, orderId: string) {
     delivered: signed ? lastDate(movement.map(row => row.shipment.deliveredAt)) : null };
   const invoicePlans = invoicePlanViews(plans, events, new Date());
   const originalInvoiceLines = order.orderItems.map(({ id, name, quantity, unitPrice }) => ({ id, name, quantity, unitPrice }));
-  const customerInvoiceScope = customerInvoiceReview(financeEvents, orderId, customerKey, start.acceptance?.id ?? null, originalInvoiceLines);
+  const customerInvoiceScopes = customerInvoiceReviews(financeEvents, orderId, customerKey, start.acceptance?.id ?? null, originalInvoiceLines);
+  const verifiedQuantities = new Map<string, number>();
+  for (const scope of customerInvoiceScopes) {
+    for (const line of scope.lines) verifiedQuantities.set(line.id, (verifiedQuantities.get(line.id) ?? 0) + line.quantity);
+  }
   const purchases = purchase.orders.filter(po => po.orderedBefore || po.paidCents > 0 || po.paymentExceptions.length > 0).map(po => {
     const suppliers = [...new Set(po.lines.map(line => line.terms.supplier).filter((name): name is string => Boolean(name)))];
     const payees = [...new Set(po.lines.map(line => line.terms.payee).filter((name): name is string => Boolean(name)))];
@@ -233,7 +276,8 @@ export async function financeWorkspace(tx: Db, orderId: string) {
     cancellationRequest: late.length ? await alipayCancellationRequest(tx, orderId) : null,
     paidAt: order.paidAt?.toISOString() ?? null,
     verifiedCents: start.payment.receivedCents, settlementCents: native && !authorityConflict ? start.postingPrincipal?.cents ?? 0 : cashCents,
-    customerInvoiceScope, originalInvoiceLines,
+    customerInvoiceScope: customerInvoiceScopes[0] ?? null, customerInvoiceScopes,
+    originalInvoiceLines: originalInvoiceLines.map(line => ({ ...line, unverifiedQuantity: Math.max(0, line.quantity - (verifiedQuantities.get(line.id) ?? 0)) })),
     bankVersion: start.version, paymentPlanKnown: Boolean(start.plan), shipmentDates,
     receivable: ar && { id: ar.id, status: ar.status, originalCents: Math.round(ar.amount * 100),
       outstandingCents: receivableOutstandingCents(ar.amount, ar.status, postings, start.postingPrincipal ? start.postingPrincipal.cents / 100 : order.total),

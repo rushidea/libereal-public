@@ -3,7 +3,7 @@ import { applyStockHeldAlipayPayment, previewStockHeldAlipayPayment } from '@/li
 import { customerCashProjection, postVerifiedCustomerCash } from '@/lib/customer-cash';
 import { refreshCreditRestrictions } from '@/lib/customer-credit';
 import { invoiceTimeline } from '@/lib/finance-invoice-timeline';
-import { customerInvoiceScopeVersion, financeIdentity, financeWorkspace, invoiceStatus, invoiceTriggers,
+import { coveredCustomerInvoiceLines, customerInvoiceScopeVersion, financeIdentity, financeWorkspace, invoiceStatus, invoiceTriggers,
   type FinanceWorkspace, type InvoiceTrigger } from '@/lib/finance-workspace';
 import { jsonObject } from '@/lib/order-catalog-repricing';
 import { pricingContentHash } from '@/lib/pricing-adjustment-approval';
@@ -39,8 +39,8 @@ function planFor(view: FinanceWorkspace, id: unknown, historical = false) {
   return plan;
 }
 
-function sameInvoiceScope(view: FinanceWorkspace, side: Plan['side'], purchaseOrderId: string | null) {
-  return view.invoicePlans.filter(row => row.side === side && row.purchaseOrderId === purchaseOrderId);
+function sameInvoiceScope(view: FinanceWorkspace, side: Plan['side'], purchaseOrderId: string | null, scopeId: string | null) {
+  return view.invoicePlans.filter(row => row.side === side && row.purchaseOrderId === purchaseOrderId && row.invoiceScopeId === scopeId);
 }
 
 function invoiceTrigger(side: Plan['side'], value: unknown) {
@@ -51,10 +51,9 @@ function invoiceTrigger(side: Plan['side'], value: unknown) {
   return trigger;
 }
 
-function invoiceScopeLimit(view: FinanceWorkspace, side: string, purchaseOrderId: string | null) {
-  const agreedCents = side === 'customer' ? (view.principalCents > 0 ? view.principalCents : view.customerInvoiceScope?.grossCents)
-    : view.purchases.find(po => po.id === purchaseOrderId)?.agreedCents;
-  if (side === 'customer' && agreedCents == null) throw new PurchaseError('请先凭原开票书证核对客户可开票范围');
+function invoiceScopeLimit(view: FinanceWorkspace, side: string, purchaseOrderId: string | null, scopeId: string | null) {
+  if (side === 'customer') return customerInvoiceScope(view, scopeId)?.grossCents ?? view.principalCents;
+  const agreedCents = view.purchases.find(po => po.id === purchaseOrderId)?.agreedCents;
   if (agreedCents == null) throw new PurchaseError('须先核对当前供方合同和可收票金额');
   return agreedCents;
 }
@@ -65,10 +64,17 @@ function projectedInvoiceCommitments(plans: Plan[], timeline = invoiceTimeline(p
     + (timeline.remaining.get(plan.id) ?? 0), 0);
 }
 
-function checkCustomerInvoiceParties(view: FinanceWorkspace, issuer: string, recipient: string) {
-  if (view.principalCents > 0) return null;
-  const scope = view.customerInvoiceScope;
-  if (!scope || financeIdentity(issuer) !== financeIdentity(scope.issuer) || financeIdentity(recipient) !== financeIdentity(scope.recipient)) {
+function customerInvoiceScope(view: FinanceWorkspace, scopeId: unknown, allowSingle = false) {
+  if (scopeId == null && view.principalCents > 0) return null;
+  const scope = scopeId == null && allowSingle && view.customerInvoiceScopes.length === 1
+    ? view.customerInvoiceScopes[0] : view.customerInvoiceScopes.find(row => row.id === scopeId);
+  if (!scope) throw new PurchaseError('请凭原开票书证核对并选择本次业务对应的客户可开票范围');
+  return scope;
+}
+
+function checkCustomerInvoiceParties(view: FinanceWorkspace, scopeId: unknown, issuer: string, recipient: string, allowSingle = false) {
+  const scope = customerInvoiceScope(view, scopeId, allowSingle);
+  if (scope && (financeIdentity(issuer) !== financeIdentity(scope.issuer) || financeIdentity(recipient) !== financeIdentity(scope.recipient))) {
     throw new PurchaseError('请按原书证核对开票方与受票方');
   }
   return scope;
@@ -83,7 +89,7 @@ export function invoiceReadyAt(view: FinanceWorkspace, plan: Plan) {
     : view.postingPrincipal && view.settlementCents === view.postingPrincipal.cents && !view.authorityConflict ? view.paidAt : null;
   if (!po && (plan.trigger === 'dispatched' || plan.trigger === 'delivered')) businessAt = view.shipmentDates[plan.trigger];
   if (!businessAt || !Number.isFinite(Date.parse(businessAt)) || plan.amendedFromPlanId && !plan.effectiveAt) return null;
-  const originalScopeAt = plan.side === 'customer' && view.principalCents <= 0 ? view.customerInvoiceScope?.occurredAt : null;
+  const originalScopeAt = plan.side === 'customer' ? customerInvoiceScope(view, plan.invoiceScopeId)?.occurredAt : null;
   return [businessAt, plan.effectiveAt, originalScopeAt].filter((time): time is string => Boolean(time)).sort().at(-1)!;
 }
 
@@ -100,11 +106,11 @@ async function invoiceDocument(tx: Db, view: FinanceWorkspace, input: FinanceInp
   if (financeIdentity(issuer) !== financeIdentity(plan.issuer) || financeIdentity(recipient) !== financeIdentity(plan.recipient)) {
     throw new PurchaseError('票面开票方和受票方须与本次确认的安排一致');
   }
-  const sourceScope = plan.side === 'customer' ? checkCustomerInvoiceParties(view, issuer, recipient) : null;
+  const sourceScope = plan.side === 'customer' ? checkCustomerInvoiceParties(view, plan.invoiceScopeId, issuer, recipient) : null;
   const identityKey = pricingContentHash({ issuer: financeIdentity(issuer), number: financeIdentity(number) });
   const grossCents = money(data.grossCents, '票面含税合计');
   const amountCents = money(data.amountCents, '本次归入金额');
-  const plans = sameInvoiceScope(view, plan.side, plan.purchaseOrderId);
+  const plans = sameInvoiceScope(view, plan.side, plan.purchaseOrderId, plan.invoiceScopeId);
   const before = invoiceTimeline(plans);
   const allocationId = 'previewed-invoice';
   const trial = plans.map(row => row.id === plan.id ? { ...row, allocations: [...row.allocations, {
@@ -114,7 +120,7 @@ async function invoiceDocument(tx: Db, view: FinanceWorkspace, input: FinanceInp
   const after = invoiceTimeline(trial);
   if (after.conflicts.has(allocationId)) throw new PurchaseError('票面日期超出原安排的有效范围或可用金额');
   if ([...after.conflicts].some(id => !before.conflicts.has(id))
-    || projectedInvoiceCommitments(trial, after) > invoiceScopeLimit(view, plan.side, plan.purchaseOrderId)) {
+    || projectedInvoiceCommitments(trial, after) > invoiceScopeLimit(view, plan.side, plan.purchaseOrderId, plan.invoiceScopeId)) {
     throw new PurchaseError('实际票面与已占用的开票额度冲突，请核对原票和安排');
   }
   const adjustedPlans = plans.flatMap(row => {
@@ -196,19 +202,33 @@ async function financeOperation(tx: Db, input: FinanceInput, actor: PurchaseActo
   }
   if (action === 'verify_customer_invoice_scope') {
     const { issuer, recipient } = data;
-    if (view.principalCents > 0 || view.customerInvoiceScope || !view.acceptanceId || !isActivePurchaseOrder({
+    if (view.principalCents > 0 || !view.acceptanceId || !isActivePurchaseOrder({
       status: view.status, archivedAt: view.archived ? new Date() : null,
     })) throw new PurchaseError('仅可对有原接单依据、面额待核的客户订单核实开票范围');
     const issuedBy = requiredText(issuer, '原书证开票方全称');
     const issuedTo = requiredText(recipient, '原书证受票方全称');
     if (financeIdentity(issuedBy) === financeIdentity(issuedTo)) throw new PurchaseError('请核对原书证中的购销双方');
     const ids = data.invoiceLineIds;
-    const lines = Array.isArray(ids) ? view.originalInvoiceLines.filter(line => ids.includes(line.id) && positiveCents(line.quantity)) : [];
-    if (!Array.isArray(ids) || !lines.length || lines.length !== ids.length) throw new PurchaseError('请选择可由原书证证实的实际订单行');
+    const selected = data.invoiceLines ?? (Array.isArray(ids) ? ids.map(orderItemId => ({
+      orderItemId, quantity: view.originalInvoiceLines.find(line => line.id === orderItemId)?.quantity,
+    })) : null);
+    const lines = coveredCustomerInvoiceLines(view.originalInvoiceLines, selected);
+    if (!lines) throw new PurchaseError('请选择可由原书证证实的实际订单行和数量');
+    if (lines.some(row => row.quantity > (view.originalInvoiceLines.find(line => line.id === row.id)?.unverifiedQuantity ?? 0))) {
+      throw new PurchaseError('此份书证所列数量与已核实的份额重叠，请核对尚未确认的数量');
+    }
+    const documentRow = data.documentRow == null ? null : money(data.documentRow, '原件实际行号');
+    const prior = await tx.$queryRaw<{ id: string }[]>`
+      SELECT id FROM FinanceEvent WHERE action='verify_customer_invoice_scope'
+        AND json_extract(detail,'$.operation.sha256')=${evidence.sha256}
+        AND (${documentRow} IS NULL OR json_extract(detail,'$.operation.documentRow') IS NULL
+          OR json_extract(detail,'$.operation.documentRow')=${documentRow}) LIMIT 1`;
+    if (prior.length) throw new PurchaseError('此原件或该原件行已经核对过开票范围，请回到原记录');
     const grossCents = money(data.grossCents, '原书证可开的含税金额');
     const occurredAt = actualTime(data.occurredAt, '原书证载明的实际确认时间');
-    return { ...evidence, action, issuer: issuedBy, recipient: issuedTo, grossCents, occurredAt, ownerId: actor.id,
+    return { ...evidence, action, issuer: issuedBy, recipient: issuedTo, grossCents, occurredAt, ownerId: actor.id, documentRow,
       acceptanceId: view.acceptanceId, lines, lineIds: lines.map(row => row.id),
+      invoiceLines: lines.map(row => ({ orderItemId: row.id, quantity: row.quantity })),
       scopeVersion: customerInvoiceScopeVersion(orderId, view.customerKey, view.acceptanceId, lines) };
   }
   if (action === 'create_plan') {
@@ -226,9 +246,10 @@ async function financeOperation(tx: Db, input: FinanceInput, actor: PurchaseActo
     }
     const trigger = invoiceTrigger(side, data.trigger);
     const grossCents = money(data.grossCents, '本次安排的含税金额');
-    const scope = side === 'customer' ? checkCustomerInvoiceParties(view, issuer, recipient) : null;
-    const agreed = invoiceScopeLimit(view, side, po?.id ?? null);
-    const planned = projectedInvoiceCommitments(sameInvoiceScope(view, side, po?.id ?? null));
+    const scope = side === 'customer' ? checkCustomerInvoiceParties(view, data.invoiceScopeId, issuer, recipient, true) : null;
+    const scopeId = scope?.id ?? null;
+    const agreed = invoiceScopeLimit(view, side, po?.id ?? null, scopeId);
+    const planned = projectedInvoiceCommitments(sameInvoiceScope(view, side, po?.id ?? null, scopeId));
     if (grossCents > agreed - planned) throw new PurchaseError('安排金额超过原单尚未安排的金额');
     return { ...evidence, action, side, issuer, recipient, grossCents, trigger, ownerId: actor.id, purchaseOrderId: po?.id ?? null,
       partyKey: po ? 'supplier:' + financeIdentity(issuer) : view.customerKey, invoiceScopeId: scope?.id ?? null };
@@ -247,7 +268,7 @@ async function financeOperation(tx: Db, input: FinanceInput, actor: PurchaseActo
     }
     const retroactiveReference = Date.parse(effectiveAt) < Date.parse(occurredAt)
       ? requiredText(data.retroactiveReference, '原书面约定中明确追溯生效的条款') : null;
-    const plans = sameInvoiceScope(view, plan.side, plan.purchaseOrderId);
+    const plans = sameInvoiceScope(view, plan.side, plan.purchaseOrderId, plan.invoiceScopeId);
     const prior = invoiceTimeline(plans);
     const replacementId = 'previewed-invoice-arrangement';
     const amended = [...plans, { ...plan, id: replacementId, grossCents: amountCents, amendedFromPlanId: plan.id,
@@ -256,7 +277,7 @@ async function financeOperation(tx: Db, input: FinanceInput, actor: PurchaseActo
     if (next.transfers.get(replacementId) !== amountCents
       || [...prior.transfers].some(([id, available]) => next.transfers.get(id) !== available)
       || [...next.conflicts].some(id => !prior.conflicts.has(id))
-      || projectedInvoiceCommitments(amended, next) > invoiceScopeLimit(view, plan.side, plan.purchaseOrderId)) {
+      || projectedInvoiceCommitments(amended, next) > invoiceScopeLimit(view, plan.side, plan.purchaseOrderId, plan.invoiceScopeId)) {
       throw new PurchaseError('变更金额超过本单有效的未开部分，或影响其他已经安排的额度');
     }
     return { ...evidence, action, planId: plan.id, original: plan, amountCents, retainedCents: next.remaining.get(plan.id) ?? 0,
@@ -270,7 +291,7 @@ async function financeOperation(tx: Db, input: FinanceInput, actor: PurchaseActo
     if (action === 'confirm_condition' && (plan.trigger !== 'manual' || plan.manualAt)) throw new PurchaseError('本项没有待人工核对的开票条件');
     const occurredAt = actualTime(data.occurredAt, '实际办理时间');
     if (action === 'close_plan') {
-      const plans = sameInvoiceScope(view, plan.side, plan.purchaseOrderId);
+      const plans = sameInvoiceScope(view, plan.side, plan.purchaseOrderId, plan.invoiceScopeId);
       const prior = invoiceTimeline(plans);
       const after = invoiceTimeline(plans.map(row => row.id === plan.id ? { ...row, closedAt: occurredAt, stoppedCents: stoppable } : row));
       if ([...after.conflicts].some(id => !prior.conflicts.has(id))

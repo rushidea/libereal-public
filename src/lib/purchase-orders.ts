@@ -10,7 +10,7 @@ import { agreedDocumentTerms, assertSupplierDocumentScopes, missingDocumentScope
 import { decisionDocumentRow, decisionMaterialTerms, decisionTermsChanged, previewDecisionDocuments, type CustomerDecisionDocument, type DecisionDocumentInput, type DecisionEffect } from '@/lib/purchase-decision-documents';
 import { pricingContentHash } from '@/lib/pricing-adjustment-approval';
 import { loadPurchaseOrderSource, loadPurchaseLines, type PurchaseSource, type SourceOrder } from '@/lib/purchase-source';
-import { assertUnusedSupplierPayment, incomingSupplierPaymentIssues, purchasePaymentRecords, supplierPaymentCorrections, supplierPaymentEvidence,
+import { assertUnusedSupplierPayment, readSupplierPaymentIssues, purchasePaymentRecords, supplierPaymentCorrections, supplierPaymentEvidence,
   supplierPaymentExceptions, type PaymentEvidence, type PaymentIssueOutcome } from '@/lib/purchase-payments';
 import { creditExceptionMatches, paymentPlanAt, paymentPlanContent, paymentPlanFromReview, purchaseCreditVersion, purchaseStartReview, type PaymentPlan } from '@/lib/purchase-start';
 import { purchaseCreditAt } from '@/lib/purchase-credit-history';
@@ -18,7 +18,7 @@ import { availableIncidentSources, clarifiedIncidentScope, incidentQuantities, i
   type IncidentLocation, type IncidentReviewResult, type SupplyIncident } from '@/lib/purchase-incidents';
 import { incidentLineTotals, incidentQuantityKey, type IncidentCandidate, type IncidentQuantity } from '@/lib/purchase-incident-scope';
 import { assertShortfallAssignmentMerge, planShortfallFollowup, recordShortfallFollowup, shortfallPart } from '@/lib/purchase-shortfall-followup';
-import type { ContractDispatchSource, ShortfallDecision } from '@/lib/purchase-shortfalls';
+import { unlinkedDispatchShortfallsAt, type ContractDispatchSource, type ShortfallDecision } from '@/lib/purchase-shortfalls';
 import {
   attestPurchaseTerms, documentSha256, initialPurchaseTerms, missingPurchaseTerms, missingWrittenTerms, normalizePurchaseTerms, positiveCents, PurchaseError,
   purchaseTimestamp, requireNewDocumentsForChangedTerms, requiredText, type PurchaseTerms,
@@ -164,8 +164,8 @@ function fundingUnchangedSince(approval: PurchaseActivity, review: StartReview, 
 export async function purchaseWorkspace(tx: Db, orderId: string) {
   const order = await loadPurchaseOrderSource(tx, orderId);
   const activities = await readPurchaseActivities(tx, orderId);
-  const [incomingPayments, paymentCorrections] = await Promise.all([
-    incomingSupplierPaymentIssues(tx, orderId), supplierPaymentCorrections(tx, orderId),
+  const [paymentIssues, paymentCorrections] = await Promise.all([
+    readSupplierPaymentIssues(tx, orderId), supplierPaymentCorrections(tx, orderId),
   ]);
   const { eligibility, review: startReview } = await purchaseStartReview(tx, order, activities);
   const demand = remainingDemand(order);
@@ -176,8 +176,11 @@ export async function purchaseWorkspace(tx: Db, orderId: string) {
     UNION ALL
     SELECT orderItemId,ownerId,source,terms,revision,purchaseOrderId,id AS replacementId,fromPurchaseOrderId,authorizationId
     FROM PurchaseReplacementLine WHERE orderId=${orderId} ORDER BY orderItemId`;
+  const paymentCasePurchases = JSON.stringify(paymentIssues.flatMap(issue => [
+    issue.purchaseOrderId, ...issue.reviewHistory.flatMap(review => review.operation.target ? [review.operation.target.purchaseOrderId] : []),
+  ]));
   const headers = await tx.$queryRaw<OrderRow[]>`SELECT id,status,revision,approvedHash FROM PurchaseOrder
-    WHERE orderId=${orderId} AND (status <> 'superseded' OR EXISTS(
+    WHERE orderId=${orderId} AND (status <> 'superseded' OR id IN (SELECT value FROM json_each(${paymentCasePurchases})) OR EXISTS(
       SELECT 1 FROM PurchaseActivity a WHERE a.purchaseOrderId=PurchaseOrder.id
         AND (a.action IN ('register_order','record_payment','record_late_order_exception','record_payment_exception','correct_payment_attribution')
           OR json_type(a.detail,'$.snapshot.operation.withdrawnDraftLines')='array'
@@ -248,7 +251,7 @@ export async function purchaseWorkspace(tx: Db, orderId: string) {
       && (startReview.active || Boolean(cancellation)) && (header.status === 'approved' || header.status === 'on_hold');
     const revision = Number(header.revision);
     return { ...header, revision, totalCents, contentHash, lines, ledger, paidCents, dueCents, remaining, payments, paymentCorrections: corrections,
-      paymentExceptions: supplierPaymentExceptions(ledger, header.id, incomingPayments),
+      paymentExceptions: supplierPaymentExceptions(header.id, paymentIssues),
       remainingScope: hasGoodsPayable ? reviewedScope ?? null : null, needsRemainingReview, payableReviewWindows, canApproveRemaining, needsLegacyReview,
       needsFundingReapproval: commitment.state === 'ordinary' && !registration && header.status === 'approved'
         && eligibility.eligible && Boolean(fundingApproval && latestApproval
@@ -858,7 +861,7 @@ function supplierPaymentHolds(view: Workspace, po: PO, at: number) {
     && (!row.startedAt || Date.parse(row.startedAt) <= at)
     && row.quantity > row.decisions.filter(decision => decision.recordedAt.getTime() <= at)
       .reduce((sum, decision) => sum + decision.quantity, 0));
-  const shortfalls = view.fulfillment.unlinkedDispatchShortfalls.filter(row => row.purchaseOrderId === po.id && Date.parse(row.occurredAt) <= at);
+  const shortfalls = unlinkedDispatchShortfallsAt(view.fulfillment.reviewedDispatchShortfalls.filter(row => row.purchaseOrderId === po.id), po.ledger, at);
   const incidents = supplyIncidents(po.ledger.filter(row => Date.parse(row.createdAt) <= at));
   return { dispatches: dispatches.map(row => row.parcelLineId), shortfalls: shortfalls.map(row => row.key), incidents: incidents.map(row => row.id) };
 }
@@ -961,11 +964,14 @@ function originalSupplierPayment(view: Workspace, po: PO, issue: PendingSupplier
 
 async function reviewSupplierPaymentIssue(tx: Db, view: Workspace, po: PO, input: PurchaseActionInput) {
   if (po.version !== input.version) conflict();
-  const issue = pendingPaymentIssue(po, input);
   const outcome = input.paymentIssueOutcome;
+  const issue = po.paymentExceptions.find(row => row.id === input.paymentIssueId && row.canRoute);
   if (!issue || outcome !== 'awaiting_disposition' && outcome !== 'outside_purchase' && outcome !== 'no_effective_approval') conflict();
+  if (!issue.pending && outcome !== 'outside_purchase' && !(issue.awaitingTarget && outcome === 'awaiting_disposition')) {
+    throw new PurchaseError('这笔转账仍待确认归属，请按实际书证补充进展或指定目标');
+  }
   const referenceSha256 = documentSha256(input.referenceSha256, '付款差异处理结果书证摘要');
-  if (issue.review?.operation.referenceSha256 === referenceSha256 || issue.followup?.operation.referenceSha256 === referenceSha256) {
+  if (issue.reviewHistory.some(row => row.operation.referenceSha256 === referenceSha256)) {
     throw new PurchaseError('这份处理结果已登记');
   }
   if (outcome !== 'awaiting_disposition' && issue.original.paymentEvidence.sha256 === referenceSha256) {
@@ -974,13 +980,12 @@ async function reviewSupplierPaymentIssue(tx: Db, view: Workspace, po: PO, input
   if (outcome === 'no_effective_approval' && supplierPaymentApprovalAt(view, po, Date.parse(issue.original.paymentEvidence.occurredAt))) {
     throw new PurchaseError('付款当日已有有效采购批准，请核对原款与本单的归属和付款条件');
   }
-  if (issue.incoming && outcome === 'outside_purchase') throw new PurchaseError('该款有已核实的原归属转交，请在原记录核对分派结果');
   const targetId = input.paymentIssueTargetPurchaseOrderId === undefined ? null
     : requiredText(input.paymentIssueTargetPurchaseOrderId, '已核实的目标采购单编号');
   let target: { orderId: string; purchaseOrderId: string } | null = null;
   if (targetId) {
-    if (outcome !== 'outside_purchase' || targetId === po.id
-      || issue.original.sourcePaymentId && !po.payments.some(row => row.id === issue.original.sourcePaymentId)) {
+    if (outcome !== 'outside_purchase' || targetId === po.id || targetId === issue.purchaseOrderId
+      || !issue.incoming && issue.original.sourcePaymentId && !po.payments.some(row => row.id === issue.original.sourcePaymentId)) {
       throw new PurchaseError('仅尚未更正且有书证归属其他采购单的原转账可转交');
     }
     const destination = await tx.purchaseOrder.findUnique({ where: { id: targetId }, select: { id: true, orderId: true } });
@@ -988,6 +993,7 @@ async function reviewSupplierPaymentIssue(tx: Db, view: Workspace, po: PO, input
     target = { orderId: destination.orderId, purchaseOrderId: destination.id };
   }
   return { action: 'review_payment_exception' as const, paymentIssueId: issue.id, outcome, original: issue.original,
+    originPurchaseOrderId: issue.purchaseOrderId, previousTarget: issue.review?.operation.target ?? null, previousReviewId: issue.review?.id ?? null,
     responsibleActorId: issue.ownerId, target, reference: requiredText(input.reference, '书面处理结果档案出处'), referenceSha256,
     description: requiredText(input.description, '已核实的处理结果与原款去向') };
 }
@@ -1007,6 +1013,7 @@ async function correctSupplierPaymentAttribution(tx: Db, view: Workspace, po: PO
   const approvalAtPaymentId = approvalAt(original.ledger, Date.parse(issue.original.paymentEvidence.occurredAt))?.id ?? null;
   const posting = originalSupplierPayment(view, po, issue, input, actor);
   return { ...posting, action: 'correct_payment_attribution' as const,
+    previousPaymentIssueId: issue.original.previousPaymentIssueId,
     source: { orderId: sourceOrder.orderId, purchaseOrderId: original.id, revision: original.revision,
       version: original.version, paymentId: source.id, amountCents: source.amountCents, paidCents: original.paidCents,
       dueCents: original.dueCents, recordedApprovalId, approvalAtPaymentId, payee: source.payee, reference: source.reference },
@@ -1099,10 +1106,14 @@ function actionDetails(
       !== pricingContentHash({ ...paymentEvidence, reference: undefined })) {
       throw new PurchaseError('所选已记付款的原流水、日期、原件行或收款方不同，请核对原记录');
     }
+    const previousIssue = original?.paymentEvidence && po.paymentExceptions.find(row => row.postedToPurchaseOrderId === po.id
+      && (row.postingId === original.id || original.reviewId && row.postingId === original.reviewId)
+      && row.original.amountCents === original.amountCents);
     if (original && Date.parse(paymentEvidence.occurredAt) > Date.parse(original.recordedAt)) {
       throw new PurchaseError('原实际付款时间不能晚于原付款登记');
     }
-    return { action, amountCents: input.amountCents, paymentEvidence, sourcePaymentId: original?.id, responsibleActorId: actor.id,
+    return { action, amountCents: input.amountCents, paymentEvidence, sourcePaymentId: original?.id,
+      previousPaymentIssueId: previousIssue ? previousIssue.id : undefined, responsibleActorId: actor.id,
       approvalAtPaymentId: approvalAt(po.ledger, Date.parse(paymentEvidence.occurredAt))?.id ?? null,
       description: requiredText(input.description, '已核实的付款事实及待处理原因') };
   }
@@ -1341,10 +1352,16 @@ export async function previewPurchaseAction(tx: Db, input: PurchaseActionInput, 
     ? await prepareCoordinationEvidence(tx, po, input, details)
     : details;
   if (operation.action === 'correct_payment_attribution') {
-    await assertUnusedSupplierPayment(tx, operation.paymentEvidence, operation.source.paymentId, operation.paymentIssueId);
+    await assertUnusedSupplierPayment(tx, operation.paymentEvidence, operation.source.paymentId, operation.paymentIssueId, operation.previousPaymentIssueId);
   } else if (operation.action === 'record_payment' || operation.action === 'review_payment_time' || operation.action === 'record_payment_exception') {
     await assertUnusedSupplierPayment(tx, operation.paymentEvidence,
-      'sourcePaymentId' in operation ? operation.sourcePaymentId : undefined, 'paymentIssueId' in operation ? operation.paymentIssueId : undefined);
+      'sourcePaymentId' in operation ? operation.sourcePaymentId : undefined, 'paymentIssueId' in operation ? operation.paymentIssueId : undefined,
+      operation.action === 'record_payment_exception' ? operation.previousPaymentIssueId : undefined);
+  }
+  if (operation.action === 'record_payment_exception' && operation.sourcePaymentId
+    && po.paymentExceptions.some(row => row.id !== operation.previousPaymentIssueId && row.purchaseOrderId === po.id
+      && row.original.sourcePaymentId === operation.sourcePaymentId)) {
+    throw new PurchaseError('这笔已记实付已有原付款待核记录，请在原待办继续');
   }
   await assertSupplierDocumentScopes(tx, supplyEvidenceFor(po, operation), operation.action === 'reapprove_purchase'
     ? { restoredLines: operation.documentScopes } : undefined);

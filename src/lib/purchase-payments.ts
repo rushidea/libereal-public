@@ -10,15 +10,16 @@ export type PaymentEvidence = {
 };
 type PaymentEvidenceInput = { reference?: string; referenceSha256?: string; bankTrace?: string; payee?: string; occurredAt?: string;
   paymentDocumentKind?: unknown; paymentStatementRow?: unknown };
-type OriginalPaymentIssue = { amountCents: number; paymentEvidence: PaymentEvidence; sourcePaymentId?: string; description: string };
+type OriginalPaymentIssue = {
+  amountCents: number; paymentEvidence: PaymentEvidence; sourcePaymentId?: string; previousPaymentIssueId?: string; description: string;
+};
 export type PaymentIssueOutcome = 'awaiting_disposition' | 'outside_purchase' | 'no_effective_approval';
 type PaymentIssueDecision = {
   paymentIssueId: string; outcome: PaymentIssueOutcome; description: string; reference: string; referenceSha256: string;
   target: { orderId: string; purchaseOrderId: string } | null;
 };
-type PaymentIssue = {
-  id: string; purchaseOrderId: string; ownerId: string; recordedAt: string; original: OriginalPaymentIssue;
-  review: { id: string; actorId: string; operation: PaymentIssueDecision } | null;
+type PaymentIssueRow = {
+  id: string; issueId: string; purchaseOrderId: string; actorId: string; createdAt: string; action: string; detail: string; ordinal: bigint;
 };
 
 type PaymentCorrectionOperation = {
@@ -49,10 +50,10 @@ export function supplierPaymentEvidence(input: PaymentEvidenceInput, payee: stri
 }
 
 export async function assertUnusedSupplierPayment(
-  tx: Prisma.TransactionClient, evidence: PaymentEvidence, sourcePaymentId?: string, paymentIssueId?: string,
+  tx: Prisma.TransactionClient, evidence: PaymentEvidence, sourcePaymentId?: string, paymentIssueId?: string, previousPaymentIssueId?: string,
 ) {
   const candidates = await tx.$queryRaw<Array<{ action: string; detail: string }>>`SELECT action,detail FROM PurchaseActivity
-    WHERE id NOT IN (${sourcePaymentId ?? ''},${paymentIssueId ?? ''})
+    WHERE id NOT IN (${sourcePaymentId ?? ''},${paymentIssueId ?? ''},${previousPaymentIssueId ?? ''})
     AND action IN ('record_payment','review_payment_time','record_payment_exception','correct_payment_attribution')
     AND (json_extract(detail,'$.snapshot.operation.paymentEvidence.traceKey')=${evidence.traceKey}
       OR json_extract(detail,'$.snapshot.operation.paymentEvidence.sha256')=${evidence.sha256}
@@ -69,41 +70,60 @@ export async function assertUnusedSupplierPayment(
   }
 }
 
-export async function incomingSupplierPaymentIssues(tx: Prisma.TransactionClient, orderId: string) {
-  const rows = await tx.$queryRaw<Array<{ id: string; purchaseOrderId: string; ownerId: string; recordedAt: string;
-    original: string; reviewId: string; reviewerId: string; review: string }>>`
-    SELECT source.id,source.purchaseOrderId,source.actorId AS ownerId,source.createdAt AS recordedAt,source.detail AS original,
-      decision.id AS reviewId,decision.actorId AS reviewerId,decision.detail AS review
-    FROM PurchaseActivity decision
-    JOIN PurchaseActivity source ON source.id=json_extract(decision.detail,'$.snapshot.operation.paymentIssueId')
-      AND source.purchaseOrderId=decision.purchaseOrderId AND source.action='record_payment_exception'
-    WHERE decision.action='review_payment_exception' AND json_extract(decision.detail,'$.snapshot.operation.outcome')='outside_purchase'
-      AND json_extract(decision.detail,'$.snapshot.operation.target.orderId')=${orderId}`;
-  return rows.map((row): PaymentIssue => ({id: row.id, purchaseOrderId: row.purchaseOrderId, ownerId: row.ownerId, recordedAt: row.recordedAt,
-    original: purchaseOperation(jsonObject(row.original)) as OriginalPaymentIssue,
-    review: { id: row.reviewId, actorId: row.reviewerId, operation: purchaseOperation(jsonObject(row.review)) as PaymentIssueDecision } }));
+export async function readSupplierPaymentIssues(tx: Prisma.TransactionClient, orderId: string) {
+  const events = await tx.$queryRaw<PaymentIssueRow[]>`
+    WITH issues AS (
+      SELECT id FROM PurchaseActivity WHERE orderId=${orderId} AND action='record_payment_exception'
+      UNION
+      SELECT json_extract(detail,'$.snapshot.operation.paymentIssueId') FROM PurchaseActivity
+        WHERE action='review_payment_exception' AND (orderId=${orderId} OR json_extract(detail,'$.snapshot.operation.target.orderId')=${orderId})
+    ), history AS (
+      SELECT rowid AS ordinal,id,purchaseOrderId,actorId,createdAt,action,detail,
+        CASE WHEN action='record_payment_exception' THEN id ELSE json_extract(detail,'$.snapshot.operation.paymentIssueId') END AS issueId
+      FROM PurchaseActivity WHERE action IN ('record_payment_exception','review_payment_exception','approve_payment_attribution',
+        'record_payment','review_payment_time','correct_payment_attribution')
+    )
+    SELECT history.* FROM history JOIN issues ON issues.id=history.issueId ORDER BY history.ordinal`;
+  const history = new Map<string, PaymentIssueRow[]>();
+  for (const event of events) {
+    const entries = history.get(event.issueId);
+    if (entries) entries.push(event);
+    else history.set(event.issueId, [event]);
+  }
+  return [...history.values()].flatMap(rows => {
+    const original = rows.find(row => row.action === 'record_payment_exception');
+    if (!original) return [];
+    const reviewHistory = rows.filter(row => row.action === 'review_payment_exception').map(row => ({
+      id: row.id, actorId: row.actorId, purchaseOrderId: row.purchaseOrderId, recordedAt: row.createdAt, ordinal: row.ordinal,
+      operation: purchaseOperation(jsonObject(row.detail)) as PaymentIssueDecision,
+    }));
+    const route = reviewHistory.findLast(row => row.operation.outcome === 'outside_purchase');
+    const activePurchaseOrderId = route ? route.operation.target?.purchaseOrderId ?? null : original.purchaseOrderId;
+    const followup = reviewHistory.findLast(row => row.purchaseOrderId === (activePurchaseOrderId ?? original.purchaseOrderId)
+      && row.ordinal > (route?.ordinal ?? original.ordinal) && row.operation.outcome !== 'outside_purchase');
+    const posting = rows.find(row => row.action === 'record_payment' || row.action === 'review_payment_time' || row.action === 'correct_payment_attribution');
+    const approval = rows.findLast(row => row.action === 'approve_payment_attribution' && row.purchaseOrderId === activePurchaseOrderId
+      && row.ordinal > (route?.ordinal ?? original.ordinal));
+    const publicReview = (row: typeof reviewHistory[number]) => ({
+      id: row.id, actorId: row.actorId, purchaseOrderId: row.purchaseOrderId, recordedAt: row.recordedAt, operation: row.operation,
+    });
+    const latest = route ?? followup;
+    return [{ id: original.id, purchaseOrderId: original.purchaseOrderId, ownerId: original.actorId, recordedAt: original.createdAt,
+      original: purchaseOperation(jsonObject(original.detail)) as OriginalPaymentIssue,
+      activePurchaseOrderId, review: latest ? publicReview(latest) : null, followup: followup ? publicReview(followup) : null, reviewHistory: reviewHistory.map(publicReview),
+      postingId: posting?.id ?? null, postedToPurchaseOrderId: posting?.purchaseOrderId ?? null, attributionApprovalId: approval?.id ?? null }];
+  });
 }
 
-export function supplierPaymentExceptions(ledger: PurchaseActivity[], purchaseOrderId: string, incoming: PaymentIssue[]) {
-  const local = ledger.filter(row => row.action === 'record_payment_exception').map((row): PaymentIssue => {
-    const review = ledger.findLast(entry => entry.action === 'review_payment_exception' && purchaseOperation(entry.detail).paymentIssueId === row.id);
-    return { id: row.id, purchaseOrderId, ownerId: row.actorId, recordedAt: row.createdAt,
-      original: purchaseOperation(row.detail) as OriginalPaymentIssue,
-      review: review ? { id: review.id, actorId: review.actorId, operation: purchaseOperation(review.detail) as PaymentIssueDecision } : null };
-  });
-  const routed = incoming.filter(row => row.review?.operation.target?.purchaseOrderId === purchaseOrderId);
-  return [...local, ...routed].map(row => {
-    const incoming = row.purchaseOrderId !== purchaseOrderId;
-    const targetDecision = incoming ? ledger.findLast(entry => entry.action === 'review_payment_exception'
-      && purchaseOperation(entry.detail).paymentIssueId === row.id) : null;
-    const followup = targetDecision ? { id: targetDecision.id, actorId: targetDecision.actorId,
-      operation: purchaseOperation(targetDecision.detail) as PaymentIssueDecision } : null;
-    const decision = incoming ? followup : row.review;
-    const posted = ledger.find(entry => (entry.action === 'record_payment' || entry.action === 'review_payment_time' || entry.action === 'correct_payment_attribution')
-      && purchaseOperation(entry.detail).paymentIssueId === row.id);
-    const approval = ledger.findLast(entry => entry.action === 'approve_payment_attribution' && purchaseOperation(entry.detail).paymentIssueId === row.id);
-    const pending = !posted && (!decision || decision.operation.outcome === 'awaiting_disposition');
-    return { ...row, incoming, followup, pending, postingId: posted?.id ?? null, attributionApprovalId: approval?.id ?? null };
+export function supplierPaymentExceptions(purchaseOrderId: string, issues: Awaited<ReturnType<typeof readSupplierPaymentIssues>>) {
+  return issues.flatMap(row => {
+    const incoming = purchaseOrderId !== row.purchaseOrderId;
+    if (incoming && !row.reviewHistory.some(decision => decision.operation.target?.purchaseOrderId === purchaseOrderId)) return [];
+    const current = row.activePurchaseOrderId === purchaseOrderId;
+    const awaitingTarget = !incoming && row.activePurchaseOrderId === null && !row.postingId;
+    const canRoute = !row.postingId && (current || awaitingTarget);
+    const pending = !row.postingId && current && row.followup?.operation.outcome !== 'no_effective_approval';
+    return [{ ...row, incoming, pending, canRoute, awaitingTarget, attributionApprovalId: current ? row.attributionApprovalId : null }];
   });
 }
 
