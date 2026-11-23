@@ -8,10 +8,14 @@ import { GET, POST } from '@/app/api/admin/purchases/route';
 import { GET as financeGET, POST as financePOST } from '@/app/api/admin/finance/route';
 import { POST as alipayNotify } from '@/app/api/payments/alipay/notify/route';
 import { POST as creditReview } from '@/app/api/cron/credit-review/route';
+import { PATCH as requestCustomerOrderChange } from '@/app/api/orders/[id]/route';
+import { PATCH as requestAdminOrderChange } from '@/app/api/admin/orders/[id]/route';
+import { PATCH as withdrawOrders } from '@/app/api/admin/orders/archive/route';
 import { ADMIN_ROLE_DEFINITIONS, type AdminRoleKey } from '@/lib/admin-permissions';
 import { releaseOrderReceivableOnCancellation, reserveOrderCredit } from '@/lib/customer-credit';
 import { resetEphemeralStoreForTests } from '@/lib/ephemeral-store';
 import { merchantAcceptanceMetadata, merchantOrderApprovalPreview, ORDER_APPROVAL_INCLUDE } from '@/lib/order-approval';
+import { reconcileStockHeldAlipayPayments } from '@/lib/order-auto-close';
 import { prisma } from '@/lib/prisma';
 import { pricingContentHash } from '@/lib/pricing-adjustment-approval';
 import type { PurchaseActionInput } from '@/lib/purchase-orders';
@@ -1070,6 +1074,29 @@ describe('admin purchase endpoint', () => {
       expect(await prisma.order.findUnique({ where: { id } })).toMatchObject({ total: 0, paidAt: expect.any(Date) });
       expect(await prisma.creditAccount.findUnique({ where: { id: allowance.id } }))
         .toMatchObject({ status: 'overdue_hold', usedAmount: allowance.usedAmount });
+
+      const parties = { issuer: 'Office archive seller', recipient: 'Office archive buyer' };
+      const createInvoice = { ...paper('archive-invoice-plan'), ...parties, side: 'customer', trigger: 'paid', grossCents: 10000 };
+      const settled = (await expectJson(await financeRead(id), 200)).workspace;
+      await expectJson(await financePost({ orderId: id, requestId: randomUUID(), action: 'create_plan',
+        stage: 'preview', version: settled.version, data: createInvoice }), 409);
+      const originalScope = { ...paper('office-original-invoice-contract'), ...parties, grossCents: 10000,
+        invoiceLineIds: ['office-legacy-amount-line'], occurredAt: oldAt.toISOString() };
+      await expectJson(await financePost({ orderId: id, requestId: randomUUID(), action: 'verify_customer_invoice_scope',
+        stage: 'preview', version: settled.version, data: { ...originalScope, invoiceLineIds: ['not-this-order'] } }), 409);
+      const scope = await financePreview('verify_customer_invoice_scope', originalScope, id);
+      await expectJson(await financePost({ ...scope.input, stage: 'confirm', actionHash: scope.preview.actionHash }), 403);
+      const verifiedScope = (await finish(scope)).workspace;
+      expect(verifiedScope).toMatchObject({ principalCents: 0, postingPrincipal: { cents: 12050 },
+        customerInvoiceScope: { grossCents: 10000, issuer: parties.issuer, recipient: parties.recipient, actorId: staff.accountant,
+          lines: [{ id: 'office-legacy-amount-line', quantity: 1 }] } });
+      const plan = (await record('create_plan', createInvoice, id)).invoicePlans[0];
+      const invoice = { ...paper('office-paid-archive-invoice'), ...parties, planId: plan.id, number: 'ARCHIVE-OFFICE-INVOICE', grossCents: 10000,
+        amountCents: 10000, issuedAt: verifiedScope.paidAt };
+      const booked = await record('record_invoice', invoice, id);
+      expect(booked.invoicePlans[0]).toMatchObject({ usedCents: 10000, remainingCents: 0 });
+      expect(await prisma.order.findUnique({ where: { id } })).toMatchObject({ total: 0 });
+      expect(await prisma.customerCashPosting.count({ where: { orderId: id } })).toBe(1);
       vi.unstubAllEnvs();
     });
 
@@ -1234,7 +1261,43 @@ describe('admin purchase endpoint', () => {
       expect(await prisma.financeEvent.count({ where: { orderId: lateOrder } })).toBe(2);
     });
 
-    it('resumes the same signed Alipay receipt after stock recovers without a second provider callback', async () => {
+    it.each(['customer', 'supplier'] as const)('uses an old %s invoice arrangement before a written future change and for late reporting', async side => {
+      if (side === 'supplier') await startActualSupply(orderId, 'office-future-supplier-invoice');
+      const purchase = side === 'supplier' ? await currentPurchase() : null;
+      signIn(staff.accountant);
+      const parties = side === 'supplier' ? { issuer: procurementTerms.supplier, recipient: 'Office buyer' }
+        : { issuer: 'Office seller', recipient: 'Office buyer' };
+      const grossCents = 7000;
+      const plan = (await record('create_plan', { ...paper('office-source-invoice-arrangement'), ...parties, side,
+        purchaseOrderId: purchase?.id, grossCents, trigger: 'accepted' })).invoicePlans[0];
+      const separate = (await record('create_plan', { ...paper('office-independent-invoice-arrangement'), ...parties, side,
+        purchaseOrderId: purchase?.id, grossCents: 346, trigger: 'accepted' })).invoicePlans.find((row: { id: string }) => row.id !== plan.id);
+      const issue = (label: string, planId: string, amountCents: number, issuedAt = new Date().toISOString()) =>
+        ({ ...paper(label), ...parties, planId, issuedAt, number: label, grossCents: amountCents, amountCents });
+      await record('record_invoice', issue('OFFICE-EXISTING-INVOICE', plan.id, 2000));
+      const changedAt = new Date().toISOString();
+      const effectiveAt = new Date(Date.now()+3600000).toISOString();
+      const updated = await record('amend_plan', { ...paper('office-future-invoice-change'), planId: plan.id, amountCents: 4500,
+        trigger: 'accepted', occurredAt: changedAt, effectiveAt });
+      const next = updated.invoicePlans.find((row: { amendedFromPlanId: string | null }) => row.amendedFromPlanId === plan.id);
+      const before = issue('OFFICE-INVOICE-PRIOR-TO-CHANGE', plan.id, 1100);
+      await record('record_invoice', before);
+      const late = issue('OFFICE-LATE-REPORT-PRIOR-TO-CHANGE', plan.id, 900);
+      vi.setSystemTime(Date.parse(effectiveAt) + 60000);
+      const result = await record('record_invoice', late);
+      expect(result.invoicePlans.find((row: { id: string }) => row.id === plan.id)).toMatchObject({ usedCents: 4000, remainingCents: 0 });
+      expect(result.invoicePlans.find((row: { id: string }) => row.id === next.id)).toMatchObject({ grossCents: 4500, remainingCents: 3000 });
+      expect(result.invoicePlans.find((row: { id: string }) => row.id === separate.id)).toMatchObject({ remainingCents: 346, usedCents: 0 });
+      await expectJson(await financePost({ orderId, action: 'record_invoice', requestId: randomUUID(), version: result.version, stage: 'preview',
+        data: issue('OFFICE-OVER-SHARED-AMOUNT', next.id, 3001) }), 409);
+      const final = await record('record_invoice', issue('OFFICE-AFTER-CHANGE', next.id, 3000));
+      await expectJson(await financePost({ orderId, action: 'record_invoice', requestId: randomUUID(), version: final.version, stage: 'preview',
+        data: issue('OFFICE-DATE-OVERLAP-WITH-EXISTING-ISSUED-INVOICE', plan.id, 1, late.issuedAt) }), 409);
+      expect(await prisma.financeInvoice.count()).toBe(4);
+      expect(await prisma.customerCashPosting.count()).toBe(0);
+    });
+
+    it.each([false, true])('resumes the same signed Alipay receipt after stock recovers (cancellation request: %s)', async cancellation => {
       const id = 'office-alipay-stock-held';
       const productId = 'office-alipay-item-stock';
       await prisma.product.create({ data: { id: productId, catalogNumber: 'SYNTHETIC-OFFICE-ITEM', name: 'Office file', brand: 'Synthetic Office',
@@ -1248,13 +1311,52 @@ describe('admin purchase endpoint', () => {
       expect(await callback.text()).toBe('success');
       const before = await prisma.paymentAttempt.findUniqueOrThrow({ where: { outTradeNo: 'LP-OFFICE-STOCK-HOLD' } });
       expect(before).toMatchObject({ status: 'paid_stock_shortfall_reconciliation_required', tradeNo: 'OFFICE-ALIPAY-ORIGINAL', notifiedAt: expect.any(Date) });
+      if (cancellation) {
+        const request = (path: string, body: object) => new NextRequest('http://localhost' + path, {
+          method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
+        });
+        const params = { params: Promise.resolve({ id }) };
+        const requestResult = { error: 'ALIPAY_RECEIPT_PENDING_REVIEW', requestRecorded: true };
+        signIn(buyer, 'customer');
+        for (let retry = 0; retry < 2; retry++) {
+          const response = await requestCustomerOrderChange(request('/api/orders/' + id,
+            { status: 'cancelled', reason: '原客户请求取消' }), params);
+          expect(await expectJson(response, 409)).toMatchObject(requestResult);
+        }
+        signIn(staff.merchant);
+        const closed = await requestAdminOrderChange(request('/api/admin/orders/' + id,
+          { status: 'closed', reason: '按原客户意愿请求关闭', stepUpToken: await grant(staff.merchant) }), params);
+        expect(await expectJson(closed, 409)).toMatchObject(requestResult);
+        for (const action of ['delete', 'archive']) {
+          const removed = await withdrawOrders(request('/api/admin/orders/archive',
+            { action, orderIds: [orderId, id], stepUpToken: await grant(staff.merchant) }));
+          expect(await expectJson(removed, 409)).toMatchObject({ ...requestResult, orderId: id });
+        }
+        expect(await prisma.orderEvent.count({ where: { orderId: id, type: 'alipay_cancellation_requested' } })).toBe(4);
+        expect(await prisma.order.findUniqueOrThrow({ where: { id } })).toMatchObject({ status: 'unpaid', paidAt: null, archivedAt: null });
+        expect(await prisma.order.findUniqueOrThrow({ where: { id: orderId } })).toMatchObject({ status: 'confirmed', archivedAt: null });
+        expect(await prisma.paymentAttempt.findUnique({ where: { id: before.id } })).toEqual(before);
+      }
       signIn(staff.accountant);
-      const previewBefore = await financePreview('resume_alipay_payment', { ...paper('inventory-verification-for-original-callback'), sourceId: before.id }, id);
+      const data = { ...paper('inventory-verification-for-original-callback'), sourceId: before.id };
+      if (cancellation) {
+        const view = (await expectJson(await financeRead(id), 200)).workspace;
+        await expectJson(await financePost({ action: 'resume_alipay_payment', orderId: id, version: view.version,
+          requestId: randomUUID(), data, stage: 'preview' }), 409);
+        const claimed = await record('review_payment_case', { ...paper('named-review-of-cancellation'), sourceId: before.id,
+          occurredAt: new Date().toISOString() }, id);
+        expect(claimed.latePayments[0]).toMatchObject({ review: { ownerId: staff.accountant } });
+      }
+      const previewBefore = await financePreview('resume_alipay_payment', { ...data, confirmContinueAfterCancellation: cancellation }, id);
       const signedBody = { ...previewBefore.input, stage: 'confirm', actionHash: previewBefore.preview.actionHash };
       await expectJson(await financePost(signedBody), 403);
       await expectJson(await financePost({ ...signedBody, stepUpToken: await grant(staff.accountant) }), 409);
       expect(await prisma.paymentAttempt.findUnique({ where: { id: before.id } })).toEqual(before);
       await prisma.product.update({ where: { id: productId }, data: { stockQuantity: 2 } });
+      if (cancellation) {
+        expect(await reconcileStockHeldAlipayPayments()).toMatchObject({ stockReceiptsResumed: 0, stockReceiptsDeferred: 1 });
+        expect(await prisma.paymentAttempt.findUnique({ where: { id: before.id } })).toEqual(before);
+      }
       const completed = await finish(previewBefore);
       expect((await finish(previewBefore)).eventId).toBe(completed.eventId);
       expect(completed.workspace).toMatchObject({ status: 'pending', nativePaymentId: before.id, settlementCents: 4000,
@@ -1413,7 +1515,9 @@ describe('admin purchase endpoint', () => {
       expect(await currentPurchase()).toMatchObject({ paidCents: 2900, totalCents: 7346 });
     });
 
-    it('routes the actual bank transfer to the identified purchase and uses its original approved balance once', async () => {
+    it.each(['unbooked', 'legacy', 'misassigned'] as const)('routes the actual bank transfer to the identified purchase (%s)', async scenario => {
+      const alreadyBooked = scenario === 'legacy';
+      if (scenario === 'misassigned') await startActualSupply(orderId, 'office-misassigned-original-payment');
       const target = 'office-transfer-target-order';
       const item = 'office-transfer-target-item';
       await seedAcceptedOrder(target, item);
@@ -1425,11 +1529,24 @@ describe('admin purchase endpoint', () => {
       signIn(staff.finance);
       const receiver = await currentPurchase(target);
       const original = {
-        reference: '实际转账合成原回单', amountCents: 600,
+        reference: '实际转账合成原回单', amountCents: alreadyBooked ? 900 : 600,
         ...supplierPaymentProof('OFFICE-BANK-ROUTED-TRACE', procurementTerms.payee, new Date().toISOString()),
       };
+      const prior = alreadyBooked ? await prisma.purchaseActivity.create({ data: {
+        id: 'LEGACY-B-NINE-YUAN', orderId: target, purchaseOrderId: receiver.id, actorId: staff.finance, action: 'record_payment',
+        amountCents: BigInt(original.amountCents), createdAt: original.occurredAt,
+        detail: JSON.stringify({ snapshot: { orderId: target, purchaseOrderId: receiver.id, lines: receiver.lines, operation: {
+          action: 'record_payment', reference: 'LEGACY-FILE-P', conditionReference: 'Original office prepayment', amountCents: original.amountCents,
+        } } }),
+      } }) : null;
+      let misplaced: { id: string; detail: string } | undefined;
+      if (scenario === 'misassigned') {
+        await expectJson(await confirm(await previewAction({ ...original, action: 'record_payment', requestId: 'record-first-under-wrong-order',
+          conditionReference: '原登记按付款材料所列条款归属。' }), await grant(staff.finance)), 200);
+        misplaced = await prisma.purchaseActivity.findFirstOrThrow({ where: { orderId, action: 'record_payment' }, select: { id: true, detail: true } });
+      }
       const sourceCase = await previewAction({ ...original, action: 'record_payment_exception', requestId: 'routed-payment-original-review',
-        description: '保存原银行转账，待核对原件所列的采购单。' });
+        sourcePaymentId: misplaced?.id, description: '保存原银行转账，待核对原件所列的采购单。' });
       const reported = await expectJson(await confirm(sourceCase, await grant(staff.finance)), 200);
       const originalPurchase = reported.workspace.orders[0];
       const [issue] = originalPurchase.paymentExceptions;
@@ -1440,7 +1557,44 @@ describe('admin purchase endpoint', () => {
       await expectJson(await confirm(forward, await grant(staff.finance)), 200);
       const destination = await expectJson(await readPurchases(target), 200);
       expect(destination.workspace.orders[0].paymentExceptions).toMatchObject([{ id: issue.id, pending: true, incoming: true,
-        purchaseOrderId: originalPurchase.id, original: { amountCents: 600, paymentEvidence: { bankTrace: original.bankTrace } } }]);
+        purchaseOrderId: originalPurchase.id, original: { amountCents: original.amountCents, paymentEvidence: { bankTrace: original.bankTrace } } }]);
+      if (prior) {
+        const duplicate = await expectJson(await post({ action: 'record_payment', requestId: 'avoid-booking-already-recorded-nine-yuan',
+          orderId: target, purchaseOrderId: receiver.id, version: destination.workspace.orders[0].version, paymentIssueId: issue.id,
+          conditionReference: '原批准的条件', stage: 'preview' }), 409);
+        expect(duplicate.error).toContain('可能对应的已记旧付款');
+        const link = await previewAction({ action: 'review_payment_time', requestId: 'associate-original-bank-line-to-legacy-p',
+          paymentIssueId: issue.id, sourcePaymentId: prior.id, reference: '供方对同一笔付款原始回函', referenceSha256: pricingContentHash('proof of link to P'),
+          description: '原凭证和供方确认书核实为同一笔已入账的9元。' }, target);
+        await expectJson(await confirm(link), 403);
+        const linked = await expectJson(await confirm(link, await grant(staff.finance)), 200);
+        await expectJson(await confirm(link, await grant(staff.finance)), 200);
+        expect(linked.workspace.orders[0]).toMatchObject({ id: receiver.id, paidCents: 900, dueCents: 6446,
+          paymentExceptions: [{ id: issue.id, pending: false, postingId: expect.any(String) }],
+          payments: [{ id: prior.id, amountCents: 900, reference: 'LEGACY-FILE-P', occurredAt: original.occurredAt, bankTrace: original.bankTrace }] });
+        expect(await prisma.purchaseActivity.findUnique({ where: { id: prior.id }, select: { detail: true } })).toEqual({ detail: prior.detail });
+        expect(await prisma.purchaseActivity.count({ where: { action: 'record_payment' } })).toBe(1);
+        return;
+      }
+      if (misplaced) {
+        const adjustment = await previewAction({ action: 'correct_payment_attribution', requestId: 'office-one-equivalent-attribution-correction',
+          paymentIssueId: issue.id, conditionReference: '目标原采购单的有效预付条件已核对',
+          reference: 'supplier-bank-attribution-correction', referenceSha256: pricingContentHash('signed attribution correction'),
+          description: '银行和供方确认原账等额改归目标采购，原实付款保留。' }, target);
+        await expectJson(await confirm(adjustment), 403);
+        const corrected = await expectJson(await confirm(adjustment, await grant(staff.finance)), 200);
+        await expectJson(await confirm(adjustment, await grant(staff.finance)), 200);
+        expect(corrected.workspace.orders[0]).toMatchObject({ paidCents: 600, dueCents: 6746,
+          payments: [{ sourcePaymentId: misplaced.id, bankTrace: original.bankTrace, amountCents: 600 }],
+          paymentExceptions: [{ id: issue.id, pending: false }] });
+        const source = await expectJson(await readPurchases(orderId), 200);
+        expect(source.workspace.orders[0]).toMatchObject({ paidCents: 0, dueCents: 7346, payments: [],
+          paymentCorrections: [{ targetPurchaseOrderId: receiver.id, operation: { source: { paymentId: misplaced.id } } }] });
+        expect(await prisma.purchaseActivity.findUnique({ where: { id: misplaced.id }, select: { detail: true } })).toEqual({ detail: misplaced.detail });
+        expect(await prisma.purchaseActivity.count({ where: { action: 'record_payment' } })).toBe(1);
+        expect(await prisma.purchaseActivity.count({ where: { action: 'correct_payment_attribution' } })).toBe(1);
+        return;
+      }
       const parameters = { paymentIssueId: issue.id, action: 'record_payment',
         conditionReference: '目标原批准中已满足的订购付款条件', requestId: 'apply-identified-original-trace' } as const;
       const apply = await previewAction(parameters, target);

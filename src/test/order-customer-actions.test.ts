@@ -35,6 +35,7 @@ vi.mock('@/lib/prisma', () => ({
     cart: { findUnique: mocks.cartFindUnique, upsert: mocks.cartUpsert },
     $transaction: async (callback: (tx: unknown) => Promise<unknown>) => callback({
       order: { findUnique: mocks.transactionOrderFindUnique, update: mocks.transactionOrderUpdate, updateMany: mocks.transactionOrderUpdateMany },
+      paymentAttempt: { findMany: vi.fn(async () => []) },
       orderEvent: { findMany: vi.fn(async () => []) },
     }),
   },
@@ -67,6 +68,7 @@ vi.mock('@/lib/product-pricing', () => ({
 
 import { PATCH } from '@/app/api/orders/[id]/route';
 import { POST as reorderPOST } from '@/app/api/orders/[id]/reorder/route';
+import { alipayReceiptWhere } from '@/lib/payment-concurrency';
 
 function patchRequest(body: object) {
   return new NextRequest('https://libereal.cn/api/orders/order-1', {
@@ -129,7 +131,7 @@ describe('customer order actions', () => {
     expect(response.status).toBe(200);
     expect(mocks.transactionOrderUpdate).toHaveBeenCalled();
     expect(mocks.transactionOrderUpdateMany).toHaveBeenCalledWith({
-      where: { id: 'order-1', status: 'unpaid', paidAt: null },
+      where: { id: 'order-1', status: 'unpaid', paidAt: null, NOT: { paymentAttempts: { some: alipayReceiptWhere } } },
       data: { status: 'cancelled', autoCloseAt: null },
     });
     expect(mocks.releaseOrderInventory).toHaveBeenCalled();

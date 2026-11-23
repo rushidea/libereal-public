@@ -51,7 +51,7 @@ function makeWorkspace(status?: Purchase['status'], lineChanges: Partial<Line> =
   const purchase: Purchase | null = status ? {
     id: purchaseId, status, version, revision: 4, contentHash: 'd'.repeat(64),
     approvedHash: status === 'draft' || status === 'on_hold' ? null : 'd'.repeat(64),
-    totalCents: 8642, paidCents: 0, lines: [line], ledger: [], payments: [], paymentExceptions: [], orderedBefore: status === 'ordered',
+    totalCents: 8642, paidCents: 0, lines: [line], ledger: [], payments: [], paymentExceptions: [], paymentCorrections: [], orderedBefore: status === 'ordered',
     openIncidentId: open?.id ?? null, incident: open, incidents: open ? [open] : [], incidentHistory:open ? [open] : [],
     incidentSources:[{orderItemId,quantity:line.source.quantity,source:{kind:'unshipped'},reference:'TEST-ORDER-REFERENCED'}],
     orderReceipt: null, leadTimeApproved: false,
@@ -148,7 +148,7 @@ describe('supplier purchasing page', () => {
       recordedAt: proof.occurredAt, original: { amountCents: 600, paymentEvidence: proof, description: '转交指定采购单核对。' },
       review: { id: 'TEST-SUPPLIER-TRANSFER', actorId: 'finance-origin', operation: { paymentIssueId: issueId, outcome: 'outside_purchase',
         target: { orderId, purchaseOrderId: purchaseId }, reference: '归属原件', referenceSha256: 'f'.repeat(64), description: '原银行转账归属本单。' } },
-      followup: null,
+      followup: null, attributionApprovalId: null,
     }];
     const posts = mockWorkspace(workspace, ['purchases.read', 'purchases.pay'], body => {
       const result = preview(body, workspace);

@@ -1876,6 +1876,61 @@ describe('actual scope of a supply incident', () => {
     holdResponsibility:'合成具名核对人',lines:[{parcelLineId,quantity,incidentId,receiptId,outcome:'continue'}],
   });
 
+  it('records an actual transfer before quarantine and requires independent attribution for a transfer made during the hold', async () => {
+    await acceptCustomerOrder();
+    const { relay: purchaseOrderId } = await orderFromSuppliers();
+    const beforeHold = nextOccurrence();
+    nextOccurrence();
+    const reported = await report(purchaseOrderId, 'original-office-hold', '原一件暂停等待书面澄清。', [waiting(relayLineId, 1)]);
+    const incidentId = reported.orders.find(row => row.id === purchaseOrderId)!.incidents[0].id;
+    const shipment = await dispatch({ ...dispatchInput('original-office-shipment-during-hold', 'supplier_to_libereal', [goods(purchaseOrderId, relayLineId)]),
+      lines: [{ ...goods(purchaseOrderId, relayLineId), holdAssignments: [{ incidentId, quantity: 1 }] }],
+      holdReview: pendingDeviation('actual-office-stock-quarantine') });
+    const [parcelLine] = shipment.lines;
+    const duringHold = nextOccurrence();
+    const { lines } = await current(purchaseOrderId);
+    const payee = lines[0].terms.payee;
+    const before = await purchaseAction(purchaseOrderId, { action: 'record_payment', requestId: 'office-payment-before-hold',
+      reference: 'OFFICE-PRIOR-BANK', amountCents: 100, conditionReference: '暂停前供方书面付款条件',
+      ...supplierPaymentProof('OFFICE-PRIOR-BANK', payee, beforeHold) }, merchant);
+    expect(before.orders.find(row => row.id === purchaseOrderId)).toMatchObject({ paidCents: 100, dueCents: 4900 });
+
+    const transfer = { reference: 'OFFICE-BANK-DURING-HOLD', amountCents: 900, conditionReference: '实际供方回单',
+      ...supplierPaymentProof('OFFICE-BANK-DURING-HOLD', payee, duringHold) };
+    await expect(purchaseAction(purchaseOrderId, { ...transfer, action: 'record_payment', requestId: 'no-ordinary-payment-in-hold' }, merchant))
+      .rejects.toThrow(/书面/);
+    const recorded = await purchaseAction(purchaseOrderId, { ...transfer, action: 'record_payment_exception', requestId: 'office-preserve-paid-during-hold',
+      description: '真实转账待核。原暂停期间没有本次付款放行。' }, merchant);
+    const issue = recorded.orders.find(row => row.id === purchaseOrderId)!.paymentExceptions[0];
+    expect(issue).toMatchObject({ pending: true, original: { amountCents: 900 } });
+    const permission = { action: 'approve_payment_attribution' as const, paymentIssueId: issue.id, requestId: 'supplier-attribution-after-warehouse-clearance',
+      reference: 'OFFICE-SIGNED-HOLD-DISPOSITION', referenceSha256: pricingContentHash('supplier approval and real warehouse release document'),
+      description: '双方实际处理已完成，核准将同一原银行转账冲入原合同。' };
+    await expect(purchaseAction(purchaseOrderId, permission, approver)).rejects.toThrow(/须先核清该笔暂停/);
+    await event(shipment.id, eventInput('office-quarantine-count', 'warehouse_receipt', [{ parcelLineId: parcelLine.id, quantity: 1, batchNumber: receivedLotA }]));
+    const lot = await receipt(parcelLine.id, receivedLotA);
+    await event(shipment.id, continuation('office-qualified-warehouse-release', parcelLine.id, incidentId, 1, lot.id));
+    const open = (await current(purchaseOrderId)).incidents[0];
+    if (open) await purchaseAction(purchaseOrderId, { action: 'resolve_change', incidentId, outcome: 'original_terms',
+      requestId: 'office-resolve-original-supplier-terms', ...agreement('actual-opt-in-to-original-contract'),
+      coordinationLines: open.outstanding ?? undefined }, approver);
+    const post = { action: 'record_payment' as const, paymentIssueId: issue.id, requestId: 'office-book-the-same-historical-cash',
+      conditionReference: '现批准下同笔银行原款可归入合同' };
+    await expect(purchaseAction(purchaseOrderId, post, merchant)).rejects.toThrow(/还不能归入/);
+    await expect(purchaseAction(purchaseOrderId, permission, merchant)).rejects.toThrow(/另一位/);
+    const approved = await purchaseAction(purchaseOrderId, permission, approver);
+    const authority = approved.orders.find(row => row.id === purchaseOrderId)!.paymentExceptions[0].attributionApprovalId;
+    expect(authority).toBeTruthy();
+    await expect(purchaseAction(purchaseOrderId, post, approver)).rejects.toThrow(/还不能归入/);
+    const posted = await purchaseAction(purchaseOrderId, post, merchant);
+    expect(posted.orders.find(row => row.id === purchaseOrderId)).toMatchObject({ paidCents: 1000, dueCents: 4000,
+      paymentExceptions: [{ id: issue.id, pending: false, attributionApprovalId: authority }] });
+    expect(posted.activities.at(-1)?.detail).toMatchObject({ snapshot: { operation: {
+      approvalId: null, attributionApprovalId: authority, paymentEvidence: { occurredAt: duringHold },
+    } } });
+    expect(await prisma.customerCashPosting.count({ where: { orderId } })).toBe(0);
+  });
+
   it.each(['original','resend','receipt'] as const)('records the evidenced held unit and leaves the same source’s ordinary unit available (%s)',async kind=>{
     await acceptCustomerOrder();
     const {relay:id}=await orderFromSuppliers();
