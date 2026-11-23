@@ -58,8 +58,8 @@ export function canReviewInvoiceCoverage(plan: InvoicePlan) {
     || plan.allocations.some(row => row.status !== 'voided'));
 }
 
-export default function FinanceForm({ view, action, busy, onPreview, onCancel, onError }: {
-  view: FinanceWorkspace; action: FinanceInput['action']; busy: boolean;
+export default function FinanceForm({ view, action, initialPlanId, busy, onPreview, onCancel, onError }: {
+  view: FinanceWorkspace; action: FinanceInput['action']; initialPlanId?: string; busy: boolean;
   onPreview: (input: FinanceInput) => Promise<void>; onCancel: () => void; onError: (message: string) => void;
 }) {
   const scopes = view.customerInvoiceScopes ?? [];
@@ -89,7 +89,7 @@ export default function FinanceForm({ view, action, busy, onPreview, onCancel, o
     : !plan.closed && (action === 'chase_invoice' ? plan.side === 'supplier' && plan.remainingCents > 0
       : action === 'confirm_condition' ? plan.trigger === 'manual' && !plan.manualAt
       : action === 'amend_plan' ? plan.scheduledRemainingCents > 0 : Math.min(plan.remainingCents, plan.scheduledRemainingCents) > 0));
-  const [planId, setPlanId] = useState(plans[0]?.id ?? '');
+  const [planId, setPlanId] = useState(plans.find(row => row.id === initialPlanId)?.id ?? plans[0]?.id ?? '');
   const [poId, setPoId] = useState(view.purchases[0]?.id ?? '');
   const [allocationId, setAllocationId] = useState('');
   const [invoiceDate, setInvoiceDate] = useState('');
@@ -262,7 +262,7 @@ export default function FinanceForm({ view, action, busy, onPreview, onCancel, o
       {['record_invoice','verify_invoice_coverage','amend_plan','confirm_condition','close_plan','chase_invoice'].includes(action) && <label className="grid gap-1">发票安排
         <select name="planId" value={planId} onChange={e => { setPlanId(e.target.value); setAllocationId(''); }} className={field} required>
           {plans.map(row => <option key={row.id} value={row.id}>{row.side === 'customer' ? '销项' : '进项'} · {row.reference}
-            {action === 'record_invoice' ? ' · 按票面日期核对' : ' · 可用 ' + money(action === 'amend_plan' ? row.scheduledRemainingCents : row.remainingCents)}</option>)}</select></label>}
+            {action === 'record_invoice' ? ' · 按票面日期核对' : ' · 安排未办 ' + money(action === 'amend_plan' ? row.scheduledRemainingCents : row.remainingCents)}</option>)}</select></label>}
       {action === 'verify_invoice_coverage' && <>
         <label className="grid gap-1">本次核对对象
           <select name="allocationId" value={reviewingInvoice?.id ?? ''} onChange={e => setAllocationId(e.target.value)} className={field}>

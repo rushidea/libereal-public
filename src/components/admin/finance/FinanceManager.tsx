@@ -21,6 +21,7 @@ export default function FinanceManager({ initialOrder }: { initialOrder: string 
   const [list, setList] = useState<OrderRow[]>([]);
   const [canWrite, setCanWrite] = useState(false);
   const [action, setAction] = useState<FinanceInput['action'] | null>(null);
+  const [actionPlanId, setActionPlanId] = useState<string | undefined>();
   const [pending, setPending] = useState<{ input: FinanceInput; preview: FinancePreviewResult } | null>(null);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
@@ -155,7 +156,8 @@ export default function FinanceManager({ initialOrder }: { initialOrder: string 
               {' · ' + amounts.timeline.filter(row => row.needsReview).map(row => dateLabel(row.at)).join('、')}
               {' · 请凭明确的澄清书证核对历史客户可开票范围。'}</p>}
             {amounts.invoiceConflicts?.map(row => <p key={row.id} className="text-amber-900">
-              原票 {row.number} · 票面日期 {dateLabel(row.issuedAt)} · 请核对当日书证或登记发票更正待办。
+              原票 {row.number} · 票面日期 {dateLabel(row.issuedAt)}{row.ownerId && ' · 原安排经办人 ' + row.ownerId}
+              {' · 请核对当日书证或登记发票更正待办。'}
             </p>)}
           </>}
         </div>;
@@ -192,8 +194,18 @@ export default function FinanceManager({ initialOrder }: { initialOrder: string 
     {view.invoicePlans.length > 0 && <section aria-label="发票安排与原件" className="space-y-2"><h2 className={heading}>发票安排与原件</h2>
       {view.invoicePlans.map(plan => <article key={plan.id} className="space-y-1 rounded border border-slate-200 p-3 text-sm">
         <h3 className="font-semibold">{plan.side === 'customer' ? '客户开票' : '供应商来票'} · {plan.reference}{plan.closed && ' · 已关闭'}</h3>
-        <p>{plan.issuer} 开给 {plan.recipient} · 原安排 {money(plan.grossCents)} · 已占用 {money(plan.usedCents)}
-          {' · 尚可办理 ' + money(plan.remainingCents)} · {triggerLabels[plan.trigger]}</p>
+        <p>{plan.issuer} 开给 {plan.recipient} · 原安排 {money(plan.grossCents)} · 已开及更正中 {money(plan.usedCents)}
+          {' · 安排未开 ' + money(plan.remainingCents)} · {triggerLabels[plan.trigger]}</p>
+        {plan.remainingCents > 0 && <p>{plan.issuableCents == null ? '当前可办理金额待核对'
+          : '当前可办理 ' + money(plan.issuableCents)}
+          {(plan.readyAt === null || !plan.recordable) && ' · 等待约定条件达成'}</p>}
+        {plan.readyAt && plan.remainingCents > 0 && (plan.issuableCents == null || plan.issuableCents < plan.remainingCents)
+          && canReviewInvoiceCoverage(plan) && <div>
+          <p className="text-amber-900">未开金额超过已有书证支持的额度，或商品归属待核。请由原安排经办人核对。</p>
+          {canWrite && !action && <button type="button" className={button} disabled={busy} onClick={() => {
+            setError(''); setMessage(''); setActionPlanId(plan.id); setAction('verify_invoice_coverage');
+          }}>核对商品和书证</button>}
+        </div>}
         {plan.effectiveAt && <p>约定生效 {dateLabel(plan.effectiveAt)}</p>}
         {plan.invoiceScopeId && <p>对应原书证 {view.customerInvoiceScopes.find(row => row.id === plan.invoiceScopeId)?.reference ?? '待核实'}</p>}
         {plan.amendedFromPlanId && plan.effectiveAllocationCents !== plan.grossCents && <p>结合原安排的实际票面，本版可用的总额度 {money(plan.effectiveAllocationCents)}</p>}
@@ -209,8 +221,8 @@ export default function FinanceManager({ initialOrder }: { initialOrder: string 
         </div>)}
       </article>)}</section>}
     {actions.length > 0 && !action && <section className="space-y-2"><h2 className={heading}>办理事项</h2><div className="flex flex-wrap gap-2">
-      {actions.map(key => <button key={key} className={button} disabled={busy} onClick={() => { setError(''); setMessage(''); setAction(key); }}>{actionLabels[key]}</button>)}</div></section>}
-    {action && !pending && <FinanceForm key={view.version + action} view={view} action={action} busy={busy} onError={setError}
+      {actions.map(key => <button key={key} className={button} disabled={busy} onClick={() => { setError(''); setMessage(''); setActionPlanId(undefined); setAction(key); }}>{actionLabels[key]}</button>)}</div></section>}
+    {action && !pending && <FinanceForm key={view.version + action} view={view} action={action} initialPlanId={actionPlanId} busy={busy} onError={setError}
       onCancel={() => setAction(null)} onPreview={input => send(input)}/>}
     {pending && <FinancePreview preview={pending.preview} busy={busy} onBack={() => setPending(null)} onConfirm={() => {
       const current = pending;
