@@ -2400,6 +2400,8 @@ describe('actual scope of a supply incident', () => {
     const recorded=await count();
     await expect(purchaseAction(id,{action:'record_payment',requestId:'not-before-recovery',reference:'TEST-NOT-PAID',
       conditionReference:'TEST-REAL-TERM',amountCents:1850})).rejects.toThrow(/仍待采购接续/);
+    const whenUnlinked = nextOccurrence();
+    nextOccurrence();
     const recover={action:'report_change' as const,requestId:'recover-one-historical-part',
       shortfallHandoffKey:old.key,reference:'TEST-ORIGINAL-FILE-WITH-NAMED-HANDOFF',description:'补接旧版已核实短失。',
       responsibility:'合成原采购续办人'};
@@ -2415,6 +2417,18 @@ describe('actual scope of a supply incident', () => {
     expect(await current(id)).toMatchObject({paidCents:900,dueCents:4100,incidents:[
       {outstanding:[target],shortfallOrigin:{incidentId:issue.id,parcelId:parcel.id,parcelLineId,resolutionId},responsibility:recover.responsibility},
     ]});
+    const [open] = (await current(id)).incidents;
+    await purchaseAction(id,{action:'resolve_change',incidentId:open.id,outcome:'original_terms',requestId:'resolve-the-recovered-contract-scope',
+      coordinationLines:[target],...agreement('actual-resolution-of-recovered-shortfall')});
+    const payee = (await current(id)).lines[0].terms.payee;
+    const dated = { amountCents: 1850, reference:'OLDER-BANK-TRANSFER-BETWEEN-REVIEWS', conditionReference:'原合同付款条件',
+      ...supplierPaymentProof('OLDER-BANK-TRANSFER-BETWEEN-REVIEWS',payee,whenUnlinked) };
+    await expect(purchaseAction(id,{...dated,action:'record_payment',requestId:'no-retrospective-release-during-gap'}))
+      .rejects.toThrow(/仍待采购接续/);
+    const retained = await purchaseAction(id,{...dated,action:'record_payment_exception',requestId:'named-actual-transfer-during-historical-gap',
+      description:'按原日期保留银行转账，历史待接续的时段须核实归属。'},merchant);
+    expect(retained.orders.find(row=>row.id===id)).toMatchObject({paidCents:900,dueCents:4100,
+      paymentExceptions:[{pending:true,ownerId:merchant.id,original:{amountCents:1850}}]});
   });
 
   const reportExactLoss = (id:string, target:NonNullable<PurchaseAction['affectedLines']>[number], tag:string) =>

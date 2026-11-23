@@ -78,7 +78,7 @@ function makeWorkspace(status?: Purchase['status'], lineChanges: Partial<Line> =
     eligibility: { eligible: true, reason: null, basis: { acceptanceId: 'test-acceptance', receivableId: 'test-receivable',
       reserveId: 'test-credit-reserve', amount: 250, mode: 'credit', payment, planEvidenceId: null } },
     lines: [line], orders: purchase ? [purchase] : [], activities: [], customerRemaining:[{orderItemId,quantity:2}],
-    fulfillment: { version, targets: [], delivered: [], historicalDelivered: [], customerReceived: [], supplierReceived: [], warehouseReceived: [], warehouseTransit: [], supplierDispatched: [], incidentSources: [], dispatchHolds: [], unlinkedDispatchShortfalls: [], shortfalls: [], freeResends: [], parcelLinesWithPriorHoldTransfer: [], replacementsWithPriorHoldTransfer: [], parcelLinesWithUnverifiedStockSource: [], replacementsWithUnverifiedStockSource: [], inconsistent: [], ledger: [] },
+    fulfillment: { version, targets: [], delivered: [], historicalDelivered: [], customerReceived: [], supplierReceived: [], warehouseReceived: [], warehouseTransit: [], supplierDispatched: [], incidentSources: [], dispatchHolds: [], unlinkedDispatchShortfalls: [], reviewedDispatchShortfalls: [], shortfalls: [], freeResends: [], parcelLinesWithPriorHoldTransfer: [], replacementsWithPriorHoldTransfer: [], parcelLinesWithUnverifiedStockSource: [], replacementsWithUnverifiedStockSource: [], inconsistent: [], ledger: [] },
   };
 }
 
@@ -136,6 +136,39 @@ afterEach(() => {
 });
 
 describe('supplier purchasing page', () => {
+  it('continues the same verified transfer when the destination was unknown at the first review', async () => {
+    const workspace = makeWorkspace('ordered');
+    const [purchase] = workspace.orders;
+    const issueId = 'UNROUTED-ORIGINAL-BANK-LINE';
+    const recordedAt = '2026-11-20T00:31:00.000Z';
+    const proof = { payee: '合成供方收款账户', bankTrace: 'ORIGINAL-TRANSFER-ROW', traceKey: 'ORIGINAL-TRANSFER-ROW',
+      reference: '原合成银行对账单', occurredAt: recordedAt, sha256: 'e'.repeat(64), documentKind: 'statement', statementRow: 2 } as const;
+    const original = { amountCents: 600, paymentEvidence: proof, description: '原应付归属已经排除本采购单' };
+    const review = { id: 'known-outside-unknown-destination', actorId: 'finance-origin', purchaseOrderId: purchaseId, recordedAt,
+      operation: { paymentIssueId: issueId, outcome: 'outside_purchase' as const, target: null, reference: '原核对结果',
+        referenceSha256: 'f'.repeat(64), description: '已排除原采购单，目标待查' } };
+    purchase.paymentExceptions = [{ id: issueId, purchaseOrderId: purchaseId, incoming: false, pending: false, postingId: null,
+      ownerId: 'finance-origin', activePurchaseOrderId: null, postedToPurchaseOrderId: null, canRoute: true, awaitingTarget: true,
+      reviewHistory: [review], review, followup: null, attributionApprovalId: null, recordedAt, original }];
+    const posts = mockWorkspace(workspace,['purchases.read','purchases.pay'],body => {
+      const result = preview(body,workspace);
+      Object.assign(result.preview.snapshot.operation,{ paymentIssueId: issueId, responsibleActorId: 'finance-origin', original,
+        target: { orderId: 'TEST-DESTINATION-ORDER', purchaseOrderId: 'TEST-DESTINATION-PO' } });
+      return Response.json(result);
+    });
+    render(<PurchaseManager initialOrder={orderId}/>);
+    fireEvent.click(await screen.findByRole('button',{name:'补记核实的目标采购单'}));
+    fill('处理结果','outside_purchase');
+    fill('已核实的目标采购单编号（如有）','TEST-DESTINATION-PO');
+    fill('已核实的处理结果与原款去向','现按原件查到确切目标。');
+    fill('书面处理结果档案出处','新的具名书证');
+    fill('付款差异处理结果书证摘要','b'.repeat(64));
+    fireEvent.click(screen.getByRole('button',{name:'查看完整预览'}));
+    expect(await screen.findByRole('region',{name:'操作预览'})).toHaveTextContent(/转交采购单 TEST-DESTINATION-PO.*原流水 ORIGINAL-TRANSFER-ROW/);
+    expect(posts[0]).toMatchObject({ action:'review_payment_exception', paymentIssueId:issueId, paymentIssueOutcome:'outside_purchase',
+      paymentIssueTargetPurchaseOrderId:'TEST-DESTINATION-PO' });
+  });
+
   it('previews a forwarded supplier transfer using the original reference, actual amount and matched approval', async () => {
     const workspace = makeWorkspace('ordered');
     const [purchase] = workspace.orders;
@@ -145,8 +178,10 @@ describe('supplier purchasing page', () => {
       documentKind: 'single_receipt', statementRow: 1 } as const;
     purchase.paymentExceptions = [{
       id: issueId, purchaseOrderId: 'TEST-ORIGIN-PURCHASE', incoming: true, pending: true, postingId: null, ownerId: 'finance-origin',
+      activePurchaseOrderId: purchaseId, postedToPurchaseOrderId: null, canRoute: true, awaitingTarget: false, reviewHistory: [],
       recordedAt: proof.occurredAt, original: { amountCents: 600, paymentEvidence: proof, description: '转交指定采购单核对。' },
-      review: { id: 'TEST-SUPPLIER-TRANSFER', actorId: 'finance-origin', operation: { paymentIssueId: issueId, outcome: 'outside_purchase',
+      review: { id: 'TEST-SUPPLIER-TRANSFER', actorId: 'finance-origin', purchaseOrderId: 'TEST-ORIGIN-PURCHASE', recordedAt: proof.occurredAt,
+        operation: { paymentIssueId: issueId, outcome: 'outside_purchase',
         target: { orderId, purchaseOrderId: purchaseId }, reference: '归属原件', referenceSha256: 'f'.repeat(64), description: '原银行转账归属本单。' } },
       followup: null, attributionApprovalId: null,
     }];

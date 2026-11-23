@@ -5,14 +5,17 @@ import FinanceManager from '@/components/admin/finance/FinanceManager';
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
 describe('admin finance workspace', () => {
-  it('requires evidence for the covered legacy invoice lines before offering a new customer invoice plan', async () => {
+  it.each([false, true])('requires covered lines and supports supplementary legacy invoice evidence (first scope present: %s)', async hasFirst => {
     const orderId = 'legacy-office-with-reviewed-receivable';
     const workspace = {
       orderId, version: 'legacy-office-view', status: 'confirmed', customerEmail: 'office@example.test', principalCents: 0,
       postingPrincipal: { cents: 12050, reviewId: 'receivable-review' }, settlementCents: 12050, verifiedCents: 12050,
       acceptanceId: 'original-order-acceptance', shipmentDates: { dispatched: null, delivered: null },
       banks: [], receipts: [], cash: [], purchases: [], invoicePlans: [], events: [], latePayments: [],
-      originalInvoiceLines: [{ id: 'archived-office-folder', name: '合成文件夹', quantity: 1, unitPrice: 120.5 }],
+      customerInvoiceScopes: hasFirst ? [{ id: 'original-accepted-scope', grossCents: 6000,
+        reference: '原协议 A', issuer: '合成售方', recipient: '合成客户', lines: [{ id: 'archived-office-label', name: '合成标签', quantity: 1 }] }] : [],
+      originalInvoiceLines: [{ id: 'archived-office-folder', name: '合成文件夹', quantity: 1, unverifiedQuantity: 1, unitPrice: 120.5 },
+        { id: 'archived-office-label', name: '合成标签', quantity: 1, unverifiedQuantity: hasFirst ? 0 : 1, unitPrice: 60 }],
     };
     const fetchFinance = vi.fn(async (_input: string, options?: RequestInit) => {
       if (options?.method !== 'POST') return Response.json({ canWrite: true, workspace });
@@ -23,7 +26,7 @@ describe('admin finance workspace', () => {
     vi.stubGlobal('fetch', fetchFinance);
     render(<FinanceManager initialOrder={orderId}/>);
     const action = await screen.findByRole('button', { name: '核对历史客户可开票范围' });
-    expect(screen.queryByRole('button', { name: '登记开票或收票安排' })).not.toBeInTheDocument();
+    expect(Boolean(screen.queryByRole('button', { name: '登记开票或收票安排' }))).toBe(hasFirst);
     fireEvent.click(action);
     fireEvent.click(screen.getByRole('checkbox', { name: '合成文件夹 · 1 件' }));
     for (const [label, value] of [
@@ -36,7 +39,7 @@ describe('admin finance workspace', () => {
     expect(preview).toHaveTextContent('书证可开含税金额 ¥100.00');
     const request = fetchFinance.mock.calls.find(([, options]) => options?.method === 'POST');
     expect(JSON.parse(String(request?.[1]?.body))).toMatchObject({ action: 'verify_customer_invoice_scope',
-      data: { grossCents: 10000, invoiceLineIds: ['archived-office-folder'], reference: '原签订协议-001' } });
+      data: { grossCents: 10000, invoiceLines: [{ orderItemId: 'archived-office-folder', quantity: 1 }], reference: '原签订协议-001' } });
   });
 
   it('opens supplier followups from the list and offers only evidence progress on a claimed payment case', async () => {
