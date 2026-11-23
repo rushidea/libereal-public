@@ -2356,6 +2356,124 @@ describe('actual scope of a supply incident', () => {
     ]});
   });
 
+  const reportExactLoss = (id:string, target:NonNullable<PurchaseAction['affectedLines']>[number], tag:string) =>
+    purchaseAction(id,{action:'report_change',changeKind:'other',requestId:'report-exact-loss-'+tag,affectedLines:[target],
+      reference:'TEST-EXACT-LOSS-'+tag,description:'按同一物流短失记录和货件数量登记实际范围。'});
+  const approveOriginalShare = (id:string, incidentId:string, part:NonNullable<PurchaseAction['affectedLines']>[number], tag:string) =>
+    purchaseAction(id,{action:'resolve_change',incidentId,outcome:'original_terms',coordinationLines:[part],
+      requestId:'original-terms-'+tag,...agreement(tag)});
+  const approveFreeShare = (id:string, incidentId:string, lossId:string, tag:string) =>
+    purchaseAction(id,{action:'resolve_change',incidentId,outcome:'shortfall',requestId:'free-resend-'+tag,
+      ...agreement(tag),dispositions:[{...line(relayLineId,1),outcome:'cancel',shortfallId:lossId,shortfallDecision:'free_resend'}]});
+
+  it.each([
+    ['original_first','all_at_once'],
+    ['resend_first','all_at_once'],
+    ['original_first','split'],
+    ['resend_first','split'],
+  ] as const)('counts disjoint signed decisions from the same scope in either order (%s, %s)',async(first,handoff)=>{
+    const {id,issue,parcel,parcelLineId,resolutionId,target}=await shortfallAfterClosingEarlierNotice(2);
+    const original=await reportExactLoss(id,target,'two-pieces-known-from-original-carrier-evidence');
+    const caseId=original.orders.find(row=>row.id===id)!.incidents[0].id;
+    const one={...target,quantity:1};
+    const keep=()=>approveOriginalShare(id,caseId,one,'original-terms-for-one-physical-piece');
+    const resend=()=>approveFreeShare(id,caseId,resolutionId,'free-resend-for-the-separate-other-piece');
+    if (first==='original_first') {await keep();await resend();} else {await resend();await keep();}
+    const po=await current(id);
+    const signed=po.ledger.filter(row=>row.action==='resolve_change');
+    const requests=handoff==='all_at_once' ? [2] : [1,1];
+    const links=[];
+    for (const [index,quantity] of requests.entries()) {
+      const body=handOffShortfall('reconcile-exact-signed-share-'+index,parcelLineId,issue.id,resolutionId,quantity);
+      const result=await prisma.$transaction(tx=>previewParcelEvent(tx,orderId,parcel.id,body,operator));
+      const inspected=(result.snapshot as unknown as {holdDecisions:Array<{purchaseFollowup:{
+        decisionLinks:Array<{activityId:string;quantity:number}>;reportQuantity:number
+      }}>}).holdDecisions[0].purchaseFollowup;
+      expect(inspected.reportQuantity).toBe(0);
+      links.push(...inspected.decisionLinks);
+      await prisma.$transaction(tx=>recordParcelEvent(tx,orderId,parcel.id,body,operator,result.actionHash));
+    }
+    expect(links).toEqual(signed.map(row=>({activityId:row.id,quantity:1})));
+    const used=await current(id);
+    expect(used).toMatchObject({status:'ordered',paidCents:900,dueCents:4100,incidents:[]});
+    expect(used.ledger.filter(row=>row.action==='report_change')).toHaveLength(2);
+    const payment=await prisma.$transaction(tx=>previewPurchaseAction(tx,{orderId,purchaseOrderId:id,version:used.version,
+      action:'record_payment',requestId:'existing-payable-terms-preview-only',reference:'TEST-OUTSTANDING-TAIL-PREVIEW',
+      conditionReference:'TEST-ORIGINAL-APPROVED-AND-MATURED-TERM',amountCents:1850},approver));
+    expect(payment.snapshot.operation).toMatchObject({action:'record_payment',amountCents:1850});
+    expect((await current(id)).paidCents).toBe(900);
+    expect((await prisma.$transaction(tx=>purchaseWorkspace(tx,orderId))).fulfillment.freeResends).toMatchObject([
+      {shortfallId:resolutionId,quantity:1,dispatched:0},
+    ]);
+  });
+
+  it.each(['open','settled_before_merge','settled_after_merge','chained_merge'] as const)
+    ('preserves a previous assignment when the same proven shortfall share is merged (%s)',async timing=>{
+    const {id,issue,parcel,parcelLineId,resolutionId,target}=await shortfallAfterClosingEarlierNotice(2);
+    const one={...target,quantity:1};
+    await event(parcel.id,handOffShortfall('first-unit-assigned-to-the-earlier-case',parcelLineId,issue.id,resolutionId));
+    const [original]=(await current(id)).incidents;
+    let left=original.id;
+    let right=original.id;
+    for (const hop of timing==='chained_merge' ? [1,2] : [1]) {
+      const concurrent=await reportExactLoss(id,one,'subsequent-original-for-same-unit-'+hop);
+      right=concurrent.orders.find(row=>row.id===id)!.incidents.find(row=>row.id!==left)!.id;
+      if (timing==='settled_before_merge') await approveOriginalShare(id,right,one,'the-paired-exact-share-was-resolved-first');
+      await purchaseAction(id,{action:'review_change_scope',incidentId:left,relatedIncidentId:right,reviewResult:'duplicate',
+        requestId:'both-notices-locate-the-identical-goods-'+hop,reference:'TEST-SAME-PHYSICAL-LOSS-'+hop,
+        description:'核对原件，同一物流记录中的同一件已移交货物没有新增。'});
+      left=right;
+    }
+    if (timing==='settled_after_merge' || timing==='chained_merge') await approveOriginalShare(id,right,one,'the-merged-first-unit-settled');
+    const second=handOffShortfall('independent-second-actual-unit-only',parcelLineId,issue.id,resolutionId);
+    const preview=await prisma.$transaction(tx=>previewParcelEvent(tx,orderId,parcel.id,second,operator));
+    expect(preview.snapshot).toMatchObject({holdDecisions:[{purchaseFollowup:{
+      reportQuantity:1,decisionLinks:[],transfers:[],
+    }}]});
+    await event(parcel.id,second);
+    await event(parcel.id,second);
+    const po=await current(id);
+    const followup=po.incidents.find(row=>row.id!==right)!;
+    expect(followup).toMatchObject({outstanding:[one],shortfallOrigin:{incidentId:issue.id,resolutionId,parcelLineId}});
+    expect(po.incidentHistory.find(row=>row.id===original.id)).toMatchObject({status:'duplicate',linkedTo:right});
+    expect(po).toMatchObject({paidCents:900,dueCents:4100,status:'on_hold'});
+  });
+
+  it('uses the remaining bounded scope across a proven merge without counting earlier unrelated reuse',async()=>{
+    const {id,issue,parcel,parcelLineId,resolutionId,target}=await shortfallAfterClosingEarlierNotice(2);
+    const two=await reportExactLoss(id,target,'whole-two-source-for-subsequent-merge');
+    const old=two.orders.find(row=>row.id===id)!.incidents[0].id;
+    const one={...target,quantity:1};
+    await approveOriginalShare(id,old,one,'the-first-piece-written-agreement');
+    const second=await reportExactLoss(id,one,'letter-confirming-the-same-unresolved-second-share');
+    const next=second.orders.find(row=>row.id===id)!.incidents.find(row=>row.id!==old)!.id;
+    await purchaseAction(id,{action:'review_change_scope',incidentId:old,relatedIncidentId:next,reviewResult:'duplicate',
+      requestId:'target-covers-entire-outstanding-one-piece',reference:'TEST-DIRECT-EXACT-REMAINDER-COMMON-SCOPE',
+      description:'只关联原事项剩余的一件，原已决定的一件另有原书证。'});
+    await approveFreeShare(id,next,resolutionId,'the-authorized-second-piece-only');
+    const both=handOffShortfall('reconcile-two-disjoint-pieces-after-scope-merge',parcelLineId,issue.id,resolutionId,2);
+    const po=await current(id);
+    const decisions=po.ledger.filter(row=>row.action==='resolve_change').map(row=>({activityId:row.id,quantity:1}));
+    const result=await prisma.$transaction(tx=>previewParcelEvent(tx,orderId,parcel.id,both,operator));
+    expect(result.snapshot).toMatchObject({holdDecisions:[{purchaseFollowup:{reportQuantity:0,decisionLinks:decisions}}]});
+    await event(parcel.id,both);
+    expect(await current(id)).toMatchObject({status:'ordered',paidCents:900,dueCents:4100,incidents:[]});
+  });
+
+  it('keeps the unproven remainder open when separate decisions might cover the same physical piece',async()=>{
+    const {id,issue,parcel,parcelLineId,resolutionId,target}=await shortfallAfterClosingEarlierNotice(2);
+    const one={...target,quantity:1};
+    const first=await reportExactLoss(id,one,'letter-applies-to-one-but-does-not-distinguish-unit');
+    await approveOriginalShare(id,first.orders.find(row=>row.id===id)!.incidents[0].id,one,'contract-terms-for-one');
+    const next=await reportExactLoss(id,one,'other-letter-also-applies-to-one');
+    await approveFreeShare(id,next.orders.find(row=>row.id===id)!.incidents[0].id,resolutionId,'free-resend-might-cover-the-same-one');
+    const both=handOffShortfall('ambiguous-overlap-is-left-for-procurement',parcelLineId,issue.id,resolutionId,2);
+    const result=await prisma.$transaction(tx=>previewParcelEvent(tx,orderId,parcel.id,both,operator));
+    expect(result.snapshot).toMatchObject({holdDecisions:[{purchaseFollowup:{reportQuantity:1,decisionLinks:[{quantity:1}]}}]});
+    await event(parcel.id,both);
+    expect(await current(id)).toMatchObject({status:'on_hold',paidCents:900,dueCents:4100,incidents:[{outstanding:[one]}]});
+  });
+
   it('records actual direct signature before any buyer decision without closing the customer order or collecting money',async()=>{
     await acceptCustomerOrder();
     const {direct,relay:id}=await orderFromSuppliers();
