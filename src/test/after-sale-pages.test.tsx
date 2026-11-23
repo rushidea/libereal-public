@@ -78,6 +78,22 @@ describe('客户与经办人从原订单进入售后',()=>{
     expect(within(picker).queryByRole('option',{name:/整票原号/})).toBeNull();
     expect(within(picker).getByRole('option',{name:/实际重开票号/})).toBeTruthy();
     fireEvent.click(screen.getByRole('button',{name:'返回'}));
+    fireEvent.click(screen.getByRole('button',{name:'核对该商品的票面分摊'}));
+    fireEvent.click(screen.getByLabelText('凭补充原件核对前序红冲和本商品承接份额'));
+    fireEvent.change(screen.getByLabelText('须凭原件核对的发票分摊'),{target:{value:replacement.id}});
+    fireEvent.change(screen.getByLabelText('前序红冲票的实际分摊'),{target:{value:original.id}});
+    expect(screen.getByText(/正式红冲回执 跨单整票红冲原件/)).toBeTruthy();
+    for(const [label,value] of [
+      ['本商品从前序红冲承接的实际金额（元）','40'],['办理说明','补到的原件明确这40元对应前序票'],
+      ['凭据实际发生时间','2026-11-06T10:00'],['凭据名称或档案出处','实际前序红冲书证'],['原件 SHA-256',hash],
+    ]) fireEvent.change(screen.getByLabelText(label,{exact:true}),{target:{value}});
+    fireEvent.click(screen.getByRole('button',{name:'预览本次内容'}));
+    await waitFor(()=>expect(submissions).toHaveLength(2));
+    expect(submissions[1]).toMatchObject({action:'verify_invoice_line',caseId:sale.id,data:{
+      invoiceAllocationId:replacement.id,reissueParentAllocationId:original.id,sourceCorrectionEventId:receipt.id,amountCents:4000,
+    }});
+    fireEvent.click(screen.getByRole('button',{name:'刷新本单'}));
+    await screen.findByRole('button',{name:'登记客户书面决定'});
     fireEvent.click(screen.getByRole('button',{name:'登记客户书面决定'}));
     expect(screen.getByText(/登记客户对待办重开的新决定/)).toBeTruthy();
     fireEvent.change(screen.getByLabelText('书面决定要求的实际更正结果'),{target:{value:'reissue'}});
@@ -89,10 +105,42 @@ describe('客户与经办人从原订单进入售后',()=>{
     fireEvent.change(screen.getByLabelText('凭据名称或档案出处'),{target:{value:'客户新书面决定原件'}});
     fireEvent.change(screen.getByLabelText('原件 SHA-256',{exact:true}),{target:{value:hash}});
     fireEvent.click(screen.getByRole('button',{name:'预览本次内容'}));
-    await waitFor(()=>expect(submissions).toHaveLength(2));
-    expect(submissions[1]).toMatchObject({action:'agreement',caseId:sale.id,data:{remedy:'invoice',invoiceAllocationId:original.id,
+    await waitFor(()=>expect(submissions).toHaveLength(3));
+    expect(submissions[2]).toMatchObject({action:'agreement',caseId:sale.id,data:{remedy:'invoice',invoiceAllocationId:original.id,
       invoiceOutcome:'reissue',replacementAmountCents:6000,revisesAgreementId:agreement.id}});
-    expect(submissions[1]).not.toHaveProperty('data.amountCents');
+    expect(submissions[2]).not.toHaveProperty('data.amountCents');
+  });
+
+  it('原案早已指定包裹时可以原地补核该包裹内的一件',async()=>{
+    const parcel={id:'PINNED-RECEIVED-TWO',orderItemId:line.id,route:'supplier_to_customer',quantity:2,
+      reference:'同一实际运单',receipts:[{quantity:2,at:Date.parse('2026-11-01T01:00:00Z')}]};
+    const sale={id:'one-from-this-box',orderItemId:line.id,quantity:1,issue:'other',ownerId:'hold-owner',customerState:'closed',
+      originalParcelLineId:parcel.id,originalParcelShares:[{parcelLineId:parcel.id,quantity:1,evidenceEventId:null}],
+      supplierState:'resolved',report:'合成书证待补核',reference:'原案',reportedAt:'2026-11-01T01:00:00Z',events:[]};
+    const workspace={order:{id:order,status:'completed',acceptedAt:'2026-11-01T01:00:00Z'},lines:[line],cases:[sale],refundDrafts:[],
+      shortfalls:[],deliveries:[parcel,{...parcel,id:'OTHER-BOX',reference:'不是原案包裹'}]};
+    let sent:unknown;
+    vi.stubGlobal('fetch',vi.fn((_input:string,init?:RequestInit)=>{
+      if (init?.method==='POST') {
+        sent=JSON.parse(String(init.body));
+        return res({preview:{actionHash:hash,snapshot:{item:line,scopeQuantity:1,nextState:'closed',
+          nextSupplierState:'resolved',proof:{reference:'具名书证'},operation:{parcelLineId:parcel.id,quantity:1}}}});
+      }
+      return res({workspace,permissions:['admin.access','orders.read','orders.write']});
+    }));
+    render(<AfterSalesManager initialOrder={order}/>);
+    expect(await screen.findByText(/同一实际运单.*待凭原件核对份额/)).toBeTruthy();
+    fireEvent.click(screen.getByRole('button',{name:'核对原包裹及件数'}));
+    const boxes=screen.getByLabelText('本次核对的实际原包裹行') as HTMLSelectElement;
+    expect(boxes.value).toBe(parcel.id);
+    expect(within(boxes).queryByRole('option',{name:/不是原案包裹/})).toBeNull();
+    for(const [label,value] of [
+      ['本案在该包裹中的实际件数','1'],['办理说明','签收记录及书证核对本案一件'],
+      ['凭据实际发生时间','2026-11-06T10:00'],['凭据名称或档案出处','本案分份书证'],['原件 SHA-256',hash],
+    ]) fireEvent.change(screen.getByLabelText(label,{exact:true}),{target:{value}});
+    fireEvent.click(screen.getByRole('button',{name:'预览本次内容'}));
+    await screen.findByRole('region',{name:'售后办理预览'});
+    expect(sent).toMatchObject({action:'bind_original_parcel',caseId:sale.id,data:{parcelLineId:parcel.id,quantity:1,sha256:hash}});
   });
 
   it('订单岗确认前显示客户原文和两件案中的一件退款，既有财务历史只显示事项',async()=>{

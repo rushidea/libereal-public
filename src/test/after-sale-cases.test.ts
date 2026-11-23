@@ -331,7 +331,7 @@ describe('售后沿用原订单和短失事实', () => {
     expect(buyAfter).toMatchObject({totalCents:buyBefore?.totalCents,paidCents:buyBefore?.paidCents,dueCents:buyBefore?.dueCents});
   });
 
-  it('同一包裹两件均已签收，两案各具名认领一件后同一笔实款分30与20元',async()=>{
+  it.each(['分份后登记','建案时指定','协议中指定'])('同一包裹两件均已签收，同一笔实款分30与20元（%s）',async source=>{
     await acceptOrder();
     const purchaseOrderId=await registerSupplierOrder(4000);
     const box=await prisma.$transaction(tx=>dispatchParcel(tx,orderId,{
@@ -340,13 +340,19 @@ describe('售后沿用原订单和短失事实', () => {
     },operator));
     const parcelLineId=box.lines[0].id;
     await parcelEvent(box.id,'SIGN-TWO-ON-SAME-LINE','customer_delivery',[{parcelLineId,quantity:2}]);
-    const subjects:{caseId:string;evidenceId:string}[]=[];
+    const subjects:{caseId:string;evidenceId?:string}[]=[];
+    const verify=(caseId:string,tag:string)=>saleInput('bind_original_parcel','signed-original-share-proof-'+tag,{parcelLineId,quantity:1},caseId);
     for(const tag of ['A','B']){
-      const created=await record(saleInput('open','case-tied-to-a-share-'+tag,{orderItemId:itemId,quantity:1,issue:'other',channel:'handoff'}));
+      const created=await record(saleInput('open','case-tied-to-a-share-'+tag,{
+        orderItemId:itemId,quantity:1,issue:'other',channel:'handoff',...(source==='建案时指定'?{originalParcelLineId:parcelLineId}:{}),
+      }));
       const caseId=created.caseId!;
       await record(saleInput('claim','claim-one-physical-piece-'+tag,{},caseId));
-      const named=await record(saleInput('bind_original_parcel','signed-original-share-proof-'+tag,{parcelLineId,quantity:1},caseId));
-      subjects.push({caseId,evidenceId:named.eventId!});
+      if(source==='协议中指定') await record(saleInput('agreement','customer-writing-pins-package-'+tag,{
+        originalParcelLineId:parcelLineId,remedy:'return',customerDecision:'书面指定原包裹中该案商品',
+      },caseId));
+      const named=source==='分份后登记'?await record(verify(caseId,tag)):null;
+      subjects.push({caseId,evidenceId:named?.eventId??undefined});
     }
     const third=await record(saleInput('open','third-unassigned-case',{orderItemId:itemId,quantity:1,issue:'other',channel:'handoff'}));
     await record(saleInput('claim','take-third-unassigned-case',{},third.caseId!));
@@ -360,8 +366,23 @@ describe('售后沿用原订单和短失事实', () => {
     },caseId);
     const first=attribute(subjects[0].caseId,'original-evidence-allocation-a-30',3000);
     const a=await record(first,procurement);
-    expect(a.snapshot).toMatchObject({operation:{transfer:{unallocatedAfterCents:2000,supplierScope:{parcelClaim:{
-      caseId:subjects[0].caseId,quantity:1,evidenceEventIds:[subjects[0].evidenceId]}}}}});
+    expect(a.snapshot).toMatchObject({operation:{transfer:{unallocatedAfterCents:2000}}});
+    if (source==='分份后登记') {
+      expect(a.snapshot).toMatchObject({operation:{transfer:{supplierScope:{parcelClaim:{
+        caseId:subjects[0].caseId,quantity:1,evidenceEventIds:[subjects[0].evidenceId]}}}}});
+    } else {
+      const original=(await prisma.afterSaleEvent.findUniqueOrThrow({where:{id:a.eventId!}})).detail;
+      expect(JSON.parse(original).operation.transfer.supplierScope).not.toHaveProperty('parcelClaim');
+      const verifiedB=await record(verify(subjects[1].caseId,'B'));
+      subjects[1].evidenceId=verifiedB.eventId!;
+      await expect(preview(attribute(subjects[1].caseId,'missing-the-prior-cases-proof',2000),procurement)).rejects.toThrow('原包裹份额');
+      const verifyA=verify(subjects[0].caseId,'A');
+      const named=await record(verifyA);
+      subjects[0].evidenceId=named.eventId!;
+      expect(named.snapshot).toMatchObject({operation:{parcelLineId,quantity:1,priorSupplierEventIds:[a.eventId]}});
+      expect(await record({...verifyA,requestId:'same-follow-up-original-proof-A'})).toMatchObject({eventId:named.eventId,repeated:true});
+      expect((await prisma.afterSaleEvent.findUniqueOrThrow({where:{id:a.eventId!}})).detail).toBe(original);
+    }
     await expect(preview(attribute(subjects[0].caseId,'new-label-does-not-create-another-share',2000),procurement)).rejects.toThrow('原包裹份额');
     await expect(preview(attribute(subjects[1].caseId,'over-actual-50',2001),procurement)).rejects.toThrow('真实交易总额');
     const lastInput=attribute(subjects[1].caseId,'original-evidence-allocation-b-20',2000);

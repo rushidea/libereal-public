@@ -631,7 +631,7 @@ describe('售后正常 HTTP 入口、真实权限和单次身份确认', () => {
       for(const item of cases) await record(finance,action('invoice_outcome','link-red-'+item.id,item.id,{...red.evidence,financeEventId:red.eventId}));
       return red.eventId as string;
     }
-    return {original,begin,correct,issue};
+    return {original,begin,correct,issue,plan,parties};
   }
 
   it.each(['unchanged','amend-before-entry','amend-after-entry','withdraw-before-entry'] as const)(
@@ -781,6 +781,86 @@ describe('售后正常 HTTP 入口、真实权限和单次身份确认', () => {
     signIn(clerk,'admin');
     await record(clerk,action('close','only-close-on-current-valid-invoices',current.id));
     expect(await prisma.afterSaleEvent.count({where:{caseId:current.id,action:'invoice_reissue'}})).toBe(3);
+    expect(await prisma.customerCashPosting.count()).toBe(0);
+  });
+
+  it.each(['原已记来源','缺旧记录后补核','跨单合开','后继票部分承接','改安排后补核前序分摊'])(
+    '合开票红冲后只沿实际重开的60元分摊承接两张后继票（%s）',async mode=>{
+    const {original,begin,correct,plan,parties}=await correctedInvoice();
+    const sale=await begin('mixed-real-replacement',10000);
+    const originalRed=await correct([sale]);
+    const ordinaryOrder=mode==='跨单合开'?'OFFICE-OTHER-COMBINED-ORDER':personalOrder;
+    if (ordinaryOrder!==personalOrder) {
+      await seedOrder(ordinaryOrder,owner);
+      await acceptOriginalOrder(ordinaryOrder);
+    }
+    const ordinary=(await financeRecord('create_plan',ordinaryOrder,'OFFICE-ORDINARY-PLAN-40',{
+      ...parties,side:'customer',trigger:'accepted',grossCents:4000,
+    })).workspace.invoicePlans.find(row=>row.grossCents===4000)!;
+    const combined={...parties,number:'OFFICE-MIXED-ACTUAL-100',issuedAt:new Date().toISOString(),
+      grossCents:10000,reference:'合开实际票面100元',sha256:pricingContentHash('office-mixed-actual-invoice')};
+    const middle=(await financeRecord('record_invoice',personalOrder,'BOOK-MIXED-REISSUE-60',{
+      ...combined,planId:plan.id,amountCents:6000,...(mode!=='缺旧记录后补核'?{correctionEventId:originalRed}:{}),
+    })).workspace.invoicePlans.find(row=>row.id===plan.id)!.allocations.find(row=>row.number===combined.number)!;
+    const other=(await financeRecord('record_invoice',ordinaryOrder,'BOOK-MIXED-ORDINARY-40',{
+      ...combined,planId:ordinary.id,amountCents:4000,
+    })).workspace.invoicePlans.find(row=>row.id===ordinary.id)!.allocations.find(row=>row.number===combined.number)!;
+    expect(other.invoiceId).toBe(middle.invoiceId);
+    await startCorrection(middle.invoiceId,'MIXED-WHOLE-INVOICE');
+    const red=await correctionReceipt(middle.invoiceId,'MIXED-WHOLE-INVOICE','voided');
+    async function successor(number:string,planId:string,amountCents:number,orderId=personalOrder) {
+      const actual=await financeRecord('record_invoice',orderId,number,{
+        ...parties,planId,number,issuedAt:new Date().toISOString(),grossCents:amountCents,amountCents,correctionEventId:red.eventId,
+      });
+      return actual.workspace.invoicePlans.find(row=>row.id===planId)!.allocations.find(row=>row.number===number)!;
+    }
+    const lastPlan=mode==='改安排后补核前序分摊'
+      ? (await financeRecord('create_plan',personalOrder,'OFFICE-DIFFERENT-PLAN-FOR-REISSUE-25',{
+        ...parties,side:'customer',trigger:'accepted',grossCents:2500,
+      })).workspace.invoicePlans.find(row=>row.grossCents===2500)!
+      : plan;
+    const first=await successor('OFFICE-MIXED-SUCCESSOR-35',plan.id,3500);
+    const last=await successor('OFFICE-MIXED-SUCCESSOR-PARTIAL',lastPlan.id,mode==='后继票部分承接'?3500:2500);
+    const unrelated=await successor('OFFICE-MIXED-ORDINARY-SUCCESSOR-40',ordinary.id,4000,ordinaryOrder);
+    const attach=(tag:string,id:string,amountCents:number)=>action('invoice_reissue',tag,sale.id,{invoiceAllocationId:id,amountCents});
+    if (mode==='缺旧记录后补核') {
+      await expectJson(preview(attach('historical-source-still-unverified',first.id,3500)),409);
+      const verify=(tag:string,sourceCorrectionEventId:unknown,amountCents:number)=>action('verify_invoice_line',tag,sale.id,{
+        invoiceAllocationId:middle.id,reissueParentAllocationId:original.id,sourceCorrectionEventId,amountCents,
+        note:'合开票的60元分摊及原票红冲由补到的书面原件确定',
+      });
+      await expectJson(preview(verify('cannot-name-the-middle-void-as-its-own-source',red.eventId,6000)),409);
+      await expectJson(preview(verify('cannot-borrow-the-ordinary-forty',originalRed,6001)),409);
+      const input=verify('name-the-already-voided-60-portion',originalRed,6000);
+      const reviewed=await record(finance,input);
+      expect(JSON.parse((await prisma.afterSaleEvent.findUniqueOrThrow({where:{id:reviewed.eventId}})).detail).operation).toMatchObject({
+        currentStatus:'voided',reissueLink:{allocationId:middle.id,parentAllocationId:original.id,receiptId:originalRed,amountCents:6000},
+      });
+      expect(await record(finance,{...input,requestId:'verify-the-same-historical-portion-again'})).toMatchObject({eventId:reviewed.eventId,repeated:true});
+    }
+    await expectJson(preview(attach('ordinary-successor-cannot-cover-this-case',unrelated.id,4000)),409);
+    const saved=await record(finance,attach('apply-successor-35',first.id,3500));
+    if (mode==='后继票部分承接') {
+      const blocked=await expectJson(preview(attach('would-double-use-ten-of-remaining-25',last.id,3500)),409);
+      expect(blocked.error).toContain('实际承接的分摊余额');
+    }
+    if (mode==='改安排后补核前序分摊') {
+      await expectJson(preview(attach('different-plan-must-name-a-proved-parent',last.id,2500)),409);
+    }
+    if (mode==='后继票部分承接'||mode==='改安排后补核前序分摊') {
+      await record(finance,action('verify_invoice_line','evidence-carries-only-twenty-five',sale.id,{
+        invoiceAllocationId:last.id,reissueParentAllocationId:middle.id,sourceCorrectionEventId:red.eventId,amountCents:2500,
+        note:'书证和实办票面确认本次仅承接该红冲分摊的25元',
+      }));
+    }
+    await expectJson(preview(attach('cannot-exceed-proved-mixed-portion',last.id,2501)),409);
+    await record(finance,attach('apply-successor-25',last.id,2500));
+    const position=(await expectJson(adminRead(),200)).workspace.cases.find((row:{id:string})=>row.id===sale.id).invoiceReissue;
+    expect(position).toMatchObject({issuedCents:6000,recordedCents:6000,voidedCents:6000,remainingCents:4000,needsAttribution:false});
+    const savedOperation=JSON.parse((await prisma.afterSaleEvent.findUniqueOrThrow({where:{id:saved.eventId}})).detail).operation;
+    expect(savedOperation).toMatchObject({rootAllocationId:original.id,parentAllocationId:middle.id,sourceCorrectionEventId:red.eventId,amountCents:3500});
+    expect(await prisma.financeInvoiceAllocation.count({where:{invoiceId:middle.invoiceId}})).toBe(2);
+    expect(await prisma.afterSaleEvent.count({where:{caseId:sale.id,action:'invoice_reissue'}})).toBe(2);
     expect(await prisma.customerCashPosting.count()).toBe(0);
   });
 
