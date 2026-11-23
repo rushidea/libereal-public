@@ -83,10 +83,10 @@ async function purchaseAction(purchaseOrderId: string, action: PurchaseAction, a
   });
 }
 
-async function orderFromSuppliers() {
+async function orderFromSuppliers(relayQuantity=2) {
   const suppliers = [
     { orderItemId: directLineId, supplier: 'TEST-DIRECT-SUPPLIER', quantity: 1 },
-    { orderItemId: relayLineId, supplier: 'TEST-RELAY-SUPPLIER', quantity: 2 },
+    { orderItemId: relayLineId, supplier: 'TEST-RELAY-SUPPLIER', quantity: relayQuantity },
   ];
   for (const { orderItemId, supplier, quantity } of suppliers) {
     await prisma.$transaction(async tx => {
@@ -118,7 +118,7 @@ async function orderFromSuppliers() {
     });
     return purchase!.id;
   };
-  return { direct: purchaseFor(directLineId, 1), relay: purchaseFor(relayLineId, 2) };
+  return { direct: purchaseFor(directLineId, 1), relay: purchaseFor(relayLineId, relayQuantity) };
 }
 
 function dispatchInput(requestId: string, route: Route, lines: DispatchLine[]) {
@@ -2184,8 +2184,12 @@ describe('actual scope of a supply incident', () => {
   });
 
   async function shortfallAfterClosingEarlierNotice(quantity=1) {
+    if (quantity>2) {
+      await prisma.orderItem.update({where:{id:relayLineId},data:{quantity}});
+      await prisma.order.update({where:{id:orderId},data:{subtotal:100*(quantity+1),total:100*(quantity+1)}});
+    }
     await acceptCustomerOrder();
-    const {relay:id,direct}=await orderFromSuppliers();
+    const {relay:id,direct}=await orderFromSuppliers(Math.max(2,quantity));
     await purchaseAction(id,{action:'record_payment',requestId:'actual-original-deposit-before-late-shortfall',
       reference:'TEST-ORIGINAL-900-DEPOSIT',conditionReference:'TEST-ACTUAL-DEPOSIT-TERM',amountCents:900});
     const reported=await report(id,'later-closed-original-notice','原供应通知包含后知误发的实际份额。',[waiting(relayLineId,quantity)]);
@@ -2472,6 +2476,106 @@ describe('actual scope of a supply incident', () => {
     expect(result.snapshot).toMatchObject({holdDecisions:[{purchaseFollowup:{reportQuantity:1,decisionLinks:[{quantity:1}]}}]});
     await event(parcel.id,both);
     expect(await current(id)).toMatchObject({status:'on_hold',paidCents:900,dueCents:4100,incidents:[{outstanding:[one]}]});
+  });
+
+  async function previewOriginalTail(id:string, tag:string) {
+    const po=await current(id);
+    return prisma.$transaction(tx=>previewPurchaseAction(tx,{orderId,purchaseOrderId:id,version:po.version,
+      action:'record_payment',requestId:tag,reference:'TEST-TAIL-PREVIEW-ONLY',
+      conditionReference:'TEST-ORIGINAL-SIGNED-PAYABLE-CONDITION',amountCents:1850},approver));
+  }
+
+  it.each([{quantities:[2]},{quantities:[1,1]}])('keeps the same unresolved quantity whether the same two ambiguous letters are submitted as $quantities',async({quantities})=>{
+    const {id,issue,parcel,parcelLineId,resolutionId,target}=await shortfallAfterClosingEarlierNotice(2);
+    const one={...target,quantity:1};
+    for (const tag of ['earlier-one','later-one']) {
+      const recorded=await reportExactLoss(id,one,tag);
+      const subject=recorded.orders.find(row=>row.id===id)!.incidents[0];
+      await approveOriginalShare(id,subject.id,one,'could-be-the-same-physical-piece-'+tag);
+    }
+    const readPlans: Array<{reportQuantity:number;decisionLinks:Array<{activityId:string;quantity:number}>}>=[];
+    for (const [index,quantity] of quantities.entries()) {
+      const body=handOffShortfall('same-evidence-for-either-size-'+index,parcelLineId,issue.id,resolutionId,quantity);
+      const {snapshot,actionHash}=await prisma.$transaction(tx=>previewParcelEvent(tx,orderId,parcel.id,body,operator));
+      const plans=snapshot as {holdDecisions:Array<{purchaseFollowup:typeof readPlans[number]}>};
+      readPlans.push(plans.holdDecisions[0].purchaseFollowup);
+      const apply=()=>prisma.$transaction(tx=>recordParcelEvent(tx,orderId,parcel.id,body,operator,actionHash));
+      await apply();
+      await apply();
+      await prisma.$disconnect();
+    }
+    expect(readPlans.reduce((sum,plan)=>sum+plan.reportQuantity,0)).toBe(1);
+    expect(readPlans.flatMap(plan=>plan.decisionLinks)).toMatchObject([{quantity:1}]);
+    const pending=await current(id);
+    expect(pending).toMatchObject({status:'on_hold',paidCents:900,dueCents:4100,incidents:[
+      {outstanding:[one],responsibility:'合成原合同责任经办人'},
+    ]});
+    expect(pending.incidents).toHaveLength(1);
+    await expect(previewOriginalTail(id,'tail-is-not-yet-cleared')).rejects.toThrow();
+    await approveOriginalShare(id,pending.incidents[0].id,one,'new-written-evidence-distinguishes-the-other-piece');
+    await expect(previewOriginalTail(id,'tail-preview-only-after-separate-approval'))
+      .resolves.toMatchObject({snapshot:{operation:{action:'record_payment',amountCents:1850,authorizedDueCents:4100}}});
+    expect((await current(id)).paidCents).toBe(900);
+  });
+
+  it.each(['merge_before_second','merge_after_second','settle_merged_pair_first'] as const)
+    ('keeps two distinct handoffs booked in the same case after a merge (%s)',async timing=>{
+    const {id,issue,parcel,parcelLineId,resolutionId,target}=await shortfallAfterClosingEarlierNotice(3);
+    const one={...target,quantity:1};
+    const two={...target,quantity:2};
+    await event(parcel.id,handOffShortfall('one-handed-to-the-first-case',parcelLineId,issue.id,resolutionId));
+    const [a]=(await current(id)).incidents;
+    const recorded=await reportExactLoss(id,two,'actual-coverage-two-in-the-related-case');
+    const c=recorded.orders.find(row=>row.id===id)!.incidents.find(row=>row.id!==a.id)!;
+    const earlier=timing!=='merge_before_second';
+    if (earlier) {
+      const second=handOffShortfall('second-another-piece-handed-to-c',parcelLineId,issue.id,resolutionId);
+      const result=await prisma.$transaction(tx=>previewParcelEvent(tx,orderId,parcel.id,second,operator));
+      expect(result.snapshot).toMatchObject({holdDecisions:[{purchaseFollowup:{
+        reportQuantity:0,transfers:[{incidentId:c.id,from:one}],
+      }}]});
+      await event(parcel.id,second);
+    }
+    await purchaseAction(id,{action:'review_change_scope',incidentId:a.id,relatedIncidentId:c.id,reviewResult:'duplicate',
+      requestId:'merge-records-without-merging-physical-assignments',reference:'TEST-PROVEN-A-IS-WITHIN-C-TWO',
+      description:'已核对是同一事项，保留实际已经各自接办的数量。'});
+    if (timing==='settle_merged_pair_first') await approveOriginalShare(id,c.id,two,'independently-approved-for-the-pair-only');
+    await prisma.$disconnect();
+    const remaining=handOffShortfall('remaining-physical-quantity',parcelLineId,issue.id,resolutionId,earlier?1:2);
+    const check=await prisma.$transaction(tx=>previewParcelEvent(tx,orderId,parcel.id,remaining,operator));
+    expect(check.snapshot).toMatchObject({holdDecisions:[{purchaseFollowup:{
+      reportQuantity:1,decisionLinks:[],transfers:earlier ? [] : [{incidentId:c.id,from:one}],
+    }}]});
+    await event(parcel.id,remaining);
+    await event(parcel.id,remaining);
+    if (timing!=='settle_merged_pair_first') await approveOriginalShare(id,c.id,two,'confirmed-original-condition-for-only-the-merged-pair');
+    const afterPair=await current(id);
+    expect(afterPair).toMatchObject({status:'on_hold',paidCents:900,dueCents:6600,
+      incidents:[{outstanding:[one],responsibility:'合成原合同责任经办人'}]});
+    expect(afterPair.incidents).toHaveLength(1);
+    await expect(previewOriginalTail(id,'uncovered-third-still-needs-review')).rejects.toThrow();
+    await approveOriginalShare(id,afterPair.incidents[0].id,one,'written-different-decision-for-third-only');
+    await expect(previewOriginalTail(id,'no-payment-posted-after-third-review'))
+      .resolves.toMatchObject({snapshot:{operation:{action:'record_payment',amountCents:1850,authorizedDueCents:6600}}});
+    expect((await current(id)).paidCents).toBe(900);
+  });
+
+  it('keeps both named cases open when the proposed merge covers less than the shares each already took on',async()=>{
+    const {id,issue,parcel,parcelLineId,resolutionId,target}=await shortfallAfterClosingEarlierNotice(2);
+    const one={...target,quantity:1};
+    await event(parcel.id,handOffShortfall('first-piece-now-owned-by-a',parcelLineId,issue.id,resolutionId));
+    const [a]=(await current(id)).incidents;
+    const after=await reportExactLoss(id,one,'one-in-the-other-case');
+    const c=after.orders.find(row=>row.id===id)!.incidents.find(row=>row.id!==a.id)!;
+    await event(parcel.id,handOffShortfall('second-piece-now-owned-by-c',parcelLineId,issue.id,resolutionId));
+    await expect(purchaseAction(id,{action:'review_change_scope',incidentId:a.id,relatedIncidentId:c.id,reviewResult:'duplicate',
+      requestId:'cannot-erase-one-existing-assignment',reference:'TEST-ONLY-ONE-ACTUAL-SHARE-IN-THE-RELATED-SCOPE',
+      description:'没有经核实的证据证明另一方可接手两件。'})).rejects.toThrow(/已经分别接办的短失数量/);
+    expect((await current(id)).incidents.map(row=>row.id)).toEqual([a.id,c.id]);
+    await approveOriginalShare(id,c.id,one,'written-proof-for-c');
+    await expect(previewOriginalTail(id,'a-is-still-unresolved')).rejects.toThrow();
+    await approveOriginalShare(id,a.id,one,'independent-written-proof-for-a');
+    await expect(previewOriginalTail(id,'both-written-decisions-present')).resolves.toMatchObject({snapshot:{paidCents:900}});
   });
 
   it('records actual direct signature before any buyer decision without closing the customer order or collecting money',async()=>{
