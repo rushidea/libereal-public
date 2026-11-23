@@ -75,8 +75,17 @@ export function invoiceAuthorityTimeline(evidence: InvoiceEvidence[]) {
       needsReview = true;
     }
     const confirmedEvidenceIds = clarification?.mode === 'clarify' ? clarification.confirmedEvidenceIds : needsReview ? [] : evidenceIds;
+    const effective = group.filter(row => confirmedEvidenceIds.includes(row.id));
+    // A new cumulative ceiling only provides the increase beyond the preceding verified ceiling.
+    const previous = effective.some(row => !row.change) ? 0 : prior ?? 0;
+    const capacityCents = authorized === null ? null : Math.max(0, authorized - previous);
+    const scopeLimits = capacityCents === null ? [] : effective.map(row => ({
+      id: row.id,
+      cents: Math.min(capacityCents, !row.change ? row.grossCents
+        : row.change.mode === 'increase' ? row.change.amountCents : capacityCents),
+    }));
     return { at: new Date(at).toISOString(), authorizedCents: authorized, needsReview, evidenceIds, confirmedEvidenceIds,
-      clarificationId: clarification?.mode === 'clarify' ? resolving[0].id : null };
+      clarificationId: clarification?.mode === 'clarify' ? resolving[0].id : null, capacityCents, scopeLimits };
   });
 }
 
@@ -91,7 +100,11 @@ export function invoicesOutsideAuthority(timeline: InvoiceAuthorityTimeline, all
 }>) {
   const effective = allocations.filter(row => row.status !== 'voided');
   const totals = new Map<string, number>();
-  for (const row of effective) totals.set(row.issuedAt, (totals.get(row.issuedAt) ?? 0) + row.amountCents);
+  const usedByScope = new Map<string, number>();
+  for (const row of effective) {
+    totals.set(row.issuedAt, (totals.get(row.issuedAt) ?? 0) + row.amountCents);
+    if (row.scopeId) usedByScope.set(row.scopeId, (usedByScope.get(row.scopeId) ?? 0) + row.amountCents);
+  }
   let used = 0;
   const conflicts = new Set<string>();
   for (const [at, amount] of [...totals].sort(([left], [right]) => left.localeCompare(right))) {
@@ -99,7 +112,17 @@ export function invoicesOutsideAuthority(timeline: InvoiceAuthorityTimeline, all
     const authority = invoiceAuthorityAt(timeline, at);
     if (!authority || authority.authorizedCents === null || used > authority.authorizedCents) conflicts.add(at);
   }
-  const approved = new Set(timeline.flatMap(row => row.confirmedEvidenceIds));
-  return effective.filter(row => conflicts.has(row.issuedAt) || !row.scopeId || !approved.has(row.scopeId))
+  const validAfter = new Map<string, string>();
+  for (const entry of timeline) {
+    const usedForEffectiveDate = entry.scopeLimits.reduce((sum, scope) => sum + (usedByScope.get(scope.id) ?? 0), 0);
+    if (entry.capacityCents === null || usedForEffectiveDate > entry.capacityCents) continue;
+    for (const scope of entry.scopeLimits) {
+      if ((usedByScope.get(scope.id) ?? 0) <= scope.cents) validAfter.set(scope.id, entry.at);
+    }
+  }
+  return effective.filter(row => {
+    const at = row.scopeId && validAfter.get(row.scopeId);
+    return !at || row.issuedAt < at || conflicts.has(row.issuedAt);
+  })
     .map(row => ({ id: row.id, number: row.number, issuedAt: row.issuedAt }));
 }

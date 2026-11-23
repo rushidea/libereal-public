@@ -224,12 +224,18 @@ export async function financeWorkspace(tx: Db, orderId: string) {
   const invoicePlans = invoicePlanViews(plans, events, new Date());
   const originalInvoiceLines = order.orderItems.map(({ id, name, quantity, unitPrice }) => ({ id, name, quantity, unitPrice }));
   const customerInvoiceReviewsFound = customerInvoiceReviews(financeEvents, orderId, customerKey, start.acceptance?.id ?? null, originalInvoiceLines);
-  const customerInvoiceScopes = customerInvoiceReviewsFound.filter(row => row.grossCents > 0);
-  const customerInvoiceFamilies = customerInvoiceScopes.filter(row => row.familyId === row.id).map(root => {
+  const commitmentsByScope = new Map<string, number>();
+  for (const plan of invoicePlans) {
+    const id = plan.invoiceScopeId;
+    if (id) commitmentsByScope.set(id, (commitmentsByScope.get(id) ?? 0) + plan.usedCents + plan.scheduledRemainingCents);
+  }
+  const customerInvoiceFamilies = customerInvoiceReviewsFound.filter(row => row.familyId === row.id).map(root => {
     const evidence = customerInvoiceReviewsFound.filter(row => row.familyId === root.id);
     const scopeIds = new Set(evidence.map(row => row.id));
     const planned = invoicePlans.filter(plan => plan.invoiceScopeId && scopeIds.has(plan.invoiceScopeId));
-    const timeline = invoiceAuthorityTimeline(evidence);
+    const timeline = invoiceAuthorityTimeline(evidence).map(point => ({
+      ...point, plannedCents: point.scopeLimits.reduce((sum, scope) => sum + (commitmentsByScope.get(scope.id) ?? 0), 0),
+    }));
     const authorizedCents = timeline.at(-1)!.authorizedCents;
     const invoiceConflicts = invoicesOutsideAuthority(timeline, planned.flatMap(plan =>
       plan.allocations.map(allocation => ({ ...allocation, scopeId: plan.invoiceScopeId }))));
@@ -237,6 +243,15 @@ export async function financeWorkspace(tx: Db, orderId: string) {
     const plannedCents = planned.reduce((sum, plan) => sum + plan.usedCents + plan.scheduledRemainingCents, 0);
     return { id: root.id, authorizedCents, issuedCents, plannedCents, invoiceConflicts, timeline, evidence,
       availableCents: authorizedCents === null || invoiceConflicts.length ? null : Math.max(0, authorizedCents - plannedCents) };
+  });
+  const customerInvoiceScopes = customerInvoiceReviewsFound.filter(row => row.change?.mode !== 'clarify').map(evidence => {
+    const family = customerInvoiceFamilies.find(row => row.id === evidence.familyId);
+    const point = family?.timeline.find(row => row.scopeLimits.some(scope => scope.id === evidence.id));
+    const authorizedCents = point?.scopeLimits.find(scope => scope.id === evidence.id)?.cents ?? null;
+    const plannedCents = commitmentsByScope.get(evidence.id) ?? 0;
+    const remainingCents = family?.availableCents == null || point?.capacityCents == null || authorizedCents === null ? null
+      : Math.max(0, Math.min(family.availableCents, point.capacityCents - point.plannedCents, authorizedCents - plannedCents));
+    return { ...evidence, authorizedCents, remainingCents };
   });
   const verifiedQuantities = new Map<string, number>();
   for (const scope of customerInvoiceScopes.filter(row => row.familyId === row.id)) {

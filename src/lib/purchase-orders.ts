@@ -940,19 +940,32 @@ function reviewedSupplierAttribution(view: Workspace, po: PO, issue: PendingSupp
   return { approval, basis };
 }
 
-function bookedAttributionApproval(po: PO, paymentId: string) {
-  const posting = po.ledger.find(row => row.id === paymentId && (row.action === 'record_payment' || row.action === 'correct_payment_attribution'));
+function bookedAttributionApproval(po: PO, payment: PO['payments'][number]) {
+  const posting = po.ledger.find(row => row.id === payment.id && (row.action === 'record_payment' || row.action === 'correct_payment_attribution'));
   if (!posting) return null;
-  const book = purchaseOperation(posting.detail);
+  const proof = payment.reviewId && payment.reviewId !== posting.id
+    ? po.ledger.find(row => row.id === payment.reviewId && row.action === 'review_payment_time') : posting;
+  if (!proof) return null;
+  const book = purchaseOperation(proof.detail);
+  const association = proof.action === 'review_payment_time';
+  if (association) {
+    const original = purchaseObject(book.original);
+    const authorization = purchaseObject(proof.detail.authorization);
+    if (book.sourcePaymentId !== posting.id || original.id !== posting.id || original.amountCents !== payment.amountCents
+      || original.payee !== payment.payee || Date.parse(proof.createdAt) < Date.parse(posting.createdAt)
+      || authorization.permission !== 'purchases.pay' || authorization.action !== 'admin_sensitive') return null;
+  }
+  if (!payment.paymentEvidence || pricingContentHash(book.paymentEvidence) !== pricingContentHash(payment.paymentEvidence)) return null;
   const approval = po.ledger.find(row => row.id === book.attributionApprovalId && row.action === 'approve_payment_attribution');
-  if (!approval || approval.actorId === posting.actorId || Date.parse(approval.createdAt) > Date.parse(posting.createdAt)
+  if (!approval || approval.actorId === proof.actorId || Date.parse(approval.createdAt) > Date.parse(proof.createdAt)
     || purchaseObject(approval.detail.authorization).permission !== 'purchases.approve') return null;
   const approvalOperation = purchaseOperation(approval.detail);
   const basis = purchaseObject(approvalOperation.basis);
-  if (basis.purchaseOrderId !== po.id || basis.issueId !== book.paymentIssueId || basis.amountCents !== book.amountCents
+  if (basis.purchaseOrderId !== po.id || basis.issueId !== book.paymentIssueId || basis.amountCents !== payment.amountCents
+    || association && basis.alreadyBookedId !== posting.id
     || pricingContentHash(basis.paymentEvidence) !== pricingContentHash(book.paymentEvidence)
     || approvalOperation.basisHash !== pricingContentHash(basis)) return null;
-  return approval.id;
+  return { approvalId: approval.id, proofId: proof.id };
 }
 
 function originalSupplierPayment(view: Workspace, po: PO, issue: PendingSupplierPayment, input: PurchaseActionInput, actor: PurchaseActor) {
@@ -1027,12 +1040,13 @@ async function reviewSupplierPaymentIssue(tx: Db, view: Workspace, po: PO, input
       !== pricingContentHash({ ...issue.original.paymentEvidence, reference: undefined })) {
       throw new PurchaseError('须核对本单仍有效的同一笔银行实付；未绑定原凭证的付款请先补核原记录');
     }
-    const alreadyApproved = bookedAttributionApproval(po, existing.id);
+    const alreadyApproved = bookedAttributionApproval(po, existing);
     const historical = alreadyApproved ? null : supplierPaymentApprovalAt(view, po, Date.parse(existing.paymentEvidence.occurredAt));
     const reviewed = !alreadyApproved && !historical && reviewedSupplierAttribution(view, po, issue, actor);
     if (!alreadyApproved && !historical && !reviewed) throw new PurchaseError('付款当日的原批准或暂停处理授权待核对');
     confirmation = { sourcePaymentId: existing.id, approvalId: historical?.approval.id ?? null,
-      attributionApprovalId: alreadyApproved ?? (reviewed ? reviewed.approval.id : null) };
+      attributionApprovalId: alreadyApproved?.approvalId ?? (reviewed ? reviewed.approval.id : null),
+      attributionProofId: alreadyApproved?.proofId ?? null };
   }
   return { action: 'review_payment_exception' as const, paymentIssueId: issue.id, outcome, original: issue.original,
     ...confirmation,

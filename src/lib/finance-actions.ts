@@ -54,7 +54,7 @@ function invoiceTrigger(side: Plan['side'], value: unknown) {
 }
 
 function invoiceScopeLimit(view: FinanceWorkspace, side: string, purchaseOrderId: string | null, scopeId: string | null) {
-  if (side === 'customer') return customerInvoiceScope(view, scopeId)?.grossCents ?? view.principalCents;
+  if (side === 'customer') return scopeId ? customerInvoiceScope(view, scopeId)?.authorizedCents ?? 0 : view.principalCents;
   const agreedCents = view.purchases.find(po => po.id === purchaseOrderId)?.agreedCents;
   if (agreedCents == null) throw new PurchaseError('须先核对当前供方合同和可收票金额');
   return agreedCents;
@@ -73,7 +73,8 @@ function invoiceCommitmentFits(view: FinanceWorkspace, side: string, purchaseOrd
   if (side !== 'customer' || !scopeId) return true;
   const familyId = customerInvoiceScope(view, scopeId)?.familyId;
   const family = view.customerInvoiceFamilies.find(row => row.id === familyId);
-  if (!family || !family.timeline.some(row => row.confirmedEvidenceIds.includes(scopeId))) return false;
+  const effective = family?.timeline.find(row => row.scopeLimits.some(scope => scope.id === scopeId));
+  if (!family || effective?.capacityCents == null || effective.plannedCents - previousCents + proposedCents > effective.capacityCents) return false;
   // A valid historical invoice can consume an existing arrangement even if its unused portion is under review today.
   if (recordingHistoricalInvoice && proposedCents <= previousCents) return true;
   return family.authorizedCents !== null && family.invoiceConflicts.length === 0
@@ -82,8 +83,8 @@ function invoiceCommitmentFits(view: FinanceWorkspace, side: string, purchaseOrd
 
 function customerInvoiceScope(view: FinanceWorkspace, scopeId: unknown, allowSingle = false) {
   if (scopeId == null && view.principalCents > 0) return null;
-  const scope = scopeId == null && allowSingle && view.customerInvoiceScopes.length === 1
-    ? view.customerInvoiceScopes[0] : view.customerInvoiceScopes.find(row => row.id === scopeId);
+  const authorized = scopeId == null && allowSingle ? view.customerInvoiceScopes.filter(row => (row.authorizedCents ?? 0) > 0) : [];
+  const scope = authorized.length === 1 ? authorized[0] : view.customerInvoiceScopes.find(row => row.id === scopeId);
   if (!scope) throw new PurchaseError('请凭原开票书证核对并选择本次业务对应的客户可开票范围');
   return scope;
 }
@@ -225,7 +226,10 @@ type Evidence = { reference: string; sha256: string; description: string };
 
 async function financeOperation(tx: Db, input: FinanceInput, actor: PurchaseActor, view: FinanceWorkspace) {
   const { action, data, orderId } = input;
-  const evidence = { reference: requiredText(data.reference, '书面依据编号'), sha256: documentSha256(data.sha256, '原件摘要'),
+  const retained = action === 'create_plan' && data.side === 'customer' && data.reference === undefined && data.sha256 === undefined
+    ? customerInvoiceScope(view, data.invoiceScopeId, true) : null;
+  const evidence = { reference: requiredText(retained?.reference ?? data.reference, '书面依据编号'),
+    sha256: documentSha256(retained?.sha256 ?? data.sha256, '原件摘要'),
     description: requiredText(data.description, '核对结果或业务约定') };
   if (action === 'verify_bank_receipt' || action === 'record_customer_receipt') {
     const order = await loadPurchaseOrderSource(tx, orderId);
@@ -336,7 +340,9 @@ async function financeOperation(tx: Db, input: FinanceInput, actor: PurchaseActo
       throw new PurchaseError('安排金额超过原书证尚未安排的额度');
     }
     return { ...evidence, action, side, issuer, recipient, grossCents, trigger, ownerId: actor.id, purchaseOrderId: po?.id ?? null,
-      partyKey: po ? 'supplier:' + financeIdentity(issuer) : view.customerKey, invoiceScopeId: scope?.id ?? null };
+      partyKey: po ? 'supplier:' + financeIdentity(issuer) : view.customerKey, invoiceScopeId: scope?.id ?? null,
+      invoiceEvidence: scope ? { id: scope.id, reference: scope.reference, documentRow: scope.documentRow, occurredAt: scope.occurredAt,
+        lines: scope.lines, authorizedCents: scope.authorizedCents, remainingCents: scope.remainingCents } : undefined };
   }
   if (action === 'record_invoice') return invoiceDocument(tx, view, input, evidence);
   if (action === 'amend_plan') {
