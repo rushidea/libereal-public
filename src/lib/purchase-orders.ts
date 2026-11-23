@@ -14,7 +14,7 @@ import { creditExceptionMatches, paymentPlanAt, paymentPlanContent, paymentPlanF
 import { purchaseCreditAt } from '@/lib/purchase-credit-history';
 import { availableIncidentSources, clarifiedIncidentScope, incidentQuantities, incidentLink, resolveIncidentScope, supplyIncidentHistory, type IncidentLocation, type IncidentReviewResult, type SupplyIncident } from '@/lib/purchase-incidents';
 import { incidentLineTotals, incidentQuantityKey, type IncidentCandidate, type IncidentQuantity } from '@/lib/purchase-incident-scope';
-import { planShortfallFollowup, recordShortfallFollowup, shortfallPart } from '@/lib/purchase-shortfall-followup';
+import { assertShortfallAssignmentMerge, planShortfallFollowup, recordShortfallFollowup, shortfallPart } from '@/lib/purchase-shortfall-followup';
 import type { ContractDispatchSource, ShortfallDecision } from '@/lib/purchase-shortfalls';
 import {
   attestPurchaseTerms, documentSha256, initialPurchaseTerms, missingPurchaseTerms, missingWrittenTerms, normalizePurchaseTerms, positiveCents, PurchaseError,
@@ -937,6 +937,8 @@ function actionDetails(
       }
       if (reviewResult === 'no_impact' && input.relatedIncidentId) throw new PurchaseError('请选择无新增影响或关联原事项中的一种结果');
       const canonical = reviewResult === 'duplicate' ? incidentLink(incident,po.incidentHistory,input.relatedIncidentId) : undefined;
+      if (canonical) assertShortfallAssignmentMerge(po.ledger,incident,canonical,
+        view.fulfillment.shortfalls.filter(loss=>loss.purchaseOrderId===po.id));
       return {...review,relatedIncidentId:canonical?.id,relatedIncident:canonical,
         previousOutstanding:incident.outstanding,outstanding:[],scope:incident.scope,incrementalQuantity:0,supplyFacts:[]};
     }

@@ -56,7 +56,9 @@ function quantityOf(parts:unknown,key:string) {
 
 const digest = (value:unknown) => typeof value==='string' && /^[a-f\d]{64}$/i.test(value);
 
-function approvedDisposition(op:Record<string,unknown>,target:DispatchShortfall) {
+type LossSource = Pick<DispatchShortfall,'orderItemId'|'resolutionId'|'occurredAt'>;
+
+function approvedDisposition(op:Record<string,unknown>,target:LossSource) {
   return Array.isArray(op.dispositions) ? op.dispositions.filter(part=>part?.orderItemId===target.orderItemId
     && positiveCents(part.quantity) && !part.revisesResendApprovalId
     && (part.shortfallId===target.resolutionId || part.forwardingLossId===target.resolutionId))
@@ -70,19 +72,21 @@ function reserve(bucket:Map<string,number>,id:unknown,quantity:unknown) {
 type SourceScope = {
   remaining: number | undefined;
   linked: number;
+  assigned: number;
+  unclearPlacement: number;
   chain: DecisionLink[];
   decisions: DecisionLink[];
 };
 
-function shortfallCoverage(ledger:PurchaseActivity[], target:DispatchShortfall, used:number, staged:DecisionLink[]) {
-  const key=incidentQuantityKey(shortfallPart(target));
+function shortfallCoverage(ledger:PurchaseActivity[], target:LossSource, used:number, staged:DecisionLink[]) {
+  const key=incidentQuantityKey({orderItemId:target.orderItemId,quantity:1,source:{kind:'shortfall',id:target.resolutionId}});
   const scopes=new Map<string,SourceScope>();
   const chains: DecisionLink[][]=[];
   const joined=new Map<DecisionLink[],DecisionLink[]>();
   const dispositions: DecisionLink[]=[];
   const linkedToDecision=new Map<string,number>();
   const linkedBeforeMerge: Array<{activities:Set<string>;quantity:number}>=[];
-  const linkedToScope=new Map<string,number>();
+  const caseForDecision=new Map<string,SourceScope>();
   let accounted=0;
 
   function newChain() {
@@ -93,15 +97,22 @@ function shortfallCoverage(ledger:PurchaseActivity[], target:DispatchShortfall, 
 
   function setRemaining(scope:SourceScope, quantity:number|undefined) {
     const stillLinked=Math.min(scope.linked,quantity ?? 0);
-    accounted-=scope.linked-stillLinked;
+    const removed=scope.linked-stillLinked;
+    const unclear=Math.min(scope.unclearPlacement,removed);
+    accounted-=removed-unclear;
+    scope.unclearPlacement-=unclear;
     scope.linked=stillLinked;
     scope.remaining=quantity;
   }
 
   function attach(id:unknown,quantity:unknown) {
-    if (typeof id!=='string' || !positiveCents(quantity)) return;
+    if (typeof id!=='string' || !positiveCents(quantity)) return 0;
     const scope=scopes.get(id);
-    if (scope && scope.remaining!==undefined) scope.linked+=quantity;
+    if (scope?.remaining===undefined) return 0;
+    const assigned=Math.min(quantity,Math.max(0,scope.remaining-scope.linked));
+    scope.linked+=assigned;
+    scope.assigned+=assigned;
+    return assigned;
   }
 
   for (const row of staged) reserve(linkedToDecision,row.activityId,row.quantity);
@@ -110,15 +121,25 @@ function shortfallCoverage(ledger:PurchaseActivity[], target:DispatchShortfall, 
     const incidentId=typeof op.incidentId==='string' ? op.incidentId : undefined;
     const scope=incidentId ? scopes.get(incidentId) : undefined;
     if (row.action==='report_change') {
-      scopes.set(row.id,{remaining:quantityOf(op.affectedLines,key),linked:0,chain:newChain(),decisions:[]});
+      scopes.set(row.id,{remaining:quantityOf(op.affectedLines,key),linked:0,assigned:0,unclearPlacement:0,chain:newChain(),decisions:[]});
     }
 
     const handoff=purchaseObject(op.shortfallHandoff);
-    if (handoff.resolutionId===target.resolutionId && handoff.parcelLineId===target.parcelLineId && positiveCents(handoff.quantity)) {
-      accounted+=handoff.quantity;
-      if (Array.isArray(handoff.decisionLinks)) for (const link of handoff.decisionLinks) reserve(linkedToDecision,link.activityId,link.quantity);
-      if (Array.isArray(handoff.existingIncidents)) for (const link of handoff.existingIncidents) attach(link.incidentId,link.quantity);
-      if (row.action==='report_change') attach(row.id,quantityOf(op.affectedLines,key));
+    if (handoff.resolutionId===target.resolutionId && handoff.orderItemId===target.orderItemId && positiveCents(handoff.quantity)) {
+      let left=handoff.quantity;
+      if (Array.isArray(handoff.decisionLinks)) for (const link of handoff.decisionLinks) {
+        if (typeof link?.activityId!=='string' || !positiveCents(link.quantity)) continue;
+        const existing=caseForDecision.get(link.activityId);
+        const quantity=Math.min(left,link.quantity);
+        reserve(linkedToDecision,link.activityId,quantity);
+        if (existing) existing.assigned+=quantity;
+        left-=quantity;
+      }
+      if (Array.isArray(handoff.existingIncidents)) for (const link of handoff.existingIncidents) {
+        if (positiveCents(link?.quantity)) left-=attach(link.incidentId,Math.min(left,link.quantity));
+      }
+      if (row.action==='report_change') left-=attach(row.id,Math.min(left,quantityOf(op.affectedLines,key) ?? 0));
+      accounted+=handoff.quantity-left;
     }
     if (!scope || !incidentId) continue;
 
@@ -129,8 +150,7 @@ function shortfallCoverage(ledger:PurchaseActivity[], target:DispatchShortfall, 
       if (to>from && scope.chain.length) scope.chain=newChain();
       if (scope.remaining!==undefined || to>0) setRemaining(scope,Math.max(0,(scope.remaining ?? 0)-from+to));
       if (row.action==='clear_held_dispatch' && !op.shortfallHandoffKey && to && purchaseObject(op.followup).responsibility) {
-        scope.linked+=to;
-        accounted+=to;
+        accounted+=attach(incidentId,to);
       }
       continue;
     }
@@ -147,17 +167,28 @@ function shortfallCoverage(ledger:PurchaseActivity[], target:DispatchShortfall, 
         if (related && common && extent && common<=extent && scope.remaining===common) {
           const alreadyLinked=Math.min(scope.linked,common);
           const relatedOpen=related.remaining ?? 0;
-          const resolved=Math.max(0,extent-relatedOpen);
-          // A partial match can include either a settled share or one still open. Keep both
-          // claims unavailable until the written scope distinguishes the physical shares.
-          const reservedClosed=Math.min(alreadyLinked,resolved);
-          if (reservedClosed && related.decisions.length) linkedBeforeMerge.push({
-            activities:new Set(related.decisions.map(row=>row.activityId)),quantity:reservedClosed,
-          });
-          related.linked=Math.min(relatedOpen,Math.max(related.linked,alreadyLinked));
           const relatedCovered=related.chain.reduce((sum,row)=>sum+row.quantity,0);
+          const openRoom=Math.max(0,relatedOpen-related.linked);
+          const transferredOpen=Math.min(alreadyLinked,openRoom);
+          const transferredClosed=related.decisions.length ? Math.min(alreadyLinked,Math.max(0,extent-relatedOpen)) : 0;
+          // The reports can merge. Their separately handed-off physical quantities still add up.
+          const moved=Math.min(alreadyLinked,Math.max(0,extent-related.assigned),transferredOpen+transferredClosed);
+          const open=Math.min(moved,transferredOpen);
+          const settled=moved-open;
+          if (settled) linkedBeforeMerge.push({
+            activities:new Set(related.decisions.map(row=>row.activityId)),quantity:settled,
+          });
+          // A partial merge can leave the identity of the open and settled pieces unclear.
+          // Reserve the open space, and count the same uncertain assignment just once across decisions.
+          const earlierUnclear=Math.min(scope.unclearPlacement,moved);
+          const laterUnclear=transferredClosed ? open : Math.min(open,earlierUnclear);
+          accounted+=earlierUnclear-laterUnclear;
+          scope.unclearPlacement-=earlierUnclear;
+          related.unclearPlacement+=laterUnclear;
+          related.linked+=open;
+          related.assigned+=moved;
           if (common===extent && relatedCovered+relatedOpen<=extent && scope.chain!==related.chain) joined.set(scope.chain,related.chain);
-          scope.linked-=alreadyLinked;
+          scope.linked-=moved;
         }
         setRemaining(scope,0);
       } else if (op.reviewResult==='no_impact') setRemaining(scope,0);
@@ -178,7 +209,13 @@ function shortfallCoverage(ledger:PurchaseActivity[], target:DispatchShortfall, 
     if (disposition) dispositions.push({activityId:row.id,quantity:disposition});
     const quantity=approved && handled && (op.outcome==='original_terms' || disposition===handled) ? handled : 0;
     const linked=Math.min(scope.linked,handled ?? disposition);
-    reserve(linkedToDecision,row.id,linked);
+    const unclear=Math.min(scope.unclearPlacement,linked);
+    if (quantity || disposition) {
+      reserve(linkedToDecision,row.id,linked);
+      caseForDecision.set(row.id,scope);
+      accounted+=unclear;
+    } else accounted-=linked-unclear;
+    scope.unclearPlacement-=unclear;
     scope.linked-=linked;
     if (!factualTransition) scope.chain=newChain();
     if (quantity) {
@@ -190,7 +227,6 @@ function shortfallCoverage(ledger:PurchaseActivity[], target:DispatchShortfall, 
     setRemaining(scope,after);
   }
 
-  for (const [id,scope] of scopes) if (scope.remaining) linkedToScope.set(id,Math.min(scope.remaining,scope.linked));
   const groups=chains.map(chain=>{
     const proof=[...chain];
     const visited=new Set([chain]);
@@ -202,34 +238,60 @@ function shortfallCoverage(ledger:PurchaseActivity[], target:DispatchShortfall, 
   });
   // Approval of primary shortfall dispositions already consumes the shared physical-loss balance.
   groups.push(dispositions);
-  return {groups,linkedToDecision,linkedBeforeMerge,linkedToScope,unassigned:Math.max(0,used-accounted)};
+  return {groups,linkedToDecision,linkedBeforeMerge,scopes,unassigned:Math.max(0,used-accounted)};
 }
 
 function availableDecisionLinks(coverage:ReturnType<typeof shortfallCoverage>, quantity:number) {
   let strongest:DecisionLink[]=[];
   let count=0;
+  const alreadyUsed=[...coverage.linkedToDecision.values()].reduce((sum,used)=>sum+used,0);
   for (const group of coverage.groups) {
-    let remaining=quantity;
-    let unassigned=coverage.unassigned;
     const late=coverage.linkedBeforeMerge.map(row=>({...row}));
-    const links=group.flatMap(row=>{
-      let available=Math.max(0,row.quantity-(coverage.linkedToDecision.get(row.activityId) ?? 0));
+    let matched=0;
+    const possible=group.map(row=>{
+      const linked=Math.min(row.quantity,coverage.linkedToDecision.get(row.activityId) ?? 0);
+      matched+=linked;
+      let available=row.quantity-linked;
       for (const reservation of late) {
         if (!reservation.activities.has(row.activityId)) continue;
-        const linked=Math.min(available,reservation.quantity);
-        reservation.quantity-=linked;
-        available-=linked;
+        const assigned=Math.min(available,reservation.quantity);
+        reservation.quantity-=assigned;
+        available-=assigned;
       }
-      const uncertain=Math.min(available,unassigned);
+      return {...row,quantity:available};
+    });
+    // An earlier use remains spent even when a later request selects a different proof group.
+    // A group outside that use must prove enough shares to cover the possible overlap.
+    let unassigned=coverage.unassigned+alreadyUsed-matched
+      +late.reduce((sum,row)=>sum+row.quantity,0);
+    let remaining=quantity;
+    const links=possible.flatMap(row=>{
+      const uncertain=Math.min(row.quantity,unassigned);
       unassigned-=uncertain;
-      const allocated=Math.min(remaining,available-uncertain);
+      const allocated=Math.min(remaining,row.quantity-uncertain);
       remaining-=allocated;
       return allocated>0 ? [{activityId:row.activityId,quantity:allocated}] : [];
     });
-    // Independent reports of the same loss can overlap without a verified common scope.
     if (quantity-remaining>count) { strongest=links;count=quantity-remaining; }
   }
   return strongest;
+}
+
+export function assertShortfallAssignmentMerge(
+  ledger:PurchaseActivity[], from:SupplyIncident, into:SupplyIncident, actualLosses:LossSource[],
+) {
+  for (const part of from.outstanding ?? []) {
+    if (part.source?.kind!=='shortfall') continue;
+    const lossId=part.source.id;
+    const source=actualLosses.find(loss=>loss.resolutionId===lossId && loss.orderItemId===part.orderItemId);
+    if (!source) continue;
+    const {scopes}=shortfallCoverage(ledger,source,0,[]);
+    const moving=Math.min(part.quantity,scopes.get(from.id)?.linked ?? 0);
+    const capacity=quantityOf(into.scope,incidentQuantityKey(part)) ?? 0;
+    if (moving && moving+(scopes.get(into.id)?.assigned ?? 0)>capacity) {
+      throw new PurchaseError('归并范围不足以覆盖已经分别接办的短失数量，请核对书面范围并保留仍待办理的份额');
+    }
+  }
 }
 
 export function planShortfallFollowup(purchase: Purchase, target: DispatchShortfall, previouslyReviewed: number,
@@ -252,7 +314,7 @@ export function planShortfallFollowup(purchase: Purchase, target: DispatchShortf
     const key=incidentQuantityKey(part);
     const onOriginalParcel=key===parcelKey && issue.id===currentOriginal;
     if (key!==missingKey && !onOriginalParcel) continue;
-    const alreadyLinked=onOriginalParcel ? 0 : (coverage.linkedToScope.get(issue.id) ?? 0);
+    const alreadyLinked=onOriginalParcel ? 0 : (coverage.scopes.get(issue.id)?.linked ?? 0);
     const reservedQuantity=stagedTransfers.filter(row=>row.incidentId===issue.id && incidentQuantityKey(row.from)===key)
       .reduce((sum,row)=>sum+row.from.quantity,0);
     const quantity=Math.min(remaining,Math.max(0,part.quantity-alreadyLinked-reservedQuantity));
