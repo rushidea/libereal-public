@@ -53,8 +53,8 @@ function invoiceTrigger(side: Plan['side'], value: unknown) {
   return trigger;
 }
 
-function invoiceScopeLimit(view: FinanceWorkspace, side: string, purchaseOrderId: string | null, scopeId: string | null) {
-  if (side === 'customer') return scopeId ? customerInvoiceScope(view, scopeId)?.authorizedCents ?? 0 : view.principalCents;
+function invoiceScopeLimit(view: FinanceWorkspace, side: string, purchaseOrderId: string | null) {
+  if (side === 'customer') return view.principalCents;
   const agreedCents = view.purchases.find(po => po.id === purchaseOrderId)?.agreedCents;
   if (agreedCents == null) throw new PurchaseError('须先核对当前供方合同和可收票金额');
   return agreedCents;
@@ -69,16 +69,11 @@ function projectedInvoiceCommitments(plans: Plan[], timeline = invoiceTimeline(p
 function invoiceCommitmentFits(view: FinanceWorkspace, side: string, purchaseOrderId: string | null, scopeId: string | null,
   previousCents: number, proposedCents: number, recordingHistoricalInvoice = false,
 ) {
-  if (proposedCents > invoiceScopeLimit(view, side, purchaseOrderId, scopeId)) return false;
-  if (side !== 'customer' || !scopeId) return true;
-  const familyId = customerInvoiceScope(view, scopeId)?.familyId;
-  const family = view.customerInvoiceFamilies.find(row => row.id === familyId);
-  const effective = family?.timeline.find(row => row.scopeLimits.some(scope => scope.id === scopeId));
-  if (!family || effective?.capacityCents == null || effective.plannedCents - previousCents + proposedCents > effective.capacityCents) return false;
+  if (side !== 'customer' || !scopeId) return proposedCents <= invoiceScopeLimit(view, side, purchaseOrderId);
   // A valid historical invoice can consume an existing arrangement even if its unused portion is under review today.
   if (recordingHistoricalInvoice && proposedCents <= previousCents) return true;
-  return family.authorizedCents !== null && family.invoiceConflicts.length === 0
-    && family.plannedCents - previousCents + proposedCents <= family.authorizedCents;
+  const room = customerInvoiceScope(view, scopeId)?.roomCents;
+  return room != null && proposedCents - previousCents <= room;
 }
 
 function customerInvoiceScope(view: FinanceWorkspace, scopeId: unknown, allowSingle = false) {
@@ -342,7 +337,8 @@ async function financeOperation(tx: Db, input: FinanceInput, actor: PurchaseActo
     return { ...evidence, action, side, issuer, recipient, grossCents, trigger, ownerId: actor.id, purchaseOrderId: po?.id ?? null,
       partyKey: po ? 'supplier:' + financeIdentity(issuer) : view.customerKey, invoiceScopeId: scope?.id ?? null,
       invoiceEvidence: scope ? { id: scope.id, reference: scope.reference, documentRow: scope.documentRow, occurredAt: scope.occurredAt,
-        lines: scope.lines, authorizedCents: scope.authorizedCents, remainingCents: scope.remainingCents } : undefined };
+        lines: scope.lines, authorizedCents: scope.authorizedCents, remainingCents: scope.remainingCents,
+        sharesCumulativeLimit: scope.change?.mode !== 'increase' } : undefined };
   }
   if (action === 'record_invoice') return invoiceDocument(tx, view, input, evidence);
   if (action === 'amend_plan') {

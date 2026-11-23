@@ -7,6 +7,7 @@ export type InvoiceAuthorityChange =
 type InvoiceEvidence = {
   id: string; occurredAt: string; grossCents: number; change: InvoiceAuthorityChange | null;
 };
+type ScopeLimit = { id: string; cents: number; kind: 'cumulative' | 'increase' };
 
 function isCents(value: unknown): value is number {
   return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
@@ -43,6 +44,7 @@ export function invoiceAuthorityTimeline(evidence: InvoiceEvidence[]) {
     ordered.set(at, sameTime);
   }
   let authorized: number | null = 0;
+  let independent: number | null = 0;
   return [...ordered].sort(([left], [right]) => left - right).map(([at, group]) => {
     const evidenceIds = group.map(row => row.id).sort();
     const resolving = clarifications.filter(({ change }) => change?.mode === 'clarify'
@@ -76,16 +78,24 @@ export function invoiceAuthorityTimeline(evidence: InvoiceEvidence[]) {
     }
     const confirmedEvidenceIds = clarification?.mode === 'clarify' ? clarification.confirmedEvidenceIds : needsReview ? [] : evidenceIds;
     const effective = group.filter(row => confirmedEvidenceIds.includes(row.id));
-    // A new cumulative ceiling only provides the increase beyond the preceding verified ceiling.
-    const previous = effective.some(row => !row.change) ? 0 : prior ?? 0;
-    const capacityCents = authorized === null ? null : Math.max(0, authorized - previous);
-    const scopeLimits = capacityCents === null ? [] : effective.map(row => ({
-      id: row.id,
-      cents: Math.min(capacityCents, !row.change ? row.grossCents
-        : row.change.mode === 'increase' ? row.change.amountCents : capacityCents),
-    }));
+    const previouslyIndependent = independent;
+    if (needsReview && group.some(row => row.change?.mode === 'increase' || row.change?.mode === 'unknown')) independent = null;
+    if (independent !== null) {
+      independent += effective.reduce((sum, row) => sum + (row.change?.mode === 'increase' ? row.change.amountCents : 0), 0);
+      if (!isCents(independent)) independent = null;
+    }
+    // Cumulative papers share the balance for their common goods. Named increases stay with their own goods.
+    const cumulativeCents = authorized === null || independent === null ? null : Math.max(0, authorized - independent);
+    const scopeLimits = effective.flatMap<ScopeLimit>(row => {
+      if (row.change?.mode === 'increase') return [{ id: row.id, cents: row.change.amountCents, kind: 'increase' }];
+      if (cumulativeCents === null || previouslyIndependent === null) return [];
+      const writtenTotal = !row.change ? row.grossCents : row.change.mode === 'restate' ? row.change.amountCents
+        : row.change.mode === 'legacy' ? row.change.afterCents : authorized!;
+      const writtenCumulative = Math.max(0, writtenTotal - previouslyIndependent);
+      return [{ id: row.id, cents: Math.min(cumulativeCents, writtenCumulative), kind: 'cumulative' }];
+    });
     return { at: new Date(at).toISOString(), authorizedCents: authorized, needsReview, evidenceIds, confirmedEvidenceIds,
-      clarificationId: clarification?.mode === 'clarify' ? resolving[0].id : null, capacityCents, scopeLimits };
+      clarificationId: clarification?.mode === 'clarify' ? resolving[0].id : null, cumulativeCents, scopeLimits };
   });
 }
 
@@ -95,34 +105,59 @@ export function invoiceAuthorityAt(timeline: InvoiceAuthorityTimeline, at: strin
   return timeline.findLast(row => row.at <= at);
 }
 
+export function invoiceScopeRooms(
+  timeline: InvoiceAuthorityTimeline, usedByScope: ReadonlyMap<string, number>, at = timeline.at(-1)?.at,
+) {
+  const through = timeline.filter(row => at && row.at <= at);
+  const available = through.at(-1);
+  const rooms = new Map<string, { authorizedCents: number; roomCents: number }>();
+  if (!available || available.authorizedCents === null) return rooms;
+  const proofs = through.flatMap(row => row.scopeLimits);
+  const used = [...usedByScope.values()].reduce((sum, amount) => sum + amount, 0);
+  const familyRoom = available.authorizedCents - used;
+  const commonUsed = new Map<number, number>();
+  for (const { id, cents, kind } of proofs) {
+    if (kind === 'cumulative') commonUsed.set(cents, (commonUsed.get(cents) ?? 0) + (usedByScope.get(id) ?? 0));
+  }
+  const ceilings = [...commonUsed.keys()].sort((left, right) => left - right);
+  let cumulativeUsed = 0;
+  const remainingAtCeiling = new Map(ceilings.map(ceiling => {
+    cumulativeUsed += commonUsed.get(ceiling) ?? 0;
+    return [ceiling, ceiling - cumulativeUsed];
+  }));
+  // A commitment under a smaller ceiling also occupies the larger cumulative ceilings.
+  let commonRoom = available.cumulativeCents === null ? null : available.cumulativeCents - cumulativeUsed;
+  for (const ceiling of ceilings.reverse()) {
+    if (commonRoom === null) break;
+    commonRoom = Math.min(commonRoom, remainingAtCeiling.get(ceiling)!);
+    remainingAtCeiling.set(ceiling, commonRoom);
+  }
+  for (const { id, cents, kind } of proofs) {
+    const room = kind === 'increase' ? cents - (usedByScope.get(id) ?? 0)
+      : available.cumulativeCents === null ? null : remainingAtCeiling.get(cents) ?? null;
+    if (room !== null) rooms.set(id, { authorizedCents: cents, roomCents: Math.min(familyRoom, room) });
+  }
+  return rooms;
+}
+
 export function invoicesOutsideAuthority(timeline: InvoiceAuthorityTimeline, allocations: Array<{
   id: string; number: string; issuedAt: string; amountCents: number; status: string; scopeId: string | null;
 }>) {
-  const effective = allocations.filter(row => row.status !== 'voided');
-  const totals = new Map<string, number>();
+  const effective = allocations.filter(row => row.status !== 'voided').sort((a, b) => a.issuedAt.localeCompare(b.issuedAt));
   const usedByScope = new Map<string, number>();
+  const dated = new Map<string, typeof effective>();
   for (const row of effective) {
-    totals.set(row.issuedAt, (totals.get(row.issuedAt) ?? 0) + row.amountCents);
-    if (row.scopeId) usedByScope.set(row.scopeId, (usedByScope.get(row.scopeId) ?? 0) + row.amountCents);
+    const sameDate = dated.get(row.issuedAt) ?? [];
+    sameDate.push(row);
+    dated.set(row.issuedAt, sameDate);
   }
-  let used = 0;
-  const conflicts = new Set<string>();
-  for (const [at, amount] of [...totals].sort(([left], [right]) => left.localeCompare(right))) {
-    used += amount;
-    const authority = invoiceAuthorityAt(timeline, at);
-    if (!authority || authority.authorizedCents === null || used > authority.authorizedCents) conflicts.add(at);
-  }
-  const validAfter = new Map<string, string>();
-  for (const entry of timeline) {
-    const usedForEffectiveDate = entry.scopeLimits.reduce((sum, scope) => sum + (usedByScope.get(scope.id) ?? 0), 0);
-    if (entry.capacityCents === null || usedForEffectiveDate > entry.capacityCents) continue;
-    for (const scope of entry.scopeLimits) {
-      if ((usedByScope.get(scope.id) ?? 0) <= scope.cents) validAfter.set(scope.id, entry.at);
+  return [...dated].flatMap(([at, rows]) => {
+    for (const row of rows) {
+      const key = row.scopeId ?? '';
+      usedByScope.set(key, (usedByScope.get(key) ?? 0) + row.amountCents);
     }
-  }
-  return effective.filter(row => {
-    const at = row.scopeId && validAfter.get(row.scopeId);
-    return !at || row.issuedAt < at || conflicts.has(row.issuedAt);
-  })
-    .map(row => ({ id: row.id, number: row.number, issuedAt: row.issuedAt }));
+    const rooms = invoiceScopeRooms(timeline, usedByScope, at);
+    return rows.filter(row => (rooms.get(row.scopeId ?? '')?.roomCents ?? -1) < 0)
+      .map(row => ({ id: row.id, number: row.number, issuedAt: row.issuedAt }));
+  });
 }
