@@ -14,7 +14,7 @@ type SupplierTransferScope = { orderId: string; purchaseOrderId: string; orderIt
 type ActualTransfer = { method: string; party: string; destination: string; referenceNo: string } & (
   { direction: 'customer_refund' } | { direction: 'supplier_return'; supplierScope?: SupplierTransferScope }
 );
-type SharedParcel = { claims: ParcelClaim[]; signedQuantity: number };
+type SharedParcel = { claims: (ParcelClaim & { priorSupplierEventIds: string[]; verifiedAt: number })[]; signedQuantity: number };
 
 function overlapsSupplierShare(scope: SupplierTransferScope, orderId: string, op: Record<string,unknown>) {
   if (orderId!==scope.orderId || op.purchaseOrderId!==scope.purchaseOrderId || op.orderItemId!==scope.orderItemId) return false;
@@ -33,7 +33,8 @@ export async function allocateAfterSaleTransfer(tx: Db, terms: ActualTransfer, d
   const allocationReference = data.allocationReference == null && totalCents === amountCents
     ? terms.referenceNo : requiredText(data.allocationReference, '该笔实际款的本行分摊依据');
   const rows = await tx.afterSaleEvent.findMany({ where: { action: { in: ['refund_result', 'supplier'] } },
-    select: { id: true, caseId:true, action: true, sha256: true, documentRow: true, occurredAt: true, detail: true, case:{select:{orderId:true}} } });
+    select: { id: true, caseId:true, action: true, sha256: true, documentRow: true, occurredAt: true, createdAt:true,
+      detail: true, case:{select:{orderId:true}} } });
   const candidates = rows.flatMap(row => {
     const op = purchaseObject(jsonObject(row.detail).operation);
     if (!(row.action === 'refund_result' ? op.result === 'paid' : op.outcome === 'financial_result')) return [];
@@ -56,9 +57,10 @@ export async function allocateAfterSaleTransfer(tx: Db, terms: ActualTransfer, d
       const scope = terms.supplierScope;
       const old = parcel?.claims.find(claim=>claim.caseId===row.caseId);
       const saved = purchaseObject(purchaseObject(actual.supplierScope).parcelClaim);
-      const retainedProof = saved.caseId===undefined || saved.caseId===old?.caseId && saved.quantity===old?.quantity
-        && Array.isArray(saved.evidenceEventIds) && saved.evidenceEventIds.length===old?.evidenceEventIds.length
-        && saved.evidenceEventIds.every(id=>old?.evidenceEventIds.includes(id));
+      const retainedProof = old && (saved.caseId===undefined
+        ? old.priorSupplierEventIds.includes(row.id) || old.verifiedAt <= row.createdAt.getTime()
+        : saved.caseId===old.caseId && saved.quantity===old.quantity && Array.isArray(saved.evidenceEventIds)
+          && saved.evidenceEventIds.length===old.evidenceEventIds.length && saved.evidenceEventIds.every(id=>old.evidenceEventIds.includes(id)));
       condition(retainedProof && scope.parcelClaim && old && op.originalParcelLineId===scope.originalParcelLineId
         && !op.shortfallId && !scope.shortfallId && op.quantity===old.quantity
         && old.caseId!==scope.parcelClaim.caseId && !previousClaims.has(old.caseId)

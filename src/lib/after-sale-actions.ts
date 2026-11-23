@@ -43,23 +43,33 @@ function openRow(view: AfterSaleWorkspace, data: Record<string, unknown>, eviden
 function originalReceipt(view: AfterSaleWorkspace, row: SaleCase, data: Record<string, unknown>, proof: SaleEvidence): Plan {
   const parcel = view.deliveries.find(item => item.id === data.parcelLineId && item.orderItemId === row.orderItemId
     && item.route !== 'supplier_to_libereal' && !item.afterSaleApprovalId);
-  condition(parcel && !originalSaleParcel(row), '请选择实际对客包裹行，并保留原案已经指定的整笔来源');
+  const pinned = originalSaleParcel(row);
+  condition(parcel && (!pinned || pinned === parcel.id), '请选择实际对客包裹行，并保留原案已经指定的整笔来源');
   const amount = quantity(data.quantity);
   const received = parcel.receipts.filter(item => item.at <= Date.parse(proof.occurredAt)).reduce((sum, item) => sum + item.quantity, 0);
-  const shares = originalSaleParcelShares(row);
+  const shares = originalSaleParcelShares(row).filter(share => share.evidenceEventId);
   const allocated = view.cases.filter(item => item.id !== row.id).flatMap(item => {
     const decision = currentSaleAgreement(item);
     const withoutRemedy = item.customerState === 'closed' && decision && ['keep', 'follow_up'].includes(String(saleOperation(decision).remedy))
-      && !caseEvents(item,'physical').length && !caseEvents(item,'approve_exchange').length;
+      && !caseEvents(item,'physical').length && !caseEvents(item,'approve_exchange').length
+      && !caseEvents(item,'supplier').some(event => saleOperation(event).outcome === 'financial_result');
     return withoutRemedy ? [] : originalSaleParcelShares(item);
   }).concat(shares);
   condition(amount <= row.quantity - shares.reduce((sum, item) => sum + item.quantity, 0)
     && amount <= received - allocated.filter(item => item.parcelLineId === parcel.id).reduce((sum, item) => sum + item.quantity, 0),
     '本案剩余份额或这一包裹实际已签收的可关联数量不足');
   const share = { parcelLineId:parcel.id, quantity:amount };
-  const supplierState = supplierProgress(row,view.deliveries,view.shortfalls.find(loss=>loss.resolutionId===row.shortfallId),undefined,share).state;
+  const confirmedQuantity = amount + shares.filter(item => item.parcelLineId === parcel.id).reduce((sum,item)=>sum+item.quantity,0);
+  const priorSupplierEventIds = parcel.purchaseOrderId && !row.shortfallId ? caseEvents(row,'supplier').filter(event => {
+    const op = saleOperation(event);
+    return op.outcome === 'financial_result' && op.originalParcelLineId === parcel.id && op.purchaseOrderId === parcel.purchaseOrderId
+      && op.orderItemId === row.orderItemId && !op.shortfallId && op.quantity === confirmedQuantity;
+  }).map(event=>event.id) : [];
+  const supplierState = supplierProgress(row,view.deliveries,view.shortfalls.find(loss=>loss.resolutionId===row.shortfallId),
+    undefined,pinned ? undefined : share).state;
   return { operation: { ...share, orderItemId:row.orderItemId,purchaseOrderId:parcel.purchaseOrderId,
-    receivedQuantity:received,waybill:parcel.reference,note:requiredText(data.note,'原包裹与本案件数的核对依据') }, supplierState };
+    receivedQuantity:received,waybill:parcel.reference,priorSupplierEventIds,
+    note:requiredText(data.note,'原包裹与本案件数的核对依据') }, supplierState };
 
 }
 
@@ -305,6 +315,7 @@ async function planAction(tx: Db, view: AfterSaleWorkspace, row: SaleCase, input
   if (action === 'supplier') return supplierAfterSale(tx,view,row,data,proof,actor.id);
   if (action === 'agreement') return agreement(tx,view,row,data,proof);
   if (action === 'release_refund_source') return releaseRefundSource(tx,view,row,data,proof);
+  if (action === 'bind_original_parcel' && originalSaleParcel(row)) return originalReceipt(view,row,data,proof);
   condition(row.customerState !== 'closed','该客户事项已经办结，新增事项请另行登记并引用原单');
   if (action === 'technical') {
     condition(technicalIssue(row.issue) && ['reviewing','awaiting_technical','awaiting_customer'].includes(row.customerState),'当前事项无待核的技术意见');
@@ -349,6 +360,8 @@ export async function afterSaleAction(tx: Db, input: SaleInput, actor: SaleActor
         : action === 'bind_original_parcel' ? { parcelLineId: data.parcelLineId }
         : action === 'approve_exchange' ? { parcelLineId:exchangeParcel }
         : action === 'supplier' ? { purchaseOrderId:data.purchaseOrderId??null, parcelLineId:data.originalParcelLineId??null }
+        : action === 'verify_invoice_line' && data.reissueParentAllocationId ? {
+          allocationId:data.invoiceAllocationId, parentAllocationId:data.reissueParentAllocationId, receiptId:data.sourceCorrectionEventId }
         : action === 'invoice_reissue' ? { allocationId:data.invoiceAllocationId }
         : action === 'physical' ? { parcelLineId: data.parcelLineId, resolutionId: data.resolutionId ?? null } : {}) };
   const businessKey = pricingContentHash(natural);

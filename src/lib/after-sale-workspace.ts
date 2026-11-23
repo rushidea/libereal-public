@@ -22,19 +22,25 @@ export function currentSaleAgreement(row: SaleCase) {
 export function originalSaleParcel(row: SaleCase) {
   const original = lastCaseEvent(row, 'open');
   const pinned = original && saleOperation(original).originalParcelLineId;
-  const agreement = currentSaleAgreement(row);
-  const covered = agreement && saleOperation(agreement).originalParcelLineId;
-  return typeof pinned === 'string' ? pinned : typeof covered === 'string' ? covered : null;
+  if (typeof pinned === 'string') return pinned;
+  const written = caseEvents(row,'agreement').map(event=>({at:event.occurredAt,operation:saleOperation(event)}))
+    .filter(({operation})=>!operation.historical && typeof operation.originalParcelLineId==='string')
+    .sort((a,b)=>a.at.getTime()-b.at.getTime()).at(-1)?.operation.originalParcelLineId;
+  return typeof written === 'string' ? written : null;
 }
 
 export function originalSaleParcelShares(row: SaleCase): { parcelLineId: string; quantity: number; evidenceEventId: string | null }[] {
   const pinned = originalSaleParcel(row);
-  if (pinned) return [{ parcelLineId: pinned, quantity: row.quantity, evidenceEventId: null }];
-  return caseEvents(row, 'bind_original_parcel').flatMap(event => {
+  const confirmed = caseEvents(row, 'bind_original_parcel').flatMap(event => {
     const op = saleOperation(event);
     return typeof op.parcelLineId === 'string' && positiveCents(op.quantity)
       ? [{ parcelLineId: op.parcelLineId, quantity: op.quantity, evidenceEventId: event.id }] : [];
   });
+  if (!pinned) return confirmed;
+  const shares: ReturnType<typeof originalSaleParcelShares> = confirmed.filter(share => share.parcelLineId === pinned);
+  const unverified = row.quantity - shares.reduce((sum, share) => sum + share.quantity, 0);
+  if (unverified > 0) shares.push({ parcelLineId: pinned, quantity: unverified, evidenceEventId: null });
+  return shares;
 }
 
 type SupplierParcel = { id: string; purchaseOrderId: string | null; reference: string };

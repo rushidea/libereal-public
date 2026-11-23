@@ -49,10 +49,17 @@ export async function supplierAfterSale(tx: Db, view: AfterSaleWorkspace, row: S
   const actualShares = original && !loss ? view.cases.flatMap(item=>{
     const assigned = originalSaleParcelShares(item).filter(share=>share.parcelLineId===original.id);
     const evidenceEventIds = assigned.flatMap(share=>share.evidenceEventId?[share.evidenceEventId]:[]);
+    const events = caseEvents(item,'bind_original_parcel').filter(event=>evidenceEventIds.includes(event.id));
+    const priorSupplierEventIds = events.flatMap(event=>{
+      const ids = saleOperation(event).priorSupplierEventIds;
+      return Array.isArray(ids) ? ids.filter((id):id is string=>typeof id==='string') : [];
+    });
     return item.orderItemId===row.orderItemId && assigned.length && assigned.length===evidenceEventIds.length
-      ? [{caseId:item.id,quantity:assigned.reduce((sum,share)=>sum+share.quantity,0),evidenceEventIds}] : [];
+      ? [{caseId:item.id,quantity:assigned.reduce((sum,share)=>sum+share.quantity,0),evidenceEventIds,priorSupplierEventIds,
+        verifiedAt:Math.max(...events.map(event=>event.createdAt.getTime()))}] : [];
   }) : [];
-  const parcelClaim = actualShares.find(claim=>claim.caseId===row.id && claim.quantity===subject.quantity);
+  const verified = actualShares.find(claim=>claim.caseId===row.id && claim.quantity===subject.quantity);
+  const parcelClaim = verified && {caseId:verified.caseId,quantity:verified.quantity,evidenceEventIds:verified.evidenceEventIds};
   const parcel = parcelClaim && original ? {claims:actualShares,signedQuantity:original.receipts
     .filter(receipt=>receipt.at<=Date.parse(proof.occurredAt)).reduce((sum,receipt)=>sum+receipt.quantity,0)} : undefined;
   const transfer = await allocateAfterSaleTransfer(tx, {

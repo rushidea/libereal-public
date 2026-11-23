@@ -134,6 +134,7 @@ async function invoiceCoverage(tx: Db, part: Awaited<ReturnType<typeof allocatio
 
 export async function verifyInvoiceLine(tx: Db, row: SaleCase, data: Record<string, unknown>, proof: SaleEvidence) {
   const part = await allocation(tx, row.orderId, requiredText(data.invoiceAllocationId, '实际受影响的发票分摊'));
+  if (data.reissueParentAllocationId !== undefined) return verifyReissueLink(tx,row,part,data,proof);
   const coverage = await invoiceCoverage(tx, part, row.orderItemId);
   const lineLimitCents = cents(data.amountCents);
   const portions = readPortionAmounts(data.portionAmounts, coverage.eligible, lineLimitCents - coverage.min);
@@ -157,7 +158,8 @@ export async function invoiceAgreement(tx: Db, row: SaleCase, data: Record<strin
     replacementAmountCents: expectedOutcome === 'reissue' ? cents(data.replacementAmountCents) : null };
 }
 
-type AfterSaleInvoiceUse = { eventId:string; caseId: string; orderItemId: string; allocationId: string; amountCents: number; financeEventId: unknown };
+type AfterSaleInvoiceUse = { eventId:string; caseId: string; orderItemId: string; allocationId: string; amountCents: number;
+  financeEventId: unknown; sourceCorrectionEventId?: unknown; originalOutcomeId?: unknown; rootAllocationId?: unknown };
 
 async function afterSaleInvoiceUses(tx: Db, orderId: string, action: 'invoice_outcome' | 'invoice_reissue') {
   const events = await tx.afterSaleEvent.findMany({ where: { action, case: { orderId } },
@@ -166,7 +168,8 @@ async function afterSaleInvoiceUses(tx: Db, orderId: string, action: 'invoice_ou
     const op = purchaseObject(jsonObject(event.detail).operation);
     return typeof op.allocationId === 'string' && positiveCents(op.amountCents)
       ? [{ eventId:event.id, caseId:event.caseId, orderItemId:event.case.orderItemId, allocationId:op.allocationId,
-        amountCents:op.amountCents, financeEventId:op.financeEventId }] : [];
+        amountCents:op.amountCents, financeEventId:op.financeEventId, sourceCorrectionEventId:op.sourceCorrectionEventId,
+        originalOutcomeId:op.correctionId,rootAllocationId:op.rootAllocationId }] : [];
   });
 }
 
@@ -235,7 +238,8 @@ function issuedReservation(row: SaleCase, uses: AfterSaleInvoiceUse[]) {
     if (typeof part.allocationId !== 'string' || !positiveCents(part.amountCents)) return [];
     const matched = uses.filter(use=>use.caseId===row.id && use.allocationId===part.allocationId);
     const amountCents = part.amountCents - sumParts(matched);
-    return amountCents>0 ? [{ eventId:agreement?.id??row.id,caseId:row.id,orderItemId:row.orderItemId,allocationId:part.allocationId,amountCents,financeEventId:null }] : [];
+    return amountCents>0 ? [{ eventId:agreement?.id??row.id,caseId:row.id,orderItemId:row.orderItemId,allocationId:part.allocationId,
+      amountCents,financeEventId:null,rootAllocationId:invoice.allocationId }] : [];
   });
 }
 
@@ -245,7 +249,21 @@ async function reissueBook(tx: Db, orderId: string) {
     include:{plan:{select:{orderId:true,events:{where:{action:'record_invoice'},orderBy:ordered}}},
       invoice:{include:{events:{where:{action:{in:['open_correction','resolve_correction']}},orderBy:ordered}}}},
   });
-  const uses = await afterSaleInvoiceUses(tx,orderId,'invoice_reissue');
+  const outcomes=new Map((await afterSaleInvoiceUses(tx,orderId,'invoice_outcome')).map(use=>[use.eventId,use]));
+  const uses=(await afterSaleInvoiceUses(tx,orderId,'invoice_reissue')).map(use=>{
+    const original=typeof use.originalOutcomeId==='string' ? outcomes.get(use.originalOutcomeId) : undefined;
+    return {...use,rootAllocationId:use.rootAllocationId ?? (original?.caseId===use.caseId ? original.allocationId : undefined)};
+  });
+  const reviewed = await tx.afterSaleEvent.findMany({where:{action:'verify_invoice_line',case:{orderId}},
+    select:{id:true,detail:true,case:{select:{orderItemId:true}}}});
+  const links = reviewed.flatMap(event=>{
+    const link=purchaseObject(purchaseObject(jsonObject(event.detail).operation).reissueLink);
+    return typeof link.allocationId==='string' && typeof link.parentAllocationId==='string'
+      && typeof link.receiptId==='string' && typeof link.rootAllocationId==='string'
+      && typeof link.bookingId==='string' && positiveCents(link.amountCents)
+      ? [{id:event.id,orderItemId:event.case.orderItemId,allocationId:link.allocationId,parentAllocationId:link.parentAllocationId,
+        receiptId:link.receiptId,rootAllocationId:link.rootAllocationId,bookingId:link.bookingId,amountCents:link.amountCents}] : [];
+  });
   const entries = parts.map(part=>{
     const doc = part.invoice;
     const booking = part.plan.events.find(event=>event.invoiceId===doc.id && financeProof(event));
@@ -264,33 +282,149 @@ async function reissueBook(tx: Db, orderId: string) {
     return { part,status,voidReceipt,bookingId:booking?.id??null,correctionId:correction?.id??null,
       recorded:signed ? book : null, link:purchaseObject(signed && book?.replaces) };
   });
-  return {entries,uses};
+  return {entries,uses,links};
 }
 
 type ReissueBook = Awaited<ReturnType<typeof reissueBook>>;
+type ReissueEntry = ReissueBook['entries'][number];
 type VoidReceipt = NonNullable<ReissueBook['entries'][number]['voidReceipt']>;
+type ReissueEdge = { parentAllocationId:string; receiptId:string; amountCents:number; reviewId?:string };
 
-function reissueChain(book: ReissueBook, root: VoidReceipt) {
-  const related = new Map<string,string>();
-  const receipts = new Map([[root.id,root]]);
+function sameInvoiceParties(a: ReissueEntry, b: ReissueEntry) {
+  return financeIdentity(a.part.invoice.issuer)===financeIdentity(b.part.invoice.issuer)
+    && financeIdentity(a.part.invoice.recipient)===financeIdentity(b.part.invoice.recipient);
+}
+
+function validPredecessor(child: ReissueEntry, parent: ReissueEntry, receiptId: unknown) {
+  const receipt=parent.voidReceipt;
+  if (!receipt || !child.recorded || receipt.id!==receiptId || parent.part.invoiceId===child.part.invoiceId
+    || receipt.occurredAt>child.part.invoice.issuedAt.toISOString() || !sameInvoiceParties(child,parent)) return false;
+  return !child.recorded.replaces || (child.link.correctionEventId===receipt.id && child.link.invoiceId===receipt.invoiceId);
+}
+
+async function reissueChain(tx: Db, book: ReissueBook, row: SaleCase, original: ReissueEntry, root: VoidReceipt) {
+  const related = new Map<string,ReissueEdge>();
+  const unresolved = new Set<string>();
+  const reviews = book.links.filter(link=>link.orderItemId===row.orderItemId);
+  const historical = book.uses.filter(use=>isReissueLineageUse(use,row.orderItemId,original.part.id) && use.financeEventId===root.id);
+  const reviewedParts=new Set([...reviews,...historical].map(part=>part.allocationId));
+  const candidates = book.entries.filter(entry=>entry.recorded && entry.part.invoiceId!==root.invoiceId && sameInvoiceParties(entry,original)
+    && (entry.recorded.replaces || reviewedParts.has(entry.part.id)));
+  const receiptIds=new Set([root.id,...candidates.map(entry=>entry.link.correctionEventId),...reviews.map(review=>review.receiptId),
+    ...historical.map(use=>use.sourceCorrectionEventId)]);
+  const candidateIds=new Set(candidates.map(entry=>entry.part.id));
+  const scoped = await Promise.all(book.entries.filter(entry=>candidateIds.has(entry.part.id)
+    || entry.voidReceipt && receiptIds.has(entry.voidReceipt.id)).map(async entry=>[
+    entry.part.id,await invoiceCoverage(tx,entry.part,row.orderItemId),
+  ] as const));
+  const coverage = new Map(scoped);
+  const coversLine = (entry: ReissueEntry) => {
+    const scope=coverage.get(entry.part.id);
+    return (scope?.limit ?? scope?.max ?? 0)>0;
+  };
+  const recognized = (entry: ReissueEntry) => entry.part.id===original.part.id || related.has(entry.part.id);
+  // A replacement can only follow a red receipt that pre-dates its own issue date.
+  const dated = candidates.sort((a,b)=>a.part.invoice.issuedAt.getTime()-b.part.invoice.issuedAt.getTime()
+    || a.part.invoice.createdAt.getTime()-b.part.invoice.createdAt.getTime() || a.part.id.localeCompare(b.part.id));
   for (let added=true; added;) {
     added=false;
-    for (const entry of book.entries) {
-      const doc=entry.part.invoice;
-      if (related.has(entry.part.id) || !entry.recorded || doc.id===root.invoiceId) continue;
-      const parent=typeof entry.link.correctionEventId==='string' ? receipts.get(entry.link.correctionEventId) : undefined;
-      const bound = parent && parent.invoiceId===entry.link.invoiceId && parent.occurredAt<=doc.issuedAt.toISOString();
-      const reviewed = !entry.recorded.replaces && book.uses.some(use=>use.financeEventId===root.id && use.allocationId===entry.part.id);
-      if (!bound && !reviewed) continue;
-      related.set(entry.part.id,bound ? parent.id : root.id);
-      const ownReceipt = entry.voidReceipt;
-      if (ownReceipt && book.entries.filter(item=>item.part.invoiceId===doc.id).every(item=>related.has(item.part.id))) {
-        receipts.set(ownReceipt.id,ownReceipt);
+    for (const entry of dated) {
+      const id=entry.part.id;
+      if (related.has(id) || !coversLine(entry)) continue;
+      const named=reviews.find(review=>review.allocationId===id && review.rootAllocationId===original.part.id && review.bookingId===entry.bookingId);
+      const prior=historical.filter(use=>use.allocationId===id);
+      const historicalReceipts=[...new Set(prior.map(use=>use.sourceCorrectionEventId??root.id))];
+      const receiptId=named?.receiptId ?? entry.link.correctionEventId ?? (historicalReceipts.length===1 ? historicalReceipts[0] : undefined);
+      const all=book.entries.filter(parent=>validPredecessor(entry,parent,receiptId));
+      const samePlan=all.filter(parent=>parent.part.planId===entry.part.planId);
+      const possible=named ? all.filter(parent=>parent.part.id===named.parentAllocationId)
+        : samePlan.length ? samePlan : all.filter(coversLine);
+      if (!possible.some(parent=>recognized(parent) || unresolved.has(parent.part.id))) continue;
+      const unnamedUse=reviews.some(review=>review.allocationId===id && review.rootAllocationId!==original.part.id);
+      const parent=possible.length===1 ? possible[0] : null;
+      const parentEdge=parent && related.get(parent.part.id);
+      const parentAmount=parent?.part.id===original.part.id ? Number.MAX_SAFE_INTEGER : parentEdge?.amountCents;
+      const lineAmount=coverage.get(id)!.limit;
+      const amount=named?.amountCents ?? (!entry.recorded?.replaces && prior.length ? sumParts(prior) : lineAmount);
+      if (!parent || !parentAmount || (!named && unnamedUse) || amount===null || lineAmount===null
+        || amount>lineAmount || amount>parentAmount) {
+        if (!unresolved.has(id)) {
+          unresolved.add(id);
+          added=true;
+        }
+        continue;
       }
+      related.set(id,{parentAllocationId:parent.part.id,receiptId:parent.voidReceipt!.id,amountCents:amount,reviewId:named?.id});
+      unresolved.delete(id);
       added=true;
     }
   }
-  return {related,receipts};
+  return {related,unresolved,coverage};
+}
+
+type ReissueChain = Awaited<ReturnType<typeof reissueChain>>;
+
+function isReissueLineageUse(use: AfterSaleInvoiceUse, orderItemId: string, rootAllocationId: string) {
+  return use.orderItemId===orderItemId && use.rootAllocationId===rootAllocationId;
+}
+
+function reissueAncestors(chain: ReissueChain, allocationId: string) {
+  const ids=new Set<string>();
+  let id=allocationId;
+  while (!ids.has(id) && chain.related.has(id)) {
+    ids.add(id);
+    id=chain.related.get(id)!.parentAllocationId;
+  }
+  return ids;
+}
+
+function reissueRoom(chain: ReissueChain, allocationId: string, uses: IssuedPart[]) {
+  const limits=reissueAncestors(chain,allocationId);
+  return Math.min(...[...limits].map(id=>{
+    const consumed=uses.filter(use=>reissueAncestors(chain,use.allocationId).has(id));
+    return chain.related.get(id)!.amountCents - sumParts(consumed);
+  }));
+}
+
+async function verifyReissueLink(tx: Db, row: SaleCase, part: Awaited<ReturnType<typeof allocation>>,
+  data: Record<string,unknown>, proof: SaleEvidence) {
+  const agreement=currentSaleAgreement(row);
+  const terms=purchaseObject(agreement && saleOperation(agreement).invoice);
+  const correction=savedCorrection(row,agreement);
+  const book=await reissueBook(tx,row.orderId);
+  const original=book.entries.find(entry=>entry.part.id===terms.allocationId);
+  const root=original?.voidReceipt;
+  condition(terms.expectedOutcome==='reissue' && correction && original && root && root.id===saleOperation(correction).financeEventId,
+    '请先核对本案原票分摊、红冲回执及客户的重开决定');
+  const parent=book.entries.find(entry=>entry.part.id===data.reissueParentAllocationId);
+  const child=book.entries.find(entry=>entry.part.id===part.id);
+  const receipt=parent?.voidReceipt;
+  condition(parent && receipt && child && child.bookingId && child.part.invoiceId!==original.part.invoiceId
+    && sameInvoiceParties(child,original) && validPredecessor(child,parent,data.sourceCorrectionEventId)
+    && child.part.invoice.issuedAt.toISOString()<=proof.occurredAt
+    && ![child.part.invoice.sha256,parent.part.invoice.sha256,correction.sha256].includes(proof.sha256),
+    '请凭补充原件核对实际签发的票、前一张票的分摊及正式红冲回执');
+  const chain=await reissueChain(tx,book,row,original,root);
+  const childScope=chain.coverage.get(part.id) ?? await invoiceCoverage(tx,part,row.orderItemId);
+  const parentAmount=parent.part.id===original.part.id ? Number.MAX_SAFE_INTEGER : chain.related.get(parent.part.id)?.amountCents;
+  const reviewed=book.links.filter(link=>link.allocationId===part.id && link.orderItemId===row.orderItemId);
+  const previouslyUsed=book.uses.filter(use=>use.allocationId===part.id && use.orderItemId===row.orderItemId);
+  const coveredOtherRoots=reviewed.filter(link=>link.rootAllocationId!==original.part.id);
+  // An already attached portion continues to use its original source. Other written portions share this line's ceiling.
+  const usedOutside=sumParts(previouslyUsed.filter(use=>use.rootAllocationId!==original.part.id
+    && !coveredOtherRoots.some(link=>link.rootAllocationId===use.rootAllocationId)));
+  const amountCents=cents(data.amountCents);
+  condition(parentAmount && childScope.limit!==null
+    && amountCents<=parentAmount && amountCents+sumParts(coveredOtherRoots)+usedOutside<=childScope.limit
+    && !reviewed.some(link=>link.rootAllocationId===original.part.id)
+    && amountCents>=sumParts(previouslyUsed.filter(use=>use.rootAllocationId===original.part.id)),
+    '请先核实本商品的原分摊，所核金额须在有效前序份额和替代票的商品金额内');
+  return {operation:{invoiceId:part.invoiceId,allocationId:part.id,originalNumber:part.invoice.number,orderItemId:row.orderItemId,
+    predecessorNumber:parent.part.invoice.number,sourceCorrectionEventId:receipt.id,attributedCents:amountCents,
+    coverageId:childScope.coverageId,reviewId:childScope.reviewId,previousEdge:chain.related.get(parent.part.id),
+    currentCorrectionEventId:child.correctionId,currentStatus:child.status,invoiceSha256:child.part.invoice.sha256,
+    reissueLink:{allocationId:part.id,parentAllocationId:parent.part.id,receiptId:receipt.id,rootAllocationId:original.part.id,
+      bookingId:child.bookingId,amountCents},note:requiredText(data.note,'两张票的原件、红冲回执及本商品实际承接金额')}};
 }
 
 async function reissuePosition(tx: Db, row: SaleCase, cases: SaleCase[], book: ReissueBook) {
@@ -299,9 +433,10 @@ async function reissuePosition(tx: Db, row: SaleCase, cases: SaleCase[], book: R
   const correction = savedCorrection(row,agreement);
   if (!agreement || !correction || row.customerState==='closed' || terms.expectedOutcome!=='reissue') return null;
   const financeEventId = saleOperation(correction).financeEventId;
-  const root = book.entries.find(entry=>entry.part.id===terms.allocationId)?.voidReceipt;
-  condition(root && root.id===financeEventId, '原票红冲回执待财务核对');
-  const chain = reissueChain(book, root);
+  const original = book.entries.find(entry=>entry.part.id===terms.allocationId);
+  const root = original?.voidReceipt;
+  condition(original && root && root.id===financeEventId, '原票红冲回执待财务核对');
+  const chain = await reissueChain(tx,book,row,original,root);
   const status = new Map(book.entries.map(entry=>[entry.part.id,entry.status]));
   const effective = book.uses.filter(use=>status.get(use.allocationId)!=='voided');
   const own = recordedReissue(book.uses,row,root.id);
@@ -321,24 +456,44 @@ async function reissuePosition(tx: Db, row: SaleCase, cases: SaleCase[], book: R
   for (const use of [...own,...allReservations.filter(use=>use.caseId===row.id)]) addInvoiceCharge(claimed,use.allocationId,use.amountCents);
   let needsAttribution = false;
   const unmatchedPending = new Set<string>();
-  const decisive = new Set(claimed.keys());
+  const decisive = new Set([...claimed.keys(),original.part.id,...chain.related.keys(),...chain.unresolved]);
   const scopeProofs: { allocationId:string; coverageId:string|null; reviewId:string|null }[]=[];
+  const candidates: IssuedPart[]=[];
+  const sameLineage=(use:AfterSaleInvoiceUse)=>isReissueLineageUse(use,row.orderItemId,original.part.id);
+  const liveUses = [...effective,...reservations].filter(sameLineage);
   for (const entry of book.entries) {
-    if (!chain.related.has(entry.part.id)) continue;
-    const coverage = await invoiceCoverage(tx,entry.part,row.orderItemId);
-    if (coverage.max<=0 && !claimed.has(entry.part.id)) continue;
-    decisive.add(entry.part.id);
-    scopeProofs.push({allocationId:entry.part.id,coverageId:coverage.coverageId,reviewId:coverage.reviewId});
-    const account = entry.status==='voided' ? [...book.uses,...allReservations] : [...effective,...reservations];
-    const used = amountsAllocated(account,entry.part.id,row.orderItemId);
-    const left = Math.min(coverage.total-used.totalUsed,(coverage.limit??coverage.max)-used.lineUsed);
-    if (left<=0) continue;
-    if (coverage.limit===null || competing) {
-      if (entry.status!=='voided') needsAttribution=true;
-      if (entry.status==='correction_pending') unmatchedPending.add(entry.part.id);
+    const id=entry.part.id;
+    const coverage=chain.coverage.get(id);
+    if (coverage && decisive.has(id)) scopeProofs.push({allocationId:id,coverageId:coverage.coverageId,reviewId:coverage.reviewId});
+    const edge=chain.related.get(id);
+    if (!coverage || !edge || chain.unresolved.has(id)) {
+      if (chain.unresolved.has(id) && entry.status!=='voided') needsAttribution=true;
+      if (chain.unresolved.has(id) && entry.status==='correction_pending') unmatchedPending.add(id);
       continue;
     }
-    addInvoiceCharge(claimed,entry.part.id,left);
+    const account = entry.status==='voided' ? [...book.uses,...allReservations] : [...effective,...reservations];
+    const used = amountsAllocated(account,id,row.orderItemId);
+    const usedByLineage=sumParts(account.filter(use=>use.allocationId===id && sameLineage(use)));
+    const left = Math.min(coverage.total-used.totalUsed,(coverage.limit??0)-used.lineUsed,edge.amountCents-usedByLineage);
+    if (left<=0) continue;
+    if (competing) {
+      if (entry.status!=='voided') needsAttribution=true;
+      if (entry.status==='correction_pending') unmatchedPending.add(id);
+      continue;
+    }
+    candidates.push({allocationId:id,amountCents:left});
+  }
+  const liveCandidates=candidates.filter(part=>status.get(part.allocationId)!=='voided');
+  const attributed=[...liveUses,...liveCandidates];
+  for (const part of liveUses) if (reissueRoom(chain,part.allocationId,attributed)<0) needsAttribution=true;
+  for (const part of candidates) {
+    const state=status.get(part.allocationId);
+    if (state!=='voided' && reissueRoom(chain,part.allocationId,attributed)<0) {
+      needsAttribution=true;
+      if (state==='correction_pending') unmatchedPending.add(part.allocationId);
+      continue;
+    }
+    addInvoiceCharge(claimed,part.allocationId,part.amountCents);
   }
   const parts = [...claimed].map(([allocationId,amountCents])=>({allocationId,amountCents,status:status.get(allocationId)??'correction_pending'}))
     .sort((a,b)=>a.allocationId.localeCompare(b.allocationId));
@@ -354,7 +509,7 @@ async function reissuePosition(tx: Db, row: SaleCase, cases: SaleCase[], book: R
   const version=pricingContentHash({root,parts,scopeProofs:scopeProofs.sort((a,b)=>a.allocationId.localeCompare(b.allocationId)),
     uses:[...book.uses,...allReservations].filter(use=>decisive.has(use.allocationId)).sort((a,b)=>a.eventId.localeCompare(b.eventId)),book:book.entries.filter(entry=>decisive.has(entry.part.id)).map(entry=>({
     id:entry.part.id,bookingId:entry.bookingId,correctionId:entry.correctionId,status:entry.status,
-    sha256:entry.part.invoice.sha256, parentReceiptId:chain.related.get(entry.part.id)??null,
+    sha256:entry.part.invoice.sha256, predecessor:chain.related.get(entry.part.id)??null,
   })).sort((a,b)=>a.id.localeCompare(b.id)),needsAttribution, unmatchedPending:[...unmatchedPending].sort()});
   return {agreement,correction,terms,root,chain,effective,reservations,parts,issuedCents,pendingCents,voidedCents,recordedCents,recordedPendingCents,
     remainingCents,needsAttribution,pendingReceipts,version,
@@ -417,21 +572,34 @@ export async function invoiceReissue(tx: Db, row: SaleCase, cases: SaleCase[], d
     && financeIdentity(doc.recipient)===financeIdentity(original.invoice.recipient)
     && doc.issuedAt>=correction.occurredAt && proof.occurredAt>=doc.issuedAt.toISOString(),
     '须关联同一交易方实际出具且晚于原票处理的有效替代票');
-  const parentReceipt=chain.related.get(part.id);
-  const namedReceipt=typeof data.financeEventId==='string'?chain.receipts.get(data.financeEventId):undefined;
-  condition(parentReceipt || !entry.recorded.replaces && data.confirmReplacementEvidence===true && namedReceipt
-    && namedReceipt.occurredAt<=doc.issuedAt.toISOString()
-    && proof.sha256!==doc.sha256 && proof.sha256!==correction.sha256 && proof.sha256!==original.invoice.sha256,
-    '请关联开票时已核对的原红冲记录，或凭另份明确列出两张票和原更正的书证具名补核');
   const amountCents=data.amountCents===undefined?cents(position.remainingCents):cents(data.amountCents);
+  const edge=chain.related.get(part.id);
+  const parents=book.entries.filter(parent=>validPredecessor(entry,parent,data.financeEventId));
+  const samePlan=parents.filter(parent=>parent.part.planId===part.planId);
+  const named=samePlan.length?samePlan:(await Promise.all(parents.map(async parent=>{
+    const coverage=chain.coverage.get(parent.part.id) ?? await invoiceCoverage(tx,parent.part,row.orderItemId);
+    return (coverage.limit??coverage.max)>0 ? [parent] : [];
+  }))).flat();
+  const parent=named.length===1?named[0]:null;
+  const legacyParent=parent && (parent.part.id===original.id || chain.related.has(parent.part.id)) ? parent : null;
+  condition(edge || !entry.recorded.replaces && data.confirmReplacementEvidence===true && legacyParent
+    && !book.links.some(link=>link.allocationId===part.id && link.orderItemId===row.orderItemId)
+    && ![doc.sha256,correction.sha256,original.invoice.sha256,legacyParent.part.invoice.sha256].includes(proof.sha256),
+    '请关联开票时已核对的原红冲记录，或凭原件在发票核对中确认实际前序分摊和本商品金额');
+  const source = edge ?? {parentAllocationId:legacyParent!.part.id,receiptId:legacyParent!.voidReceipt!.id,amountCents};
   const confirmedElsewhere=sumParts(reservations.filter(use=>use.caseId===row.id && use.allocationId!==part.id));
   condition(amountCents<=position.remainingCents-position.recordedPendingCents-confirmedElsewhere,
     '本票金额超出本案剩余重开份额，或占用了已签发的另一票');
   const coverage=await invoiceCoverage(tx,part,row.orderItemId);
   const others=reservations.filter(use=>use.caseId!==row.id);
   const scope=availableAfterSaleAmount(coverage,amountsAllocated([...effective,...others],part.id,row.orderItemId),amountCents);
+  const limits=edge ? chain : {...chain,related:new Map(chain.related).set(part.id,source)};
+  const applied=[...effective,...reservations.filter(use=>use.caseId!==row.id || use.allocationId!==part.id)]
+    .filter(use=>isReissueLineageUse(use,row.orderItemId,original.id));
+  condition(amountCents<=reissueRoom(limits,part.id,applied),'本次金额超过原票更正链中实际承接的分摊余额');
   const remainingCents=position.remainingCents-amountCents;
-  return {operation:{correctionId:correction.id,financeEventId:root.id,sourceCorrectionEventId:parentReceipt??namedReceipt?.id,agreementId:agreement.id,
+  return {operation:{correctionId:correction.id,financeEventId:root.id,sourceCorrectionEventId:source.receiptId,
+    parentAllocationId:source.parentAllocationId,rootAllocationId:original.id,agreementId:agreement.id,
     replacementEventId:entry.bookingId,linkedAtIssuance:Boolean(entry.recorded.replaces),originalInvoiceId:original.invoiceId,invoiceId:doc.id,
     allocationId:part.id,number:doc.number,issuedAt:doc.issuedAt.toISOString(),amountCents,alreadyRecordedCents:position.recordedCents,
     remainingCents,scope,reissueVersion:position.version,currentCorrectionEventId:entry.correctionId,

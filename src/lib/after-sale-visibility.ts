@@ -30,6 +30,7 @@ export function saleOperationFor(action: string, op: Record<string,unknown>, per
     if (action==='agreement' && op.invoice) visible.invoice = select(purchaseObject(op.invoice),invoiceIdentity);
   }
   if (!procurement) {
+    if (action==='bind_original_parcel') delete visible.priorSupplierEventIds;
     if (op.replacement) visible.replacement = salePurchaseFor(purchaseObject(op.replacement),permissions);
     if (Array.isArray(op.replacements)) visible.replacements = op.replacements.map(source=>salePurchaseFor(purchaseObject(source),permissions));
     if (action==='approve_exchange') return select(visible,['agreementId','technicalId','originalParcelLineId','purchaseOrderId','orderItemId',
