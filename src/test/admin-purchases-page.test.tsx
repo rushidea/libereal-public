@@ -74,7 +74,7 @@ function makeWorkspace(status?: Purchase['status'], lineChanges: Partial<Line> =
     payment, bankReceipts: [], outstandingCents: 25000, credit: null, creditVersion: null, overCredit: false, creditExceptionRequired: false, version,
   };
   return {
-    orderId, orderStatus: 'confirmed', cancellation: null, canPrepare: false, startReview,
+    orderId, orderStatus: 'confirmed', cancellation: null, canPrepare: false, startReview, continuation: null,
     eligibility: { eligible: true, reason: null, basis: { acceptanceId: 'test-acceptance', receivableId: 'test-receivable',
       reserveId: 'test-credit-reserve', amount: 250, mode: 'credit', payment, planEvidenceId: null } },
     lines: [line], orders: purchase ? [purchase] : [], activities: [], customerRemaining:[{orderItemId,quantity:2}],

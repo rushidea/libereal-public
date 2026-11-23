@@ -8,7 +8,8 @@ const { requireAdmin } = vi.hoisted(() => ({
 vi.mock('@/lib/session', () => ({ requireAdmin }));
 
 import { GET, PATCH } from '@/app/api/admin/tasks/route';
-import { enqueueBackgroundTask } from '@/lib/background-tasks';
+import { claimNextBackgroundTask, enqueueBackgroundTask, failBackgroundTask } from '@/lib/background-tasks';
+import { storeReminderDeliveryScope } from '@/lib/task-delivery-review';
 import { prisma } from '@/lib/prisma';
 import { SUPPLIER_MAIL_HEADER_CURSOR, SUPPLIER_MAIL_HEADER_TASK, SUPPLIER_MAIL_HEADER_VIEW } from '@/lib/supplier-mail-headers';
 
@@ -109,11 +110,20 @@ describe('admin task routes', () => {
     const patch = (data: unknown) => PATCH(new NextRequest('http://localhost/api/admin/tasks', {
       method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }));
     const original = await get();
-    expect(JSON.stringify(original)).not.toContain('private-number');
+    expect(original.deliveryScope).toMatchObject({targets:[{channel:'sms',recipient:'private-number'}]});
+    requireAdmin.mockResolvedValueOnce({id:'admin_test_id',email:'admin@test.com',role:'admin'})
+      .mockResolvedValueOnce(NextResponse.json({error:'restricted'},{status:403}) as never);
+    const readOnly=await get();
+    expect(readOnly).toMatchObject({deliveryScope:null,deliveryVersion:null});
+    expect(JSON.stringify(readOnly)).not.toContain('private-number');
     expect((await patch({ id: task.id, action: 'retry' })).status).toBe(409);
     const review = { id: task.id, action: 'record_delivery_review', version: original.deliveryVersion,
-      outcome: 'partial', reference: 'local admin delivery log', sha256: 'a'.repeat(64) };
-    expect((await patch(review)).status).toBe(200);
+      outcome: 'partial', reference: 'local admin delivery log', sha256: 'a'.repeat(64),
+      targetIds:original.deliveryScope.targets.map((target:{id:string})=>target.id) };
+    expect((await patch({...review,targetIds:['0'.repeat(64)]})).status).toBe(409);
+    const first=await patch(review);
+    expect(first.status).toBe(200);
+    const firstReceipt=await first.json();
     expect((await patch(review)).status).toBe(200);
     const second = await get();
     expect(second.status).toBe('awaiting_human');
@@ -121,8 +131,52 @@ describe('admin task routes', () => {
     expect((await patch({ ...review, outcome: 'all_accepted' })).status).toBe(409);
     expect((await patch({ ...review, outcome: 'none_accepted', version: second.deliveryVersion, sha256: 'b'.repeat(64) })).status).toBe(200);
     expect((await get()).status).toBe('delivery_reviewed');
+    expect(await (await patch(review)).json()).toEqual(firstReceipt);
     expect(await prisma.auditLog.count({ where: { action: 'task.delivery_reviewed', targetId: task.id } })).toBe(2);
-    expect((await prisma.backgroundTask.findUniqueOrThrow({ where: { id: task.id } })).attempts).toBe(1);
+    expect(await prisma.backgroundTask.findUniqueOrThrow({ where: { id: task.id } }))
+      .toMatchObject({attempts:1,lastError:'legacy uncertain',payload:task.payload});
+  });
+
+  it('limits reminder review to the original finance scope and keeps each partial receipt bound to the selected channels',async()=>{
+    const task=await enqueueBackgroundTask('order.reminder',{
+      receivableId:'private-receivable',reminderAt:'2031-06-01T10:00:00.000Z',privateBankEvidence:'private-bank-document',
+    });
+    const claimed=await claimNextBackgroundTask('local-review-fixture');
+    expect(claimed?.id).toBe(task.id);
+    expect(await storeReminderDeliveryScope(prisma,claimed!,['buyer@example.test','organization@example.test'],'+86123456')).toBe(true);
+    expect(await failBackgroundTask(task.id,claimed!.lockedBy!,new Error('private provider details'))).toBe(true);
+    const read=async()=> (await (await GET(new NextRequest('http://localhost/api/admin/tasks'))).json()).tasks[0];
+    const patch=(body:Record<string,unknown>)=>PATCH(new NextRequest('http://localhost/api/admin/tasks',{method:'PATCH',
+      headers:{'Content-Type':'application/json'},body:JSON.stringify({id:task.id,action:'record_delivery_review',...body})}));
+    const identity={id:'admin_test_id',email:'admin@test.com',role:'admin'};
+    requireAdmin.mockResolvedValueOnce(identity).mockResolvedValueOnce(identity)
+      .mockResolvedValueOnce(NextResponse.json({error:'finance restricted'},{status:403}) as never);
+    const restricted=await read();
+    expect(restricted).toMatchObject({deliveryScope:null,deliveryVersion:null,status:'awaiting_human'});
+    for(const value of ['private-receivable','private-bank-document','private provider details','organization@example.test']) {
+      expect(JSON.stringify(restricted)).not.toContain(value);
+    }
+    const original=await read();
+    expect(original.deliveryScope).toMatchObject({kind:'credit_reminder',reference:'private-receivable',targets:expect.arrayContaining([
+      expect.objectContaining({channel:'email',recipient:'buyer@example.test'}),expect.objectContaining({channel:'sms',recipient:'+86123456'}),
+    ])});
+    expect(original.deliveryScope.targets).toHaveLength(3);
+    const [first,second]=original.deliveryScope.targets as {id:string}[];
+    const a={version:original.deliveryVersion,outcome:'partial',reference:'档案中的首份实际回执',sha256:'a'.repeat(64),targetIds:[first.id]};
+    requireAdmin.mockResolvedValueOnce(identity).mockResolvedValueOnce(NextResponse.json({error:'finance restricted'},{status:403}) as never);
+    expect((await patch(a)).status).toBe(403);
+    expect((await patch({...a,outcome:'all_accepted'})).status).toBe(409);
+    const firstResponse=await patch(a);
+    expect(firstResponse.status).toBe(200);
+    const receiptA=await firstResponse.json();
+    const afterFirst=await read();
+    expect(afterFirst.deliveryVersion).not.toBe(original.deliveryVersion);
+    expect(afterFirst.deliveryScope).toEqual(original.deliveryScope);
+    const b={...a,version:afterFirst.deliveryVersion,reference:'下一份实际回执',sha256:'b'.repeat(64),targetIds:[second.id]};
+    expect((await patch(b)).status).toBe(200);
+    expect(await (await patch(a)).json()).toEqual(receiptA);
+    expect(await claimNextBackgroundTask('must-not-replay')).toBeNull();
+    expect(await prisma.auditLog.count({where:{targetId:task.id,action:'task.delivery_reviewed'}})).toBe(2);
   });
 
 });

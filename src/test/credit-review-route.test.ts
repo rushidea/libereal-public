@@ -1,8 +1,10 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { BackgroundTask } from '@prisma/client';
 import { NextRequest } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { POST } from '@/app/api/cron/credit-review/route';
 import { executeBackgroundTask } from '@/lib/background-task-handlers';
+import { claimNextBackgroundTask } from '@/lib/background-tasks';
 import { clearAllTables, closeTestDb, getTestDb, seedUser } from './db-helpers';
 
 const outbound = vi.hoisted(() => ({ mail: vi.fn(), sms: vi.fn() }));
@@ -156,12 +158,19 @@ describe('POST /api/cron/credit-review', () => {
     await creditPosting(settled.orderId, settled.id, 'settled-after-queue', 100000);
     await prisma.accountReceivable.update({ where: { id: rescheduled.id }, data: { dueAt: daysAgo(-15) } });
     await creditPosting(partial.orderId, partial.id, 'part-paid-after-queue', 80000);
-    const tasks = await prisma.backgroundTask.findMany({ where: { type: 'order.reminder' } });
+    const tasks: BackgroundTask[] = [];
+    for (let i=0;i<3;i++) {
+      const task=await claimNextBackgroundTask('credit-review-regression');
+      expect(task?.type).toBe('order.reminder');
+      tasks.push(task!);
+    }
     const taskFor = (id: string) => tasks.find(task => JSON.parse(task.payload).receivableId === id)!;
     expect(await executeBackgroundTask(taskFor(settled.id))).toHaveProperty('skipped');
     expect(await executeBackgroundTask(taskFor(rescheduled.id))).toHaveProperty('skipped');
     expect(outbound.mail).not.toHaveBeenCalled();
     await expect(executeBackgroundTask(taskFor(partial.id))).resolves.toMatchObject({ email: true, recipients: 1 });
+    expect(JSON.parse((await prisma.backgroundTask.findUniqueOrThrow({where:{id:taskFor(partial.id).id}})).result!))
+      .toMatchObject({deliveryScope:{reference:partial.id,targets:[{channel:'email',recipient:'hold@test.com'}]}});
     expect(outbound.mail).toHaveBeenCalledTimes(1);
     expect(outbound.mail).toHaveBeenCalledWith(expect.objectContaining({
       to: 'hold@test.com', text: expect.stringContaining('¥200.00'),
