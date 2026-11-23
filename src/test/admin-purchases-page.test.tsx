@@ -55,7 +55,7 @@ function makeWorkspace(status?: Purchase['status'], lineChanges: Partial<Line> =
     openIncidentId: open?.id ?? null, incident: open, incidents: open ? [open] : [], incidentHistory:open ? [open] : [],
     incidentSources:[{orderItemId,quantity:line.source.quantity,source:{kind:'unshipped'},reference:'TEST-ORDER-REFERENCED'}],
     orderReceipt: null, leadTimeApproved: false,
-    dueCents: 8642, remaining: [{ orderItemId, quantity: source.quantity }], remainingScope: null,
+    dueCents: 8642, contractDueCents: 8642, disputedPaidCents: 0, remaining: [{ orderItemId, quantity: source.quantity }], remainingScope: null,
     needsRemainingReview: false, payableReviewWindows:[], canApproveRemaining: false, needsLegacyReview: false, needsFundingReapproval: false, canRegisterOrder: status === 'approved',
     documentReviewLines: [], commitmentState: 'ordinary', commitmentExceptions: [], canRecordCommitmentException: false,
   } : null;
@@ -148,7 +148,8 @@ describe('supplier purchasing page', () => {
       operation: { paymentIssueId: issueId, outcome: 'outside_purchase' as const, target: null, reference: '原核对结果',
         referenceSha256: 'f'.repeat(64), description: '已排除原采购单，目标待查' } };
     purchase.paymentExceptions = [{ id: issueId, purchaseOrderId: purchaseId, incoming: false, pending: false, postingId: null,
-      ownerId: 'finance-origin', activePurchaseOrderId: null, postedToPurchaseOrderId: null, canRoute: true, awaitingTarget: true,
+      ownerId: 'finance-origin', currentOwnerId: 'finance-origin', activePurchaseOrderId: null, postedToPurchaseOrderId: null,
+      appliedPaymentId: null, currentPosting: null, canRoute: true, awaitingTarget: true,
       reviewHistory: [review], review, followup: null, attributionApprovalId: null, recordedAt, original }];
     const posts = mockWorkspace(workspace,['purchases.read','purchases.pay'],body => {
       const result = preview(body,workspace);
@@ -178,7 +179,8 @@ describe('supplier purchasing page', () => {
       documentKind: 'single_receipt', statementRow: 1 } as const;
     purchase.paymentExceptions = [{
       id: issueId, purchaseOrderId: 'TEST-ORIGIN-PURCHASE', incoming: true, pending: true, postingId: null, ownerId: 'finance-origin',
-      activePurchaseOrderId: purchaseId, postedToPurchaseOrderId: null, canRoute: true, awaitingTarget: false, reviewHistory: [],
+      currentOwnerId: 'finance-origin', activePurchaseOrderId: purchaseId, postedToPurchaseOrderId: null, appliedPaymentId: null,
+      currentPosting: null, canRoute: true, awaitingTarget: false, reviewHistory: [],
       recordedAt: proof.occurredAt, original: { amountCents: 600, paymentEvidence: proof, description: '转交指定采购单核对。' },
       review: { id: 'TEST-SUPPLIER-TRANSFER', actorId: 'finance-origin', purchaseOrderId: 'TEST-ORIGIN-PURCHASE', recordedAt: proof.occurredAt,
         operation: { paymentIssueId: issueId, outcome: 'outside_purchase',
@@ -204,6 +206,59 @@ describe('supplier purchasing page', () => {
       paymentIssueId: issueId, conditionReference: '旧批准所列条款' });
     expect(posts[0]).not.toHaveProperty('amountCents');
     expect(posts[0]).not.toHaveProperty('bankTrace');
+  });
+
+  it.each(['file', 'confirm'] as const)('carries the currently booked payment through %s of the difference review', async stage => {
+    const workspace = makeWorkspace('ordered');
+    const [purchase] = workspace.orders;
+    const issueId = 'TEST-SAME-RECEIPT-CASE';
+    const sourcePaymentId = 'TEST-ACTUAL-PAID-ROW';
+    const occurredAt = '2026-11-20T00:31:00.000Z';
+    const proof = { payee: '合成供方收款账户', bankTrace: 'TEST-SAME-RECEIPT', traceKey: 'TEST-SAME-RECEIPT',
+      reference: '银行原回单', occurredAt, sha256: 'e'.repeat(64), documentKind: 'single_receipt', statementRow: 1 } as const;
+    const original = { amountCents: 900, sourcePaymentId, paymentEvidence: proof, description: '核对原已记实付。' };
+    purchase.paidCents = 900;
+    purchase.disputedPaidCents = 900;
+    purchase.dueCents = null;
+    purchase.payments = [{ id: sourcePaymentId, actorId: 'finance-origin', amountCents: 900, reference: proof.reference,
+      payee: proof.payee, recordedAt: occurredAt, occurredAt, bankTrace: proof.bankTrace, evidenceSha256: proof.sha256, paymentEvidence: proof,
+      reviewId: null, reviewedBy: null, canReviewTime: false, sourcePaymentId: null }];
+    if (stage === 'confirm') purchase.paymentExceptions = [{ id: issueId, purchaseOrderId: purchase.id, ownerId: 'finance-origin', currentOwnerId: 'finance-reviewer',
+      incoming: false, pending: true, postingId: null, postedToPurchaseOrderId: null, appliedPaymentId: null,
+      currentPosting: { id: sourcePaymentId, orderId, purchaseOrderId: purchase.id },
+      activePurchaseOrderId: purchase.id, canRoute: true, awaitingTarget: false, original, recordedAt: occurredAt,
+      reviewHistory: [], review: null, followup: null, attributionApprovalId: null }];
+    const posts = mockWorkspace(workspace, ['purchases.read', 'purchases.pay'], body => {
+      const result = preview(body, workspace);
+      Object.assign(result.preview.snapshot.operation, { paymentIssueId: issueId, sourcePaymentId, original,
+        amountCents: original.amountCents, paymentEvidence: proof, responsibleActorId: 'finance-reviewer' });
+      return Response.json(result);
+    });
+    render(<PurchaseManager initialOrder={orderId}/>);
+    if (stage === 'file') {
+      fireEvent.click(await screen.findByRole('button', { name: '登记待核对付款凭证' }));
+      fill('已记的原付款', sourcePaymentId);
+      expect(screen.getByText(/沿用原银行书证/)).toHaveTextContent(proof.bankTrace);
+      expect(screen.queryByLabelText('银行实际付款时间')).not.toBeInTheDocument();
+      fill('已核实的付款事实及待处理原因', '沿原银行书证核对已记实付。');
+      fireEvent.click(screen.getByRole('button', { name: '查看完整预览' }));
+      expect(await screen.findByRole('region', { name: '操作预览' })).toHaveTextContent(proof.bankTrace);
+      expect(posts[0]).toMatchObject({ action: 'record_payment_exception', sourcePaymentId });
+      expect(posts[0]).not.toHaveProperty('amountCents');
+      expect(posts[0]).not.toHaveProperty('bankTrace');
+      return;
+    }
+    fireEvent.click(await screen.findByRole('button', { name: '核对本单已有付款' }));
+    expect(screen.getByLabelText('处理结果')).toHaveValue('confirmed_current');
+    expect(screen.getByText('现跟进人 finance-reviewer')).toBeInTheDocument();
+    expect(screen.getByText(/当前记账采购单/)).toHaveTextContent(sourcePaymentId);
+    fill('已核实的处理结果与原款去向', '银行实付与本单原记录一致。');
+    fill('书面处理结果档案出处', '原件和已记付款核对结果');
+    fill('付款差异处理结果书证摘要', proof.sha256);
+    fireEvent.click(screen.getByRole('button', { name: '查看完整预览' }));
+    expect(await screen.findByRole('region', { name: '操作预览' })).toHaveTextContent('原实付 ¥9.00 · 本次仅核对原账');
+    expect(posts[0]).toMatchObject({ action: 'review_payment_exception', paymentIssueId: issueId, paymentIssueOutcome: 'confirmed_current' });
+    expect(posts[0]).not.toHaveProperty('amountCents');
   });
 
   it('offers the three written shortfall decisions and previews a free resend without changing the payable', async () => {

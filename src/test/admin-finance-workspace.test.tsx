@@ -12,8 +12,10 @@ describe('admin finance workspace', () => {
       postingPrincipal: { cents: 12050, reviewId: 'receivable-review' }, settlementCents: 12050, verifiedCents: 12050,
       acceptanceId: 'original-order-acceptance', shipmentDates: { dispatched: null, delivered: null },
       banks: [], receipts: [], cash: [], purchases: [], invoicePlans: [], events: [], latePayments: [],
-      customerInvoiceScopes: hasFirst ? [{ id: 'original-accepted-scope', grossCents: 6000,
+      customerInvoiceScopes: hasFirst ? [{ id: 'original-accepted-scope', familyId: 'original-accepted-scope', grossCents: 6000,
         reference: '原协议 A', issuer: '合成售方', recipient: '合成客户', lines: [{ id: 'archived-office-label', name: '合成标签', quantity: 1 }] }] : [],
+      customerInvoiceFamilies: hasFirst ? [{ id: 'original-accepted-scope', authorizedCents: 6000,
+        issuedCents: 6000, plannedCents: 6000, availableCents: 0 }] : [],
       originalInvoiceLines: [{ id: 'archived-office-folder', name: '合成文件夹', quantity: 1, unverifiedQuantity: 1, unitPrice: 120.5 },
         { id: 'archived-office-label', name: '合成标签', quantity: 1, unverifiedQuantity: hasFirst ? 0 : 1, unitPrice: 60 }],
     };
@@ -40,6 +42,49 @@ describe('admin finance workspace', () => {
     const request = fetchFinance.mock.calls.find(([, options]) => options?.method === 'POST');
     expect(JSON.parse(String(request?.[1]?.body))).toMatchObject({ action: 'verify_customer_invoice_scope',
       data: { grossCents: 10000, invoiceLines: [{ orderItemId: 'archived-office-folder', quantity: 1 }], reference: '原签订协议-001' } });
+  });
+
+  it('offers a signed amount supplement when the only original item is already covered', async () => {
+    const orderId = 'legacy-one-office-label';
+    const scopeId = 'original-one-label-proof';
+    const line = { id: 'label-line', name: '合成标签', quantity: 1, unverifiedQuantity: 0 };
+    const scope = { id: scopeId, familyId: scopeId, grossCents: 6000, reference: '原开票书证 A',
+      issuer: '合成售方', recipient: '合成客户', lines: [line] };
+    const amounts = { id: scopeId, authorizedCents: 6000, issuedCents: 6000, plannedCents: 6000, availableCents: 0 };
+    const workspace = { orderId, version: 'legacy-office-view', status: 'confirmed', customerEmail: 'office@example.test', principalCents: 0,
+      settlementCents: 0, verifiedCents: 0, acceptanceId: 'accepted-original-order', shipmentDates: { dispatched: null, delivered: null },
+      banks: [], receipts: [], cash: [], purchases: [], invoicePlans: [], events: [], latePayments: [],
+      customerInvoiceScopes: [scope], customerInvoiceFamilies: [amounts], originalInvoiceLines: [line] };
+    const fetchFinance = vi.fn(async (_input: string, options?: RequestInit) => {
+      if (options?.method !== 'POST') return Response.json({ canWrite: true, workspace });
+      const { data } = JSON.parse(String(options.body));
+      return Response.json({ preview: { actionHash: 'supplementary-proof', snapshot: { orderId, actor: { email: 'accountant@example.test' },
+        operation: { ...data, action: 'verify_customer_invoice_scope', acceptanceId: workspace.acceptanceId, lines: [line],
+          scopeChange: { beforeCents: 6000, deltaCents: 4000, afterCents: 10000, issuedCents: 6000, plannedCents: 6000, availableCents: 4000 } } } } });
+    });
+    vi.stubGlobal('fetch', fetchFinance);
+    render(<FinanceManager initialOrder={orderId}/>);
+    fireEvent.click(await screen.findByRole('button', { name: '核对历史客户可开票范围' }));
+    expect(screen.getByLabelText('开票书证对应范围')).toHaveValue(scopeId);
+    expect(screen.getByLabelText('原书证开票方全称')).toHaveValue(scope.issuer);
+    expect(screen.getByText('已核商品与数量 合成标签 1 件')).toBeInTheDocument();
+    const revise = screen.getByRole('checkbox', { name: '书证重新核定累计可开额' });
+    fireEvent.click(revise);
+    expect(screen.getByLabelText('原书证核定的新累计可开额（元）')).toHaveAttribute('min', '0');
+    fireEvent.click(revise);
+    for (const [label, value] of [
+      ['原书证明确补充的含税金额（元）', '40'], ['原书证载明的实际确认时间', '2026-01-03T08:00'],
+      ['书面依据或原件编号', '后到书证 B'], ['原件 SHA-256 摘要', 'b'.repeat(64)],
+      ['核对结果或书面约定', '原来一件另有四十元含税开票书证。'],
+    ]) fireEvent.change(screen.getByLabelText(label), { target: { value } });
+    fireEvent.click(screen.getByRole('button', { name: '查看完整预览' }));
+    const panel = await screen.findByRole('region', { name: '票款操作预览' });
+    expect(panel).toHaveTextContent('原累计可开 ¥60.00 · 本次增加 ¥40.00 · 新累计可开 ¥100.00');
+    expect(panel).toHaveTextContent('已开及更正中 ¥60.00 · 已占额度 ¥60.00 · 尚可安排 ¥40.00');
+    const request = fetchFinance.mock.calls.find(([, options]) => options?.method === 'POST');
+    const { data } = JSON.parse(String(request?.[1]?.body));
+    expect(data).toMatchObject({ invoiceScopeBasisId: scopeId, grossCents: 4000, reference: '后到书证 B' });
+    expect(data).not.toHaveProperty('invoiceLines');
   });
 
   it('opens supplier followups from the list and offers only evidence progress on a claimed payment case', async () => {

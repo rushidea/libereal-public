@@ -1128,6 +1128,41 @@ describe('admin purchase endpoint', () => {
       const secondRow = await record('verify_customer_invoice_scope', { ...secondPaper, documentRow: 3, grossCents: 2000 }, id);
       expect(secondRow.customerInvoiceScopes.at(-1)).toMatchObject({ grossCents: 2000, documentRow: 3 });
       expect(secondRow.originalInvoiceLines).toMatchObject([{ unverifiedQuantity: 0 }, { unverifiedQuantity: 0 }]);
+      const sameItemSupplement = {
+        ...paper('later-distinct-customer-copy-for-the-same-original-single-item'), ...parties,
+        invoiceScopeBasisId: verifiedScope.customerInvoiceScope.id, grossCents: 4000, occurredAt: new Date().toISOString(),
+        invoiceLines: [{ orderItemId: 'office-legacy-amount-line', quantity: 1 }],
+      };
+      const supplement = await financePreview('verify_customer_invoice_scope', sameItemSupplement, id);
+      expect(supplement.preview.snapshot.operation.scopeChange).toMatchObject({ beforeCents: 6000, deltaCents: 4000,
+        afterCents: 10000, issuedCents: 6000, availableCents: 4000 });
+      const supplementResult = await finish(supplement);
+      await expectJson(await financePost({ ...supplement.input, stage: 'preview', requestId: randomUUID(), version: supplementResult.workspace.version,
+        data: { ...sameItemSupplement, reference: 'same paper filed under another name' } }), 409);
+      const added = supplementResult.workspace.customerInvoiceScopes.find((row: { id: string }) => row.id === supplementResult.eventId);
+      expect(added).toMatchObject({ grossCents: 4000, lines: [{ id: 'office-legacy-amount-line', quantity: 1 }] });
+      const additionalPlan = (await record('create_plan', { ...createInvoice, ...paper('same-item-supplement-arrangement'),
+        invoiceScopeId: added.id, grossCents: 4000 }, id)).invoicePlans.find((row: { invoiceScopeId: string }) => row.invoiceScopeId === added.id);
+      const newInvoice = await record('record_invoice', { ...invoice, ...paper('invoice-for-documented-supplement-on-same-item'), planId: additionalPlan.id,
+        number: 'SECOND-INVOICE-SAME-VERIFIED-ITEM', issuedAt: new Date().toISOString(), amountCents: 4000, grossCents: 4000 }, id);
+      expect(newInvoice.invoicePlans.find((row: { id: string }) => row.id === plan.id)).toMatchObject({ usedCents: 6000, remainingCents: 0 });
+      expect(newInvoice.invoicePlans.find((row: { id: string }) => row.id === additionalPlan.id)).toMatchObject({ usedCents: 4000, remainingCents: 0 });
+      const revise = { ...sameItemSupplement, restateInvoiceCeiling: true };
+      await expectJson(await financePost({ ...supplement.input, stage: 'preview', requestId: randomUUID(), version: newInvoice.version,
+        data: { ...revise, ...paper('would-reduce-below-issued-on-this-item'), grossCents: 9999 } }), 409);
+      const up = await record('verify_customer_invoice_scope', { ...revise, ...paper('new-same-item-ceiling'), grossCents: 11000 }, id);
+      const release = await financePreview('verify_customer_invoice_scope', {
+        ...revise, ...paper('written-withdrawal-of-only-the-unallocated-extra-amount'), grossCents: 10000,
+      }, id);
+      expect(release.preview.snapshot.operation.scopeChange).toMatchObject({ beforeCents: 11000, deltaCents: -1000,
+        afterCents: 10000, issuedCents: 10000, availableCents: 0 });
+      const lowered = await finish(release);
+      await expectJson(await financePost({ orderId: id, requestId: randomUUID(), action: 'create_plan', stage: 'preview',
+        version: lowered.workspace.version, data: { ...createInvoice, ...paper('would-reuse-former-unallocated-ceiling'),
+          invoiceScopeId: up.customerInvoiceScopes.at(-1).id, grossCents: 1000 } }), 409);
+      expect(lowered.workspace.customerInvoiceFamilies).toEqual(expect.arrayContaining([expect.objectContaining({
+        id: verifiedScope.customerInvoiceScope.id, authorizedCents: 10000, issuedCents: 10000, availableCents: 0,
+      })]));
       expect(await prisma.order.findUnique({ where: { id } })).toMatchObject({ total: 0 });
       expect(await prisma.customerCashPosting.count({ where: { orderId: id } })).toBe(1);
       vi.unstubAllEnvs();
@@ -1717,5 +1752,142 @@ describe('admin purchase endpoint', () => {
         orderId: target, purchaseOrderId: refreshedTarget.id, version: refreshedTarget.version, stage: 'preview' }), 409);
       expect(await prisma.purchaseActivity.count({ where: { action: 'record_payment' } })).toBe(1);
     });
+
+    it.each(['confirm-own', 'unknown-back-to-origin', 'target-back-to-origin', 'booked-target-back-to-origin', 'multiple-corrections',
+      'disputed-full-payment', 'outgoing-unbooked-retains-valid-payments'] as const)(
+      'follows the one actual supplier receipt through %s', async scenario => {
+        await startActualSupply(orderId, 'office-payment-trail-A');
+        const other = 'office-other-confirmed-purchase';
+        const third = 'office-third-confirmed-purchase';
+        async function targetPurchase(target: string) {
+          const item = target + '-line';
+          await seedAcceptedOrder(target, item);
+          signIn(staff.operator);
+          const prepared = await expectJson(await post({ action: 'prepare', orderId: target }), 200);
+          await expectJson(await post({ action: 'save_line', orderId: target, orderItemId: item, revision: prepared.workspace.lines[0].revision,
+            checkedEvidence: true, terms: { ...procurementTerms, sourceSha256: pricingContentHash('separate written quote-' + target) } }), 200);
+          await startActualSupply(target, target);
+          signIn(staff.finance);
+          return currentPurchase(target);
+        }
+        const destination = await targetPurchase(other);
+        const thirdPurchase = scenario === 'multiple-corrections' ? await targetPurchase(third) : null;
+        signIn(staff.finance);
+        const source = await currentPurchase();
+        const alreadyPaid = scenario !== 'target-back-to-origin' && scenario !== 'unknown-back-to-origin';
+        const unrelated = scenario === 'outgoing-unbooked-retains-valid-payments';
+        const testsInvoices = unrelated || scenario === 'disputed-full-payment';
+        const amountCents = scenario === 'disputed-full-payment' ? 7346 : 900;
+        const proof = { amountCents, ...supplierPaymentProof('OFFICE-ONE-REAL-STATEMENT-ROW', procurementTerms.payee),
+          paymentDocumentKind: 'statement', paymentStatementRow: 4, reference: '原银行实付凭据同行' };
+        const apply = async (req: ActionRequest, id = orderId) => {
+          vi.setSystemTime(Date.now() + 3 * 60_000);
+          return expectJson(await confirm(await previewAction(req, id), await grant(staff.finance)), 200);
+        };
+        const paid = alreadyPaid ? await apply({ ...proof, ...(unrelated
+          ? { ...supplierPaymentProof('OFFICE-A-VALID-DIFFERENT-PAYMENT', procurementTerms.payee), amountCents: 7346, paymentDocumentKind: 'single_receipt' }
+          : {}), action: 'record_payment', requestId: 'one-cash-entry-in-A',
+          conditionReference: '实际转账日期下该笔批准与金额' }) : null;
+        const originalPaymentId = paid?.workspace.orders[0].payments[0].id;
+        const reconciliation = { ...paper('office-original-purchase-vs-proof-vs-invoice'), purchaseOrderId: source.id, outcome: 'matched' };
+        let invoice: Record<string, unknown> | undefined;
+        let beforeReview: Awaited<ReturnType<typeof financePreview>> | undefined;
+        if (testsInvoices) {
+          signIn(staff.accountant);
+          const parties = { issuer: procurementTerms.supplier, recipient: 'Office seller' };
+          const plan = await record('create_plan', { ...paper('office-actually-agreed-paid-before-invoice'), ...parties,
+            side: 'supplier', purchaseOrderId: source.id, trigger: 'paid', grossCents: 7346 });
+          const planId = plan.invoicePlans[0].id;
+          const first = { ...parties, ...paper('office-partly-received-actual-invoice'), planId, number: 'OFFICE-ORIGINAL-SUPPLIER',
+            issuedAt: new Date().toISOString(), grossCents: 3000, amountCents: 3000 };
+          await record('record_invoice', first);
+          const matched = await record('reconcile_supplier', reconciliation);
+          expect(matched.purchases[0]).toMatchObject({ dueCents: 0, paidInFullAt: expect.any(String), reconciled: true });
+          invoice = { ...first, ...paper('office-remaining-supplier-invoice'), number: 'OFFICE-REMAINDER-SUPPLIER',
+            grossCents: 4346, amountCents: 4346 };
+          beforeReview = await financePreview('record_invoice', invoice);
+          signIn(staff.finance);
+        }
+        const filed = await apply({ ...(alreadyPaid && !unrelated ? {} : proof),
+          action: 'record_payment_exception', requestId: 'start-same-receipt-review',
+          description: '核对同一份真实原银行流水。', sourcePaymentId: unrelated ? undefined : originalPaymentId });
+        const issueId = filed.workspace.orders[0].paymentExceptions[0].id;
+        expect(filed.workspace.orders[0].paymentExceptions[0].original).toMatchObject({
+          amountCents, paymentEvidence: { bankTrace: proof.bankTrace, documentKind: 'statement', statementRow: 4 },
+        });
+        const review = (id: string, target?: string): ActionRequest => ({ action: 'review_payment_exception',
+          paymentIssueId: issueId, requestId: id, paymentIssueOutcome: 'outside_purchase',
+          paymentIssueTargetPurchaseOrderId: target, reference: id, referenceSha256: pricingContentHash(id),
+          description: '按实际独立书证核对同一笔款的归属。' });
+        if (scenario === 'confirm-own') {
+          const resolved = await apply({ ...review('original-evidence-agrees-with-existing-posting'),
+            paymentIssueOutcome: 'confirmed_current' });
+          expect(resolved.workspace.orders[0]).toMatchObject({ paidCents: 900, dueCents: 6446,
+            paymentExceptions: [{ pending: false, postedToPurchaseOrderId: source.id }], payments: [{ id: originalPaymentId }] });
+          expect(await prisma.purchaseActivity.count({ where: { action: 'record_payment' } })).toBe(1);
+          return;
+        }
+        await apply(review('provisional-exclusion-or-transfer', scenario === 'unknown-back-to-origin' ? undefined : destination.id));
+        if (invoice && beforeReview) {
+          signIn(staff.accountant);
+          const state = (await expectJson(await financeRead(), 200)).workspace;
+          expect(state.purchases[0]).toMatchObject({ paidCents: 7346, invoicedCents: 3000, disputedPaidCents: unrelated ? 0 : 7346,
+            dueCents: unrelated ? 0 : null, paidInFullAt: unrelated ? expect.any(String) : null,
+            agreedCents: unrelated ? 7346 : null, reconciled: unrelated });
+          if (unrelated) {
+            expect((await financePreview('record_invoice', invoice)).preview.snapshot.operation.amountCents).toBe(4346);
+          } else {
+            await expectJson(await financePost({ ...beforeReview.input, stage: 'confirm', actionHash: beforeReview.preview.actionHash,
+              stepUpToken: await grant(staff.accountant) }), 409);
+            await expectJson(await financePost({ ...beforeReview.input, stage: 'preview', requestId: randomUUID(), version: state.version }), 409);
+            await expectJson(await financePost({ ...beforeReview.input, action: 'reconcile_supplier', stage: 'preview', requestId: randomUUID(), version: state.version,
+              data: reconciliation }), 409);
+          }
+          expect(await prisma.purchaseActivity.count({ where: { action: 'record_payment' } })).toBe(1);
+          return;
+        }
+        if (!alreadyPaid || scenario === 'booked-target-back-to-origin') {
+          await apply({ ...review('new-evidence-corrects-destination-to-origin', source.id),
+            paymentIssueOutcome: 'assign_purchase' }, scenario === 'unknown-back-to-origin' ? orderId : other);
+          const resolved = alreadyPaid ? await apply({ ...review('exact-existing-booking-confirmed-after-return'),
+            paymentIssueOutcome: 'confirmed_current' })
+            : await apply({ action: 'record_payment', paymentIssueId: issueId, requestId: 'book-the-only-real-cash-in-origin',
+            conditionReference: '获新书证后按原单原付款时点批准入账。' });
+          expect(resolved.workspace.orders[0]).toMatchObject({ paidCents: 900, payments: [{ bankTrace: proof.bankTrace }],
+            paymentExceptions: [{ pending: false, postedToPurchaseOrderId: source.id }] });
+          if (alreadyPaid) expect(resolved.workspace.orders[0].payments[0].id).toBe(originalPaymentId);
+          expect((await currentPurchase(other)).paidCents).toBe(0);
+          expect(await prisma.purchaseActivity.count({ where: { action: 'record_payment' } })).toBe(1);
+          return;
+        }
+        const move = (paymentIssueId: string, label: string): ActionRequest => ({
+          action: 'correct_payment_attribution', paymentIssueId, requestId: label, conditionReference: '原实际付款日的批准及书面条件',
+          reference: label, referenceSha256: pricingContentHash(label), description: '只更正已记实付的等额归属。',
+        });
+        const first = await apply(move(issueId, 'first-formal-correction-from-A-to-B'), other);
+        const effective = first.workspace.orders[0].payments[0];
+        const then = await apply({ action: 'record_payment_exception', requestId: 'new-written-evidence-after-formal-correction',
+          sourcePaymentId: effective.id, description: '从当前有效账复核同一份原银行流水。' }, other);
+        const active = then.workspace.orders[0].paymentExceptions.find((row: { pending: boolean }) => row.pending);
+        await expectJson(await post({ ...review('provisional-exclusion-or-transfer', thirdPurchase!.id), paymentIssueId: active.id,
+          requestId: 'do-not-reuse-old-routing-letter-for-a-different-purchase', orderId: other, purchaseOrderId: destination.id,
+          version: then.workspace.orders[0].version, stage: 'preview' }), 409);
+        await apply({ ...review('documented-subsequent-destination-C', thirdPurchase!.id), paymentIssueId: active.id }, other);
+        const second = await apply(move(active.id, 'second-formal-correction-to-C'), third);
+        const next = second.workspace.orders[0].payments[0];
+        const originalTrail = (await expectJson(await readPurchases(orderId), 200)).workspace.orders[0].paymentExceptions;
+        expect(originalTrail.find((row: { id: string }) => row.id === issueId))
+          .toMatchObject({ postedToPurchaseOrderId: destination.id, currentPosting: { id: next.id, purchaseOrderId: thirdPurchase!.id } });
+        const now = await apply({ action: 'record_payment_exception', requestId: 'actual-original-A-confirmed-after-C',
+          sourcePaymentId: next.id, description: '原发票和银行资料另证现金本人实际对应 A。' }, third);
+        const back = now.workspace.orders[0].paymentExceptions.find((row: { pending: boolean }) => row.pending);
+        await apply({ ...review('documented-return-to-A-after-formal-corrections', source.id), paymentIssueId: back.id }, third);
+        const final = await apply(move(back.id, 'third-formal-correction-back-to-A'));
+        expect(final.workspace.orders[0]).toMatchObject({ paidCents: 900, dueCents: 6446, payments: [{ bankTrace: proof.bankTrace, amountCents: 900 }] });
+        for (const target of [other, third]) expect((await currentPurchase(target)).paidCents).toBe(0);
+        expect(await prisma.purchaseActivity.count({ where: { action: 'record_payment' } })).toBe(1);
+        expect(await prisma.purchaseActivity.count({ where: { action: 'correct_payment_attribution' } })).toBe(3);
+      },
+    );
   });
 });
