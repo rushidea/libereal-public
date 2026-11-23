@@ -46,81 +46,190 @@ export function dispatchShortfallKey(reviewEventId: string, target: DispatchShor
 type DecisionLink = { activityId:string; quantity:number };
 type Transfer = { incidentId:string; from:IncidentQuantity };
 
-function finishedDecisions(ledger: PurchaseActivity[], target: DispatchShortfall) {
-  const documented: Array<DecisionLink & {incidentId:string}>=[];
-  const originalTerms=new Map<string,typeof documented>();
-  const targetKey=incidentQuantityKey(shortfallPart(target));
-  const digest=(value:unknown)=>typeof value==='string' && /^[a-f\d]{64}$/i.test(value);
+function quantityOf(parts:unknown,key:string) {
+  if (!Array.isArray(parts)) return undefined;
+  const matches=parts.filter(part=>part && incidentQuantityKey(part)===key);
+  if (matches.length===0) return 0;
+  if (matches.length===1 && positiveCents(matches[0].quantity)) return matches[0].quantity as number;
+  return undefined;
+}
+
+const digest = (value:unknown) => typeof value==='string' && /^[a-f\d]{64}$/i.test(value);
+
+function approvedDisposition(op:Record<string,unknown>,target:DispatchShortfall) {
+  return Array.isArray(op.dispositions) ? op.dispositions.filter(part=>part?.orderItemId===target.orderItemId
+    && positiveCents(part.quantity) && !part.revisesResendApprovalId
+    && (part.shortfallId===target.resolutionId || part.forwardingLossId===target.resolutionId))
+    .reduce((sum,part)=>sum+part.quantity,0) : 0;
+}
+
+function reserve(bucket:Map<string,number>,id:unknown,quantity:unknown) {
+  if (typeof id==='string' && positiveCents(quantity)) bucket.set(id,(bucket.get(id) ?? 0)+quantity);
+}
+
+type SourceScope = {
+  remaining: number | undefined;
+  linked: number;
+  chain: DecisionLink[];
+  decisions: DecisionLink[];
+};
+
+function shortfallCoverage(ledger:PurchaseActivity[], target:DispatchShortfall, used:number, staged:DecisionLink[]) {
+  const key=incidentQuantityKey(shortfallPart(target));
+  const scopes=new Map<string,SourceScope>();
+  const chains: DecisionLink[][]=[];
+  const joined=new Map<DecisionLink[],DecisionLink[]>();
+  const dispositions: DecisionLink[]=[];
+  const linkedToDecision=new Map<string,number>();
+  const linkedBeforeMerge: Array<{activities:Set<string>;quantity:number}>=[];
+  const linkedToScope=new Map<string,number>();
+  let accounted=0;
+
+  function newChain() {
+    const chain:DecisionLink[]=[];
+    chains.push(chain);
+    return chain;
+  }
+
+  function setRemaining(scope:SourceScope, quantity:number|undefined) {
+    const stillLinked=Math.min(scope.linked,quantity ?? 0);
+    accounted-=scope.linked-stillLinked;
+    scope.linked=stillLinked;
+    scope.remaining=quantity;
+  }
+
+  function attach(id:unknown,quantity:unknown) {
+    if (typeof id!=='string' || !positiveCents(quantity)) return;
+    const scope=scopes.get(id);
+    if (scope && scope.remaining!==undefined) scope.linked+=quantity;
+  }
+
+  for (const row of staged) reserve(linkedToDecision,row.activityId,row.quantity);
   for (const row of ledger) {
-    if (row.action!=='resolve_change' || Date.parse(row.createdAt)<Date.parse(target.occurredAt) || !digest(row.detail.actionHash)) continue;
     const op=purchaseOperation(row.detail);
-    if (typeof op.incidentId!=='string' || !digest(op.supplierSha256) || !digest(op.customerSha256)
-      || !op.supplierReference || !op.customerReference) continue;
-    if (op.outcome==='original_terms') {
-      const handled=purchaseObject(op.incidentProgress).handled;
-      if (!Array.isArray(handled)) continue;
-      const amount=handled.filter(part=>positiveCents(part?.quantity) && incidentQuantityKey(part)===targetKey)
-        .reduce((sum,part)=>sum+part.quantity,0);
-      if (amount) originalTerms.set(op.incidentId,[...(originalTerms.get(op.incidentId) ?? []),{activityId:row.id,incidentId:op.incidentId,quantity:amount}]);
-    } else if (Array.isArray(op.dispositions)) {
-      const amount=op.dispositions.filter(part=>part?.orderItemId===target.orderItemId && positiveCents(part.quantity)
-        && !part.revisesResendApprovalId && (part.shortfallId===target.resolutionId || part.forwardingLossId===target.resolutionId))
-        .reduce((sum,part)=>sum+part.quantity,0);
-      if (amount) documented.push({activityId:row.id,incidentId:op.incidentId,quantity:amount});
+    const incidentId=typeof op.incidentId==='string' ? op.incidentId : undefined;
+    const scope=incidentId ? scopes.get(incidentId) : undefined;
+    if (row.action==='report_change') {
+      scopes.set(row.id,{remaining:quantityOf(op.affectedLines,key),linked:0,chain:newChain(),decisions:[]});
     }
-  }
-  const total=(rows:typeof documented)=>rows.reduce((sum,row)=>sum+row.quantity,0);
-  // A terms confirmation and a replacement disposition may both refer to the same pieces.
-  return [...originalTerms.values()].reduce((best,rows)=>total(rows)>total(best) ? rows : best,documented);
-}
 
-function remainingDecisionLinks(purchase: Purchase, target: DispatchShortfall, used: number, staged:DecisionLink[]) {
-  const knownDecisions=new Map<string,number>();
-  const knownIncidents=new Map<string,number>();
-  function reserve(bucket:Map<string,number>,id:unknown,quantity:unknown) {
-    if (typeof id==='string' && positiveCents(quantity)) bucket.set(id,(bucket.get(id) ?? 0)+quantity);
+    const handoff=purchaseObject(op.shortfallHandoff);
+    if (handoff.resolutionId===target.resolutionId && handoff.parcelLineId===target.parcelLineId && positiveCents(handoff.quantity)) {
+      accounted+=handoff.quantity;
+      if (Array.isArray(handoff.decisionLinks)) for (const link of handoff.decisionLinks) reserve(linkedToDecision,link.activityId,link.quantity);
+      if (Array.isArray(handoff.existingIncidents)) for (const link of handoff.existingIncidents) attach(link.incidentId,link.quantity);
+      if (row.action==='report_change') attach(row.id,quantityOf(op.affectedLines,key));
+    }
+    if (!scope || !incidentId) continue;
+
+    if (row.action==='locate_held_dispatch' || row.action==='clear_held_dispatch') {
+      const location=purchaseObject(op.location);
+      const from=quantityOf([location.from],key) ?? 0;
+      const to=quantityOf([location.to],key) ?? 0;
+      if (to>from && scope.chain.length) scope.chain=newChain();
+      if (scope.remaining!==undefined || to>0) setRemaining(scope,Math.max(0,(scope.remaining ?? 0)-from+to));
+      if (row.action==='clear_held_dispatch' && !op.shortfallHandoffKey && to && purchaseObject(op.followup).responsibility) {
+        scope.linked+=to;
+        accounted+=to;
+      }
+      continue;
+    }
+
+    if (row.action==='review_change_scope') {
+      if (op.reviewResult==='scope_confirmed') {
+        const after=quantityOf(op.outstanding,key);
+        if (after===undefined || (scope.remaining!==undefined && after>scope.remaining)) scope.chain=newChain();
+        setRemaining(scope,after);
+      } else if (op.reviewResult==='duplicate' && typeof op.relatedIncidentId==='string') {
+        const related=scopes.get(op.relatedIncidentId);
+        const common=quantityOf(op.previousOutstanding,key);
+        const extent=quantityOf(purchaseObject(op.relatedIncident).scope,key);
+        if (related && common && extent && common<=extent && scope.remaining===common) {
+          const alreadyLinked=Math.min(scope.linked,common);
+          const relatedOpen=related.remaining ?? 0;
+          const resolved=Math.max(0,extent-relatedOpen);
+          // A partial match can include either a settled share or one still open. Keep both
+          // claims unavailable until the written scope distinguishes the physical shares.
+          const reservedClosed=Math.min(alreadyLinked,resolved);
+          if (reservedClosed && related.decisions.length) linkedBeforeMerge.push({
+            activities:new Set(related.decisions.map(row=>row.activityId)),quantity:reservedClosed,
+          });
+          related.linked=Math.min(relatedOpen,Math.max(related.linked,alreadyLinked));
+          const relatedCovered=related.chain.reduce((sum,row)=>sum+row.quantity,0);
+          if (common===extent && relatedCovered+relatedOpen<=extent && scope.chain!==related.chain) joined.set(scope.chain,related.chain);
+          scope.linked-=alreadyLinked;
+        }
+        setRemaining(scope,0);
+      } else if (op.reviewResult==='no_impact') setRemaining(scope,0);
+      continue;
+    }
+
+    if (row.action!=='resolve_change') continue;
+    const progress=purchaseObject(op.incidentProgress);
+    const handled=quantityOf(progress.handled,key);
+    const after=quantityOf(progress.outstanding,key);
+    const statedScope=quantityOf(progress.scope,key);
+    const before=scope.remaining ?? (progress.scopeBasis==='reviewed' ? statedScope : undefined);
+    const factualTransition=before!==undefined && handled!==undefined && after!==undefined && statedScope!==undefined
+      && before<=statedScope && before===handled+after;
+    const approved=Date.parse(row.createdAt)>=Date.parse(target.occurredAt) && digest(row.detail.actionHash)
+      && digest(op.supplierSha256) && digest(op.customerSha256) && op.supplierReference && op.customerReference;
+    const disposition=approved ? approvedDisposition(op,target) : 0;
+    if (disposition) dispositions.push({activityId:row.id,quantity:disposition});
+    const quantity=approved && handled && (op.outcome==='original_terms' || disposition===handled) ? handled : 0;
+    const linked=Math.min(scope.linked,handled ?? disposition);
+    reserve(linkedToDecision,row.id,linked);
+    scope.linked-=linked;
+    if (!factualTransition) scope.chain=newChain();
+    if (quantity) {
+      const decision={activityId:row.id,quantity};
+      if (factualTransition) scope.chain.push(decision);
+      else if (op.outcome==='original_terms') chains.push([decision]);
+      scope.decisions.push(decision);
+    }
+    setRemaining(scope,after);
   }
-  for (const row of staged) reserve(knownDecisions,row.activityId,row.quantity);
-  let explained=0;
-  for (const row of purchase.ledger) {
-    const op=purchaseOperation(row.detail);
-    const previous=purchaseObject(op.shortfallHandoff);
-    if (previous.resolutionId!==target.resolutionId || previous.parcelLineId!==target.parcelLineId || !positiveCents(previous.quantity)) continue;
-    explained+=previous.quantity;
-    if (Array.isArray(previous.decisionLinks)) for (const link of previous.decisionLinks) reserve(knownDecisions,link.activityId,link.quantity);
-    if (Array.isArray(previous.existingIncidents)) for (const link of previous.existingIncidents) reserve(knownIncidents,link.incidentId,link.quantity);
-    if (row.action==='report_change' && Array.isArray(op.affectedLines)) reserve(knownIncidents,row.id,op.affectedLines[0]?.quantity);
-  }
-  let remaining=target.quantity;
-  let unassigned=Math.max(0,used-explained);
-  return finishedDecisions(purchase.ledger,target).flatMap(row=>{
-    const reserved=Math.min(row.quantity,knownDecisions.get(row.activityId) ?? 0);
-    const caseBalance=knownIncidents.get(row.incidentId) ?? 0;
-    const caseReserved=Math.min(row.quantity-reserved,caseBalance);
-    knownIncidents.set(row.incidentId,caseBalance-caseReserved);
-    const notAttributed=Math.min(unassigned,row.quantity-reserved-caseReserved);
-    unassigned-=notAttributed;
-    const quantity=Math.min(remaining,row.quantity-reserved-caseReserved-notAttributed);
-    remaining-=quantity;
-    return quantity>0 ? [{activityId:row.activityId,quantity}] : [];
+
+  for (const [id,scope] of scopes) if (scope.remaining) linkedToScope.set(id,Math.min(scope.remaining,scope.linked));
+  const groups=chains.map(chain=>{
+    const proof=[...chain];
+    const visited=new Set([chain]);
+    for (let next=joined.get(chain);next && !visited.has(next);next=joined.get(next)) {
+      proof.push(...next);
+      visited.add(next);
+    }
+    return proof;
   });
+  // Approval of primary shortfall dispositions already consumes the shared physical-loss balance.
+  groups.push(dispositions);
+  return {groups,linkedToDecision,linkedBeforeMerge,linkedToScope,unassigned:Math.max(0,used-accounted)};
 }
 
-function boundOutstanding(ledger: PurchaseActivity[], issue:SupplyIncident, sourceKey:string, resolutionId:string) {
-  const links=new Map((issue.shortfallFollowups ?? []).filter(row=>row.resolutionId===resolutionId)
-    .map(row=>[row.activityId,row.quantity]));
-  let remaining=0;
-  for (const row of ledger) {
-    remaining+=links.get(row.id) ?? 0;
-    if (!remaining || row.action!=='resolve_change') continue;
-    const op=purchaseOperation(row.detail);
-    const handled=purchaseObject(op.incidentProgress).handled;
-    if (op.incidentId!==issue.id || !Array.isArray(handled)) continue;
-    const quantity=handled.filter(part=>positiveCents(part?.quantity) && incidentQuantityKey(part)===sourceKey)
-      .reduce((sum,part)=>sum+part.quantity,0);
-    remaining=Math.max(0,remaining-quantity);
+function availableDecisionLinks(coverage:ReturnType<typeof shortfallCoverage>, quantity:number) {
+  let strongest:DecisionLink[]=[];
+  let count=0;
+  for (const group of coverage.groups) {
+    let remaining=quantity;
+    let unassigned=coverage.unassigned;
+    const late=coverage.linkedBeforeMerge.map(row=>({...row}));
+    const links=group.flatMap(row=>{
+      let available=Math.max(0,row.quantity-(coverage.linkedToDecision.get(row.activityId) ?? 0));
+      for (const reservation of late) {
+        if (!reservation.activities.has(row.activityId)) continue;
+        const linked=Math.min(available,reservation.quantity);
+        reservation.quantity-=linked;
+        available-=linked;
+      }
+      const uncertain=Math.min(available,unassigned);
+      unassigned-=uncertain;
+      const allocated=Math.min(remaining,available-uncertain);
+      remaining-=allocated;
+      return allocated>0 ? [{activityId:row.activityId,quantity:allocated}] : [];
+    });
+    // Independent reports of the same loss can overlap without a verified common scope.
+    if (quantity-remaining>count) { strongest=links;count=quantity-remaining; }
   }
-  return remaining;
+  return strongest;
 }
 
 export function planShortfallFollowup(purchase: Purchase, target: DispatchShortfall, previouslyReviewed: number,
@@ -135,14 +244,15 @@ export function planShortfallFollowup(purchase: Purchase, target: DispatchShortf
     op.historicalIncidentId===target.incidentId && incidentQuantityKey((op.location as {to:IncidentQuantity}).to)===parcelKey);
   const original=purchase.incidentHistory.find(row=>row.id===(location?.incidentId ?? target.incidentId));
   const currentOriginal=original?.linkedTo ?? original?.id;
-  const decisionLinks=remainingDecisionLinks(purchase,target,previouslyReviewed,stagedDecisionLinks);
+  const coverage=shortfallCoverage(purchase.ledger,target,previouslyReviewed,stagedDecisionLinks);
+  const decisionLinks=availableDecisionLinks(coverage,target.quantity);
   let remaining=target.quantity-decisionLinks.reduce((sum,row)=>sum+row.quantity,0);
   const transfers: Transfer[]=[];
   for (const issue of purchase.incidents) for (const part of issue.outstanding ?? []) {
     const key=incidentQuantityKey(part);
     const onOriginalParcel=key===parcelKey && issue.id===currentOriginal;
     if (key!==missingKey && !onOriginalParcel) continue;
-    const alreadyLinked=onOriginalParcel ? 0 : boundOutstanding(purchase.ledger,issue,missingKey,target.resolutionId);
+    const alreadyLinked=onOriginalParcel ? 0 : (coverage.linkedToScope.get(issue.id) ?? 0);
     const reservedQuantity=stagedTransfers.filter(row=>row.incidentId===issue.id && incidentQuantityKey(row.from)===key)
       .reduce((sum,row)=>sum+row.from.quantity,0);
     const quantity=Math.min(remaining,Math.max(0,part.quantity-alreadyLinked-reservedQuantity));
