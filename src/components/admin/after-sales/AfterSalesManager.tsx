@@ -34,7 +34,7 @@ function permitted(row:Case, rights:string[], view:Desk):AfterSaleAction[] {
     out.push('add_evidence');
     if(!row.shortfallId&&row.customerState!=='closed')out.push('link_shortfall');
     if(['reviewing','awaiting_technical','awaiting_customer'].includes(row.customerState)&&['quality','technical'].includes(row.issue))out.push('technical');
-    if(['reviewing','awaiting_customer','awaiting_technical','awaiting_fulfillment','awaiting_refund','refund_prepared','refund_followup','awaiting_invoice','awaiting_close'].includes(row.customerState)
+    if(['reviewing','awaiting_customer','awaiting_technical','awaiting_fulfillment','awaiting_refund','refund_prepared','refund_followup','awaiting_invoice','awaiting_invoice_reissue','awaiting_close'].includes(row.customerState)
       || row.agreementId)out.push('agreement');
     if(row.customerState==='awaiting_fulfillment')out.push('physical');
     if(row.customerState==='awaiting_close'&&!(effective?.remedy==='keep'&&held))out.push('close');
@@ -62,7 +62,8 @@ function permitted(row:Case, rights:string[], view:Desk):AfterSaleAction[] {
   }
   return out;
 }
-function Details({value}:{value:Record<string,unknown>}) {
+function Details({value}:{value:Record<string,unknown>|null}) {
+  if (!value) return null;
   const transfer=value.transfer as Record<string,unknown>|undefined;
   const visible={...value,...(transfer&&{totalCents:transfer.totalCents,allocatedBeforeCents:transfer.allocatedBeforeCents,
     unallocatedAfterCents:transfer.unallocatedAfterCents,allocationReference:transfer.allocationReference})};
@@ -154,6 +155,10 @@ export default function AfterSalesManager({initialOrder,initialLoss=''}:{initial
         {(row.originalParcelShares??[]).map(part=><p key={part.evidenceEventId??part.parcelLineId} className="text-sm">
           原包裹 {view.deliveries.find(line=>line.id===part.parcelLineId)?.reference??part.parcelLineId} · 本案 {part.quantity} 件
         </p>)}
+        {(row.supplierScopes??[]).map(part=><p key={part.key} className="text-sm">
+          {part.supplier??'原采购 '+part.purchaseOrderId}{part.reference&&' · '+part.reference} · {part.quantity} 件 · {afterSaleLabel(part.state)}
+          {' · 经办 '+(part.ownerId??'待接手')}{part.lastReference&&' · 凭据 '+part.lastReference}
+        </p>)}
         {row.events.some(event=>event.action==='approve_exchange')&&<Link className="text-sm underline"
           href={'/admin/orders?orderId='+encodeURIComponent(view.order.id)}>打开原单物流，登记已准售后换货</Link>}
         <details><summary className="cursor-pointer text-sm">办理记录（{row.events.length}）</summary>{row.events.map(event=><div className="my-2 border-l-2 pl-3 text-sm" key={event.id}>
@@ -165,7 +170,7 @@ export default function AfterSalesManager({initialOrder,initialLoss=''}:{initial
       {pending&&<section aria-label="售后办理预览" className="space-y-3 rounded border border-slate-300 bg-slate-50 p-4"><h2 className="font-semibold">{afterSaleActions[pending.input.action]} · 确认预览</h2>
         <p>订单 {pending.input.orderId} · {String((pending.snapshot.item as {name?:string})?.name??'')} × {String(pending.snapshot.scopeQuantity)}</p>
         <p className="text-sm">客户侧 {afterSaleLabel(String(pending.snapshot.nextState))} · 供应商侧 {afterSaleLabel(String(pending.snapshot.nextSupplierState))}</p>
-        <Details value={pending.snapshot.operation as Record<string,unknown>}/><p className="text-sm">凭据 {String((pending.snapshot.proof as {reference?:string})?.reference??'')}</p>
+        <Details value={pending.snapshot.operation as Record<string,unknown>|null}/><p className="text-sm">凭据 {String((pending.snapshot.proof as {reference?:string})?.reference??'')}</p>
         <details><summary className="cursor-pointer">完整内容与版本</summary><pre className="max-h-72 overflow-auto whitespace-pre-wrap break-all text-xs">{JSON.stringify(pending.snapshot,null,2)}</pre></details>
         <div className="flex gap-2"><button className={primary} disabled={busy} onClick={()=>void begin(async token=>confirm(pending,token))}>确认{afterSaleActions[pending.input.action]}</button>
           <button className={button} disabled={busy} onClick={()=>{currentPreview.current=null;setPending(null);}}>返回修改</button></div></section>}</>}
