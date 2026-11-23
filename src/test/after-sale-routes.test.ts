@@ -286,6 +286,54 @@ describe('售后正常 HTTP 入口、真实权限和单次身份确认', () => {
 
   });
 
+  it.each(['cancelled','unpaid'] as const)('验签旧价原款按真实100元办理，未接单的现价80元不截减（%s）',async status=>{
+    await prisma.order.update({where:{id:personalOrder},data:{status,paymentMethod:'alipay',total:80,subtotal:80}});
+    await prisma.orderItem.update({where:{id:line(personalOrder)},data:{quantity:1,unitPrice:80}});
+    const outTradeNo='OFFICE-VERIFIED-PRECEDING-PRICE-100';
+    const tradeNo='OFFICE-REAL-EARLIER-100-RECEIPT';
+    const seed=await prisma.paymentAttempt.create({data:{orderId:personalOrder,provider:'alipay',outTradeNo,amount:100}});
+    const gateway=new URLSearchParams({app_id:'office-test-app',seller_id:'office-test-shop',out_trade_no:outTradeNo,
+      trade_no:tradeNo,total_amount:'100.00',trade_status:'TRADE_SUCCESS'});
+    expect(await (await alipayNotify(new Request('http://localhost/api/payments/alipay/notify',{method:'POST',body:gateway}))).text()).toBe('success');
+    const actual=await prisma.paymentAttempt.findUniqueOrThrow({where:{id:seed.id}});
+    expect(actual.status).toBe('rejected_amount_mismatch');
+    signIn(clerk,'admin');
+    const {caseId}=await record(clerk,action('open','reported-verified-preceding-price','',{
+      orderItemId:line(personalOrder),quantity:1,issue:'cancellation',channel:'email'}));
+    await record(clerk,action('claim','claim-actual-original-amount',caseId));
+    const decision=action('agreement','written-authorization-for-real-old-trade',caseId,{
+      remedy:'refund',amountCents:10000,recipient:payee,destination,method:'alipay',customerDecision:'按验签原流水100元退至书面确认账户'});
+    const entered=(await expectJson(preview(decision),200)).preview.snapshot.operation;
+    expect(entered).toEqual({remedy:'refund',amountCents:10000,recipient:payee,destination,method:'alipay',quantity:1});
+    const confirmed=await record(clerk,decision);
+    expect(Object.keys(confirmed).sort()).toEqual(['applied','caseId','eventId','repeated']);
+    expect((await expectJson(adminRead(),200)).workspace.cases[0].events.find((item:{id:string})=>item.id===confirmed.eventId).operation).toBeNull();
+    await expectJson(preview(action('approve_refund','unauthorized-ordinary-order-clerk',caseId)),403);
+    signIn(finance,'admin');
+    const preparation=action('prepare_refund','actual-preceding-trade-prepared',caseId,{historyReview:'核实旧价、原到账总额、未作销货、未重复支付'});
+    await expectJson(preview(preparation),409);
+    const verify=action('review_refund_source','review-verified-100',caseId,{paymentId:actual.id,originalTradeNo:tradeNo,customerKey:owner});
+    await expectJson(preview({...verify,data:{...verify.data,originalTradeNo:'某个不同流水'}}),409);
+    await record(finance,verify);
+    const approvedView=await record(finance,preparation);
+    expect(JSON.parse((await prisma.afterSaleEvent.findUniqueOrThrow({where:{id:approvedView.eventId}})).detail).operation.position).toMatchObject({
+      independentReceipt:true,paidCents:10000,caseGoodsCents:8000,originalPaymentId:actual.id,originalAcceptance:null});
+    const approve=action('approve_refund','approve-local-terms-not-send-any-transfer',caseId);
+    const draft=await expectJson(preview(approve),200);
+    await expectJson(confirm(approve,draft.preview.actionHash),403);
+    const approved=await record(finance,approve);
+    const persisted=await prisma.afterSaleEvent.findUniqueOrThrow({where:{id:approved.eventId}});
+    vi.setSystemTime(Math.max(Date.now(),persisted.createdAt.getTime())+31_000);
+    const response=action('refund_result','preview-local-receipt-not-booked',caseId,
+      {result:'paid',amountCents:10000,referenceNo:'OFFICE-SIMULATED-RETURN-RECEIPT',recipient:payee,destination,method:'alipay'});
+    expect((await expectJson(preview(response),200)).preview.snapshot.operation).toMatchObject({
+      approvalId:approved.eventId,sourcePaymentId:actual.id,amountCents:10000});
+    await expectJson(preview({...response,data:{...response.data,amountCents:10001}}),409);
+    expect(await prisma.afterSaleEvent.count({where:{caseId,action:'refund_result'}})).toBe(0);
+    expect(await prisma.order.findUniqueOrThrow({where:{id:personalOrder}})).toMatchObject({status,total:80,paidAt:null});
+    expect(await prisma.customerCashPosting.count({where:{orderId:personalOrder}})).toBe(0);
+  });
+
   it.each(['held', 'separate'] as const)('原付款的预留可具名解除并保留销货款与额外验签流水（%s）', async kind => {
     const product = await prisma.product.create({data:{id:'office-release-product',name:'合成文件夹',catalogNumber:'OFFICE-RELEASE-FOLDER',
       brand:'合成办公品牌',stockQuantity:kind==='held'?0:5,price:100}});
@@ -552,6 +600,113 @@ describe('售后正常 HTTP 入口、真实权限和单次身份确认', () => {
     }
     expect(await prisma.afterSaleCase.findUniqueOrThrow({where:{id:primary.caseId}})).toMatchObject({customerState:'awaiting_close'});
     expect(await prisma.customerCashPosting.count()).toBe(0);
+  });
+
+  async function correctedInvoice() {
+    await acceptOriginalOrder();
+    const parties={issuer:'合成续开出票方',recipient:'合成办公收票方'};
+    const plan=(await financeRecord('create_plan',personalOrder,'OFFICE-ORIGINAL-PLAN-100',
+      {...parties,side:'customer',trigger:'accepted',grossCents:10000})).workspace.invoicePlans[0];
+    async function issue(slug:string,amountCents:number,correctionEventId?:string) {
+      const actual=await financeRecord('record_invoice',personalOrder,slug,{...parties,planId:plan.id,
+        amountCents,grossCents:amountCents,number:slug,issuedAt:new Date().toISOString(),...(correctionEventId?{correctionEventId}:{})});
+      return actual.workspace.invoicePlans[0].allocations.find(row=>row.number===slug)!;
+    }
+    const original=await issue('OFFICE-ORIGINAL-INVOICE-100',10000);
+    async function begin(slug:string,amount:number) {
+      vi.setSystemTime(Date.now()+3_600_000);
+      signIn(clerk,'admin');
+      const {caseId}=await record(clerk,action('open','open-'+slug,'',{orderItemId:line(personalOrder),issue:'invoice',quantity:1,channel:'email'}));
+      await record(clerk,action('claim','claim-'+slug,caseId));
+      const agreed=await record(clerk,action('agreement','agree-actual-replacement-'+slug,caseId,{remedy:'invoice',invoiceAllocationId:original.id,
+        invoiceOutcome:'reissue',amountCents:amount,replacementAmountCents:amount,customerDecision:'明确同意原票红冲后按真实票据重开'}));
+      return {id:caseId as string,agreementId:agreed.eventId};
+    }
+    async function correct(cases:{id:string}[]) {
+      await financeRecord('open_correction',personalOrder,'OFFICE-REISSUE-RED-REQUEST',{invoiceId:original.invoiceId});
+      const red=await financeRecord('resolve_correction',personalOrder,'OFFICE-REISSUE-RED-ACTUAL-RECEIPT',{invoiceId:original.invoiceId,outcome:'voided'});
+      signIn(finance,'admin');
+      vi.setSystemTime(Date.now()+3_600_000);
+      for(const item of cases) await record(finance,action('invoice_outcome','link-red-'+item.id,item.id,{...red.evidence,financeEventId:red.eventId}));
+      return red.eventId as string;
+    }
+    return {original,begin,correct,issue};
+  }
+
+  it.each(['unchanged','amend-before-entry','amend-after-entry','withdraw-before-entry'] as const)(
+    '一案两张替代票保留实办金额，已签发60元仍按原票面接续（%s）',async sequence=>{
+      const {original,begin,correct,issue}=await correctedInvoice();
+      const current=await begin('two-replacement-invoices',10000);
+      const red=await correct([current]);
+      const first=await issue('OFFICE-EXISTING-REPLACEMENT-60',6000,red);
+      const attach=(tag:string,allocationId:string,amountCents:number)=>
+        action('invoice_reissue',tag,current.id,{invoiceAllocationId:allocationId,amountCents});
+      const firstInput=attach('link-original-actual-60',first.id,6000);
+      if(sequence==='unchanged'||sequence==='amend-after-entry'){
+        vi.setSystemTime(Date.now()+3_600_000);
+        const firstResult=await record(finance,firstInput);
+        expect(await prisma.afterSaleCase.findUniqueOrThrow({where:{id:current.id}})).toMatchObject({customerState:'awaiting_invoice_reissue'});
+        expect(JSON.parse((await prisma.afterSaleEvent.findUniqueOrThrow({where:{id:firstResult.eventId}})).detail).operation)
+          .toMatchObject({amountCents:6000,remainingCents:4000});
+        expect((await record(finance,{...firstInput,requestId:'retry-first-replacement'}))).toMatchObject({eventId:firstResult.eventId,repeated:true});
+      }
+      const withdrawing=sequence==='withdraw-before-entry';
+      if(sequence!=='unchanged'){
+        signIn(clerk,'admin');
+        const revised=await record(clerk,action('agreement','new-agreement-only-unissued-amount',current.id,{
+          remedy:'invoice',revisesAgreementId:current.agreementId,invoiceAllocationId:original.id,
+          invoiceOutcome:withdrawing?'voided':'reissue',...(withdrawing?{}:{replacementAmountCents:3000}),
+          customerDecision:'已开60元保留，仅调整或撤回尚未签发部分'}));
+        expect(JSON.parse((await prisma.afterSaleEvent.findUniqueOrThrow({where:{id:revised.eventId}})).detail).operation.invoice).toMatchObject({
+          replacementIssuedCents:6000,replacementRecordedCents:sequence==='amend-after-entry'?6000:0,
+          replacementRemainingCents:withdrawing?0:3000,replacementAmountCents:withdrawing?6000:9000,
+          replacementIssuedParts:[{allocationId:first.id,amountCents:6000}],
+        });
+      }
+      signIn(finance,'admin');
+      vi.setSystemTime(Date.now()+3_600_000);
+      let secondPart=null;
+      if(!withdrawing){
+        const count=sequence==='unchanged'?4000:3000;
+        const second=await issue('OFFICE-SECOND-ACTUAL-REPLACEMENT',count,red);
+        secondPart={allocationId:second.id,amountCents:count};
+        const excess=attach('incorrectly-grow-second-replacement',second.id,count+1);
+        await expectJson(preview(excess),409);
+        await record(finance,attach('link-second-actual-replacement',second.id,count));
+      }
+      if(sequence==='amend-before-entry'||withdrawing) await record(finance,firstInput);
+      expect(await prisma.afterSaleCase.findUniqueOrThrow({where:{id:current.id}})).toMatchObject({customerState:'awaiting_close'});
+      const results=await prisma.afterSaleEvent.findMany({where:{caseId:current.id,action:'invoice_reissue'}});
+      expect(results.map(row=>JSON.parse(row.detail).operation)).toEqual(expect.arrayContaining([
+        expect.objectContaining({allocationId:first.id,amountCents:6000,financeEventId:red,number:first.number}),
+        ...(secondPart?[expect.objectContaining(secondPart)]:[]),
+      ]));
+      expect(results).toHaveLength(withdrawing?1:2);
+      expect(await prisma.customerCashPosting.count()).toBe(0);
+    });
+
+  it('多个案件同用一张实际替代票，争议先凭原件逐案回填且总额防重',async()=>{
+    const {original,begin,correct,issue}=await correctedInvoice();
+    const a=await begin('two-shares-case-a',5000);
+    const b=await begin('two-shares-case-b',5000);
+    const red=await correct([a,b]);
+    const printed=await issue('OFFICE-ONE-PROVEN-REPLACEMENT-60',6000,red);
+    signIn(clerk,'admin');
+    const amendment=action('agreement','only-modify-remaining-after-manual-attribution',a.id,{
+      remedy:'invoice',revisesAgreementId:a.agreementId,invoiceAllocationId:original.id,invoiceOutcome:'reissue',
+      replacementAmountCents:1000,customerDecision:'原件核对两案份额，客户仅改明细A尚未签发的金额'});
+    expect((await expectJson(preview(amendment),409)).error).toContain('逐案核对');
+    signIn(finance,'admin');
+    const attach=(id:string,tag:string,amountCents:number)=>action('invoice_reissue',tag,id,{invoiceAllocationId:printed.id,amountCents});
+    await record(finance,attach(a.id,'actual-share-a-30',3000));
+    expect((await expectJson(preview(attach(b.id,'cannot-use-shared-31',3100)),409)).error).toContain('原金额不足');
+    await record(finance,attach(b.id,'actual-share-b-30',3000));
+    signIn(clerk,'admin');
+    const saved=await record(clerk,amendment);
+    expect(JSON.parse((await prisma.afterSaleEvent.findUniqueOrThrow({where:{id:saved.eventId}})).detail).operation.invoice).toMatchObject({
+      replacementIssuedCents:3000,replacementRecordedCents:3000,replacementAmountCents:4000,replacementRemainingCents:1000});
+    expect(await prisma.afterSaleEvent.count({where:{action:'invoice_reissue'}})).toBe(2);
+    expect(await prisma.afterSaleCase.findUniqueOrThrow({where:{id:b.id}})).toMatchObject({customerState:'awaiting_invoice_reissue'});
   });
 
   it.each([false,true])('B4 的共同金额按原件范围分别使用，不能借同票另一组（重叠范围 %s）',async overlap=>{

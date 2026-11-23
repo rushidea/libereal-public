@@ -92,10 +92,10 @@ function purchaseAction(purchaseOrderId: string, input: PurchaseInput) {
   });
 }
 
-async function registerSupplierOrder() {
+async function registerSupplierOrder(unitPriceCents=1375) {
   const terms: PurchaseTerms = {
     supplier: '合成办公供方', writtenSupplier: '合成办公供方', payee: '合成供方账号',
-    paymentTerms: '按书面条件结算', unitPriceCents: 1375, linePayableCents: 2750,
+    paymentTerms: '按书面条件结算', unitPriceCents, linePayableCents: unitPriceCents*2,
     currency: 'CNY', taxBasis: 'included', freightTerms: '含运费', supplierConditions: description,
     leadTime: '3 个工作日', validUntil: new Date(Date.now() + 7 * 86400000).toISOString(),
     sourceReference: 'OFFICE-SUPPLIER-QUOTE', sourceSha256: pricingContentHash('OFFICE-SUPPLIER-QUOTE'),
@@ -178,9 +178,9 @@ beforeEach(async () => {
 afterEach(() => vi.useRealTimers());
 
 describe('售后沿用原订单和短失事实', () => {
-  async function signedOriginalPair() {
+  async function signedOriginalPair(unitPriceCents?:number) {
     await acceptOrder();
-    const purchaseOrderId=await registerSupplierOrder();
+    const purchaseOrderId=await registerSupplierOrder(unitPriceCents);
     const first=await dispatch(purchaseOrderId,'OFFICE-ORIGINAL-FIRST','supplier_to_customer');
     const second=await dispatch(purchaseOrderId,'OFFICE-ORIGINAL-SECOND','supplier_to_customer');
     await parcelEvent(first.id,'OFFICE-FIRST-SIGNATURE','customer_delivery',[{parcelLineId:first.lines[0].id,quantity:1}]);
@@ -252,7 +252,7 @@ describe('售后沿用原订单和短失事实', () => {
     if(!upfront) await expect(preview(approve(1),procurement)).rejects.toThrow('包裹份额');
     await expect(preview({...approve(1),data:{...approve(1).data,quantity:2}},procurement)).rejects.toThrow('尚未批准');
     const secondSaved=await record(approve(1,upfront?undefined:scope),procurement);
-    expect(secondSaved.snapshot).toMatchObject({operation:{quantity:1,originalParcelLineId:parcels[1],supplierDocumentShares:expect.arrayContaining(scope)}});
+    expect(secondSaved.snapshot).toMatchObject({operation:{quantity:1,originalParcelLineId:parcels[1],supplierDocumentShares:expect.arrayContaining(scope.map(part=>({...part,caseId})))}});
     for(const [index,id] of [firstSaved.eventId!,secondSaved.eventId!].entries()){
       const parcel=await dispatch(purchaseOrderId,'SIGNED-EXCHANGE-SHARE-'+index,'supplier_to_customer',{afterSaleApprovalId:id});
       await parcelEvent(parcel.id,'DELIVERY-SHARE-'+index,'customer_delivery',[{parcelLineId:parcel.lines[0].id,quantity:1}]);
@@ -263,6 +263,72 @@ describe('售后沿用原订单和短失事实', () => {
     expect(await prisma.afterSaleEvent.count({where:{caseId,action:'approve_exchange',sha256:letter.sha256,documentRow:3}})).toBe(2);
     expect(await prisma.shipmentItem.count({where:{orderItemId:itemId}})).toBe(2);
     expect(await prisma.afterSaleEvent.count({where:{caseId,action:'refund_result'}})).toBe(0);
+  });
+
+  it('同一行供方原件覆盖同单的两案和两包，分别批准并防止扩展来源',async()=>{
+    const {purchaseOrderId,first,second}=await signedOriginalPair();
+    const documentSubjects: { caseId:string; parcelLineId:string; quantity:number }[]=[];
+    for(const [index,parcel] of [first,second].entries()){
+      const parcelLineId=parcel.lines[0].id;
+      const opened=await record(saleInput('open','supplier-letter-cross-case-'+index,{
+        orderItemId:itemId,quantity:1,issue:'return',channel:'email',originalParcelLineId:parcelLineId}));
+      const caseId=opened.caseId!;
+      await record(saleInput('claim','take-cross-cases-'+index,{},caseId));
+      await record(saleInput('agreement','separate-customer-decision-for-each-case-'+index,{
+        remedy:'exchange',returnRequirement:'waived',customerDecision:'本案原包裹的一件获书面确认免费换货'},caseId));
+      documentSubjects.push({caseId,parcelLineId,quantity:1});
+    }
+    const supplierPaper={...proof('ONE-VERIFIED-SUPPLIER-DOCUMENT-FOR-TWO-CASES'),documentRow:8};
+    const approve=(index:number,includeScope=false)=>saleInput('approve_exchange','shared-supplier-line-case-'+index,{
+      ...supplierPaper,...{parcelLineId:documentSubjects[index].parcelLineId,quantity:1},supplier:'合成办公供方',
+      returnRequirement:'waived',freeOfCharge:true,...(includeScope?{supplierDocumentShares:documentSubjects}:{})},documentSubjects[index].caseId);
+    const firstInput=approve(0,true);
+    const a=await record(firstInput,procurement);
+    const cross=approve(1);
+    await expect(preview({...cross,data:{...cross.data,supplierDocumentShares:[...documentSubjects,{...documentSubjects[1],caseId:'another-unknown-case'}]}},
+      procurement)).rejects.toThrow('案件');
+    const b=await record(cross,procurement);
+    expect(b.snapshot).toMatchObject({operation:{supplierDocumentShares:expect.arrayContaining(documentSubjects),quantity:1}});
+    expect((await record({...cross,requestId:'retry-same-request-for-case-b'},procurement))).toMatchObject({eventId:b.eventId,repeated:true});
+    for(const [index,approval] of [a,b].entries()){
+      const done=await dispatch(purchaseOrderId,'ACTUAL-CROSS-CASE-REPLACEMENT-'+index,'supplier_to_customer',{afterSaleApprovalId:approval.eventId!});
+      await parcelEvent(done.id,'SIGNED-ACTUAL-CROSS-CASE-'+index,'customer_delivery',[{parcelLineId:done.lines[0].id,quantity:1}]);
+      expect((await record(saleInput('physical','finish-actual-cross-case-'+index,{result:'delivery',quantity:1,
+        parcelLineId:done.lines[0].id},documentSubjects[index].caseId))).snapshot).toMatchObject({nextState:'awaiting_close'});
+    }
+    expect(await prisma.afterSaleEvent.count({where:{action:'approve_exchange',sha256:supplierPaper.sha256,documentRow:8}})).toBe(2);
+  });
+
+  it('同案同笔供方真实抵扣按所列两包分30和20元，按总金额和原份额防重',async()=>{
+    const {purchaseOrderId,first,second}=await signedOriginalPair(4000);
+    const cases=await record(saleInput('open','covered-by-one-supplier-offset',{
+      orderItemId:itemId,quantity:2,issue:'other',channel:'handoff'}));
+    const caseId=cases.caseId!;
+    await record(saleInput('claim','operator-takes-one-offset',{},caseId));
+    const originals=[first.lines[0].id,second.lines[0].id];
+    for(const [index,parcelLineId] of originals.entries()){
+      await record(saleInput('bind_original_parcel','scope-of-the-real-offset-'+index,{parcelLineId,quantity:1},caseId));
+    }
+    const paper={...proof('SYNTHETIC-ACTUAL-OFFICE-SUPPLIER-OFFSET-50'),documentRow:4};
+    const allocate=(index:number,amountCents:number,allocationReference:string)=>saleInput('supplier','supplier-offset-'+index+'-'+amountCents+'-'+allocationReference,{
+      ...paper,outcome:'financial_result',purchaseOrderId,originalParcelLineId:originals[index],supplier:'合成办公供方',
+      method:'offset',destination:'合成原供方对账单',referenceNo:'SYNTHETIC-OFFSET-TRACE-1',transferTotalCents:5000,allocationReference,amountCents},caseId);
+    const buyBefore=(await prisma.$transaction(tx=>purchaseWorkspace(tx,orderId))).orders.find(item=>item.id===purchaseOrderId);
+    const firstEntry=allocate(0,3000,'原回执归运单甲30');
+    const saved=await record(firstEntry,procurement);
+    expect(saved.snapshot).toMatchObject({nextSupplierState:'following',operation:{transfer:{unallocatedAfterCents:2000}}});
+    expect((await record({...firstEntry,requestId:'same-supplier-offset-retry'},procurement))).toMatchObject({eventId:saved.eventId,repeated:true});
+    await expect(preview(allocate(0,2000,'改标签冒称另一份'),procurement)).rejects.toThrow('原包裹份额');
+    await expect(preview(allocate(1,2100,'真实总额以外不能分'),procurement)).rejects.toThrow('真实交易总额');
+    await expect(preview(allocate(1,2000,'原回执归运单甲30'),procurement)).rejects.toThrow('分摊依据已登记');
+    const secondEntry=await record(allocate(1,2000,'原回执归运单乙20'),procurement);
+    expect(secondEntry.snapshot).toMatchObject({nextSupplierState:'resolved',operation:{
+      originalParcelLineId:originals[1],amountCents:2000,transfer:{allocatedBeforeCents:3000,unallocatedAfterCents:0}}});
+    const savedTransfers=await prisma.afterSaleEvent.findMany({where:{caseId,action:'supplier',sha256:paper.sha256}});
+    expect(savedTransfers).toHaveLength(2);
+    expect(savedTransfers.every(event=>event.actorId===procurement.id)).toBe(true);
+    const buyAfter=(await prisma.$transaction(tx=>purchaseWorkspace(tx,orderId))).orders.find(item=>item.id===purchaseOrderId);
+    expect(buyAfter).toMatchObject({totalCents:buyBefore?.totalCents,paidCents:buyBefore?.paidCents,dueCents:buyBefore?.dueCents});
   });
 
   it('仅用原指定包裹的真实已退商品另议退款，晚录旧决定留痕但不生效',async()=>{
