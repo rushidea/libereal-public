@@ -260,13 +260,14 @@ async function reissueBook(tx: Db, orderId: string) {
   const links = reviewed.flatMap(event=>{
     const detail=jsonObject(event.detail);
     if (!event.approvedHash || purchaseObject(detail.authorization).permission!=='finance.write') return [];
-    const link=purchaseObject(purchaseObject(detail.operation).reissueLink);
+    const operation=purchaseObject(detail.operation);
+    const link=purchaseObject(operation.reissueLink);
     return typeof link.allocationId==='string' && typeof link.parentAllocationId==='string'
       && typeof link.receiptId==='string' && typeof link.rootAllocationId==='string'
       && typeof link.bookingId==='string' && positiveCents(link.amountCents)
       ? [{id:event.id,orderItemId:event.case.orderItemId,allocationId:link.allocationId,parentAllocationId:link.parentAllocationId,
         receiptId:link.receiptId,rootAllocationId:link.rootAllocationId,bookingId:link.bookingId,amountCents:link.amountCents,
-        sha256:event.sha256,documentRow:event.documentRow}] : [];
+        sha256:event.sha256,documentRow:event.documentRow,otherPlan:operation.reissueScope==='other_plan'}] : [];
   });
   const entries = parts.map(part=>{
     const doc = part.invoice;
@@ -496,8 +497,7 @@ async function verifyReissueLink(tx: Db, row: SaleCase, cases: SaleCase[], part:
   const parentInCase=parentId===original.part.id ? parentScope.limit : sumParts(chain.related.get(parentId)??[]);
   const amountCents=cents(data.amountCents);
   condition(parentScope.limit!==null && childScope.limit!==null && parentInCase!==null
-    && (fromCase ? amountCents<=parentInCase : parentId!==original.part.id && !chain.unresolved.has(parentId)
-      && amountCents<=parentScope.limit-parentInCase)
+    && (fromCase ? amountCents<=parentInCase : parentId!==original.part.id)
     && !reissueReaches(parentId,part.id,chain.related,book.links),
     '请先核实本商品的原分摊，所核金额须在有效前序份额和替代票的商品金额内');
   const reviewed=book.links.filter(link=>link.allocationId===part.id || link.parentAllocationId===parentId);
@@ -506,7 +506,8 @@ async function verifyReissueLink(tx: Db, row: SaleCase, cases: SaleCase[], part:
     '这份原件行已核对过这对实际分摊，请查看原核对记录');
   const newLink={allocationId:part.id,parentAllocationId:parentId,receiptId:receipt.id,rootAllocationId,
     bookingId:child.bookingId,amountCents};
-  const candidate={...newLink,id:'current-preview',orderItemId:row.orderItemId,sha256:proof.sha256,documentRow:proof.documentRow};
+  const candidate={...newLink,id:'current-preview',orderItemId:row.orderItemId,sha256:proof.sha256,
+    documentRow:proof.documentRow,otherPlan:!fromCase};
   const liveIds=new Set(book.entries.filter(entry=>entry.status!=='voided').map(entry=>entry.part.id));
   const existing:AfterSaleInvoiceUse[]=[...book.uses,...cases.flatMap(item=>issuedReservation(item,book.uses))];
   const active=existing.filter(use=>liveIds.has(use.allocationId));
@@ -524,6 +525,37 @@ async function verifyReissueLink(tx: Db, row: SaleCase, cases: SaleCase[], part:
     && reissueFootprint([...parentLinks,candidate],fromSource)<=parentScope.total
     && reissueFootprint([...parentLinks,candidate].filter(lineOnly),fromSource.filter(lineOnly))<=parentScope.limit,
     '所核份额超出前序分摊或后继票原已核对的商品金额');
+  const protectedLinks=book.links.filter(link=>lineOnly(link) && link.allocationId===parentId && !link.otherPlan
+    && link.bookingId===parent.bookingId && book.entries.some(source=>source.part.id===link.parentAllocationId
+      && validPredecessor(parent,source,link.receiptId)));
+  const protectedUses=existing.filter(use=>lineOnly(use) && use.allocationId===parentId);
+  let ordinarySourceLimitCents: number | undefined;
+  if (rootAllocationId===parentId) {
+    // The predecessor's own share is common to all cases. Earlier sale shares stay with their proved origins.
+    const origins = new Map<unknown,number>();
+    for (const id of new Set([...protectedLinks,...protectedUses].map(record=>record.rootAllocationId))) {
+      origins.set(id,reissueFootprint(protectedLinks.filter(link=>link.rootAllocationId===id),protectedUses.filter(use=>use.rootAllocationId===id)));
+    }
+    if (parent.recorded?.replaces) {
+      const checked = new Set([parentId]);
+      for (const sale of cases.filter(lineOnly)) {
+        const decision=currentSaleAgreement(sale);
+        const terms=purchaseObject(decision && saleOperation(decision).invoice);
+        const earlier=book.entries.find(entry=>entry.part.id===terms.allocationId);
+        const receipt=earlier?.voidReceipt;
+        const outcome=savedCorrection(sale,decision);
+        if (!earlier || !receipt || !outcome || receipt.id!==saleOperation(outcome).financeEventId || checked.has(earlier.part.id)) continue;
+        checked.add(earlier.part.id);
+        const lineage=earlier.part.id===original.part.id?chain:await reissueChain(tx,book,sale,earlier,receipt);
+        condition(!lineage.unresolved.has(parentId),'请先核清前序分摊待确认的售后来源');
+        origins.set(earlier.part.id,Math.max(origins.get(earlier.part.id)??0,sumParts(lineage.related.get(parentId)??[])));
+      }
+    }
+    ordinarySourceLimitCents=parentScope.limit-[...origins.values()].reduce((sum,amount)=>sum+amount,0);
+    const usesOwnShare=(item:{orderItemId:string;rootAllocationId?:unknown})=>lineOnly(item) && item.rootAllocationId===parentId;
+    condition(reissueFootprint([...parentLinks,candidate].filter(usesOwnShare),fromSource.filter(usesOwnShare))<=ordinarySourceLimitCents,
+      '前序分摊中本商品的普通份额已不足，已核定的售后金额保留给原来源');
+  }
   if (fromCase) {
     const next=await reissueChain(tx,{...book,links:[...book.links,candidate]},row,original,root);
     const applied=active.filter(use=>isReissueLineageUse(use,row.orderItemId,original.part.id));
@@ -535,8 +567,9 @@ async function verifyReissueLink(tx: Db, row: SaleCase, cases: SaleCase[], part:
   return {operation:{invoiceId:part.invoiceId,allocationId:part.id,originalNumber:part.invoice.number,orderItemId:row.orderItemId,
     predecessorNumber:parent.part.invoice.number,sourceCorrectionEventId:receipt.id,attributedCents:amountCents,
     reissueScope:scope,coverageId:childScope.coverageId,reviewId:childScope.reviewId,previousSources:chain.related.get(parentId),
-    parentCoverageId:parentScope.coverageId,parentReviewId:parentScope.reviewId,parentSha256:parent.part.invoice.sha256,
-    priorReissueRecords:[...reviewed,...fromSource,...inAllocation].map(event=>'eventId' in event?event.eventId:event.id).sort(),
+    parentCoverageId:parentScope.coverageId,parentReviewId:parentScope.reviewId,parentSha256:parent.part.invoice.sha256,ordinarySourceLimitCents,
+    priorReissueRecords:[...reviewed,...fromSource,...inAllocation,...protectedLinks,...protectedUses]
+      .map(event=>'eventId' in event?event.eventId:event.id).sort(),
     currentCorrectionEventId:child.correctionId,currentStatus:child.status,invoiceSha256:child.part.invoice.sha256,
     reissueLink:newLink,note:requiredText(data.note,'两张票的原件、红冲回执及本商品实际承接金额')}};
 }
