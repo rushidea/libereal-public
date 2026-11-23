@@ -13,9 +13,10 @@ describe('admin finance workspace', () => {
       acceptanceId: 'original-order-acceptance', shipmentDates: { dispatched: null, delivered: null },
       banks: [], receipts: [], cash: [], purchases: [], invoicePlans: [], events: [], latePayments: [],
       customerInvoiceScopes: hasFirst ? [{ id: 'original-accepted-scope', familyId: 'original-accepted-scope', grossCents: 6000,
+        authorizedCents: 6000, remainingCents: 6000,
         reference: '原协议 A', issuer: '合成售方', recipient: '合成客户', lines: [{ id: 'archived-office-label', name: '合成标签', quantity: 1 }] }] : [],
       customerInvoiceFamilies: hasFirst ? [{ id: 'original-accepted-scope', authorizedCents: 6000,
-        issuedCents: 6000, plannedCents: 6000, availableCents: 0 }] : [],
+        issuedCents: 0, plannedCents: 0, availableCents: 6000 }] : [],
       originalInvoiceLines: [{ id: 'archived-office-folder', name: '合成文件夹', quantity: 1, unverifiedQuantity: 1, unitPrice: 120.5 },
         { id: 'archived-office-label', name: '合成标签', quantity: 1, unverifiedQuantity: hasFirst ? 0 : 1, unitPrice: 60 }],
     };
@@ -168,5 +169,53 @@ describe('admin finance workspace', () => {
       clarifiesInvoiceEvidenceAt: at, confirmedInvoiceEvidenceIds: [root] }
       : { invoiceScopeBasisId: root, grossCents: 4000, invoiceLines: [{ orderItemId: 'office-B', quantity: 1 }] });
     if (!pending) expect(panel).not.toHaveTextContent('合成文件夹');
+  });
+
+  it('offers the existing cumulative document by its verified date, goods, and current remaining amount', async () => {
+    const orderId = 'legacy-cumulative-office-authority';
+    const base = 'office-original-60';
+    const current = 'office-third-day-cumulative-100';
+    const lines = [{ id: 'office-A', name: '合成文件夹', quantity: 1, unverifiedQuantity: 0 },
+      { id: 'office-B', name: '合成标签', quantity: 1, unverifiedQuantity: 0 }];
+    const parties = { issuer: '合成售方', recipient: '合成客户' };
+    const scope = { id: current, familyId: base, change: { mode: 'restate', amountCents: 10000 }, reference: '第三日累计100的原件',
+      occurredAt: '2026-01-03T08:00:00.000Z', grossCents: 0, authorizedCents: 4000, remainingCents: 4000, lines, ...parties };
+    const workspace = { orderId, version: 'office-recomputed-ceiling-version', status: 'confirmed', customerEmail: 'office@example.test', principalCents: 0,
+      settlementCents: 0, verifiedCents: 0, acceptanceId: 'original-order-acceptance', shipmentDates: { dispatched: null, delivered: null },
+      banks: [], receipts: [], cash: [], purchases: [], invoicePlans: [], events: [], latePayments: [],
+      originalInvoiceLines: lines, customerInvoiceScopes: [
+        { ...scope, change: null, id: base, grossCents: 6000, remainingCents: 0, reference: '第一日已开60的原件' },
+        { ...scope, id: 'excluded-old-addition', authorizedCents: null, remainingCents: null, reference: '被澄清排除的旧增额原件' },
+        scope,
+      ],
+      customerInvoiceFamilies: [{ id: base, authorizedCents: 10000, issuedCents: 6000, plannedCents: 6000, availableCents: 4000 }] };
+    const fetchFinance = vi.fn(async (_input: string, options?: RequestInit) => {
+      if (options?.method !== 'POST') return Response.json({ canWrite: true, workspace });
+      const { data } = JSON.parse(String(options.body));
+      return Response.json({ preview: { actionHash: 'existing-effective-office-proof', snapshot: { orderId, actor: { email: 'accountant@example.test' },
+        operation: { ...data, action: 'create_plan', invoiceEvidence: scope } } } });
+    });
+    vi.stubGlobal('fetch', fetchFinance);
+    render(<FinanceManager initialOrder={orderId}/>);
+    fireEvent.click(await screen.findByRole('button', { name: '登记开票或收票安排' }));
+    const selection = screen.getByRole('combobox', { name: '本次开票对应的已核书证' });
+    expect(selection).toHaveValue(current);
+    const [option] = within(selection).getAllByRole('option');
+    expect(option).toHaveTextContent(/第三日累计100的原件.*生效.*合成文件夹 1 件、合成标签 1 件.*可安排 ¥40.00/);
+    expect(within(selection).getAllByRole('option')).toHaveLength(1);
+    expect(screen.getByText('沿用已核书证 第三日累计100的原件')).toBeInTheDocument();
+    expect(screen.queryByLabelText('原件 SHA-256 摘要')).not.toBeInTheDocument();
+    for (const [label, value] of [
+      ['本项安排含税金额（元）', '40'], ['约定开票节点', 'accepted'],
+      ['核对结果或书面约定', '从已经确认生效的第三日原件办理四十元。'],
+    ]) fireEvent.change(screen.getByLabelText(label), { target: { value } });
+    fireEvent.click(screen.getByRole('button', { name: '查看完整预览' }));
+    const panel = await screen.findByRole('region', { name: '票款操作预览' });
+    expect(panel).toHaveTextContent(/原书证 第三日累计100的原件.*生效.*可安排 ¥40.00/);
+    const request = fetchFinance.mock.calls.find(([, options]) => options?.method === 'POST');
+    const input = JSON.parse(String(request?.[1]?.body));
+    expect(input).toMatchObject({ action: 'create_plan',
+      data: { invoiceScopeId: current, grossCents: 4000, ...parties } });
+    expect(input.data).not.toHaveProperty('sha256');
   });
 });
