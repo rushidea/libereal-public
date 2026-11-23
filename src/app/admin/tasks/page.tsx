@@ -3,7 +3,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import { ListTodo, RefreshCw, RotateCcw } from 'lucide-react';
 import AiOpsPanel from './AiOpsPanel';
-import DeliveryReview, { deliveryOutcomes } from './DeliveryReview';
+import DeliveryReview, { DeliveryTargets, deliveryOutcomes } from './DeliveryReview';
+import type { DeliveryScope } from '@/lib/task-delivery-review';
 import { getCloudMailUrl } from '@/lib/cloud-mail';
 
 type Task = {
@@ -21,6 +22,7 @@ type Task = {
   canRetry?: boolean;
   deliveryVersion?: string | null;
   deliveryOutcome?: string | null;
+  deliveryScope?: DeliveryScope | null;
   inquiryId?: string | null;
   mailEmailId?: number | null;
   mailConflict?: boolean;
@@ -148,7 +150,9 @@ export default function AdminTasksPage() {
               <td className="space-x-3 px-4 py-3 text-right">
                 {task.orderId && <a href={`/admin/purchases?orderId=${encodeURIComponent(task.orderId)}`} className="text-sm text-brand-700 underline">查看本单采购准备</a>}
                 {task.deliveryOutcome && <p className="text-xs">{deliveryOutcomes[task.deliveryOutcome]}</p>}
-                {task.deliveryVersion && <DeliveryReview key={task.deliveryVersion} id={task.id} version={task.deliveryVersion} reload={load}/>}
+                {task.deliveryVersion && task.deliveryScope && <DeliveryReview key={task.deliveryVersion} id={task.id}
+                  version={task.deliveryVersion} scope={task.deliveryScope} reload={load}/>}
+                {task.status==='delivery_reviewed'&&task.deliveryScope&&<DeliveryTargets scope={task.deliveryScope}/>}
                 {task.inquiryId && <a href={`/admin/inquiries?inquiryId=${encodeURIComponent(task.inquiryId)}`} className="text-sm text-brand-700 underline">核对原询价</a>}
                 {task.type === 'inquiry.supplier_mail_headers' && !task.inquiryId && <a href={getCloudMailUrl()} className="text-sm text-brand-700 underline">到邮箱人工核对</a>}
                 {task.type === 'inquiry.supplier_mail_headers' && task.mailReviewVersion && <button type="button"

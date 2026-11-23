@@ -86,9 +86,9 @@ export default function PurchaseManager({initialOrder}:{initialOrder:string}) {
         order_ready:'已排队', awaiting_human:workspace.continuation.reason || '等待经办人核对',
         succeeded:'已核对本单待采购商品行', failed:'运行失败，请核对原单后重新办理',
       }[workspace.continuation.status] || workspace.continuation.status}</p>}
-      {workspace.startReview && <PurchaseStartReview key={workspace.startReview.version} review={workspace.startReview}
+      {workspace.startReview && <PurchaseStartReview key={'start-'+workspace.startReview.version} review={workspace.startReview}
         permissions={permissions} busy={busy} request={request} onError={setError}/>}
-      <PurchaseFulfillmentReview key={workspace.fulfillment.version} orderId={workspace.orderId} review={workspace.fulfillment}
+      <PurchaseFulfillmentReview key={'fulfillment-'+workspace.fulfillment.version} orderId={workspace.orderId} review={workspace.fulfillment}
         canApprove={permissions.includes('purchases.approve')} busy={busy} request={request} onError={setError}/>
       {(workspace.canPrepare||workspace.continuation?.status==='failed')&&permissions.includes('purchases.write')&&
         <button className={primary} disabled={busy} onClick={()=>void request({action:'prepare',orderId:workspace.orderId})}>从原订单准备采购</button>}
