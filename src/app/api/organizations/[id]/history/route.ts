@@ -1,3 +1,4 @@
+import { receivableView } from '@/lib/customer-cash';
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { requireActiveSession } from '@/lib/session';
@@ -35,7 +36,7 @@ export async function GET(_request: Request, { params }: RouteParams) {
           ...ORGANIZATION_ORDER_REVIEW_INCLUDE,
           researchGroup: { select: { id: true, name: true } },
           receivable: {
-            select: { id: true, amount: true, status: true, dueAt: true, paidAt: true },
+            select: { id: true, cashPostings: { select: { releasedCents: true } }, amount: true, status: true, dueAt: true, paidAt: true },
           },
         },
       }),
@@ -66,7 +67,7 @@ export async function GET(_request: Request, { params }: RouteParams) {
         const overdueDays = overdueDaysFromDueAt(receivable.dueAt, now);
         return {
           orderId: order.id,
-          ...receivable,
+          ...receivableView(receivable),
           overdueDays,
           trigger: overdueDays >= CREDIT_REVIEW_POLICY.holdAfterDays
             ? 'order_hold'
@@ -99,7 +100,7 @@ export async function GET(_request: Request, { params }: RouteParams) {
           pointsPersonal: order.pointsPersonal, pointsGroup: order.pointsGroup, pointsGroupId: order.pointsGroupId,
           pointsDiscount: order.pointsDiscount, pointsRefundedPersonal: order.pointsRefundedPersonal,
           pointsRefundedGroup: order.pointsRefundedGroup, createdAt: order.createdAt, archivedAt: order.archivedAt,
-          researchGroup: order.researchGroup, receivable: order.receivable,
+          researchGroup: order.researchGroup, receivable: order.receivable ? receivableView(order.receivable) : null,
           organizationReview: organizationReviewState(order, creatorId),
           canCancel, canReview: canCancel && Boolean(creatorId && creatorId !== user.id),
         };

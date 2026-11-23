@@ -1,12 +1,13 @@
 import type { Prisma } from '@prisma/client';
 import { isPostDeliveryPaymentMethod, normalizeOrderPaymentMethod } from '@/data/payment-methods';
+import { customerCashProjection, postVerifiedCustomerCash, orderCreditHeldCents } from '@/lib/customer-cash';
 import { creditLimitForAccount } from '@/lib/customer-credit';
 import { orderApprovalTerms } from '@/lib/order-approval';
 import { jsonObject } from '@/lib/order-catalog-repricing';
 import { pricingContentHash } from '@/lib/pricing-adjustment-approval';
 import { addPurchaseActivity, findPurchaseActivityByRequest, readPurchaseActivities, type PurchaseActivity, type PurchaseActor, type PurchaseAuthorization } from '@/lib/purchase-activity';
 import { loadPurchaseOrderSource, type SourceOrder } from '@/lib/purchase-source';
-import { previewBankAllocation, previewBankReceipt, purchaseReceiptAllocations } from '@/lib/purchase-receipts';
+import { orderReceiptEvidence, previewBankAllocation, previewBankReceipt } from '@/lib/purchase-receipts';
 import { creditLimitTerms, type PurchaseCreditEvidence } from '@/lib/purchase-credit-history';
 import { documentSha256, positiveCents, PurchaseError, purchaseTimestamp, requiredText } from '@/lib/purchase-terms';
 
@@ -137,40 +138,13 @@ export function paymentPlanContent(plan: PaymentPlan | null) {
     balanceTerms: plan.balanceTerms?.trim().replace(/\s+/g, ' ') ?? null };
 }
 
-async function receiptEvidence(tx: Db, order: SourceOrder, activities: PurchaseActivity[], principal: number) {
-  const { bankReceipts, ...recorded } = await purchaseReceiptAllocations(tx, order, activities);
-  const alipay = order.paymentAttempts.filter(row => row.provider === 'alipay' && row.status === 'paid'
-    && row.paidAt && row.tradeNo && order.paidAt && cents(row.amount) === principal);
-  let paymentAttemptId: string | null = null;
-  let nativePaidAt: string | null = null;
-  if (alipay.length === 1) {
-    const [attempt] = alipay;
-    const events = await tx.orderEvent.findMany({ where: { orderId: order.id, type: 'payment_received' } });
-    if (events.some(row => {
-      const meta = jsonObject(row.metadata);
-      return meta.outTradeNo === attempt.outTradeNo && meta.tradeNo === attempt.tradeNo;
-    })) {
-      paymentAttemptId = attempt.id;
-      nativePaidAt = attempt.paidAt!.toISOString();
-    }
-  }
-  const ar = order.receivable;
-  const release = order.creditTransactions.filter(row => row.type === 'release' && row.userId === order.customerId && row.actorId
-    && !row.reason && cents(row.amount) === -principal);
-  const settled = ar && ar.status === 'paid' && ar.paidAt && order.paidAt?.getTime() === ar.paidAt.getTime()
-    && ar.userId === order.customerId && cents(ar.amount) === principal && release.length === 1 ? ar.id : null;
-  const payment = { ...recorded, receivedCents: paymentAttemptId ? principal : recorded.allocatedCents,
-    paymentAttemptId, nativePaidAt, settledReceivableId: settled };
-  return { payment, bankReceipts };
-}
-
 async function creditEvidence(tx: Db, order: SourceOrder, outstandingCents: number) {
   const ar = order.receivable;
   const reserves = order.creditTransactions.filter(row => row.type === 'reserve' && row.userId === order.customerId);
-  const validAmounts = [cents(order.total), outstandingCents];
-  if (!order.customerId || !ar || ar.userId !== order.customerId || ar.status !== 'open' || !validAmounts.includes(cents(ar.amount))
-    || reserves.length !== 1 || !validAmounts.includes(cents(reserves[0].amount))
-    || order.creditTransactions.some(row => row.type === 'release')) return null;
+  if (!order.customerId || !ar || ar.userId !== order.customerId || ar.status !== 'open' || reserves.length !== 1) return null;
+  const held = await orderCreditHeldCents(tx, order);
+  if (held === null || held < outstandingCents) return null;
+  if (Math.round(ar.amount * 100) < outstandingCents) return null;
   const account = await tx.creditAccount.findUnique({ where: { userId: ar.userId } });
   if (!account || !['active', 'credit_limited'].includes(account.status) || cents(account.usedAmount) < outstandingCents) return null;
   const credit: PurchaseCreditEvidence = { receivableId: ar.id, reserveId: reserves[0].id, accountId: account.id, userId: ar.userId,
@@ -206,7 +180,7 @@ export async function purchaseStartReview(tx: Db, order: SourceOrder, activities
   const accepted = await acceptance(tx, order, activities);
   const principal = cents(order.total);
   const plan = paymentPlanAt(order, activities, termsVersion);
-  const { payment, bankReceipts } = await receiptEvidence(tx, order, activities, principal);
+  const { payment, bankReceipts } = await orderReceiptEvidence(tx, order, activities, principal);
   const outstandingCents = Math.max(0, principal - payment.receivedCents);
   const creditState = outstandingCents > 0 && plan?.mode !== 'prepay' ? await creditEvidence(tx, order, outstandingCents) : null;
   const credit = creditState?.credit ?? null;
@@ -274,7 +248,9 @@ async function previewOperation(tx: Db, order: SourceOrder, activities: Purchase
   if (input.action === 'verify_bank_receipt') return previewBankReceipt(tx, order, input, evidence);
   if (input.action === 'record_customer_receipt') {
     if (!state.plan) throw new PurchaseError('请先核对本单付款条件');
-    return previewBankAllocation(tx, order, activities, input, evidence, state.outstandingCents);
+    const allocation = await previewBankAllocation(tx, order, activities, input, evidence, state.outstandingCents);
+    if (order.paidAt || state.payment.paymentAttemptId) throw new PurchaseError('本单已有全额付款记录，请核对原始账务');
+    return { ...allocation, accounting: await customerCashProjection(tx, order, allocation.amountCents) };
   }
   if (!state.creditExceptionRequired || !state.creditVersion) throw new PurchaseError('目前没有可单独批准的超授信例外');
   return { ...evidence, creditVersion: state.creditVersion, credit: state.credit };
@@ -301,9 +277,12 @@ export async function applyPurchaseStartAction(tx: Db, input: PurchaseStartInput
   const { snapshot, actionHash } = await previewPurchaseStartAction(tx, input, actor);
   if (input.actionHash !== actionHash) throw new PurchaseError('订单或支付依据已变化，请重新核对当前版本');
   const receipt = snapshot.operation;
-  await addPurchaseActivity(tx, { orderId: input.orderId, actor, action: input.action, requestKey,
+  const activityId = await addPurchaseActivity(tx, { orderId: input.orderId, actor, action: input.action, requestKey,
     amountCents: 'action' in receipt && receipt.action === 'record_customer_receipt' ? receipt.amountCents : undefined,
     referenceKey: 'receiptReferenceKey' in receipt ? receipt.receiptReferenceKey : undefined,
     detail: { intent, actionHash, authorization, snapshot },
   });
+  if (input.action === 'record_customer_receipt') {
+    await postVerifiedCustomerCash(tx, input.orderId, { bankAllocationId: activityId }, actor.id);
+  }
 }

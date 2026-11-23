@@ -115,7 +115,7 @@ export function pendingUnpaidAlipayWhere(): WhereClause {
 
 export function buildAdminActiveOrderWhere(query: AdminOrderListQuery): WhereClause {
   const and: WhereClause[] = [{ archivedAt: null }];
-  if (query.receivableOpen) and.push({ receivable: { is: { status: 'open' } } });
+  if (query.receivableOpen) and.push({ receivable: { is: { status: { in: ['open', 'overdue'] } } } });
 
   if (query.status === 'unpaid') {
     and.push({ OR: [{ status: 'unpaid' }, pendingUnpaidAlipayWhere()] });

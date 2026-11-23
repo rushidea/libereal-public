@@ -1,3 +1,4 @@
+import { receivableView } from '@/lib/customer-cash';
 import { NextResponse } from 'next/server';
 import { requireUser } from '@/lib/session';
 import { prisma } from '@/lib/prisma';
@@ -29,13 +30,13 @@ export async function GET() {
       },
     },
     orderBy: { dueAt: 'asc' },
-    select: { id: true, orderId: true, amount: true, status: true, dueAt: true, reminderCount: true, termStartedAt: true },
+    select: { id: true, orderId: true, cashPostings: { select: { releasedCents: true } }, amount: true, status: true, dueAt: true, reminderCount: true, termStartedAt: true },
   });
   const now = new Date();
   const receivables = rawReceivables.map((receivable) => {
     const overdueDays = overdueDaysFromDueAt(receivable.dueAt, now);
     return {
-      ...receivable,
+      ...receivableView(receivable),
       overdueDays,
       trigger: overdueDays >= CREDIT_REVIEW_POLICY.holdAfterDays
         ? 'order_hold'

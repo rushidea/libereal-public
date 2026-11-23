@@ -1,3 +1,4 @@
+import { receivableView } from '@/lib/customer-cash';
 import { NextRequest, NextResponse } from 'next/server';
 import type { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
@@ -51,6 +52,7 @@ const orderListSelect = {
 } satisfies Prisma.OrderSelect;
 
 const receivableSelect = {
+  cashPostings: { select: { releasedCents: true } },
   id: true,
   amount: true,
   status: true,
@@ -145,11 +147,10 @@ export async function GET(req: NextRequest) {
         },
       }),
       query.receivableOpen
-        ? prisma.accountReceivable.aggregate({
-            where: { status: 'open', order: { is: { archivedAt: null } } },
-            _count: { _all: true },
-            _sum: { amount: true },
-          })
+        ? prisma.$queryRaw<Array<{ count: bigint; cents: bigint }>>`SELECT COUNT(*) AS count,
+            COALESCE(SUM(MAX(0, ROUND(r.amount * 100) - COALESCE(
+              (SELECT SUM(c.releasedCents) FROM CustomerCashPosting c WHERE c.orderId=r.orderId),0))),0) AS cents
+            FROM AccountReceivable r JOIN "Order" o ON o.id=r.orderId WHERE r.status IN ('open','overdue') AND o.archivedAt IS NULL`
         : Promise.resolve(null),
     ]);
 
@@ -185,7 +186,8 @@ export async function GET(req: NextRequest) {
 
     const enriched = orders.map((order) => {
       const { paymentAttempts, addressSnapshot, customerId, ...rest } = order;
-      const receivable = 'receivable' in rest ? rest.receivable ?? null : null;
+      const raw = 'receivable' in rest ? rest.receivable as Prisma.AccountReceivableGetPayload<{ select: typeof receivableSelect }> | null : null;
+      const receivable = raw ? receivableView(raw) : null;
       const summary = { ...rest };
       if ('receivable' in summary) delete summary.receivable;
 
@@ -239,7 +241,7 @@ export async function GET(req: NextRequest) {
         pendingAlipayUnpaid,
       ),
       receivableSummary: receivableAggregate
-        ? { count: receivableAggregate._count._all, amount: receivableAggregate._sum.amount ?? 0 }
+        ? { count: Number(receivableAggregate[0].count), amount: Number(receivableAggregate[0].cents) / 100 }
         : null,
     });
   } catch (err) {

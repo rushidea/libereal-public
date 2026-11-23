@@ -1,3 +1,4 @@
+import { receivableOutstanding } from '@/lib/customer-cash';
 import type { BackgroundTask } from '@prisma/client';
 import { sendAliyunSmsTemplate } from '@/lib/aliyun-sms';
 import { parseTaskPayload } from '@/lib/background-tasks';
@@ -47,13 +48,14 @@ async function sendOrderReminder(task: BackgroundTask): Promise<unknown> {
   const receivable = await prisma.accountReceivable.findUnique({
     where: { id: payload.receivableId },
     include: {
+      cashPostings: { select: { releasedCents: true } },
       user: { select: { email: true, phone: true } },
       order: { select: { id: true, ownerScope: true, organization: { select: { owner: { select: { email: true } } } } } },
     },
   });
   if (!receivable || !['open', 'overdue'].includes(receivable.status)) return { skipped: 'receivable_closed' };
 
-  const message = `订单 ${receivable.order.id} 应付款 ¥${receivable.amount.toFixed(2)} 已超过 ${payload.overdueDays} 天，请及时完成付款。`;
+  const message = `订单 ${receivable.order.id} 应付款 ¥${receivableOutstanding(receivable.amount, receivable.status, receivable.cashPostings).toFixed(2)} 已超过 ${payload.overdueDays} 天，请及时完成付款。`;
   const recipients = new Set([receivable.user.email]);
   if (receivable.order.ownerScope === 'organization' && receivable.order.organization?.owner.email) {
     recipients.add(receivable.order.organization.owner.email);
@@ -66,7 +68,7 @@ async function sendOrderReminder(task: BackgroundTask): Promise<unknown> {
   if (templateCode && receivable.user.phone) {
     await sendAliyunSmsTemplate(receivable.user.phone, templateCode, {
       orderId: receivable.order.id,
-      amount: receivable.amount.toFixed(2),
+      amount: receivableOutstanding(receivable.amount, receivable.status, receivable.cashPostings).toFixed(2),
       days: payload.overdueDays,
     });
   }

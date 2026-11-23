@@ -137,3 +137,30 @@ export async function previewBankAllocation(tx: Db, order: Debtor, activities: P
     allocationReference, amountCents, receiptTotalCents: bank.receiptTotalCents, allocatedBeforeCents,
     bank, receiptReferenceKey };
 }
+
+export async function orderReceiptEvidence(tx: Db, order: SourceOrder, activities: PurchaseActivity[], principal: number) {
+  const { bankReceipts, ...recorded } = await purchaseReceiptAllocations(tx, order, activities);
+  const alipay = order.paymentAttempts.filter(row => row.provider === 'alipay' && row.status === 'paid'
+    && row.paidAt && row.tradeNo && order.paidAt && Math.round(row.amount * 100) === principal);
+  let paymentAttemptId: string | null = null;
+  let nativePaidAt: string | null = null;
+  if (alipay.length === 1) {
+    const [attempt] = alipay;
+    const events = await tx.orderEvent.findMany({ where: { orderId: order.id, type: 'payment_received' } });
+    if (events.some(row => {
+      const meta = jsonObject(row.metadata);
+      return meta.outTradeNo === attempt.outTradeNo && meta.tradeNo === attempt.tradeNo;
+    })) {
+      paymentAttemptId = attempt.id;
+      nativePaidAt = attempt.paidAt!.toISOString();
+    }
+  }
+  const ar = order.receivable;
+  const release = order.creditTransactions.filter(row => row.type === 'release' && row.userId === order.customerId && row.actorId
+    && !row.reason && Math.round(row.amount * 100) === -principal);
+  const settled = ar && ar.status === 'paid' && ar.paidAt && order.paidAt?.getTime() === ar.paidAt.getTime()
+    && ar.userId === order.customerId && Math.round(ar.amount * 100) === principal && release.length === 1 ? ar.id : null;
+  const payment = { ...recorded, receivedCents: paymentAttemptId ? principal : recorded.allocatedCents,
+    paymentAttemptId, nativePaidAt, settledReceivableId: settled };
+  return { payment, bankReceipts };
+}

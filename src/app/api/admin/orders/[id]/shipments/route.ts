@@ -4,8 +4,6 @@ import { authorizeAdminOrderMutation, consumeAdminOrderStepUp, extractStepUpToke
 import { assertOrderTransition, fulfillmentStatus, validateShipmentItems } from '@/lib/order-domain';
 import { ensureLocalStockShipment } from '@/lib/fulfillment-legacy';
 import { shipOrderInventory } from '@/lib/inventory';
-import { startOrderReceivableTerm } from '@/lib/customer-credit';
-import { isPostDeliveryPaymentMethod } from '@/data/payment-methods';
 
 const METHODS = ['logistics', 'self_pickup', 'dedicated_delivery'];
 
@@ -88,9 +86,6 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
           metadata: JSON.stringify({ shipmentId: shipment.id, method: body.method, items: shipmentItems }),
         } },
       } });
-      if (nextStatus === 'shipped' && isPostDeliveryPaymentMethod(order.paymentMethod)) {
-        await startOrderReceivableTerm(tx, id, shippedAt);
-      }
       return { shipment, orderEmail: order.email, status: nextStatus };
     });
 

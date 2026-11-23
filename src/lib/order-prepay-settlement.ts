@@ -34,6 +34,7 @@ const ACTIVE_ALIPAY_ATTEMPT_STATUSES = ['created', 'redirected', 'WAIT_BUYER_PAY
 const PAID_ATTEMPT_STATUSES = new Set([
   'paid',
   'paid_superseded_reconciliation_required',
+  'paid_terminal_reconciliation_required',
   'paid_stock_shortfall_reconciliation_required',
 ]);
 

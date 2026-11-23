@@ -1,3 +1,4 @@
+import { receivableOutstanding } from '@/lib/customer-cash';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { requireAdmin, getAdminPermissions } from '@/lib/session';
@@ -161,7 +162,6 @@ export async function GET(_req: NextRequest) {
       pendingOrganizations,
       revenueTodayAgg,
       newCustomersMonth,
-      receivableAgg,
       receivableOverdueCount,
       paymentMethodOrders,
       funnelInquiries,
@@ -184,15 +184,9 @@ export async function GET(_req: NextRequest) {
         where: { createdAt: { gte: startOfToday }, archivedAt: null },
       }),
       prisma.user.count({ where: { createdAt: { gte: startOfMonth } } }),
-      // 待收款：status=open 且订单未归档的应收款（与活跃订单待收款视图口径一致）
-      prisma.accountReceivable.aggregate({
-        _sum: { amount: true },
-        _count: { _all: true },
-        where: { status: 'open', order: { archivedAt: null } },
-      }),
       // 已过 dueAt 仍未收款的笔数（逾期，同样限定未归档）
       prisma.accountReceivable.count({
-        where: { status: 'open', order: { archivedAt: null }, dueAt: { lt: now } },
+        where: { status: { in: ['open', 'overdue'] }, order: { archivedAt: null }, dueAt: { lt: now } },
       }),
       // 支付方式分布：近 90 天订单（未归档）—— 取原始值，JS 内 normalize 归并
       prisma.order.findMany({
@@ -308,15 +302,15 @@ export async function GET(_req: NextRequest) {
       { key: 'overdue-90+', label: '逾期 90 天以上', test: (r: { dueAt: Date | null }) => overdueDaysOf(r.dueAt, now) > 90 },
     ];
     const openReceivables = await prisma.accountReceivable.findMany({
-      where: { status: 'open', order: { archivedAt: null } },
-      select: { amount: true, dueAt: true },
+      where: { status: { in: ['open', 'overdue'] }, order: { archivedAt: null } },
+      select: { amount: true, status: true, dueAt: true, cashPostings: { select: { releasedCents: true } } },
     });
     const receivableAging = agingBuckets.map((bucket) => {
       const matched = openReceivables.filter(bucket.test);
       return {
         key: bucket.key,
         label: bucket.label,
-        amount: Math.round(matched.reduce((s, r) => s + r.amount, 0) * 100) / 100,
+        amount: Math.round(matched.reduce((s, r) => s + receivableOutstanding(r.amount, r.status, r.cashPostings), 0) * 100) / 100,
         count: matched.length,
       };
     });
@@ -375,8 +369,8 @@ export async function GET(_req: NextRequest) {
       ...(hasFinance
         ? {
             receivable: {
-              count: receivableAgg._count._all,
-              totalAmount: Math.round((receivableAgg._sum.amount ?? 0) * 100) / 100,
+              count: openReceivables.length,
+              totalAmount: Math.round(receivableAgingTotal * 100) / 100,
               overdueCount: receivableOverdueCount,
             },
           }

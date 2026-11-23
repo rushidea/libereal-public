@@ -1,3 +1,4 @@
+import { receivableOutstanding } from '@/lib/customer-cash';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import {
@@ -29,6 +30,7 @@ async function handle(req: NextRequest) {
     const receivables = await prisma.accountReceivable.findMany({
       where: { status: { in: ['open', 'overdue'] }, dueAt: { not: null, lte: now } },
       include: {
+        cashPostings: { select: { releasedCents: true } },
         user: { select: { id: true, email: true, phone: true } },
         order: {
           select: {
@@ -121,7 +123,7 @@ async function handle(req: NextRequest) {
             role: 'customer',
             type: 'account_payable_reminder',
             title: '应付款提醒',
-            content: `订单 ${receivable.order.id} 应付款 ¥${receivable.amount.toFixed(2)} 已超过 ${overdueDays} 天，请及时完成付款。`,
+            content: `订单 ${receivable.order.id} 应付款 ¥${receivableOutstanding(receivable.amount, receivable.status, receivable.cashPostings).toFixed(2)} 已超过 ${overdueDays} 天，请及时完成付款。`,
             linkUrl: recipient.linkUrl,
             metadata: JSON.stringify({ receivableId: receivable.id, orderId: receivable.order.id, overdueDays }),
           },

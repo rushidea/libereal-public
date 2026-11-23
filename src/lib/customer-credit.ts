@@ -1,3 +1,4 @@
+import { jsonObject } from '@/lib/order-catalog-repricing';
 import type { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { calculateOrderPoints } from '@/lib/points';
@@ -222,7 +223,14 @@ export async function reserveOrderCredit(tx: Tx, orderId: string, actorId?: stri
   const orderAmount = roundCents(order.total);
   const usedAmount = roundCents(account.usedAmount + orderAmount);
   if (usedAmount > limit) throw new Error('CREDIT_LIMIT_EXCEEDED');
-  const confirmedAt = new Date();
+  const history = actorId && order.status === 'confirmed' ? await tx.orderStatusHistory.findFirst({
+    where: { orderId, fromStatus: 'pending', toStatus: 'confirmed', actorId },
+    orderBy: { createdAt: 'desc' }, select: { createdAt: true, metadata: true },
+  }) : null;
+  const merchant = jsonObject(history?.metadata);
+  const acceptedAt = history && merchant?.actorType === 'libereal_admin' && merchant.action === 'accept_order'
+    && merchant.version === 2 ? history.createdAt : null;
+  const confirmedAt = acceptedAt ?? new Date();
   await tx.creditAccount.update({ where: { id: account.id }, data: { usedAmount } });
   await tx.creditTransaction.create({ data: { userId: user.id, orderId, type: 'reserve', amount: orderAmount, balanceAfter: usedAmount, actorId } });
   await tx.order.update({ where: { id: orderId }, data: { customerId: user.id } });
@@ -232,6 +240,7 @@ export async function reserveOrderCredit(tx: Tx, orderId: string, actorId?: stri
       userId: user.id,
       amount: orderAmount,
       confirmedAt,
+      ...(acceptedAt ? { termStartedAt: acceptedAt, dueAt: new Date(acceptedAt.getTime() + account.paymentTermDays * 86400000) } : {}),
       paymentTermDaysSnapshot: account.paymentTermDays,
     },
   });
@@ -253,6 +262,11 @@ export type UnsettledReceivableSync = {
   usedAmount: number;
   status: string;
 };
+
+async function hasCustomerCash(tx: Tx, orderId: string) {
+  return Boolean(await tx.customerCashPosting.findFirst({ where: { orderId }, select: { id: true } })
+    || await tx.purchaseActivity.findFirst({ where: { orderId, action: 'record_customer_receipt' }, select: { id: true } }));
+}
 
 export async function syncUnsettledReceivableAmount(
   tx: Tx,
@@ -276,6 +290,7 @@ export async function syncUnsettledReceivableAmount(
     return { adjusted: false, amount: nextAmount, usedAmount: account.usedAmount, status: receivable.status };
   }
 
+  if (await hasCustomerCash(tx, orderId)) throw new Error('ORDER_AMOUNT_LOCKED');
   const usedAmount = roundCents(account.usedAmount + delta);
   if (usedAmount < 0) throw new Error('CREDIT_USED_INVALID');
   if (delta > 0) {
@@ -313,7 +328,7 @@ export async function startOrderReceivableTerm(tx: Tx, orderId: string, startedA
 export async function releaseOrderReceivableOnCancellation(tx: Tx, orderId: string, actorId?: string | null) {
   const receivable = await tx.accountReceivable.findUnique({ where: { orderId } });
   if (!receivable || receivable.status === 'cancelled') return receivable;
-  if (receivable.status === 'paid') throw new Error('PAID_ORDER_REFUND_REQUIRED');
+  if (receivable.status === 'paid' || await hasCustomerCash(tx, orderId)) throw new Error('PAID_ORDER_REFUND_REQUIRED');
   const account = await tx.creditAccount.findUnique({ where: { userId: receivable.userId } });
   if (!account) throw new Error('CREDIT_ACCOUNT_NOT_FOUND');
   const usedAmount = Math.max(0, account.usedAmount - receivable.amount);
@@ -338,8 +353,20 @@ export async function settleOrderReceivable(tx: Tx, orderId: string, actorId?: s
   if (receivable.status === 'paid') return receivable;
   const account = await tx.creditAccount.findUnique({ where: { userId: receivable.userId } });
   if (!account) throw new Error('CREDIT_ACCOUNT_NOT_FOUND');
+  if (!isUnsettledReceivableStatus(receivable.status) || await hasCustomerCash(tx, orderId)) {
+    throw new Error('VERIFIED_RECEIPTS_REQUIRED');
+  }
   const paidAt = new Date();
-  const usedAmount = Math.max(0, account.usedAmount - receivable.amount);
+  const usedAmount = roundCents(account.usedAmount - receivable.amount);
+  if (usedAmount < 0) throw new Error('CREDIT_USED_INVALID');
+  await tx.creditAccount.update({ where: { id: account.id }, data: { usedAmount } });
+  await tx.creditTransaction.create({ data: { userId: receivable.userId, orderId, type: 'release', amount: -receivable.amount, balanceAfter: usedAmount, actorId } });
+  return finishCustomerReceivable(tx, receivable, paidAt);
+}
+
+export async function finishCustomerReceivable(tx: Tx, receivable: { id: string; orderId: string; userId: string; amount: number }, paidAt: Date) {
+  const { orderId } = receivable;
+  const account = await tx.creditAccount.findUniqueOrThrow({ where: { userId: receivable.userId } });
   const openReceivables = await tx.accountReceivable.findMany({
     where: {
       userId: receivable.userId,
@@ -355,16 +382,11 @@ export async function settleOrderReceivable(tx: Tx, orderId: string, actorId?: s
     maxOverdueDays: maxOverdueDaysForReceivables(openReceivables, paidAt),
     hasEligibleHold: hasEligibleCreditHold(openReceivables, account.manuallyUnlockedAt, paidAt),
   });
-  await tx.creditAccount.update({
-    where: { id: account.id },
-    data: {
-      usedAmount,
-      ...(nextStatus === account.status ? {} : { status: nextStatus, statusSource: 'system' }),
-    },
-  });
-  await tx.creditTransaction.create({ data: { userId: receivable.userId, orderId, type: 'release', amount: -receivable.amount, balanceAfter: usedAmount, actorId } });
+  if (nextStatus !== account.status) {
+    await tx.creditAccount.update({ where: { id: account.id }, data: { status: nextStatus, statusSource: 'system' } });
+  }
   await tx.accountReceivable.update({ where: { id: receivable.id }, data: { status: 'paid', paidAt } });
-  await tx.order.update({ where: { id: orderId }, data: { status: 'completed', paidAt } });
+  await tx.order.update({ where: { id: orderId }, data: { paidAt } });
   const existingPoints = await tx.pointsLog.findFirst({ where: { userId: receivable.userId, relatedId: orderId, type: 'order_credit' } });
   const earned = calculateOrderPoints(receivable.amount);
   if (!existingPoints && earned > 0) {
