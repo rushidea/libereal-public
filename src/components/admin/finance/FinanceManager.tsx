@@ -6,10 +6,11 @@ import { button, field, money } from '@/components/admin/purchases/PurchaseLineF
 import type { FinanceInput } from '@/lib/finance-actions';
 import type { FinanceWorkspace } from '@/lib/finance-workspace';
 import { isOrderStatus, ORDER_STATUS_LABELS } from '@/lib/order-domain';
-import FinanceForm, { actionLabels, dateLabel, invoiceStateLabels, triggerLabels } from './FinanceForm';
+import FinanceForm, { actionLabels, dateLabel, invoiceStateLabels, paymentCaseProgressLabels, triggerLabels } from './FinanceForm';
 import FinancePreview, { type FinancePreviewResult } from './FinancePreview';
 
-type OrderRow = { id: string; status: string; amount: number; receivableStatus: string | null; supplierCount: number };
+type OrderRow = { id: string; status: string; amount: number; receivableStatus: string | null; supplierCount: number;
+  attention: { supplierDifferences: number; invoiceFollowups: number } | null };
 const arLabel: Record<string, string> = { open: '待回款', overdue: '逾期未结', paid: '已结清', cancelled: '已取消' };
 const orderLabel = (status: string) => isOrderStatus(status) ? ORDER_STATUS_LABELS[status] : status;
 const heading = 'text-base font-semibold text-slate-900';
@@ -25,17 +26,21 @@ export default function FinanceManager({ initialOrder }: { initialOrder: string 
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [loaded, setLoaded] = useState(false);
+  const [attentionOnly, setAttentionOnly] = useState(false);
   const generation = useRef(0);
   const selected = useRef('');
   const { begin, dialog } = useAdminMfaStepUp();
 
-  const load = useCallback(async (orderId: string, search = '', signal?: AbortSignal) => {
+  const load = useCallback(async (orderId: string, { search = '', attention = false, signal }:
+    { search?: string; attention?: boolean; signal?: AbortSignal } = {}) => {
     const id = ++generation.current;
     selected.current = orderId;
+    if (!orderId) setAttentionOnly(attention);
     setBusy(true); setLoaded(false); setError(''); setMessage(''); setView(null); setList([]); setPending(null); setAction(null); setCanWrite(false);
     try {
-      const params = orderId ? { orderId } : { search };
-      const response = await fetch('/api/admin/finance?' + new URLSearchParams(Object.entries(params)), { cache: 'no-store', signal });
+      const params = new URLSearchParams(orderId ? { orderId } : { search });
+      if (!orderId && attention) params.set('attention', '1');
+      const response = await fetch('/api/admin/finance?' + params, { cache: 'no-store', signal });
       const body = await response.json();
       if (generation.current !== id || signal?.aborted) return;
       if (!response.ok) throw new Error(response.status === 403 ? '当前账号没有财务查看权限' : body.error || '账务读取失败');
@@ -45,7 +50,7 @@ export default function FinanceManager({ initialOrder }: { initialOrder: string 
   }, []);
   useEffect(() => {
     const controller = new AbortController();
-    queueMicrotask(() => { if (!controller.signal.aborted) void load(initialOrder, '', controller.signal); });
+    queueMicrotask(() => { if (!controller.signal.aborted) void load(initialOrder, { signal: controller.signal }); });
     return () => controller.abort();
   }, [initialOrder, load]);
 
@@ -85,33 +90,46 @@ export default function FinanceManager({ initialOrder }: { initialOrder: string 
     if (active.some(row => row.allocations.some(a => a.status === 'recorded'))) actions.push('open_correction');
     if (active.some(row => row.allocations.some(a => a.status === 'correction_pending'))) actions.push('resolve_correction');
     if (view.purchases.length) actions.push('reconcile_supplier');
-    if (view.latePayments.length || view.receipts.some(row => !row.counted && !row.reconciled)) actions.push('review_payment_case', 'resolve_payment_case');
+    const cases = [...view.latePayments, ...view.receipts.filter(row => !row.counted && !row.reconciled)];
+    if (cases.some(row => !row.review)) actions.push('review_payment_case');
+    if (cases.some(row => row.review)) actions.push('update_payment_case');
   }
   return <main className="mx-auto max-w-6xl space-y-5 p-4 text-slate-800 md:p-6">
     <h1 className="text-2xl font-semibold">票款与对账</h1>
-    <form className="flex flex-wrap items-end gap-2" onSubmit={event => { event.preventDefault(); void load('', query); }}>
+    <form className="flex flex-wrap items-end gap-2" onSubmit={event => {
+      event.preventDefault(); void load('', { search: query, attention: attentionOnly });
+    }}>
       <label className="grid gap-1 text-sm">订单、客户邮箱、采购单或发票号<input className={field} value={query} onChange={e => setQuery(e.target.value)}/></label>
       <button className={button} disabled={busy}>查找</button>
+      <button type="button" className={button} disabled={busy} onClick={() => {
+        setQuery(''); void load('', { attention: view ? true : !attentionOnly });
+      }}>{attentionOnly && !view ? '查看全部票款' : '供方差异与到期追票'}</button>
       {view && <button type="button" className={button} disabled={busy} onClick={() => void load(view.orderId)}>刷新原单</button>}
     </form>
     {error && <p role="alert" className="text-red-700">{error}</p>}
     {message && <p role="status" className="text-emerald-800">{message}</p>}
     {busy && <p role="status">正在核对账务记录…</p>}
     {loaded && !view && (list.length ? <div className="overflow-x-auto"><table className="w-full text-left text-sm">
-      <thead><tr><th>客户订单</th><th>履约状态</th><th>订单金额</th><th>应收</th></tr></thead><tbody>{list.map(row =>
+      <thead><tr><th>客户订单</th><th>履约状态</th><th>订单金额</th><th>应收</th>{attentionOnly && <th>待办</th>}</tr></thead><tbody>{list.map(row =>
         <tr key={row.id} className="border-t"><td className="py-2"><button className="font-medium underline" onClick={() => void load(row.id)}>{row.id}</button></td>
-          <td>{orderLabel(row.status)}</td><td>{money(Math.round(row.amount * 100))}</td><td>{arLabel[row.receivableStatus ?? ''] ?? '另按订单核对'}</td></tr>)}</tbody></table></div>
-      : <p>未找到对应票款记录。</p>)}
+          <td>{orderLabel(row.status)}</td><td>{money(Math.round(row.amount * 100))}</td><td>{arLabel[row.receivableStatus ?? ''] ?? '另按订单核对'}</td>
+          {attentionOnly && <td>{row.attention?.supplierDifferences ? `供方差异 ${row.attention.supplierDifferences} 项` : ''}
+            {row.attention?.invoiceFollowups ? ` 到期追票 ${row.attention.invoiceFollowups} 项` : ''}</td>}</tr>)}</tbody></table></div>
+      : <p>{attentionOnly ? '没有待跟进的供方差异或到期追票。' : '未找到对应票款记录。'}</p>)}
     {view && <><section className="space-y-2 rounded border border-slate-200 p-4">
       <h2 className={heading}>客户订单 {view.orderId}</h2>
       <p>{view.customerEmail} · {orderLabel(view.status)} · 订单金额 {money(view.principalCents)}</p>
       <p>已核销或平台确认 {money(view.settlementCents)} · 已核验可归属 {money(view.verifiedCents)}
         {view.receivable && ' · 应收余额 ' + money(view.receivable.outstandingCents)}</p>
       {view.receivable && <p>账期 {view.receivable.terms} 天 · 起算 {dateLabel(view.receivable.termStartedAt)} · 到期 {dateLabel(view.receivable.dueAt)}</p>}
+      {view.receivable?.needsTermReview && <p>旧账期的起算日期与平台接单日期不同，请核对本单书面约定。</p>}
       <p>平台接单 {dateLabel(view.acceptedAt)} · 客户已签收 {dateLabel(view.shipmentDates.delivered)}</p>
       {view.authorityConflict && <p role="alert">到账来源有重叠，须由财务核对原件。</p>}
       {view.nativePaymentId && <p>支付宝原生交易 {view.nativePaymentId}</p>}
-      {view.latePayments.map(row => <p key={row.id}>平台到账待核对 · {row.outTradeNo} · {money(row.amountCents)}</p>)}
+      {view.latePayments.map(row => <div key={row.id} className="text-sm">
+        <p>平台到账待核对 · {row.outTradeNo} · {money(row.amountCents)}{row.tradeNo && ' · 支付宝流水 ' + row.tradeNo}</p>
+        {row.review && <p>跟进负责人 {row.review.ownerId} · {paymentCaseProgressLabels[String(row.review.lastRecord.operation.outcome)] ?? '已领取待核对'}</p>}
+      </div>)}
     </section>
     {view.banks.length > 0 && <section aria-label="客户银行回款" className="space-y-2"><h2 className={heading}>客户银行回款</h2>
       {view.banks.map(bank => <p key={bank.id}>{bank.bankTrace} · {bank.payer} · 到账 {money(bank.totalCents)} · 尚可分配 {money(bank.availableCents)}</p>)}
@@ -120,14 +138,17 @@ export default function FinanceManager({ initialOrder }: { initialOrder: string 
       {view.purchases.map(po => <article key={po.id} className="space-y-1 rounded border border-slate-200 p-3 text-sm">
         <h3 className="font-semibold">{po.supplier ?? '供方须核对'} · {po.id}</h3>
         <p>收款方 {po.payees.join('、')} · 原采购 {money(po.originalCents)} · 已登记付款 {money(po.paidCents)} · 余款 {money(po.dueCents ?? undefined)}</p>
-        <p>有效来票 {money(po.invoicedCents)} · 待收票 {money(po.pendingInvoiceCents ?? undefined)} · {po.reconciled ? '已记录本版对账结果' : '待对账'}</p>
+        <p>有效来票 {money(po.invoicedCents)} · 更正中 {money(po.underCorrectionCents)} · 待收票 {money(po.pendingInvoiceCents ?? undefined)} · {po.reconciled ? '已记录本版对账结果' : '待对账'}</p>
+        {po.supplierFollowup && <p>供方差异待跟进 · 经办人 {po.supplierFollowup.actorId} · {String(po.supplierFollowup.reference)}</p>}
         {po.payments.map(row => <p key={row.id}>实际付款凭据 {row.reference} · {money(row.amountCents)}</p>)}
       </article>)}</section>}
     {view.invoicePlans.length > 0 && <section aria-label="发票安排与原件" className="space-y-2"><h2 className={heading}>发票安排与原件</h2>
       {view.invoicePlans.map(plan => <article key={plan.id} className="space-y-1 rounded border border-slate-200 p-3 text-sm">
         <h3 className="font-semibold">{plan.side === 'customer' ? '客户开票' : '供应商来票'} · {plan.reference}{plan.closed && ' · 已关闭'}</h3>
         <p>{plan.issuer} 开给 {plan.recipient} · 安排 {money(plan.grossCents)} · 已回填 {money(plan.usedCents)} · {triggerLabels[plan.trigger]}</p>
-        <p>经办人 {plan.ownerId}{plan.lastFollowup && ' · 下次追票 ' + dateLabel(String(plan.lastFollowup.operation.nextReviewAt))}</p>
+        <p>经办人 {plan.ownerId}</p>
+        {!plan.closed && plan.usedCents < plan.grossCents && plan.lastFollowup && <p>下次追票 {dateLabel(String(plan.lastFollowup.operation.nextReviewAt))}
+          {' · 跟进人 ' + plan.lastFollowup.actorId}</p>}
         {plan.allocations.map(doc => <p key={doc.id}>票号 {doc.number} · {invoiceStateLabels[doc.status]} · 票面 {money(doc.grossCents)} · 本项 {money(doc.amountCents)}</p>)}
       </article>)}</section>}
     {actions.length > 0 && !action && <section className="space-y-2"><h2 className={heading}>办理事项</h2><div className="flex flex-wrap gap-2">

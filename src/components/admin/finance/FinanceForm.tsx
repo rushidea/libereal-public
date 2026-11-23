@@ -11,12 +11,15 @@ export const actionLabels = {
   restore_term: '按平台接单日期补齐账期', set_term: '登记单独约定的账期', create_plan: '登记开票或收票安排',
   confirm_condition: '核验约定开票条件', chase_invoice: '记录供应商追票', close_plan: '关闭未使用的安排',
   record_invoice: '回填实际发票', open_correction: '登记发票更正待办', resolve_correction: '回填发票更正结果',
-  reconcile_supplier: '核对采购、付款与来票', review_payment_case: '领取到账差异', resolve_payment_case: '登记差异核对结果',
+  reconcile_supplier: '核对采购、付款与来票', review_payment_case: '领取到账差异', update_payment_case: '记录到账差异进展',
 } satisfies Record<FinanceInput['action'], string>;
 
 export const triggerLabels: Record<string, string> = { accepted: '本方接单或供方确认订购', dispatched: '全部对客发货后',
   delivered: '客户实际签收后', paid: '实际付清后', manual: '经办人核验书面约定' };
 export const invoiceStateLabels: Record<string, string> = { recorded: '有效', correction_pending: '更正办理中', voided: '原票已红冲或作废' };
+export const paymentCaseProgressLabels: Record<string, string> = {
+  awaiting_provider_evidence: '等待原交易书证', awaiting_authorized_disposition: '等待获准并办妥的处理结果',
+};
 export const dateLabel = (value?: string | null) => value ? new Date(value).toLocaleString('zh-CN', { hour12: false }) : '待核对';
 
 function Text({ name, label, initial, required = true }: { name: string; label: string; initial?: string; required?: boolean }) {
@@ -50,8 +53,10 @@ export default function FinanceForm({ view, action, busy, onPreview, onCancel, o
   const po = view.purchases.find(row => row.id === poId);
   const invoices = [...new Map(view.invoicePlans.flatMap(row => row.allocations).map(doc => [doc.invoiceId, doc])).values()]
     .filter(doc => action === 'open_correction' ? doc.status === 'recorded' : doc.status === 'correction_pending');
-  const sources = [...view.latePayments.map(row => ({ id: row.id, label: row.outTradeNo })),
-    ...view.receipts.filter(row => !row.counted && !row.reconciled).map(row => ({ id: row.id, label: row.id }))];
+  const sources = [
+    ...view.latePayments.map(row => ({ id: row.id, review: row.review, label: row.outTradeNo + ' · ' + money(row.amountCents) })),
+    ...view.receipts.filter(row => !row.counted && !row.reconciled).map(row => ({ id: row.id, review: row.review, label: row.id })),
+  ].filter(row => action === 'review_payment_case' ? !row.review : Boolean(row.review));
   const cashSources = view.receipts.filter(row => row.counted && !view.cash.some(entry => entry.bankAllocationId === row.id))
     .map(row => ({ id: row.id, label: '银行回款 ' + money(row.amountCents) + ' · ' + row.id }));
   if (view.nativePaymentId && !view.cash.some(entry => entry.paymentAttemptId === view.nativePaymentId)) {
@@ -110,7 +115,7 @@ export default function FinanceForm({ view, action, busy, onPreview, onCancel, o
         <Text key={'recipient' + planId} name="recipient" label="票面受票方全称" initial={plan?.recipient}/><Text name="number" label="票面号码"/>
         <Time name="issuedAt" label="票面开票时间"/><Amount name="grossCents" label="整张发票含税合计"/>
         <Amount name="amountCents" label="本次归入此项金额"/></>}
-      {['chase_invoice','confirm_condition','close_plan','open_correction','resolve_correction','review_payment_case','resolve_payment_case'].includes(action)
+      {['chase_invoice','confirm_condition','close_plan','open_correction','resolve_correction','review_payment_case','update_payment_case'].includes(action)
         && <Time name="occurredAt" label="实际办理时间"/>}
       {action === 'chase_invoice' && <Time name="nextReviewAt" label="约定下次跟进时间"/>}
       {(action === 'open_correction' || action === 'resolve_correction') && <label className="grid gap-1">原发票<select name="invoiceId" className={field} required>
@@ -119,8 +124,12 @@ export default function FinanceForm({ view, action, busy, onPreview, onCancel, o
         <option value="" disabled>核对书面结果后选择</option><option value="retained">原票继续有效</option><option value="voided">原票已整张红冲或作废</option></select></label>}
       {action === 'reconcile_supplier' && <>{poSelect}<label className="grid gap-1">对账结果<select className={field} name="outcome" defaultValue="" required>
         <option value="" disabled>请选择</option><option value="matched">本次核对一致</option><option value="followup">有差异，继续跟进</option></select></label></>}
-      {(action === 'review_payment_case' || action === 'resolve_payment_case') && <label className="grid gap-1">待核对的交易<select name="sourceId" className={field} required>
+      {(action === 'review_payment_case' || action === 'update_payment_case') && <label className="grid gap-1">待核对的交易<select name="sourceId" className={field} required>
         {sources.map(row => <option key={row.id} value={row.id}>{row.label}</option>)}</select></label>}
+      {action === 'update_payment_case' && <label className="grid gap-1">当前进展<select className={field} name="outcome" defaultValue="" required>
+        <option value="" disabled>按已有书证选择</option>
+        {Object.entries(paymentCaseProgressLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+      </select></label>}
       <Text name="reference" label="书面依据或原件编号" initial={action === 'restore_term' ? view.acceptanceId ?? '' : ''}/>
       {action === 'restore_term' && view.acceptanceEvidenceHash
         ? <label className="grid gap-1">平台接单资料摘要<input className={field} readOnly name="sha256" value={view.acceptanceEvidenceHash}/></label>

@@ -213,6 +213,7 @@ function withdrawOrderErrorMessage(error: unknown, orderId: unknown): string {
     ORDER_NOT_FOUND: '有订单不存在或已被处理，请刷新后重试。本次没有改动任何订单。',
     POINTS_REFUND_FAILED: '积分未能退回，订单未移除。请刷新后重试。',
     CREDIT_ACCOUNT_NOT_FOUND: '找不到对应的授信账户，订单未移除。请先核对客户授信。',
+    CREDIT_RESERVATION_REVIEW_REQUIRED: `请先核对${target}原有的授信预占流水。`,
     'Admin MFA required': '请先完成再次确认身份，然后再取消并归档订单。',
     'Recent MFA verification required': '请先完成再次确认身份，然后再取消并归档订单。',
     'Admin authenticator policy required': '请先完成再次确认身份，然后再取消并归档订单。',

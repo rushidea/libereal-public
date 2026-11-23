@@ -2,7 +2,7 @@
 
 import type { previewFinanceAction } from '@/lib/finance-actions';
 import { button, money, primary } from '@/components/admin/purchases/PurchaseLineForm';
-import { actionLabels, dateLabel, triggerLabels } from './FinanceForm';
+import { actionLabels, dateLabel, paymentCaseProgressLabels, triggerLabels } from './FinanceForm';
 
 export type FinancePreviewResult = Awaited<ReturnType<typeof previewFinanceAction>>;
 
@@ -32,6 +32,11 @@ export default function FinancePreview({ preview, busy, onConfirm, onBack }: {
       <p>{op.outcome === 'matched' ? '登记本次核对一致' : '差异交由本次经办人跟进'}</p></>}
     {(op.action === 'open_correction' || op.action === 'resolve_correction') && <><p>原票 {op.originalNumber} · {op.outcome === 'voided' ? '实际整张红冲或作废' : op.outcome === 'retained' ? '原票继续有效' : '交财务核实更正结果'}</p>
       <ul>{op.affected.map(row => <li key={row.planId}>受影响订单 {row.orderId} · {money(row.amountCents)}</li>)}</ul></>}
+    {(op.action === 'review_payment_case' || op.action === 'update_payment_case') && <>
+      <p>原交易 {op.source.kind === 'alipay' ? op.source.outTradeNo : op.sourceId} · {money(op.source.amountCents)}</p>
+      {op.source.kind === 'alipay' && op.source.tradeNo && <p>支付宝流水 {op.source.tradeNo}</p>}
+      <p>跟进负责人 {op.ownerId} · {op.action === 'update_payment_case' ? paymentCaseProgressLabels[op.outcome] : '到账差异待核对'}</p>
+    </>}
     {'planId' in op && <p>发票安排 {op.planId}</p>}
     {'occurredAt' in op && <p>实际办理 {dateLabel(op.occurredAt)}</p>}
     {'nextReviewAt' in op && op.nextReviewAt && <p>下次跟进 {dateLabel(op.nextReviewAt)}</p>}
