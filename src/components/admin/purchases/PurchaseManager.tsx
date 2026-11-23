@@ -82,11 +82,15 @@ export default function PurchaseManager({initialOrder}:{initialOrder:string}) {
     {workspace&&<><div className="flex flex-wrap items-center justify-between gap-2"><h2 className="text-lg font-semibold">客户订单 {workspace.orderId}</h2>
       <button className={button} disabled={busy} onClick={()=>void load(workspace.orderId)}>刷新原单</button></div>
       <p className="text-sm">{workspace.eligibility.eligible?'已核实平台接单及本单采购启动依据':workspace.eligibility.reason}</p>
+      {workspace.continuation && <p className="text-sm text-gray-700" role="status">采购准备接续 · {{
+        order_ready:'已排队', awaiting_human:workspace.continuation.reason || '等待经办人核对',
+        succeeded:'已核对本单待采购商品行', failed:'运行失败，请核对原单后重新办理',
+      }[workspace.continuation.status] || workspace.continuation.status}</p>}
       {workspace.startReview && <PurchaseStartReview key={workspace.startReview.version} review={workspace.startReview}
         permissions={permissions} busy={busy} request={request} onError={setError}/>}
       <PurchaseFulfillmentReview key={workspace.fulfillment.version} orderId={workspace.orderId} review={workspace.fulfillment}
         canApprove={permissions.includes('purchases.approve')} busy={busy} request={request} onError={setError}/>
-      {workspace.canPrepare&&permissions.includes('purchases.write')&&
+      {(workspace.canPrepare||workspace.continuation?.status==='failed')&&permissions.includes('purchases.write')&&
         <button className={primary} disabled={busy} onClick={()=>void request({action:'prepare',orderId:workspace.orderId})}>从原订单准备采购</button>}
       {workspace.lines.length>0&&<section className="space-y-3"><h2 className="text-lg font-semibold">采购准备</h2>
         {workspace.lines.map(line=>{

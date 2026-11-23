@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { ListTodo, RefreshCw, RotateCcw } from 'lucide-react';
 import AiOpsPanel from './AiOpsPanel';
+import DeliveryReview, { deliveryOutcomes } from './DeliveryReview';
 import { getCloudMailUrl } from '@/lib/cloud-mail';
 
 type Task = {
@@ -16,6 +17,10 @@ type Task = {
   runAt: string;
   completedAt?: string | null;
   createdAt: string;
+  orderId?: string | null;
+  canRetry?: boolean;
+  deliveryVersion?: string | null;
+  deliveryOutcome?: string | null;
   inquiryId?: string | null;
   mailEmailId?: number | null;
   mailConflict?: boolean;
@@ -33,7 +38,9 @@ type TaskResponse = {
 
 const STATUS_LABELS: Record<string, string> = {
   pending: '待执行',
-  awaiting_human: '等待人工回复',
+  awaiting_human: '等待人工处理',
+  order_ready: '待接续采购准备',
+  delivery_reviewed: '已登记投递核查',
   running: '执行中',
   succeeded: '成功',
   failed: '失败',
@@ -42,11 +49,14 @@ const STATUS_LABELS: Record<string, string> = {
 const STATUS_CLASSES: Record<string, string> = {
   pending: 'bg-amber-50 text-amber-700',
   awaiting_human: 'bg-amber-50 text-amber-800',
+  order_ready: 'bg-amber-50 text-amber-700',
+  delivery_reviewed: 'bg-blue-50 text-blue-700',
   running: 'bg-blue-50 text-blue-700',
   succeeded: 'bg-emerald-50 text-emerald-700',
   failed: 'bg-red-50 text-red-700',
 };
 const TASK_LABELS: Record<string, string> = {
+  'order.purchase_prepare': '订单采购准备',
   'inquiry.supplier_written_quote': '供应商书面询价',
   'inquiry.supplier_mail_headers': '邮件待核对',
 };
@@ -136,12 +146,15 @@ export default function AdminTasksPage() {
               <td className="px-4 py-3 text-gray-600">{task.attempts} / {task.maxAttempts}</td>
               <td className="max-w-md px-4 py-3 text-xs leading-5 text-red-600">{task.mailConflict ? '同一邮件编号的邮件头不同，须人工核对' : task.lastError || '—'}</td>
               <td className="space-x-3 px-4 py-3 text-right">
+                {task.orderId && <a href={`/admin/purchases?orderId=${encodeURIComponent(task.orderId)}`} className="text-sm text-brand-700 underline">查看本单采购准备</a>}
+                {task.deliveryOutcome && <p className="text-xs">{deliveryOutcomes[task.deliveryOutcome]}</p>}
+                {task.deliveryVersion && <DeliveryReview key={task.deliveryVersion} id={task.id} version={task.deliveryVersion} reload={load}/>}
                 {task.inquiryId && <a href={`/admin/inquiries?inquiryId=${encodeURIComponent(task.inquiryId)}`} className="text-sm text-brand-700 underline">核对原询价</a>}
                 {task.type === 'inquiry.supplier_mail_headers' && !task.inquiryId && <a href={getCloudMailUrl()} className="text-sm text-brand-700 underline">到邮箱人工核对</a>}
                 {task.type === 'inquiry.supplier_mail_headers' && task.mailReviewVersion && <button type="button"
                   disabled={retrying === task.id} className="rounded border border-gray-300 px-2 py-1 text-xs text-gray-700 disabled:opacity-50"
                   onClick={() => { if (confirm('确认已处理这条收件待办？此操作不会确认供应商回复或生成报价。')) void updateTask(task.id, 'acknowledge_supplier_mail', task.mailReviewVersion ?? undefined); }}>结束邮件核对</button>}
-                {task.status === 'failed' && !TASK_LABELS[task.type] && <button type="button" onClick={() => void updateTask(task.id, 'retry')} disabled={retrying === task.id} className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 px-3 py-2 text-xs font-medium text-gray-700 hover:border-brand-300 hover:text-brand-700 disabled:opacity-50"><RotateCcw className="h-3.5 w-3.5" />重新执行</button>}
+                {task.canRetry && <button type="button" onClick={() => void updateTask(task.id, 'retry')} disabled={retrying === task.id} className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 px-3 py-2 text-xs font-medium text-gray-700 hover:border-brand-300 hover:text-brand-700 disabled:opacity-50"><RotateCcw className="h-3.5 w-3.5" />重新执行</button>}
               </td>
             </tr>)}
           </tbody>
