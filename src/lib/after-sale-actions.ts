@@ -7,7 +7,7 @@ import { cents, choice, condition, quantity, salePermission, saleProof, type Sal
 import { activeRefundSourceReview, actualRefunded, refundStep, releaseRefundSource, reviewRefundSource } from '@/lib/after-sale-refunds';
 import { afterSaleCaseInclude, afterSaleWorkspace, caseEvents, currentSaleAgreement, lastCaseEvent, originalSaleParcel, originalSaleParcelShares, saleOperation, supplierProgress, type AfterSaleWorkspace, type SaleCase } from '@/lib/after-sale-workspace';
 
-import { invoiceAgreement, invoiceOutcome, invoiceReissue, reviseInvoiceReissue, verifyInvoiceLine } from '@/lib/after-sale-invoices';
+import { invoiceAgreement, invoiceOutcome, invoiceReissue, invoiceReissueBeforeClose, reviseInvoiceReissue, verifyInvoiceLine } from '@/lib/after-sale-invoices';
 import { supplierAfterSale } from '@/lib/after-sale-supplier';
 import { approveAfterSaleExchange } from '@/lib/after-sale-exchanges';
 import { transferReference } from '@/lib/after-sale-transfers';
@@ -118,7 +118,8 @@ async function agreement(tx: Db, view: AfterSaleWorkspace, row: SaleCase, data: 
     condition(proof.occurredAt > latestDate && data.revisesAgreementId === earlier.id,
       '要修订当前客户决定，须选择其版本并提供实际发生在后的明确书面决定');
   }
-  if (row.customerState === 'awaiting_invoice_reissue') {
+  const previousInvoice = purchaseObject(earlier && saleOperation(earlier).invoice);
+  if (row.customerState === 'awaiting_invoice_reissue' || row.customerState === 'awaiting_close' && previousInvoice.expectedOutcome==='reissue') {
     condition(remedy === 'invoice' && actualRefunded(row) === 0, '请仅修订原票待办的重开条件');
     const revised = await reviseInvoiceReissue(tx,row,view.cases,data,proof);
     return { operation: { ...operation, revisesAgreementId: earlier?.id, invoice: revised.invoice }, customerState: revised.customerState };
@@ -149,7 +150,10 @@ async function agreement(tx: Db, view: AfterSaleWorkspace, row: SaleCase, data: 
     && physicalResults.every(result=>result.result==='return')), '已有实物结果，须谨慎沿原实退范围办理');
   if (remedy === 'refund_withdraw') return { operation: { ...operation, releasedCents:saleOperation(priorStop!).stoppedCents }, customerState:'awaiting_close' };
   if (remedy === 'refund') {
-    operation.refundQuantity = returned ? Math.min(returned,row.quantity) : row.quantity;
+    const allowed = returned ? Math.min(returned,row.quantity) : row.quantity;
+    const units = data.refundQuantity===undefined ? allowed : quantity(data.refundQuantity);
+    condition(units<=allowed,'本次退款件数超过原事项或已核实的实际退回范围');
+    operation.refundQuantity = units;
     if (returned) operation.originalReturns = caseEvents(row,'physical').filter(event=>saleOperation(event).result==='return').map(event=>event.id);
     return { operation, customerState: 'awaiting_refund' };
   }
@@ -316,11 +320,13 @@ async function planAction(tx: Db, view: AfterSaleWorkspace, row: SaleCase, input
   if (action === 'verify_invoice_line') return verifyInvoiceLine(tx,row,data,proof);
   if (action === 'invoice_outcome') return invoiceOutcome(tx,row,data,proof);
   if (action === 'invoice_reissue') return invoiceReissue(tx,row,view.cases,data,proof);
-  condition(action === 'close' && row.customerState === 'awaiting_close','须先取得本案所需的实际办理结果');
+  condition(action==='close','须先取得本案所需的实际办理结果');
+  const invoice = await invoiceReissueBeforeClose(tx,row,view.cases);
+  condition(invoice ? invoice.ready : row.customerState==='awaiting_close','须先取得本案所需的有效替代票或其他实际办理结果');
   const latestDecision = currentSaleAgreement(row);
   condition(!latestDecision || saleOperation(latestDecision).remedy !== 'keep' || !activeRefundSourceReview(row),
     '请先由财务核对并解除这笔未实际发出的退款预留');
-  return { operation: { note: requiredText(data.note,'办结依据、客户答复和实际处理结果'), supplierState: supplierProgress(row,view.deliveries,view.shortfalls.find(loss=>loss.resolutionId===row.shortfallId)).state }, customerState: 'closed' };
+  return { operation: { note: requiredText(data.note,'办结依据、客户答复和实际处理结果'), reissueVersion:invoice?.version, supplierState: supplierProgress(row,view.deliveries,view.shortfalls.find(loss=>loss.resolutionId===row.shortfallId)).state }, customerState: 'closed' };
 }
 
 export async function afterSaleAction(tx: Db, input: SaleInput, actor: SaleActor, confirmation?: {

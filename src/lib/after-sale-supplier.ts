@@ -46,10 +46,19 @@ export async function supplierAfterSale(tx: Db, view: AfterSaleWorkspace, row: S
     .reduce((sum, op) => sum + cents(op.amountCents), 0);
   condition(typeof ordered.payableCents === 'number' && existing + money.amountCents <= ordered.payableCents,
     '供方实际处理金额超过该采购行原书面金额，须另行核对');
+  const actualShares = original && !loss ? view.cases.flatMap(item=>{
+    const assigned = originalSaleParcelShares(item).filter(share=>share.parcelLineId===original.id);
+    const evidenceEventIds = assigned.flatMap(share=>share.evidenceEventId?[share.evidenceEventId]:[]);
+    return item.orderItemId===row.orderItemId && assigned.length && assigned.length===evidenceEventIds.length
+      ? [{caseId:item.id,quantity:assigned.reduce((sum,share)=>sum+share.quantity,0),evidenceEventIds}] : [];
+  }) : [];
+  const parcelClaim = actualShares.find(claim=>claim.caseId===row.id && claim.quantity===subject.quantity);
+  const parcel = parcelClaim && original ? {claims:actualShares,signedQuantity:original.receipts
+    .filter(receipt=>receipt.at<=Date.parse(proof.occurredAt)).reduce((sum,receipt)=>sum+receipt.quantity,0)} : undefined;
   const transfer = await allocateAfterSaleTransfer(tx, {
     direction: 'supplier_return', method: money.method, party: line.terms.supplier, destination: money.destination,
     referenceNo: money.referenceNo, supplierScope: { orderId:row.orderId, purchaseOrderId:purchase.id,orderItemId:row.orderItemId,
-      originalParcelLineId:subject.originalParcelLineId,shortfallId:subject.shortfallId },
-  }, data, proof, money.amountCents);
+      originalParcelLineId:subject.originalParcelLineId,shortfallId:subject.shortfallId,parcelClaim },
+  }, data, proof, money.amountCents,parcel);
   return { operation: { ...subject, ...money, transfer }, supplierState };
 }

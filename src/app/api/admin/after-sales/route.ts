@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { Prisma } from '@prisma/client';
-import { afterSaleInvoiceChoices } from '@/lib/after-sale-invoices';
+import { afterSaleInvoiceChoices, afterSaleReissueViews } from '@/lib/after-sale-invoices';
 import { eligibleAfterSalePayment, verifiedAfterSalePayment } from '@/lib/after-sale-payment-source';
 import { financeWorkspace } from '@/lib/finance-workspace';
 import { saleSnapshotFor } from '@/lib/after-sale-visibility';
@@ -34,6 +34,12 @@ export async function GET(req: NextRequest) {
       const workspace=await prisma.$transaction(async tx=>{
         const view=await afterSaleWorkspace(tx,id);
         const screen=afterSaleAdminView(view,permissions);
+        const reissues=await afterSaleReissueViews(tx,id,view.cases);
+        const cases=screen.cases.map(row=>{
+          const current=reissues.find(item=>item.caseId===row.id);
+          return current?{...row,customerState:current.customerState,
+            invoiceReissue:permissions.includes('finance.read')?current.invoiceReissue:null}:row;
+        });
         const refundDrafts=permissions.includes('finance.read') ? await Promise.all(view.cases
           .filter(row=>['awaiting_refund','refund_prepared','refund_approved','refund_followup'].includes(row.customerState))
           .map(async row=>({caseId:row.id,terms:refundTerms(row),position:await refundPosition(tx,view,row)}))) : [];
@@ -49,7 +55,7 @@ export async function GET(req: NextRequest) {
               customerKey:verified.customer.organizationId??verified.customer.customerId};
           } catch(error) {if(error instanceof PurchaseError)return null;throw error;}
         }))).filter(item=>item!==null);
-        return {...screen,refundDrafts,invoiceChoices,refundSources};
+        return {...screen,cases,refundDrafts,invoiceChoices,refundSources};
       });
       return NextResponse.json({workspace,permissions},{headers:{'Cache-Control':'private, no-store'}});
     }

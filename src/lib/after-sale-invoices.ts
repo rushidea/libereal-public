@@ -4,6 +4,7 @@ import { financeIdentity, invoiceStatus } from '@/lib/finance-workspace';
 import type { FulfillmentDb as Db } from '@/lib/fulfillment-records';
 import { jsonObject } from '@/lib/order-catalog-repricing';
 import { purchaseObject } from '@/lib/purchase-activity';
+import { pricingContentHash } from '@/lib/pricing-adjustment-approval';
 import { positiveCents, requiredText } from '@/lib/purchase-terms';
 import { cents, choice, condition, type SaleEvidence } from '@/lib/after-sale-records';
 import { caseEvents, currentSaleAgreement, saleOperation, type SaleCase } from '@/lib/after-sale-workspace';
@@ -156,15 +157,15 @@ export async function invoiceAgreement(tx: Db, row: SaleCase, data: Record<strin
     replacementAmountCents: expectedOutcome === 'reissue' ? cents(data.replacementAmountCents) : null };
 }
 
-type AfterSaleInvoiceUse = { caseId: string; orderItemId: string; allocationId: string; amountCents: number; financeEventId: unknown };
+type AfterSaleInvoiceUse = { eventId:string; caseId: string; orderItemId: string; allocationId: string; amountCents: number; financeEventId: unknown };
 
 async function afterSaleInvoiceUses(tx: Db, orderId: string, action: 'invoice_outcome' | 'invoice_reissue') {
   const events = await tx.afterSaleEvent.findMany({ where: { action, case: { orderId } },
-    select: { detail: true, caseId: true, case: { select: { orderItemId: true } } } });
+    select: { id:true, detail: true, caseId: true, case: { select: { orderItemId: true } } } });
   return events.flatMap(event => {
     const op = purchaseObject(jsonObject(event.detail).operation);
     return typeof op.allocationId === 'string' && positiveCents(op.amountCents)
-      ? [{ caseId:event.caseId, orderItemId:event.case.orderItemId, allocationId:op.allocationId,
+      ? [{ eventId:event.id, caseId:event.caseId, orderItemId:event.case.orderItemId, allocationId:op.allocationId,
         amountCents:op.amountCents, financeEventId:op.financeEventId }] : [];
   });
 }
@@ -234,100 +235,206 @@ function issuedReservation(row: SaleCase, uses: AfterSaleInvoiceUse[]) {
     if (typeof part.allocationId !== 'string' || !positiveCents(part.amountCents)) return [];
     const matched = uses.filter(use=>use.caseId===row.id && use.allocationId===part.allocationId);
     const amountCents = part.amountCents - sumParts(matched);
-    return amountCents>0 ? [{ caseId:row.id, orderItemId:row.orderItemId, allocationId:part.allocationId,amountCents,financeEventId:null }] : [];
+    return amountCents>0 ? [{ eventId:agreement?.id??row.id,caseId:row.id,orderItemId:row.orderItemId,allocationId:part.allocationId,amountCents,financeEventId:null }] : [];
   });
 }
 
-export async function reviseInvoiceReissue(tx: Db, row: SaleCase, cases: SaleCase[], data: Record<string, unknown>, proof: SaleEvidence) {
-  const earlier = currentSaleAgreement(row);
-  const prior = purchaseObject(earlier && saleOperation(earlier).invoice);
-  const correction = savedCorrection(row,earlier);
-  const outcome = choice(data.invoiceOutcome, ['voided','reissue'] as const, '尚未重开的客户书面决定');
-  condition(earlier && correction && data.invoiceAllocationId === prior.allocationId
-    && (data.amountCents === undefined || data.amountCents === prior.amountCents)
-    && Date.parse(proof.occurredAt) >= correction.occurredAt.getTime(),
-    '只能修订本案已红冲和尚未重开的原分摊');
-  const financeEventId = saleOperation(correction).financeEventId;
-  const uses = await afterSaleInvoiceUses(tx,row.orderId,'invoice_reissue');
-  const recorded = recordedReissue(uses,row,financeEventId);
-  const reservations = cases.flatMap(item=>issuedReservation(item,uses));
-  const competing = cases.some(other => {
-    if (other.id===row.id || other.orderItemId!==row.orderItemId || !['awaiting_invoice','awaiting_invoice_reissue'].includes(other.customerState)) return false;
-    const agreement = currentSaleAgreement(other);
-    const terms = purchaseObject(agreement && saleOperation(agreement).invoice);
-    return terms.invoiceId===prior.invoiceId && terms.expectedOutcome==='reissue'
-      && Number(terms.replacementAmountCents) > sumParts(recordedReissue(uses,other,financeEventId)) + sumParts(reservations.filter(part=>part.caseId===other.id));
+async function reissueBook(tx: Db, orderId: string) {
+  const parts = await tx.financeInvoiceAllocation.findMany({
+    where:{plan:{orderId},invoice:{side:'customer'}},
+    include:{plan:{select:{orderId:true,events:{where:{action:'record_invoice'},orderBy:ordered}}},
+      invoice:{include:{events:{where:{action:{in:['open_correction','resolve_correction']}},orderBy:ordered}}}},
   });
-  const issued = new Map<string,number>();
-  for (const use of [...recorded,...reservations.filter(part=>part.caseId===row.id)]) {
-    addInvoiceCharge(issued,use.allocationId,use.amountCents);
-  }
-  const bookings = await tx.financeEvent.findMany({ where: { action: 'record_invoice', orderId: row.orderId },
-    include: { invoice: { include: { allocations: { where: { plan: { orderId: row.orderId } }, ...invoicePart } } } } });
-  for (const event of bookings) {
-    const link = purchaseObject(financeProof(event)?.replaces);
-    if (link.correctionEventId !== financeEventId || link.invoiceId !== prior.invoiceId) continue;
-    const part = event.invoice?.allocations.find(item=>item.planId===event.planId);
-    if (!part) continue;
-    const coverage = await invoiceCoverage(tx,part,row.orderItemId);
-    const used = amountsAllocated([...uses,...reservations],part.id,row.orderItemId);
-    const left = Math.min(coverage.total - used.totalUsed,(coverage.limit ?? coverage.max) - used.lineUsed);
-    if (left <= 0) continue;
-    condition(coverage.limit !== null && !competing,
-      '已有涉及本商品的实际重开票，请先凭原件逐案核对票面和金额');
-    addInvoiceCharge(issued,part.id,left);
-  }
-  const replacementIssuedParts = [...issued].map(([allocationId,amountCents])=>({ allocationId,amountCents }));
-  const issuedCents = sumParts(replacementIssuedParts);
-  const recordedCents = sumParts(recorded);
-  const beforeCents = cents(prior.replacementAmountCents);
-  condition(issuedCents < beforeCents,'已有实际重开票占满本版金额，请保留原票面和回填结果');
-  const pendingCents = outcome === 'reissue' ? cents(data.replacementAmountCents) : 0;
-  const totalCents = issuedCents + pendingCents;
-  return { invoice: { ...prior, expectedOutcome:totalCents?'reissue':'voided', correctionId:correction.id,
-    replacementAmountCents:totalCents||null, replacementIssuedParts, replacementIssuedCents:issuedCents,
-    replacementRemainingCents:pendingCents, replacementRecordedCents:recordedCents },
-    customerState: totalCents>recordedCents ? 'awaiting_invoice_reissue' : 'awaiting_close' };
+  const uses = await afterSaleInvoiceUses(tx,orderId,'invoice_reissue');
+  const entries = parts.map(part=>{
+    const doc = part.invoice;
+    const booking = part.plan.events.find(event=>event.invoiceId===doc.id && financeProof(event));
+    const book = booking && financeProof(booking);
+    const signed = book && book.sha256===doc.sha256 && book.issuedAt===doc.issuedAt.toISOString() && book.number===doc.number
+      && book.amountCents===Number(part.amountCents);
+    const correction = doc.events.at(-1);
+    const proof = correction && financeProof(correction);
+    const affected = Array.isArray(proof?.affected) ? proof.affected : [];
+    const proved = !correction || proof?.originalSha256===doc.sha256 && affected.some(partOfInvoice=>partOfInvoice.orderId===orderId
+      && partOfInvoice.planId===part.planId && partOfInvoice.amountCents===Number(part.amountCents));
+    const financeStatus = proved ? invoiceStatus(doc.events) : 'correction_pending';
+    const status = signed || financeStatus==='voided' ? financeStatus : 'correction_pending';
+    const voidReceipt = status==='voided' && correction && typeof proof?.occurredAt==='string'
+      ? { id:correction.id, invoiceId:doc.id, occurredAt:proof.occurredAt } : null;
+    return { part,status,voidReceipt,bookingId:booking?.id??null,correctionId:correction?.id??null,
+      recorded:signed ? book : null, link:purchaseObject(signed && book?.replaces) };
+  });
+  return {entries,uses};
 }
 
-export async function invoiceReissue(tx: Db, row: SaleCase, cases: SaleCase[], data: Record<string, unknown>, proof: SaleEvidence) {
+type ReissueBook = Awaited<ReturnType<typeof reissueBook>>;
+type VoidReceipt = NonNullable<ReissueBook['entries'][number]['voidReceipt']>;
+
+function reissueChain(book: ReissueBook, root: VoidReceipt) {
+  const related = new Map<string,string>();
+  const receipts = new Map([[root.id,root]]);
+  for (let added=true; added;) {
+    added=false;
+    for (const entry of book.entries) {
+      const doc=entry.part.invoice;
+      if (related.has(entry.part.id) || !entry.recorded || doc.id===root.invoiceId) continue;
+      const parent=typeof entry.link.correctionEventId==='string' ? receipts.get(entry.link.correctionEventId) : undefined;
+      const bound = parent && parent.invoiceId===entry.link.invoiceId && parent.occurredAt<=doc.issuedAt.toISOString();
+      const reviewed = !entry.recorded.replaces && book.uses.some(use=>use.financeEventId===root.id && use.allocationId===entry.part.id);
+      if (!bound && !reviewed) continue;
+      related.set(entry.part.id,bound ? parent.id : root.id);
+      const ownReceipt = entry.voidReceipt;
+      if (ownReceipt && book.entries.filter(item=>item.part.invoiceId===doc.id).every(item=>related.has(item.part.id))) {
+        receipts.set(ownReceipt.id,ownReceipt);
+      }
+      added=true;
+    }
+  }
+  return {related,receipts};
+}
+
+async function reissuePosition(tx: Db, row: SaleCase, cases: SaleCase[], book: ReissueBook) {
   const agreement = currentSaleAgreement(row);
   const terms = purchaseObject(agreement && saleOperation(agreement).invoice);
   const correction = savedCorrection(row,agreement);
-  condition(row.customerState === 'awaiting_invoice_reissue' && terms.expectedOutcome === 'reissue' && correction,
+  if (!agreement || !correction || row.customerState==='closed' || terms.expectedOutcome!=='reissue') return null;
+  const financeEventId = saleOperation(correction).financeEventId;
+  const root = book.entries.find(entry=>entry.part.id===terms.allocationId)?.voidReceipt;
+  condition(root && root.id===financeEventId, '原票红冲回执待财务核对');
+  const chain = reissueChain(book, root);
+  const status = new Map(book.entries.map(entry=>[entry.part.id,entry.status]));
+  const effective = book.uses.filter(use=>status.get(use.allocationId)!=='voided');
+  const own = recordedReissue(book.uses,row,root.id);
+  const allReservations = cases.flatMap(item=>issuedReservation(item,book.uses));
+  const reservations = allReservations.filter(use=>status.get(use.allocationId)!=='voided');
+  const recordedCents = sumParts(own.filter(use=>status.get(use.allocationId)==='recorded'));
+  const recordedPendingCents = sumParts(own.filter(use=>status.get(use.allocationId)!=='recorded' && status.get(use.allocationId)!=='voided'));
+  const competing = cases.some(other => {
+    if (other.id===row.id || other.orderItemId!==row.orderItemId || other.customerState==='closed') return false;
+    const otherAgreement = currentSaleAgreement(other);
+    const otherTerms = purchaseObject(otherAgreement && saleOperation(otherAgreement).invoice);
+    return otherTerms.invoiceId===terms.invoiceId && otherTerms.expectedOutcome==='reissue'
+      && Number(otherTerms.replacementAmountCents) > sumParts(recordedReissue(effective,other,root.id))
+        + sumParts(reservations.filter(part=>part.caseId===other.id));
+  });
+  const claimed = new Map<string,number>();
+  for (const use of [...own,...allReservations.filter(use=>use.caseId===row.id)]) addInvoiceCharge(claimed,use.allocationId,use.amountCents);
+  let needsAttribution = false;
+  const unmatchedPending = new Set<string>();
+  const decisive = new Set(claimed.keys());
+  const scopeProofs: { allocationId:string; coverageId:string|null; reviewId:string|null }[]=[];
+  for (const entry of book.entries) {
+    if (!chain.related.has(entry.part.id)) continue;
+    const coverage = await invoiceCoverage(tx,entry.part,row.orderItemId);
+    if (coverage.max<=0 && !claimed.has(entry.part.id)) continue;
+    decisive.add(entry.part.id);
+    scopeProofs.push({allocationId:entry.part.id,coverageId:coverage.coverageId,reviewId:coverage.reviewId});
+    const account = entry.status==='voided' ? [...book.uses,...allReservations] : [...effective,...reservations];
+    const used = amountsAllocated(account,entry.part.id,row.orderItemId);
+    const left = Math.min(coverage.total-used.totalUsed,(coverage.limit??coverage.max)-used.lineUsed);
+    if (left<=0) continue;
+    if (coverage.limit===null || competing) {
+      if (entry.status!=='voided') needsAttribution=true;
+      if (entry.status==='correction_pending') unmatchedPending.add(entry.part.id);
+      continue;
+    }
+    addInvoiceCharge(claimed,entry.part.id,left);
+  }
+  const parts = [...claimed].map(([allocationId,amountCents])=>({allocationId,amountCents,status:status.get(allocationId)??'correction_pending'}))
+    .sort((a,b)=>a.allocationId.localeCompare(b.allocationId));
+  const issuedCents = sumParts(parts.filter(part=>part.status==='recorded'));
+  const pendingCents = sumParts(parts.filter(part=>part.status==='correction_pending'));
+  const voidedCents = sumParts(parts.filter(part=>part.status==='voided'));
+  const remainingCents=Math.max(0,cents(terms.replacementAmountCents)-recordedCents);
+  const pendingIds = new Set([...unmatchedPending,...parts.filter(part=>part.status==='correction_pending').map(part=>part.allocationId)]);
+  const pendingReceipts = book.entries.filter(entry=>pendingIds.has(entry.part.id)).map(entry=>({
+    allocationId:entry.part.id, number:entry.part.invoice.number, correctionId:entry.correctionId,
+    ownerId:entry.part.invoice.events.at(-1)?.actorId??null,
+  }));
+  const version=pricingContentHash({root,parts,scopeProofs:scopeProofs.sort((a,b)=>a.allocationId.localeCompare(b.allocationId)),
+    uses:[...book.uses,...allReservations].filter(use=>decisive.has(use.allocationId)).sort((a,b)=>a.eventId.localeCompare(b.eventId)),book:book.entries.filter(entry=>decisive.has(entry.part.id)).map(entry=>({
+    id:entry.part.id,bookingId:entry.bookingId,correctionId:entry.correctionId,status:entry.status,
+    sha256:entry.part.invoice.sha256, parentReceiptId:chain.related.get(entry.part.id)??null,
+  })).sort((a,b)=>a.id.localeCompare(b.id)),needsAttribution, unmatchedPending:[...unmatchedPending].sort()});
+  return {agreement,correction,terms,root,chain,effective,reservations,parts,issuedCents,pendingCents,voidedCents,recordedCents,recordedPendingCents,
+    remainingCents,needsAttribution,pendingReceipts,version,
+    ready:remainingCents===0 && pendingCents===0 && unmatchedPending.size===0 && !needsAttribution};
+}
+
+export async function afterSaleReissueViews(tx: Db, orderId: string, cases: SaleCase[]) {
+  const relevant=cases.filter(row=>row.customerState==='awaiting_invoice_reissue'||row.customerState==='awaiting_close');
+  if (!relevant.some(row=>savedCorrection(row) && purchaseObject(saleOperation(currentSaleAgreement(row)!).invoice).expectedOutcome==='reissue')) return [];
+  const book=await reissueBook(tx,orderId);
+  const views=await Promise.all(relevant.map(async row=>{
+    const position=await reissuePosition(tx,row,cases,book);
+    if (!position) return [];
+    const {issuedCents,pendingCents,voidedCents,recordedCents,remainingCents,ready,pendingReceipts,needsAttribution}=position;
+    return [{caseId:row.id,customerState:ready?'awaiting_close':'awaiting_invoice_reissue',
+      invoiceReissue:{issuedCents,pendingCents,voidedCents,recordedCents,remainingCents,pendingReceipts,needsAttribution}}];
+  }));
+  return views.flat();
+}
+
+export async function invoiceReissueBeforeClose(tx: Db, row: SaleCase, cases: SaleCase[]) {
+  const decision=currentSaleAgreement(row);
+  if (!savedCorrection(row) || purchaseObject(decision && saleOperation(decision).invoice).expectedOutcome!=='reissue') return null;
+  return reissuePosition(tx,row,cases,await reissueBook(tx,row.orderId));
+}
+
+export async function reviseInvoiceReissue(tx: Db, row: SaleCase, cases: SaleCase[], data: Record<string, unknown>, proof: SaleEvidence) {
+  const book=await reissueBook(tx,row.orderId);
+  const position=await reissuePosition(tx,row,cases,book);
+  const outcome=choice(data.invoiceOutcome,['voided','reissue'] as const,'尚未重开的客户书面决定');
+  condition(position && data.invoiceAllocationId===position.terms.allocationId
+    && (data.amountCents===undefined || data.amountCents===position.terms.amountCents)
+    && Date.parse(proof.occurredAt)>=position.correction.occurredAt.getTime(),'只能修订本案已红冲和尚未重开的原分摊');
+  const {terms, correction, issuedCents, pendingCents, voidedCents, recordedCents, needsAttribution}=position;
+  condition(!needsAttribution,'已有涉及本商品的实际重开票，请先凭原件逐案核对票面和金额');
+  const reservedCents=issuedCents+pendingCents;
+  condition(reservedCents<cents(terms.replacementAmountCents),'已有实际重开票占满本版金额，请保留原票面和回填结果');
+  const pendingCustomerCents=outcome==='reissue'?cents(data.replacementAmountCents):0;
+  const totalCents=reservedCents+pendingCustomerCents;
+  return { invoice:{...terms,expectedOutcome:totalCents?'reissue':'voided',correctionId:correction.id,
+    replacementAmountCents:totalCents||null,replacementIssuedParts:position.parts.filter(part=>part.status!=='voided')
+      .map(({allocationId,amountCents})=>({allocationId,amountCents})),
+    replacementIssuedCents:issuedCents,replacementPendingCents:pendingCents,replacementVoidedCents:voidedCents,
+    replacementRemainingCents:pendingCustomerCents,replacementRecordedCents:recordedCents,reissueVersion:position.version},
+    customerState:totalCents>recordedCents||pendingCents>0?'awaiting_invoice_reissue':'awaiting_close' };
+}
+
+export async function invoiceReissue(tx: Db, row: SaleCase, cases: SaleCase[], data: Record<string, unknown>, proof: SaleEvidence) {
+  const book=await reissueBook(tx,row.orderId);
+  const position=await reissuePosition(tx,row,cases,book);
+  condition(position && !position.ready && ['awaiting_close','awaiting_invoice_reissue'].includes(row.customerState),
     '请先核对本案的原票红冲回执及客户的重开决定');
-  const original = await allocation(tx, row.orderId, requiredText(terms.allocationId, '原票分摊'));
-  const part = await allocation(tx, row.orderId, requiredText(data.invoiceAllocationId, '已实际重开的替代发票分摊'));
-  const coverage = await invoiceCoverage(tx, part, row.orderItemId);
-  const recorded = coverage.recorded?.op;
-  const doc = part.invoice;
-  const status = invoiceStatus(await tx.financeEvent.findMany({ where: { invoiceId: doc.id }, orderBy: ordered }));
-  condition(original.invoiceId !== doc.id && status === 'recorded' && recorded && recorded.sha256 === doc.sha256
-    && recorded.issuedAt === doc.issuedAt.toISOString() && recorded.number === doc.number && recorded.amountCents === coverage.total
-    && financeIdentity(doc.issuer) === financeIdentity(original.invoice.issuer)
-    && financeIdentity(doc.recipient) === financeIdentity(original.invoice.recipient)
-    && doc.issuedAt >= correction.occurredAt && proof.occurredAt >= doc.issuedAt.toISOString(),
+  const {agreement,terms,correction,root,chain,effective,reservations}=position;
+  const original=await allocation(tx,row.orderId,requiredText(terms.allocationId,'原票分摊'));
+  const part=await allocation(tx,row.orderId,requiredText(data.invoiceAllocationId,'已实际重开的替代发票分摊'));
+  const entry=book.entries.find(item=>item.part.id===part.id);
+  const doc=part.invoice;
+  condition(original.invoiceId!==doc.id && entry?.status==='recorded' && entry.recorded
+    && financeIdentity(doc.issuer)===financeIdentity(original.invoice.issuer)
+    && financeIdentity(doc.recipient)===financeIdentity(original.invoice.recipient)
+    && doc.issuedAt>=correction.occurredAt && proof.occurredAt>=doc.issuedAt.toISOString(),
     '须关联同一交易方实际出具且晚于原票处理的有效替代票');
-  const correctionOperation = saleOperation(correction);
-  const linked = purchaseObject(recorded.replaces);
-  const correctionId = correctionOperation.financeEventId;
-  condition(linked.correctionEventId === correctionId && linked.invoiceId === original.invoiceId
-    || !recorded.replaces && data.confirmReplacementEvidence === true && data.financeEventId === correctionId
-      && proof.sha256 !== doc.sha256 && proof.sha256 !== correction.sha256 && proof.sha256 !== original.invoice.sha256,
+  const parentReceipt=chain.related.get(part.id);
+  const namedReceipt=typeof data.financeEventId==='string'?chain.receipts.get(data.financeEventId):undefined;
+  condition(parentReceipt || !entry.recorded.replaces && data.confirmReplacementEvidence===true && namedReceipt
+    && namedReceipt.occurredAt<=doc.issuedAt.toISOString()
+    && proof.sha256!==doc.sha256 && proof.sha256!==correction.sha256 && proof.sha256!==original.invoice.sha256,
     '请关联开票时已核对的原红冲记录，或凭另份明确列出两张票和原更正的书证具名补核');
-  const uses = await afterSaleInvoiceUses(tx,row.orderId,'invoice_reissue');
-  const alreadyRecordedCents = sumParts(recordedReissue(uses,row,correctionId));
-  const totalCents = cents(terms.replacementAmountCents);
-  const remaining = totalCents - alreadyRecordedCents;
-  const reservedElsewhereInCase = sumParts(issuedReservation(row,uses).filter(use=>use.allocationId!==part.id));
-  const amountCents = data.amountCents === undefined ? cents(remaining) : cents(data.amountCents);
-  condition(amountCents <= remaining - reservedElsewhereInCase, '本票金额超出本案剩余重开份额，或占用了已签发的另一票');
-  const otherReservations = cases.filter(item=>item.id!==row.id).flatMap(item=>issuedReservation(item,uses));
-  const scope = availableAfterSaleAmount(coverage,amountsAllocated([...uses,...otherReservations],part.id,row.orderItemId),amountCents);
-  const remainingCents = remaining - amountCents;
-  return { operation: { correctionId: correction.id, financeEventId: correctionId, agreementId:agreement?.id,
-    replacementEventId: coverage.recorded?.id, linkedAtIssuance: Boolean(recorded.replaces), originalInvoiceId: original.invoiceId, invoiceId: doc.id,
-    allocationId: part.id, number: doc.number, issuedAt: doc.issuedAt.toISOString(), amountCents, alreadyRecordedCents, remainingCents, scope,
-    note: requiredText(data.note, '替代票与原红冲回执的一致性及本商品实际金额') },
-    customerState:remainingCents?'awaiting_invoice_reissue':'awaiting_close' };
+  const amountCents=data.amountCents===undefined?cents(position.remainingCents):cents(data.amountCents);
+  const confirmedElsewhere=sumParts(reservations.filter(use=>use.caseId===row.id && use.allocationId!==part.id));
+  condition(amountCents<=position.remainingCents-position.recordedPendingCents-confirmedElsewhere,
+    '本票金额超出本案剩余重开份额，或占用了已签发的另一票');
+  const coverage=await invoiceCoverage(tx,part,row.orderItemId);
+  const others=reservations.filter(use=>use.caseId!==row.id);
+  const scope=availableAfterSaleAmount(coverage,amountsAllocated([...effective,...others],part.id,row.orderItemId),amountCents);
+  const remainingCents=position.remainingCents-amountCents;
+  return {operation:{correctionId:correction.id,financeEventId:root.id,sourceCorrectionEventId:parentReceipt??namedReceipt?.id,agreementId:agreement.id,
+    replacementEventId:entry.bookingId,linkedAtIssuance:Boolean(entry.recorded.replaces),originalInvoiceId:original.invoiceId,invoiceId:doc.id,
+    allocationId:part.id,number:doc.number,issuedAt:doc.issuedAt.toISOString(),amountCents,alreadyRecordedCents:position.recordedCents,
+    remainingCents,scope,reissueVersion:position.version,currentCorrectionEventId:entry.correctionId,
+    note:requiredText(data.note,'替代票与原红冲回执的一致性及本商品实际金额') },
+    customerState:remainingCents||position.pendingReceipts.length?'awaiting_invoice_reissue':'awaiting_close' };
 }

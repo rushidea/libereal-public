@@ -45,6 +45,6 @@ export function saleSnapshotFor(raw: unknown, permissions: readonly string[], su
   const ownRefundRequest = submittedBy && snapshot.actor===submittedBy && action==='agreement' && operation.remedy==='refund'
     && permissions.includes('orders.read') && permissions.includes('orders.write') && !readsSaleFinance(permissions);
   return { ...snapshot, operation:ownRefundRequest
-    ? select(operation,['remedy','amountCents','recipient','destination','method','quantity'])
+    ? select(operation,['remedy','amountCents','recipient','destination','method','decision','quantity','refundQuantity'])
     : saleOperationFor(action,operation,permissions) };
 }
