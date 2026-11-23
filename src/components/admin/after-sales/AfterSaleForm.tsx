@@ -57,13 +57,29 @@ export default function AfterSaleForm({view,current,action,chosenLoss,busy,onPre
   const assigned=Object.fromEntries(Object.entries(originalChoices).filter(([id])=>originalShares.some(part=>part.parcelLineId===id)));
   const paidReplacements=(view.replacements ?? []).filter(row=>row.orderItemId===lineId&&(!linked||row.shortfallId===linked.resolutionId));
   const decisionInvoice=current?.events.find(event=>event.id===current.agreementId)?.operation?.invoice as {
-    allocationId?:string;invoiceId?:string;correctionId?:string;originalNumber?:string}|undefined;
+    allocationId?:string;invoiceId?:string;correctionId?:string;originalNumber?:string;replacementAmountCents?:number}|undefined;
   const currentCorrection=current?.events.findLast(event=>event.action==='invoice_outcome'
     && (event.operation?.agreementId===current.agreementId||event.id===decisionInvoice?.correctionId));
   const selectedScope=current?.supplierScopes?.find(scope=>scope.key===supplierScope);
-  const documentParcels=Object.entries(assigned).map(([id,label])=>({
-    id,label,count:originalShares.filter(share=>share.parcelLineId===id).reduce((sum,share)=>sum+share.quantity,0),
-  }));
+  const exchangeSubjects=action==='approve_exchange' ? view.cases.filter(item=>item.id===current?.id
+    || item.customerState==='awaiting_fulfillment'&&item.events.some(event=>event.id===item.agreementId&&event.operation?.remedy==='exchange'
+      && !event.operation?.replacements)) : [];
+  const documentParcels=exchangeSubjects.flatMap(item=>{
+    const parts=item.originalParcelShares??[];
+    return [...new Set(parts.map(part=>part.parcelLineId))].flatMap(id=>{
+      const original=view.deliveries.find(line=>line.id===id);
+      if (!original) return [];
+      const source=item.supplierScopes?.find(scope=>scope.parcelLineId===id);
+      const selectedSupplier=current?.supplierScopes?.find(scope=>scope.parcelLineId===selectedParcel?.id)?.supplier;
+      if (source?.supplier&&selectedSupplier&&source.supplier!==selectedSupplier) return [];
+      return [{ key:item.id+'/'+id,id,caseId:item.id,label:original.reference+' · '+item.id,
+        count:parts.filter(part=>part.parcelLineId===id).reduce((sum,part)=>sum+part.quantity,0) }];
+    });
+  });
+  const previousReissues=(current?.events??[]).filter(event=>event.action==='invoice_reissue'
+    && event.operation?.financeEventId===currentCorrection?.operation?.financeEventId);
+  const reissueRemaining=decisionInvoice?.replacementAmountCents==null?null:decisionInvoice.replacementAmountCents
+    -previousReissues.reduce((sum,event)=>sum+Number(event.operation?.amountCents??0),0);
   const selectedPortions=(view.invoiceChoices?.find(row=>row.id===selectedInvoice)?.linePortions??[]).filter(part=>
     part.lines.length>1&&part.lines.some(goods=>goods.orderItemId===lineId));
   const releaseIds=new Set(current?.events.filter(event=>event.action==='release_refund_source').map(event=>event.operation?.reviewId));
@@ -94,8 +110,8 @@ export default function AfterSaleForm({view,current,action,chosenLoss,busy,onPre
       if(action==='approve_exchange') {
         data.freeOfCharge=record.freeOfCharge==='on';
         const shares=documentParcels.flatMap(part=>{
-          const number=Number(record['exchangeDocument:'+part.id]);
-          return number>0?[{parcelLineId:part.id,quantity:number}]:[];
+          const number=Number(record['exchangeDocument:'+part.key]);
+          return number>0?[{caseId:part.caseId,parcelLineId:part.id,quantity:number}]:[];
         });
         if(shares.length)data.supplierDocumentShares=shares;
       }
@@ -161,7 +177,8 @@ export default function AfterSaleForm({view,current,action,chosenLoss,busy,onPre
           <Select name="invoiceOutcome" label="书面决定要求的实际更正结果" options={revisingReissue
             ?{voided:'客户书面撤回重开',reissue:'按新书证调整待重开的金额'}
             :{retained:'书面确认原票继续有效',voided:'只办理原票红冲或作废',reissue:'红冲并实际重开'}} onChange={setOutcome}/>
-          {outcome==='reissue'&&<Input name="replacementAmountCents" label="本商品书面约定的重开金额（元）"/>}</>}</>}
+          {outcome==='reissue'&&<><Input name="replacementAmountCents" label="本商品书面约定的重开金额（元）"/>
+            {revisingReissue&&<p className="text-sm">只填尚未签发部分的新金额，已签发的票仍按实际票面办理。</p>}</>}</>}</>}
       {action==='bind_original_parcel'&&<>
         <Select name="parcelLineId" label="本次核对的实际原包裹行" options={Object.fromEntries(actualLines
           .filter(line=>!line.afterSaleApprovalId&&line.receipts.length).map(line=>[line.id,originalChoices[line.id]]))}/>
@@ -174,15 +191,15 @@ export default function AfterSaleForm({view,current,action,chosenLoss,busy,onPre
           {physical==='return'&&<Select name="resolutionId" label="已登记的退回" options={Object.fromEntries((selectedParcel?.returns??[]).map(a=>[a.id,a.id+' · '+a.quantity+' 件']))}/>}
           {physical==='delivery'&&Object.keys(approved).length>0&&<Select name="resendApprovalId" label="原采购补发批准" options={approved} required={false}/>}</>}</>}
       {action==='approve_exchange'&&<><Select name="parcelLineId" label="本次换件对应的原包裹" options={assigned}
-        initial={Object.keys(assigned).length===1?Object.keys(assigned)[0]:undefined}/>
+        initial={Object.keys(assigned).length===1?Object.keys(assigned)[0]:undefined} onChange={setParcel}/>
         <Input name="quantity" label="本次批准的件数" type="number" value={originalShares.length===1?originalShares[0].quantity:undefined}/>
         <Input name="supplier" label="原采购记录所列供货主体"/>
         <Select name="returnRequirement" label="供方书面承诺中的退回条件" options={{required:'原货实际退回',waived:'确认对本批货免退'}}/>
         <label className="flex items-center gap-2 text-sm"><input type="checkbox" name="freeOfCharge" required/>确认原供方书面承诺本批换货免费</label>
         {documentParcels.length>1&&<fieldset className="grid gap-2 sm:col-span-2">
-          <legend className="text-sm font-medium">同一书证行列出的原包裹及件数</legend>
-          <p className="text-sm">若同一行覆盖多包，请照原件填写该行明确列出的件数，各包可分别批准。</p>
-          {documentParcels.map(part=><Input key={part.id} name={'exchangeDocument:'+part.id} label={part.label+' · 书证列明件数'}
+          <legend className="text-sm font-medium">同一书证行列出的案件、原包裹和件数</legend>
+          <p className="text-sm">若这一行明确覆盖多个案件或包裹，按原件填写每份件数，再逐份批准。</p>
+          {documentParcels.map(part=><Input key={part.key} name={'exchangeDocument:'+part.key} label={part.label+' · 书证列明件数'}
             type="number" max={part.count} required={false}/>)}
         </fieldset>}</>}
       {action==='attribute_resend'&&<><Select name="parcelLineId" label="实际补件对客包裹" options={Object.fromEntries(actualLines
@@ -218,6 +235,8 @@ export default function AfterSaleForm({view,current,action,chosenLoss,busy,onPre
         </fieldset>}</>}
       {action==='invoice_reissue'&&<>
         <Select name="invoiceAllocationId" label="财务已实际登记的替代票分摊" options={invoiceOptions}/>
+        <Input name="amountCents" label="本票实际归入本案的金额（元）"/>
+        {reissueRemaining!=null&&<p className="text-sm">本案尚待核对 {money(reissueRemaining)}，多张实际票可以逐张回填。</p>}
         <p className="text-sm">原红冲回执 {String(currentCorrection?.operation?.financeEventId??'')}</p>
         <label className="flex items-center gap-2 text-sm sm:col-span-2"><input name="confirmReplacementEvidence" type="checkbox"/>
           若开票时未关联原红冲，凭补充书证核实原票、红冲回执及替代票的对应关系</label></>}
