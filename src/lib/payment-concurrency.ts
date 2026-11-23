@@ -1,5 +1,18 @@
+import type { Prisma } from '@prisma/client';
+
+// These older outcomes were only written after accepting a successful gateway callback.
+export const legacyAlipayReconciliationStatuses = ['rejected_order_cancelled', 'rejected_amount_mismatch'];
+
+export function isAlipayReconciliationStatus(status: string | null | undefined) {
+  const value = status?.toLowerCase() ?? '';
+  return value.endsWith('_reconciliation_required') || legacyAlipayReconciliationStatuses.includes(value);
+}
+
 export const alipayReconciliationCount = {
-  select: { paymentAttempts: { where: { provider: 'alipay', status: { endsWith: '_reconciliation_required' } } } },
+  select: { paymentAttempts: { where: {
+    provider: 'alipay',
+    OR: [{ status: { endsWith: '_reconciliation_required' } }, { status: { in: legacyAlipayReconciliationStatuses } }],
+  } satisfies Prisma.PaymentAttemptWhereInput } },
 } as const;
 
 /**

@@ -127,12 +127,12 @@ async function withdrawOne(
     },
   });
 
-  // 只要还有未结应收就回退已用额度。没有应收，或应收已经是取消状态时，该调用直接返回。
+  // 释放原订单流水可核实的预占，保留其它订单占用。
   try {
     await releaseOrderReceivableOnCancellation(tx, order.id, actor.id);
   } catch (err) {
     const message = err instanceof Error ? err.message : '';
-    if (message === 'PAID_ORDER_REFUND_REQUIRED' || message === 'CREDIT_ACCOUNT_NOT_FOUND') {
+    if (['PAID_ORDER_REFUND_REQUIRED', 'CREDIT_ACCOUNT_NOT_FOUND', 'CREDIT_RESERVATION_REVIEW_REQUIRED'].includes(message)) {
       throw new AdminOrderWithdrawalError(message, 409, order.id);
     }
     throw err;

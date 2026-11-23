@@ -422,6 +422,9 @@ export async function PATCH(
     if ((err as { code?: string })?.code === 'P2025') return NextResponse.json({ error: '订单已变化，请重新查看。' }, { status: 409 });
     if (message === 'QUOTE_REPRICE_REQUIRED') return NextResponse.json({ error: '商品价格已变化，请先完成原订单价格复核', code: message }, { status: 409 });
     if (message === 'FULFILLMENT_RECORDS_REQUIRED') return NextResponse.json({ error: '请先按发货明细登记实际运送和签收情况。' }, { status: 409 });
+    if (message === 'CREDIT_RESERVATION_REVIEW_REQUIRED' || message === 'CREDIT_ACCOUNT_NOT_FOUND') {
+      return NextResponse.json({ error: '请联系财务核对原订单的授信预占。', code: message }, { status: 409 });
+    }
     if (message === POINTS_REFUND_FAILED) {
       return NextResponse.json({ error: POINTS_REFUND_FAILED }, { status: 409 });
     }

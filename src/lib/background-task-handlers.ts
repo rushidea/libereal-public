@@ -1,4 +1,5 @@
-import { receivableOutstanding } from '@/lib/customer-cash';
+import { CREDIT_REVIEW_POLICY, overdueDaysFromDueAt, overdueReceivableWhere, receivableReminderKey } from '@/lib/customer-credit';
+import { receivableOrderBalance, receivableOutstandingCents } from '@/lib/receivable-balance';
 import type { BackgroundTask } from '@prisma/client';
 import { sendAliyunSmsTemplate } from '@/lib/aliyun-sms';
 import { parseTaskPayload } from '@/lib/background-tasks';
@@ -19,7 +20,7 @@ type QuoteNotificationPayload = {
   callout?: string;
 };
 type EmailPayload = MailMessage | QuoteNotificationPayload | { kind: 'business_letter'; draftId: string };
-type OrderReminderPayload = { receivableId: string; overdueDays: number };
+type OrderReminderPayload = { receivableId: string; reminderAt?: string; dueAt?: string };
 type QuoteExpirePayload = { quoteId: string };
 
 async function sendEmail(task: BackgroundTask): Promise<unknown> {
@@ -45,17 +46,27 @@ async function sendSms(task: BackgroundTask): Promise<unknown> {
 
 async function sendOrderReminder(task: BackgroundTask): Promise<unknown> {
   const payload = parseTaskPayload<OrderReminderPayload>(task);
-  const receivable = await prisma.accountReceivable.findUnique({
-    where: { id: payload.receivableId },
-    include: {
-      cashPostings: { select: { releasedCents: true } },
-      user: { select: { email: true, phone: true } },
-      order: { select: { id: true, ownerScope: true, organization: { select: { owner: { select: { email: true } } } } } },
-    },
+  const now = new Date();
+  const current = await prisma.$transaction(async tx => {
+    const receivable = await tx.accountReceivable.findFirst({
+      where: { ...overdueReceivableWhere(now), id: payload.receivableId },
+      include: {
+        user: { select: { email: true, phone: true } },
+        order: { select: { ...receivableOrderBalance, id: true, ownerScope: true, organization: { select: { owner: { select: { email: true } } } } } },
+      },
+    });
+    if (!receivable?.dueAt || !receivable.lastReminderAt || task.dedupeKey !== receivableReminderKey(receivable.id, receivable.lastReminderAt)
+      || payload.reminderAt && payload.reminderAt !== receivable.lastReminderAt.toISOString()
+      || payload.dueAt && payload.dueAt !== receivable.dueAt.toISOString()) return null;
+    const overdueDays = overdueDaysFromDueAt(receivable.dueAt, now);
+    const balance = receivableOutstandingCents(receivable.amount, receivable.status, receivable.order.cashPostings, receivable.order.total);
+    if (balance <= 0 || overdueDays < CREDIT_REVIEW_POLICY.reminderAfterDays) return null;
+    return { receivable, overdueDays, amount: (balance / 100).toFixed(2) };
   });
-  if (!receivable || !['open', 'overdue'].includes(receivable.status)) return { skipped: 'receivable_closed' };
+  if (!current) return { skipped: 'receivable_reminder_no_longer_due' };
 
-  const message = `订单 ${receivable.order.id} 应付款 ¥${receivableOutstanding(receivable.amount, receivable.status, receivable.cashPostings).toFixed(2)} 已超过 ${payload.overdueDays} 天，请及时完成付款。`;
+  const { receivable, overdueDays, amount } = current;
+  const message = `订单 ${receivable.order.id} 应付款 ¥${amount} 已超过 ${overdueDays} 天，请及时完成付款。`;
   const recipients = new Set([receivable.user.email]);
   if (receivable.order.ownerScope === 'organization' && receivable.order.organization?.owner.email) {
     recipients.add(receivable.order.organization.owner.email);
@@ -68,8 +79,8 @@ async function sendOrderReminder(task: BackgroundTask): Promise<unknown> {
   if (templateCode && receivable.user.phone) {
     await sendAliyunSmsTemplate(receivable.user.phone, templateCode, {
       orderId: receivable.order.id,
-      amount: receivableOutstanding(receivable.amount, receivable.status, receivable.cashPostings).toFixed(2),
-      days: payload.overdueDays,
+      amount,
+      days: overdueDays,
     });
   }
   return { email: true, recipients: recipients.size, sms: Boolean(templateCode && receivable.user.phone) };

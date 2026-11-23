@@ -310,6 +310,8 @@ export async function POST(req: Request) {
       // Attempt state is monotonic. Delayed non-paid notifications and
       // duplicate paid notifications must not rewrite terminal outcomes.
       if (isTerminalAttemptStatus(latestAttempt.status)) return;
+      if (latestAttempt.status === ALIPAY_STOCK_SHORTFALL_STATUS
+        && (!isPaid || latestAttempt.tradeNo && latestAttempt.tradeNo !== data.trade_no)) return;
 
       const amountMatchesOrder = amountsEqualInCents(latestAttempt.amount, latestAttempt.order.total);
       if (isPaid && (!amountMatchesOrder || isInactiveOrderStatus(latestAttempt.order.status))) {

@@ -1,4 +1,4 @@
-import { receivableView } from '@/lib/customer-cash';
+import { receivableCashAmounts, receivableView } from '@/lib/receivable-balance';
 import { NextRequest, NextResponse } from 'next/server';
 import type { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
@@ -52,7 +52,6 @@ const orderListSelect = {
 } satisfies Prisma.OrderSelect;
 
 const receivableSelect = {
-  cashPostings: { select: { releasedCents: true } },
   id: true,
   amount: true,
   status: true,
@@ -124,7 +123,7 @@ export async function GET(req: NextRequest) {
     const where = buildAdminActiveOrderWhere(query) as Prisma.OrderWhereInput;
     const countWhere = buildAdminActiveOrderCountWhere(query.receivableOpen) as Prisma.OrderWhereInput;
     const select = query.receivableOpen
-      ? { ...orderListSelect, receivable: { select: receivableSelect } }
+      ? { ...orderListSelect, receivable: { select: receivableSelect }, cashPostings: { select: receivableCashAmounts } }
       : orderListSelect;
 
     const [orders, total, statusGroups, pendingAlipayUnpaid, receivableAggregate] = await Promise.all([
@@ -148,8 +147,9 @@ export async function GET(req: NextRequest) {
       }),
       query.receivableOpen
         ? prisma.$queryRaw<Array<{ count: bigint; cents: bigint }>>`SELECT COUNT(*) AS count,
-            COALESCE(SUM(MAX(0, ROUND(r.amount * 100) - COALESCE(
-              (SELECT SUM(c.releasedCents) FROM CustomerCashPosting c WHERE c.orderId=r.orderId),0))),0) AS cents
+            COALESCE(SUM(MAX(0, MIN(ROUND(r.amount * 100) - COALESCE(
+              (SELECT SUM(c.releasedCents) FROM CustomerCashPosting c WHERE c.orderId=r.orderId),0), ROUND(o.total * 100) - COALESCE(
+              (SELECT SUM(c.amountCents) FROM CustomerCashPosting c WHERE c.orderId=r.orderId),0)))),0) AS cents
             FROM AccountReceivable r JOIN "Order" o ON o.id=r.orderId WHERE r.status IN ('open','overdue') AND o.archivedAt IS NULL`
         : Promise.resolve(null),
     ]);
@@ -187,9 +187,12 @@ export async function GET(req: NextRequest) {
     const enriched = orders.map((order) => {
       const { paymentAttempts, addressSnapshot, customerId, ...rest } = order;
       const raw = 'receivable' in rest ? rest.receivable as Prisma.AccountReceivableGetPayload<{ select: typeof receivableSelect }> | null : null;
-      const receivable = raw ? receivableView(raw) : null;
+      const cashPostings = 'cashPostings' in rest
+        ? rest.cashPostings as Prisma.CustomerCashPostingGetPayload<{ select: typeof receivableCashAmounts }>[] : [];
+      const receivable = raw ? receivableView(raw, { total: order.total, cashPostings }) : null;
       const summary = { ...rest };
       if ('receivable' in summary) delete summary.receivable;
+      if ('cashPostings' in summary) delete summary.cashPostings;
 
       let creditReview: OrderCreditReviewBadge | null = null;
       if (order.status === 'pending' && isPostDeliveryPaymentMethod(order.paymentMethod)) {

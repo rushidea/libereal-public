@@ -1,5 +1,5 @@
 import type { Prisma } from '@prisma/client';
-import { finishCustomerReceivable, isUnsettledReceivableStatus } from '@/lib/customer-credit';
+import { finishCustomerReceivable, isUnsettledReceivableStatus, orderCreditHeldCents } from '@/lib/customer-credit';
 import { readPurchaseActivities } from '@/lib/purchase-activity';
 import { orderReceiptEvidence } from '@/lib/purchase-receipts';
 import { loadPurchaseOrderSource, type SourceOrder } from '@/lib/purchase-source';
@@ -9,42 +9,6 @@ type Db = Prisma.TransactionClient;
 export type CustomerCashSource = { bankAllocationId: string } | { paymentAttemptId: string };
 
 const cents = (yuan: number) => Math.round(yuan * 100);
-
-export function receivableOutstanding(amount: number, status: string, postings: Array<{ releasedCents: bigint | number }>) {
-  if (status === 'paid' || status === 'cancelled') return 0;
-  return Math.max(0, cents(amount) - postings.reduce((total, row) => total + Number(row.releasedCents), 0)) / 100;
-}
-
-export function receivableView<T extends { amount: number; status: string; cashPostings: Array<{ releasedCents: bigint }> }>(row: T) {
-  const { cashPostings, ...view } = row;
-  return { ...view, originalAmount: row.amount, amount: receivableOutstanding(row.amount, row.status, cashPostings) };
-}
-
-// A legacy order may have reserved only the balance after its deposit.
-export async function orderCreditHeldCents(tx: Db, order: SourceOrder) {
-  const ledger = order.creditTransactions;
-  const reserves = ledger.filter(row => row.type === 'reserve');
-  if (!order.customerId || reserves.length !== 1 || reserves[0].amount <= 0) return null;
-  const releases = ledger.filter(row => row.type === 'release');
-  const postings = releases.length ? await tx.customerCashPosting.findMany({
-    where: { orderId: order.id, creditTransactionId: { not: null } },
-    select: { creditTransactionId: true, releasedCents: true, receivableId: true },
-  }) : [];
-  const linked = new Map(postings.map(row => [row.creditTransactionId, row]));
-  let balance = 0;
-  for (const row of ledger) {
-    if (!['reserve', 'amount_adjust', 'release'].includes(row.type) || row.userId !== order.customerId) return null;
-    const amount = cents(row.amount);
-    if (!Number.isSafeInteger(amount)) return null;
-    if (row.type === 'release') {
-      const post = linked.get(row.id);
-      if (!post || !order.receivable || post.receivableId !== order.receivable.id
-        || amount >= 0 || Number(post.releasedCents) !== -amount) return null;
-    }
-    balance += amount;
-  }
-  return Number.isSafeInteger(balance) && balance >= 0 && balance <= cents(order.total) ? balance : null;
-}
 
 export async function customerCashProjection(tx: Db, order: SourceOrder, amount: number) {
   const previous = await tx.customerCashPosting.findMany({ where: { orderId: order.id } });

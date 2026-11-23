@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { Prisma } from '@prisma/client';
 import { extractStepUpToken } from '@/lib/admin-order-step-up';
 import { applyFinanceAction, financeActions, previewFinanceAction, type FinanceInput } from '@/lib/finance-actions';
-import { financeWorkspace } from '@/lib/finance-workspace';
+import { financeAttention, financeWorkspace } from '@/lib/finance-workspace';
+import { legacyAlipayReconciliationStatuses } from '@/lib/payment-concurrency';
 import { pricingContentHash } from '@/lib/pricing-adjustment-approval';
 import { prisma } from '@/lib/prisma';
 import { PurchaseError, requiredText } from '@/lib/purchase-terms';
@@ -31,19 +33,27 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ workspace, canWrite });
     }
     const search = (req.nextUrl.searchParams.get('search') ?? '').trim().slice(0, 200);
-    const orders = await prisma.$queryRaw<Array<{ id: string; status: string; amount: number; receivableStatus: string | null; supplierCount: number }>>`
-      SELECT o.id,o.status,o.total AS amount,r.status AS receivableStatus,
-        (SELECT COUNT(*) FROM PurchaseOrder p WHERE p.orderId=o.id AND p.status<>'superseded') AS supplierCount
-      FROM "Order" o LEFT JOIN AccountReceivable r ON r.orderId=o.id
-      WHERE (r.id IS NOT NULL OR o.status IN ('confirmed','partially_shipped','shipped','completed') OR o.paidAt IS NOT NULL
-        OR EXISTS (SELECT 1 FROM PaymentAttempt a WHERE a.orderId=o.id AND a.status LIKE '%reconciliation_required')
-        OR EXISTS (SELECT 1 FROM FinanceEvent f WHERE f.orderId=o.id))
-      AND (instr(lower(o.id),lower(${search}))>0 OR instr(lower(o.email),lower(${search}))>0
-        OR EXISTS (SELECT 1 FROM PurchaseOrder p WHERE p.orderId=o.id AND instr(lower(p.id),lower(${search}))>0)
-        OR EXISTS (SELECT 1 FROM FinanceInvoicePlan p JOIN FinanceInvoiceAllocation a ON a.planId=p.id
-          JOIN FinanceInvoice i ON i.id=a.invoiceId WHERE p.orderId=o.id AND instr(lower(i.number),lower(${search}))>0))
-      ORDER BY o.createdAt DESC,o.id LIMIT 100`;
-    return NextResponse.json({ canWrite, orders: orders.map(row => ({ ...row, supplierCount: Number(row.supplierCount) })) });
+    const orders = await prisma.$transaction(async tx => {
+      const attention = req.nextUrl.searchParams.get('attention') === '1' ? await financeAttention(tx, new Date()) : null;
+      if (attention?.size === 0) return [];
+      const byAttention = attention ? Prisma.sql`AND o.id IN (${Prisma.join([...attention.keys()])})` : Prisma.empty;
+      const rows = await tx.$queryRaw<Array<{ id: string; status: string; amount: number; receivableStatus: string | null; supplierCount: bigint }>>`
+        SELECT o.id,o.status,o.total AS amount,r.status AS receivableStatus,
+          (SELECT COUNT(*) FROM PurchaseOrder p WHERE p.orderId=o.id AND p.status<>'superseded') AS supplierCount
+        FROM "Order" o LEFT JOIN AccountReceivable r ON r.orderId=o.id
+        WHERE (r.id IS NOT NULL OR o.status IN ('confirmed','partially_shipped','shipped','completed') OR o.paidAt IS NOT NULL
+          OR EXISTS (SELECT 1 FROM PaymentAttempt a WHERE a.orderId=o.id AND a.provider='alipay'
+            AND (a.status LIKE '%reconciliation_required' OR a.status IN (${Prisma.join(legacyAlipayReconciliationStatuses)})))
+          OR EXISTS (SELECT 1 FROM FinanceEvent f WHERE f.orderId=o.id))
+        ${byAttention}
+        AND (instr(lower(o.id),lower(${search}))>0 OR instr(lower(o.email),lower(${search}))>0
+          OR EXISTS (SELECT 1 FROM PurchaseOrder p WHERE p.orderId=o.id AND instr(lower(p.id),lower(${search}))>0)
+          OR EXISTS (SELECT 1 FROM FinanceInvoicePlan p JOIN FinanceInvoiceAllocation a ON a.planId=p.id
+            JOIN FinanceInvoice i ON i.id=a.invoiceId WHERE p.orderId=o.id AND instr(lower(i.number),lower(${search}))>0))
+        ORDER BY o.createdAt DESC,o.id LIMIT 100`;
+      return rows.map(row => ({ ...row, supplierCount: Number(row.supplierCount), attention: attention?.get(row.id) ?? null }));
+    });
+    return NextResponse.json({ canWrite, orders });
   } catch (error) { return failure(error); }
 }
 

@@ -1,10 +1,12 @@
 import { jsonObject } from '@/lib/order-catalog-repricing';
-import type { Prisma } from '@prisma/client';
+import type { CreditTransaction, Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { calculateOrderPoints } from '@/lib/points';
 import { getTierByRollingSpend, DEFAULT_TIER, TIERS } from '@/lib/discount';
 import { isPostDeliveryPaymentMethod } from '@/data/payment-methods';
 import { formatCreditDateForInput, type CustomerCreditSummary } from '@/lib/credit-summary';
+import { INACTIVE_ORDER_STATUSES } from '@/lib/order-domain';
+import { receivableOrderBalance, receivableOutstandingCents } from '@/lib/receivable-balance';
 
 type Tx = Prisma.TransactionClient;
 type CreditReader = Tx | typeof prisma;
@@ -16,6 +18,12 @@ export const CREDIT_REVIEW_POLICY = {
   holdAfterDays: 90,
   reminderIntervalDays: 15,
 } as const;
+
+export const creditReminderIntervalMs = CREDIT_REVIEW_POLICY.reminderIntervalDays * 86400000;
+
+export function receivableReminderKey(receivableId: string, remindedAt: Date) {
+  return `receivable-reminder:${receivableId}:${Math.floor(remindedAt.getTime() / creditReminderIntervalMs)}`;
+}
 
 export type CreditRestriction = 'active' | 'credit_limited' | 'overdue_hold';
 
@@ -256,6 +264,45 @@ export function isUnsettledReceivableStatus(status: string): boolean {
   return UNSETTLED_RECEIVABLE_STATUSES.has(status);
 }
 
+export const overdueReceivableWhere = (now: Date) => ({
+  status: { in: [...UNSETTLED_RECEIVABLE_STATUSES] },
+  paidAt: null,
+  dueAt: { not: null, lte: now },
+  order: { paidAt: null, status: { notIn: [...INACTIVE_ORDER_STATUSES] } },
+}) satisfies Prisma.AccountReceivableWhereInput;
+
+type OrderCreditLedger = {
+  id: string;
+  customerId: string | null;
+  receivable: { id: string } | null;
+  creditTransactions: Pick<CreditTransaction, 'id' | 'type' | 'amount' | 'userId'>[];
+};
+
+// The order may have reserved only the balance after a deposit.
+export async function orderCreditHeldCents(tx: Tx, order: OrderCreditLedger) {
+  const ledger = order.creditTransactions;
+  const reserves = ledger.filter(row => row.type === 'reserve');
+  if (!order.customerId || reserves.length !== 1 || reserves[0].amount < 0) return null;
+  const postings = ledger.some(row => row.type === 'release') ? await tx.customerCashPosting.findMany({
+    where: { orderId: order.id, creditTransactionId: { not: null } },
+    select: { creditTransactionId: true, releasedCents: true, receivableId: true },
+  }) : [];
+  const linked = new Map(postings.map(row => [row.creditTransactionId, row]));
+  let balance = 0;
+  for (const row of ledger) {
+    if (!['reserve', 'amount_adjust', 'release'].includes(row.type) || row.userId !== order.customerId) return null;
+    const amount = Math.round(row.amount * 100);
+    if (!Number.isSafeInteger(amount)) return null;
+    if (row.type === 'release') {
+      const post = linked.get(row.id);
+      if (!post || !order.receivable || post.receivableId !== order.receivable.id
+        || amount >= 0 || Number(post.releasedCents) !== -amount) return null;
+    }
+    balance += amount;
+  }
+  return Number.isSafeInteger(balance) && balance >= 0 ? balance : null;
+}
+
 export type UnsettledReceivableSync = {
   adjusted: boolean;
   amount: number;
@@ -326,24 +373,34 @@ export async function startOrderReceivableTerm(tx: Tx, orderId: string, startedA
 }
 
 export async function releaseOrderReceivableOnCancellation(tx: Tx, orderId: string, actorId?: string | null) {
-  const receivable = await tx.accountReceivable.findUnique({ where: { orderId } });
+  const order = await tx.order.findUnique({ where: { id: orderId }, select: {
+    id: true, customerId: true, paidAt: true, receivable: true,
+    creditTransactions: { select: { id: true, type: true, amount: true, userId: true } },
+  } });
+  if (!order) return null;
+  const { receivable } = order;
   if (!receivable || receivable.status === 'cancelled') return receivable;
-  if (receivable.status === 'paid' || await hasCustomerCash(tx, orderId)) throw new Error('PAID_ORDER_REFUND_REQUIRED');
+  if (receivable.status === 'paid' || receivable.paidAt || order.paidAt || await hasCustomerCash(tx, orderId)) {
+    throw new Error('PAID_ORDER_REFUND_REQUIRED');
+  }
+  const held = await orderCreditHeldCents(tx, order);
+  if (!isUnsettledReceivableStatus(receivable.status) || held === null || order.customerId !== receivable.userId) {
+    throw new Error('CREDIT_RESERVATION_REVIEW_REQUIRED');
+  }
   const account = await tx.creditAccount.findUnique({ where: { userId: receivable.userId } });
   if (!account) throw new Error('CREDIT_ACCOUNT_NOT_FOUND');
-  const usedAmount = Math.max(0, account.usedAmount - receivable.amount);
-  await tx.creditAccount.update({ where: { id: account.id }, data: { usedAmount } });
-  await tx.creditTransaction.create({
-    data: {
-      userId: receivable.userId,
-      orderId,
-      type: 'release',
-      amount: -receivable.amount,
-      balanceAfter: usedAmount,
-      reason: '订单取消释放授信',
-      actorId,
-    },
-  });
+  const usedAmount = roundCents(account.usedAmount - held / 100);
+  if (!Number.isFinite(usedAmount) || usedAmount < 0) throw new Error('CREDIT_RESERVATION_REVIEW_REQUIRED');
+  if (held > 0) {
+    const changed = await tx.creditAccount.updateMany({
+      where: { id: account.id, usedAmount: account.usedAmount }, data: { usedAmount },
+    });
+    if (changed.count !== 1) throw new Error('CREDIT_RESERVATION_REVIEW_REQUIRED');
+    await tx.creditTransaction.create({ data: {
+      userId: receivable.userId, orderId, type: 'release', amount: -held / 100,
+      balanceAfter: usedAmount, reason: '订单取消释放授信', actorId,
+    } });
+  }
   return tx.accountReceivable.update({ where: { id: receivable.id }, data: { status: 'cancelled' } });
 }
 
@@ -368,19 +425,15 @@ export async function finishCustomerReceivable(tx: Tx, receivable: { id: string;
   const { orderId } = receivable;
   const account = await tx.creditAccount.findUniqueOrThrow({ where: { userId: receivable.userId } });
   const openReceivables = await tx.accountReceivable.findMany({
-    where: {
-      userId: receivable.userId,
-      status: { in: ['open', 'overdue'] },
-      id: { not: receivable.id },
-      dueAt: { not: null, lte: paidAt },
-    },
-    select: { dueAt: true },
+    where: { ...overdueReceivableWhere(paidAt), userId: receivable.userId, id: { not: receivable.id } },
+    select: { dueAt: true, amount: true, status: true, order: { select: receivableOrderBalance } },
   });
+  const outstanding = openReceivables.filter(row => receivableOutstandingCents(row.amount, row.status, row.order.cashPostings, row.order.total) > 0);
   const nextStatus = creditStatusForOverdueReceivables({
     currentStatus: account.status,
     statusSource: account.statusSource,
-    maxOverdueDays: maxOverdueDaysForReceivables(openReceivables, paidAt),
-    hasEligibleHold: hasEligibleCreditHold(openReceivables, account.manuallyUnlockedAt, paidAt),
+    maxOverdueDays: maxOverdueDaysForReceivables(outstanding, paidAt),
+    hasEligibleHold: hasEligibleCreditHold(outstanding, account.manuallyUnlockedAt, paidAt),
   });
   if (nextStatus !== account.status) {
     await tx.creditAccount.update({ where: { id: account.id }, data: { status: nextStatus, statusSource: 'system' } });

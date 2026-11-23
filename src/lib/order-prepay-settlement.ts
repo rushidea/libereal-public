@@ -24,6 +24,7 @@ import {
   releaseUnpaidOrderPointsHold,
 } from '@/lib/points-checkout-service';
 import { OrganizationRbacError, requireOrganizationPermission } from '@/lib/organization-service';
+import { isAlipayReconciliationStatus } from '@/lib/payment-concurrency';
 import { prisma } from '@/lib/prisma';
 
 type Db = Prisma.TransactionClient | PrismaClient;
@@ -31,12 +32,6 @@ type Db = Prisma.TransactionClient | PrismaClient;
 const MUTABLE_ADJUSTMENT_TYPES = ['platform_fee', 'transfer_fee', 'coupon', 'points_redeem'] as const;
 const MUTABLE_ADJUSTMENT_TYPE_SET = new Set<string>(MUTABLE_ADJUSTMENT_TYPES);
 const ACTIVE_ALIPAY_ATTEMPT_STATUSES = ['created', 'redirected', 'WAIT_BUYER_PAY'];
-const PAID_ATTEMPT_STATUSES = new Set([
-  'paid',
-  'paid_superseded_reconciliation_required',
-  'paid_terminal_reconciliation_required',
-  'paid_stock_shortfall_reconciliation_required',
-]);
 
 export class PrepaySettlementError extends Error {
   readonly status: number;
@@ -271,7 +266,8 @@ async function assertActorCanSettle(actor: PrepaySettlementActor, order: { custo
 }
 
 function assertOrderCanSettle(order: SettlementOrder, proxyAccepted: boolean) {
-  if (order.paidAt || order.paymentAttempts.some((attempt) => PAID_ATTEMPT_STATUSES.has(attempt.status))) {
+  if (order.paidAt || order.paymentAttempts.some(attempt => attempt.status === 'paid'
+    || attempt.provider === 'alipay' && isAlipayReconciliationStatus(attempt.status))) {
     throw new PrepaySettlementError('订单已支付，不能再调整积分或优惠券', 409, 'ORDER_ALREADY_PAID');
   }
   if (order.status === 'cancelled' || order.status === 'closed') {

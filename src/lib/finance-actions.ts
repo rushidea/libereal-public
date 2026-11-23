@@ -12,7 +12,7 @@ import { documentSha256, positiveCents, PurchaseError, purchaseTimestamp, requir
 type Db = Prisma.TransactionClient;
 export const financeActions = ['verify_bank_receipt', 'record_customer_receipt', 'post_existing', 'restore_term', 'set_term',
   'create_plan', 'confirm_condition', 'chase_invoice', 'close_plan', 'record_invoice', 'open_correction', 'resolve_correction',
-  'reconcile_supplier', 'review_payment_case', 'resolve_payment_case'] as const;
+  'reconcile_supplier', 'review_payment_case', 'update_payment_case'] as const;
 type Action = typeof financeActions[number];
 export type FinanceInput = { orderId: string; action: Action; requestId: string; version: string; data: Record<string, unknown> };
 
@@ -187,13 +187,26 @@ async function financeOperation(tx: Db, input: FinanceInput, actor: PurchaseActo
     return { ...evidence, action, purchaseOrderId: po.id, matchVersion: po.matchVersion, purchase: po, outcome, ownerId: actor.id };
   }
   const sourceId = requiredText(data.sourceId, '待核对的原交易');
-  const source = view.latePayments.find(row => row.id === sourceId) ?? view.receipts.find(row => row.id === sourceId && !row.counted && !row.reconciled);
+  const alipay = view.latePayments.find(row => row.id === sourceId);
+  const bank = view.receipts.find(row => row.id === sourceId && !row.counted && !row.reconciled);
+  const source = alipay ? { ...alipay, kind: 'alipay' as const } : bank && { ...bank, kind: 'bank' as const };
   if (!source) throw new PurchaseError('找不到所选交易的待核对记录');
-  const last = view.events.findLast(row => (row.action === 'review_payment_case' || row.action === 'resolve_payment_case') && row.operation.sourceId === sourceId);
-  if (action === 'review_payment_case' ? last?.action === 'review_payment_case' : last?.action !== 'review_payment_case') {
-    throw new PurchaseError('该交易的待办状态已经变化');
+  const { review, ...originalTrade } = source;
+  const occurredAt = actualTime(data.occurredAt, '实际核对时间');
+  if (action === 'review_payment_case') {
+    if (review) throw new PurchaseError('该交易已由经办人接手，请继续登记跟进结果');
+    return { ...evidence, action, sourceId, source: originalTrade, ownerId: actor.id, occurredAt };
   }
-  return { ...evidence, action, sourceId, source, ownerId: actor.id, occurredAt: actualTime(data.occurredAt, '实际核对时间') };
+  if (!review) throw new PurchaseError('请先领取这笔原交易的待办');
+  const outcome = data.outcome;
+  if (outcome !== 'awaiting_provider_evidence' && outcome !== 'awaiting_authorized_disposition') {
+    throw new PurchaseError('请登记仍待核实的结果。结案须有已经批准并实际完成的原处理记录', 400);
+  }
+  if (occurredAt < String(review.lastRecord.operation.occurredAt ?? '')) throw new PurchaseError('核对时间早于上一条跟进记录');
+  if (review.lastRecord.operation.outcome === outcome && review.lastRecord.operation.sha256 === evidence.sha256) {
+    throw new PurchaseError('这份处理进展已经记录，请保留原待办');
+  }
+  return { ...evidence, action, sourceId, source: originalTrade, claimId: review.claimId, ownerId: review.ownerId, occurredAt, outcome };
 }
 
 export async function previewFinanceAction(tx: Db, input: FinanceInput, actor: PurchaseActor) {

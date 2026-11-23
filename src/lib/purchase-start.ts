@@ -1,7 +1,7 @@
 import type { Prisma } from '@prisma/client';
 import { isPostDeliveryPaymentMethod, normalizeOrderPaymentMethod } from '@/data/payment-methods';
-import { customerCashProjection, postVerifiedCustomerCash, orderCreditHeldCents } from '@/lib/customer-cash';
-import { creditLimitForAccount } from '@/lib/customer-credit';
+import { customerCashProjection, postVerifiedCustomerCash } from '@/lib/customer-cash';
+import { creditLimitForAccount, orderCreditHeldCents } from '@/lib/customer-credit';
 import { orderApprovalTerms } from '@/lib/order-approval';
 import { jsonObject } from '@/lib/order-catalog-repricing';
 import { pricingContentHash } from '@/lib/pricing-adjustment-approval';
@@ -144,6 +144,9 @@ async function creditEvidence(tx: Db, order: SourceOrder, outstandingCents: numb
   if (!order.customerId || !ar || ar.userId !== order.customerId || ar.status !== 'open' || reserves.length !== 1) return null;
   const held = await orderCreditHeldCents(tx, order);
   if (held === null || held < outstandingCents) return null;
+  const originalHeld = held - order.creditTransactions.filter(row => row.type === 'release')
+    .reduce((sum, row) => sum + cents(row.amount), 0);
+  if (originalHeld !== cents(order.total) && held !== outstandingCents) return null;
   if (Math.round(ar.amount * 100) < outstandingCents) return null;
   const account = await tx.creditAccount.findUnique({ where: { userId: ar.userId } });
   if (!account || !['active', 'credit_limited'].includes(account.status) || cents(account.usedAmount) < outstandingCents) return null;

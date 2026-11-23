@@ -1,4 +1,4 @@
-import { receivableView } from '@/lib/customer-cash';
+import { receivableCashAmounts, receivableView } from '@/lib/receivable-balance';
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { requireActiveSession } from '@/lib/session';
@@ -35,8 +35,9 @@ export async function GET(_request: Request, { params }: RouteParams) {
         include: {
           ...ORGANIZATION_ORDER_REVIEW_INCLUDE,
           researchGroup: { select: { id: true, name: true } },
+          cashPostings: { select: receivableCashAmounts },
           receivable: {
-            select: { id: true, cashPostings: { select: { releasedCents: true } }, amount: true, status: true, dueAt: true, paidAt: true },
+            select: { id: true, amount: true, status: true, dueAt: true, paidAt: true },
           },
         },
       }),
@@ -64,10 +65,11 @@ export async function GET(_request: Request, { params }: RouteParams) {
     const payables = orders.flatMap((order) => {
         const receivable = order.receivable;
         if (!receivable) return [];
-        const overdueDays = overdueDaysFromDueAt(receivable.dueAt, now);
+        const view = receivableView(receivable, order);
+        const overdueDays = view.amount > 0 ? overdueDaysFromDueAt(receivable.dueAt, now) : -1;
         return {
           orderId: order.id,
-          ...receivableView(receivable),
+          ...view,
           overdueDays,
           trigger: overdueDays >= CREDIT_REVIEW_POLICY.holdAfterDays
             ? 'order_hold'
@@ -78,7 +80,7 @@ export async function GET(_request: Request, { params }: RouteParams) {
                 : 'normal',
         };
       });
-    const openPayables = payables.filter((payable) => ['open', 'overdue'].includes(payable.status));
+    const openPayables = payables.filter((payable) => payable.amount > 0 && ['open', 'overdue'].includes(payable.status));
     const maxOverdueDays = openPayables.reduce((max, payable) => Math.max(max, payable.overdueDays), -1);
     return NextResponse.json({
       organization: { id, name: membership.organization.name },
@@ -100,7 +102,7 @@ export async function GET(_request: Request, { params }: RouteParams) {
           pointsPersonal: order.pointsPersonal, pointsGroup: order.pointsGroup, pointsGroupId: order.pointsGroupId,
           pointsDiscount: order.pointsDiscount, pointsRefundedPersonal: order.pointsRefundedPersonal,
           pointsRefundedGroup: order.pointsRefundedGroup, createdAt: order.createdAt, archivedAt: order.archivedAt,
-          researchGroup: order.researchGroup, receivable: order.receivable ? receivableView(order.receivable) : null,
+          researchGroup: order.researchGroup, receivable: order.receivable ? receivableView(order.receivable, order) : null,
           organizationReview: organizationReviewState(order, creatorId),
           canCancel, canReview: canCancel && Boolean(creatorId && creatorId !== user.id),
         };

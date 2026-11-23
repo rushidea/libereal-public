@@ -1,5 +1,6 @@
 import { normalizeOrderPaymentMethod } from '@/data/payment-methods';
 import { ALIPAY_PAYABLE_ORDER_STATUSES, isInactiveOrderStatus } from '@/lib/order-domain';
+import { isAlipayReconciliationStatus } from '@/lib/payment-concurrency';
 
 export const ALIPAY_PAYMENT_WINDOW_MS = 24 * 60 * 60 * 1000;
 
@@ -74,7 +75,7 @@ export function getAlipayPaymentSummary(
 
   const attemptStatus = attempt?.status?.trim() || null;
   const normalizedAttemptStatus = attemptStatus?.toUpperCase() || '';
-  const pendingReview = normalizedAttemptStatus.endsWith('_RECONCILIATION_REQUIRED');
+  const pendingReview = isAlipayReconciliationStatus(attemptStatus);
   const paidAt = toIsoString(order.paidAt || (pendingReview ? null : attempt?.paidAt));
   let status: AlipayPaymentStatus;
 

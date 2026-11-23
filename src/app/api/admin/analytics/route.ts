@@ -1,4 +1,4 @@
-import { receivableOutstanding } from '@/lib/customer-cash';
+import { receivableOrderBalance, receivableOutstandingCents } from '@/lib/receivable-balance';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { requireAdmin, getAdminPermissions } from '@/lib/session';
@@ -162,7 +162,6 @@ export async function GET(_req: NextRequest) {
       pendingOrganizations,
       revenueTodayAgg,
       newCustomersMonth,
-      receivableOverdueCount,
       paymentMethodOrders,
       funnelInquiries,
       funnelQuoted,
@@ -184,10 +183,6 @@ export async function GET(_req: NextRequest) {
         where: { createdAt: { gte: startOfToday }, archivedAt: null },
       }),
       prisma.user.count({ where: { createdAt: { gte: startOfMonth } } }),
-      // 已过 dueAt 仍未收款的笔数（逾期，同样限定未归档）
-      prisma.accountReceivable.count({
-        where: { status: { in: ['open', 'overdue'] }, order: { archivedAt: null }, dueAt: { lt: now } },
-      }),
       // 支付方式分布：近 90 天订单（未归档）—— 取原始值，JS 内 normalize 归并
       prisma.order.findMany({
         where: { createdAt: { gte: ninetyDaysAgo }, archivedAt: null },
@@ -303,14 +298,17 @@ export async function GET(_req: NextRequest) {
     ];
     const openReceivables = await prisma.accountReceivable.findMany({
       where: { status: { in: ['open', 'overdue'] }, order: { archivedAt: null } },
-      select: { amount: true, status: true, dueAt: true, cashPostings: { select: { releasedCents: true } } },
+      select: { order: { select: receivableOrderBalance }, amount: true, status: true, dueAt: true },
     });
+    const outstanding = openReceivables.map(row => ({ dueAt: row.dueAt,
+      cents: receivableOutstandingCents(row.amount, row.status, row.order.cashPostings, row.order.total) })).filter(row => row.cents > 0);
+    const receivableOverdueCount = outstanding.filter(row => row.dueAt && row.dueAt < now).length;
     const receivableAging = agingBuckets.map((bucket) => {
-      const matched = openReceivables.filter(bucket.test);
+      const matched = outstanding.filter(bucket.test);
       return {
         key: bucket.key,
         label: bucket.label,
-        amount: Math.round(matched.reduce((s, r) => s + receivableOutstanding(r.amount, r.status, r.cashPostings), 0) * 100) / 100,
+        amount: matched.reduce((sum, row) => sum + row.cents, 0) / 100,
         count: matched.length,
       };
     });
