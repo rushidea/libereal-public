@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { ORDER_STATUS_LABELS } from '@/lib/order-domain';
 import { actionStyle, DispatchForm, EventForm, EvidenceAction, HistoricalInventoryForm, HistoricalShipmentForm, HoldReviewForm, routeLabels, statusLabels,
   type FulfillmentCapabilities, type Workspace } from './FulfillmentForms';
 
@@ -24,16 +25,32 @@ const labels: Record<string,string> = {
   responsibility:'责任人',supplierReference:'供方书面核对',customerReference:'客户书面回复',
   resendApprovalId:'免费重发批准', resend:'原免费重发依据', allocation:'原出库流水归属', shipmentItemId:'原运单商品行',
 };
-function PreviewValue({ value }: { value: unknown }) {
+const parcelStatuses = {
+  dispatched: statusLabels.dispatched, in_transit: statusLabels.in_transit,
+  partially_received: statusLabels.partially_received, delivered: statusLabels.delivered,
+  exception: statusLabels.exception, shortfall: statusLabels.shortfall,
+};
+const holdReplyStatuses = { pending: statusLabels.pending, confirmed: statusLabels.confirmed };
+const previewValues: Record<string, Record<string,string>> = {
+  orderStatus: ORDER_STATUS_LABELS, fromStatus: ORDER_STATUS_LABELS, toStatus: ORDER_STATUS_LABELS,
+  priorStatus: parcelStatuses, route: routeLabels, kind: statusLabels, outcome: statusLabels,
+  party: { customer: '客户' },
+};
+
+function PreviewValue({ value, field, parent }: { value: unknown; field?: string; parent?: string }) {
   if (value === null || value === undefined || value === '') return <span>未填写</span>;
   if (Array.isArray(value)) return <ol className="space-y-2">{value.map((entry,index) =>
-    <li key={index} className="rounded border border-gray-200 bg-white p-2"><PreviewValue value={entry}/></li>)}</ol>;
+    <li key={index} className="rounded border border-gray-200 bg-white p-2"><PreviewValue value={entry} field={field} parent={parent}/></li>)}</ol>;
   if (typeof value === 'object') return <dl className="grid gap-x-3 gap-y-1 text-sm sm:grid-cols-[max-content_1fr]">
     {Object.entries(value).map(([key,entry]) => <div key={key} className="contents">
-      <dt className="text-gray-600">{labels[key] ?? key}</dt><dd className="min-w-0 break-words"><PreviewValue value={entry}/></dd></div>)}</dl>;
+      <dt className="text-gray-600">{labels[key] ?? key}</dt><dd className="min-w-0 break-words">
+        <PreviewValue value={entry} field={key} parent={field}/>
+      </dd></div>)}</dl>;
   const text = String(value);
-  const display = routeLabels[text] ?? statusLabels[text] ?? (text === 'customer' ? '客户' : text);
-  return <span className="break-all">{display}</span>;
+  const values: Readonly<Record<string, string>> | undefined =
+    field === 'status' && parent === 'holdReview' ? holdReplyStatuses : previewValues[field ?? ''];
+  const display = values?.[text];
+  return <span className="break-all">{typeof display === 'string' ? display : text}</span>;
 }
 function reviewedHold(raw: string) {
   try {
