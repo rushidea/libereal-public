@@ -8,6 +8,7 @@ import { prisma } from '@/lib/prisma';
 import { settleExpiredQuotes } from '@/lib/quote-expiry-settle';
 import { runMfaChallengeCleanupOnce } from '@/lib/security/mfa-cleanup';
 import { dispatchApprovedBusinessLetter } from '@/lib/business-letters';
+import { storeReminderDeliveryScope } from '@/lib/task-delivery-review';
 
 type SmsPayload = { phone: string; templateCode: string; templateParams: Record<string, string | number> };
 type QuoteNotificationPayload = {
@@ -71,19 +72,23 @@ async function sendOrderReminder(task: BackgroundTask): Promise<unknown> {
   if (receivable.order.ownerScope === 'organization' && receivable.order.organization?.owner.email) {
     recipients.add(receivable.order.organization.owner.email);
   }
+  const templateCode = process.env.ALIYUN_SMS_TEMPLATE_CODE_CREDIT_REMINDER;
+  const smsRecipient=templateCode?receivable.user.phone:null;
+  if (!await storeReminderDeliveryScope(prisma,task,[...recipients],smsRecipient)) {
+    throw new Error('Credit reminder no longer owns its execution claim');
+  }
   const mailResults = await Promise.all(Array.from(recipients, (to) => sendMail({ to, subject: 'LIBEREAL · 应付款提醒', text: message })));
   const failedMail = mailResults.find((result) => !result.ok);
   if (failedMail && !failedMail.ok) throw new Error(failedMail.error || 'Credit reminder email failed');
 
-  const templateCode = process.env.ALIYUN_SMS_TEMPLATE_CODE_CREDIT_REMINDER;
-  if (templateCode && receivable.user.phone) {
-    await sendAliyunSmsTemplate(receivable.user.phone, templateCode, {
+  if (templateCode && smsRecipient) {
+    await sendAliyunSmsTemplate(smsRecipient, templateCode, {
       orderId: receivable.order.id,
       amount,
       days: overdueDays,
     });
   }
-  return { email: true, recipients: recipients.size, sms: Boolean(templateCode && receivable.user.phone) };
+  return { email: true, recipients: recipients.size, sms: Boolean(smsRecipient) };
 }
 
 async function expireQuote(task: BackgroundTask): Promise<unknown> {

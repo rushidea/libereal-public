@@ -4,7 +4,8 @@ import { requireAdmin } from '@/lib/session';
 import { canRetryGeneralTask, retryBackgroundTask } from '@/lib/background-tasks';
 import { projectAiOpsTask } from '@/lib/ai-ops/tasks';
 import { writeAuditLog } from '@/lib/audit';
-import { deliveryReviewable, deliveryVersion, recordDeliveryReview } from '@/lib/task-delivery-review';
+import { deliveryDomainPermission, deliveryReviewable, deliveryVersion, isDeliveryTask, recordDeliveryReview,
+  taskDeliveryScope } from '@/lib/task-delivery-review';
 import { PURCHASE_CONTINUATION, PURCHASE_READY } from '@/lib/purchase-continuation-state';
 import { jsonObject } from '@/lib/order-catalog-repricing';
 import { acknowledgeSupplierMailHeader, supplierMailReceiptConflict, supplierMailReceiptLink, supplierMailReceiptVersion,
@@ -41,8 +42,16 @@ export async function GET(req: NextRequest) {
     prisma.backgroundTask.groupBy({ by: ['status'], where: visibleTask, _count: { _all: true } }),
     prisma.backgroundTask.findMany({ where: visibleTask, select: { type: true }, distinct: ['type'], orderBy: { type: 'asc' } }),
   ]);
+  const reviewTasks=tasks.filter(task=>deliveryReviewable(task) || isDeliveryTask(task) && task.status==='delivery_reviewed');
+  const manager=reviewTasks.length?await requireAdmin('tasks.manage'):null;
+  const mayReview=manager && !(manager instanceof NextResponse) && manager.id===admin.id;
+  const domains=mayReview?[...new Set(reviewTasks.map(deliveryDomainPermission).filter(permission=>permission!==null))]:[];
+  const clearedDomains=new Set(await Promise.all(domains.map(async permission=>{
+    const reader=await requireAdmin(permission);
+    return !(reader instanceof NextResponse) && reader.id===admin.id ? permission : null;
+  })));
   return NextResponse.json({
-    tasks: tasks.map((task) => {
+    tasks: await Promise.all(tasks.map(async task => {
       if (task.type === PURCHASE_CONTINUATION) {
         const orderId = jsonObject(task.payload).orderId;
         return { id: task.id, type: task.type, status: task.status, attempts: task.attempts, maxAttempts: task.maxAttempts,
@@ -61,15 +70,20 @@ export async function GET(req: NextRequest) {
       if (task.type.startsWith('aiops.')) return projectAiOpsTask(task);
       if (task.type === 'inquiry.supplier_written_quote') {
         const scope = jsonObject(task.payload).scope as { inquiryId?: string } | undefined;
-        return { ...task, payload: null, result: null, inquiryId: typeof scope?.inquiryId === 'string' ? scope.inquiryId : null };
+        return { ...task, payload: null, result: null,lastError:null,lockedBy:null,inquiryId: typeof scope?.inquiryId === 'string' ? scope.inquiryId : null };
       }
-      if (deliveryReviewable(task) || task.status === 'delivery_reviewed') {
+      if (isDeliveryTask(task)) {
+        const permission=deliveryDomainPermission(task);
+        const reviewable=deliveryReviewable(task);
+        const maySee=mayReview && (!permission || clearedDomains.has(permission)) && (reviewable || task.status==='delivery_reviewed');
+        const deliveryScope=maySee?await taskDeliveryScope(prisma,task):null;
         return { id: task.id, type: task.type, status: task.status, attempts: task.attempts, maxAttempts: task.maxAttempts,
           completedAt: task.completedAt, createdAt: task.createdAt, runAt: task.runAt, priority: task.priority,
-          deliveryVersion: deliveryReviewable(task) ? deliveryVersion(task) : null, deliveryOutcome: jsonObject(task.result).outcome ?? null };
+          deliveryVersion: reviewable && deliveryScope ? deliveryVersion(task,deliveryScope) : null,
+          deliveryScope, deliveryOutcome: maySee ? jsonObject(task.result).outcome ?? null : null };
       }
       return { ...task, lockedBy: null, canRetry: task.status === 'failed' && canRetryGeneralTask(task.type) };
-    }),
+    })),
     total,
     page,
     pageCount: Math.max(1, Math.ceil(total / limit)),
@@ -88,8 +102,20 @@ export async function PATCH(req: NextRequest) {
   }
   if (body.action === 'record_delivery_review') {
     const taskId = body.id;
-    const recorded = await prisma.$transaction(tx => recordDeliveryReview(tx, taskId, body, admin));
-    return recorded ? NextResponse.json(recorded) : NextResponse.json({ error: '请核对本次记录、凭据及当前任务版本' }, { status: 409 });
+    const task=await prisma.backgroundTask.findUnique({where:{id:taskId},select:{type:true,payload:true}});
+    const permission=task?deliveryDomainPermission(task):null;
+    if (permission) {
+      const reviewer=await requireAdmin(permission);
+      if (reviewer instanceof NextResponse) return reviewer;
+      if (reviewer.id!==admin.id) return NextResponse.json({error:'登录已变化，请刷新后重试'},{status:403});
+    }
+    try {
+      const recorded=await prisma.$transaction(tx=>recordDeliveryReview(tx,taskId,body,admin,permission),{isolationLevel:'Serializable'});
+      if (recorded) return NextResponse.json(recorded);
+      return NextResponse.json({error:'请核对原投递范围、凭据及当前任务版本'},{status:409});
+    } catch {
+      return NextResponse.json({error:'投递核查暂未确认，请刷新查询原记录'},{status:503});
+    }
   }
   if (body.action === 'acknowledge_supplier_mail') {
     const reviewer = await requireAdmin('inquiries.write');

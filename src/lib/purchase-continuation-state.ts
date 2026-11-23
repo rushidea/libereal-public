@@ -29,9 +29,11 @@ export async function requestPurchaseContinuation(tx: Db, orderId: string, versi
   if (!row) {
     return tx.backgroundTask.create({ data: { type: PURCHASE_CONTINUATION, status: PURCHASE_READY, dedupeKey, payload } });
   }
-  if (row.type !== PURCHASE_CONTINUATION || readContinuationInput(row.payload).orderId !== orderId) {
-    throw new Error('Order continuation key belongs to a different record');
-  }
+  if (row.type !== PURCHASE_CONTINUATION) return null;
+  let sourceMatches=false;
+  try { sourceMatches=readContinuationInput(row.payload).orderId===orderId; }
+  catch { /* A damaged task must not roll back the customer or finance action. */ }
+  if (!sourceMatches && !retryFailed) return row;
   if (version === null || row.payload === payload && !(retryFailed && row.status === 'failed')) return row;
   await continuationHistory(tx, row.id, 'purchase.continuation_requested',
     { status: row.status, payload: row.payload, result: row.result, attempts: row.attempts, lastError: row.lastError },
@@ -59,8 +61,10 @@ export async function purchaseContinuationStatus(tx: Db, orderId: string) {
   if (!row || row.type !== PURCHASE_CONTINUATION) return null;
   let reason: string | null = null;
   if (row.status === 'awaiting_human' && row.result) {
-    const receipt: unknown = JSON.parse(row.result);
-    if (receipt && typeof receipt === 'object' && 'reason' in receipt && typeof receipt.reason === 'string') reason = receipt.reason;
+    try {
+      const receipt: unknown = JSON.parse(row.result);
+      if (receipt && typeof receipt === 'object' && 'reason' in receipt && typeof receipt.reason === 'string') reason = receipt.reason;
+    } catch { reason='请核对本单原采购接续记录'; }
   }
   return { status: row.status, reason, updatedAt: row.updatedAt.toISOString() };
 }
