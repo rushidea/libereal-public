@@ -15,10 +15,11 @@ import { runMfaChallengeCleanupOnce } from '@/lib/security/mfa-cleanup';
 
 const once = process.argv.includes('--once');
 const typeArgs = process.argv.filter((arg) => arg.startsWith('--type='));
-if (typeArgs.length > 1 || (typeArgs.length === 1 && typeArgs[0] !== '--type=aiops.run') || process.argv.includes('--type')) {
-  throw new Error('Only --type=aiops.run is supported');
+if (typeArgs.length > 1 || (typeArgs.length === 1 && !['--type=aiops.run','--type=order.purchase_prepare'].includes(typeArgs[0])) || process.argv.includes('--type')) {
+  throw new Error('Unsupported worker type');
 }
-const aiOpsOnly = typeArgs.length === 1;
+const aiOpsOnly = typeArgs[0] === '--type=aiops.run';
+const purchaseOnly = typeArgs[0] === '--type=order.purchase_prepare';
 const stopController = new AbortController();
 const pollMs = Math.max(250, Number(process.env.TASK_WORKER_POLL_MS) || 2000);
 const workerId = `${os.hostname()}:${process.pid}:${randomUUID().slice(0, 8)}`;
@@ -48,6 +49,26 @@ async function scheduleRecurringTasks(now: Date): Promise<void> {
 
 async function run(): Promise<void> {
   console.info(`[task-worker] started ${workerId}`);
+  if (purchaseOnly) {
+    const { discoverOrderPurchaseWork, runOrderPurchaseContinuationOnce } = await import('@/lib/purchase-continuation-worker');
+    let nextDiscovery = 0;
+    while (!stopping) {
+      try {
+        if (Date.now() >= nextDiscovery) {
+          const count = await discoverOrderPurchaseWork();
+          nextDiscovery = count === 16 ? 0 : Date.now() + 60_000;
+        }
+        const receipt = await runOrderPurchaseContinuationOnce();
+        if (once) break;
+        if (!receipt) await sleep(pollMs);
+      } catch (error) {
+        if (once) throw error;
+        console.error('[task-worker] order preparation temporarily unavailable', error instanceof Error ? error.name : 'error');
+        await sleep(pollMs);
+      }
+    }
+    return;
+  }
   if (aiOpsOnly) {
     const { claimAiOpsTask, recoverStaleAiOpsTasks } = await import('@/lib/ai-ops/tasks');
     const { runAiOpsTask } = await import('@/lib/ai-ops/runtime-composition');
@@ -62,12 +83,12 @@ async function run(): Promise<void> {
     }
     return;
   }
-  await recoverStaleBackgroundTasks();
   let lastScheduleAt = 0;
 
   while (!stopping) {
     const now = new Date();
     if (now.getTime() - lastScheduleAt >= 60_000) {
+      await recoverStaleBackgroundTasks(now);
       await scheduleRecurringTasks(now);
       lastScheduleAt = now.getTime();
     }
@@ -81,11 +102,9 @@ async function run(): Promise<void> {
 
     try {
       const result = await executeBackgroundTask(task);
-      await completeBackgroundTask(task.id, workerId, result);
-      console.info(`[task-worker] succeeded ${task.type} ${task.id}`);
+      if (await completeBackgroundTask(task.id, task.lockedBy!, result)) console.info(`[task-worker] succeeded ${task.type} ${task.id}`);
     } catch (error) {
-      await failBackgroundTask(task.id, workerId, error);
-      console.error(`[task-worker] failed ${task.type} ${task.id}`, error);
+      if (await failBackgroundTask(task.id, task.lockedBy!, error)) console.error(`[task-worker] failed ${task.type} ${task.id}`, error);
     }
     if (once) break;
   }

@@ -92,7 +92,7 @@ export async function POST(req: NextRequest) {
     const orderId = requiredText(body.orderId, '原订单编号');
     if (draft) {
       const workspace = await prisma.$transaction(async tx => {
-        if (body.action === 'prepare') return prepareOrderPurchases(tx, orderId, actor);
+        if (body.action === 'prepare') return prepareOrderPurchases(tx, orderId, actor, true);
         if (!Number.isSafeInteger(body.revision)) throw new PurchaseError('请重新加载采购行版本');
         return savePurchaseLine(tx, {
           orderId, orderItemId: requiredText(body.orderItemId, '原订单行编号'), revision: body.revision,

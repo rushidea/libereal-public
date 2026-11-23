@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { purchaseContinuationStatus, requestPurchaseContinuation } from '@/lib/purchase-continuation-state';
 import type { Prisma } from '@prisma/client';
 import { addPurchaseActivity, findPurchaseActivityByRequest, purchaseObject, purchaseOperation, readPurchaseActivities, type PurchaseActor, type PurchaseActivity, type PurchaseAuthorization } from '@/lib/purchase-activity';
 import {
@@ -301,7 +302,8 @@ export async function purchaseWorkspace(tx: Db, orderId: string) {
     }
     return {...po,incidentSources:sources};
   });
-  return { orderId, orderStatus: order.status, cancellation, canPrepare, eligibility, startReview, lines, orders:ordersWithSources, activities, fulfillment, customerRemaining };
+  const continuation = await purchaseContinuationStatus(tx, orderId);
+  return { orderId, orderStatus: order.status, cancellation, canPrepare, eligibility, startReview, lines, orders:ordersWithSources, activities, fulfillment, customerRemaining, continuation };
 }
 
 export async function previewPurchaseShipment(tx: Db, input: ShipmentAttributionInput, actor: PurchaseActor) {
@@ -324,25 +326,53 @@ export async function applyPurchaseShipment(tx: Db, input: ShipmentAttributionIn
   return purchaseWorkspace(tx, input.orderId);
 }
 
-export async function prepareOrderPurchases(tx: Db, orderId: string, actor: PurchaseActor) {
+type PurchaseStart = Awaited<ReturnType<typeof purchaseStartReview>>;
+
+async function prepareEligibleLines(tx: Db, order: SourceOrder, start: PurchaseStart, actor: PurchaseActor,
+  ownerId: string, taskId?: string) {
+  if (!start.eligibility.eligible || !canPrepareOrder(order)) return;
+  const demand = remainingDemand(order);
+  for (const original of await loadPurchaseLines(tx, order)) {
+    const quantity = demand.get(original.orderItemId) ?? 0;
+    if (!quantity) continue;
+    const source = outstandingSource(original, quantity);
+    const stamp = now();
+    const count = await tx.$executeRaw`INSERT INTO PurchaseRequirement
+      (orderItemId,orderId,ownerId,source,terms,revision,createdAt,updatedAt)
+      VALUES (${source.orderItemId},${order.id},${ownerId},${JSON.stringify(source)},${JSON.stringify(initialPurchaseTerms(source))},1,${stamp},${stamp})
+      ON CONFLICT(orderItemId) DO NOTHING`;
+    if (count === 1) await addPurchaseActivity(tx, { orderId: order.id, orderItemId: source.orderItemId, actor, action: 'prepare',
+      detail: { eligibility: start.eligibility, source, ...(taskId ? { continuationTaskId: taskId, ownerId } : {}) } });
+  }
+}
+
+export async function prepareOrderPurchases(tx: Db, orderId: string, actor: PurchaseActor, retryFailed = false) {
   const order = await loadPurchaseOrderSource(tx, orderId);
-  const { eligibility } = await purchaseStartReview(tx, order, await readPurchaseActivities(tx, orderId));
-  if (eligibility.eligible && canPrepareOrder(order)) {
-    const demand = remainingDemand(order);
-    const sources = await loadPurchaseLines(tx, order);
-    for (const original of sources) {
-      const quantity = demand.get(original.orderItemId) ?? 0;
-      if (!quantity) continue;
-      const source = outstandingSource(original, quantity);
-      const stamp = now();
-      const count = await tx.$executeRaw`INSERT INTO PurchaseRequirement
-        (orderItemId,orderId,ownerId,source,terms,revision,createdAt,updatedAt)
-        VALUES (${source.orderItemId},${orderId},${actor.id},${JSON.stringify(source)},${JSON.stringify(initialPurchaseTerms(source))},1,${stamp},${stamp})
-        ON CONFLICT(orderItemId) DO NOTHING`;
-      if (count === 1) await addPurchaseActivity(tx, { orderId, orderItemId: source.orderItemId, actor, action: 'prepare', detail: { eligibility, source } });
-    }
+  const start = await purchaseStartReview(tx, order, await readPurchaseActivities(tx, orderId));
+  if (canPrepareOrder(order)) {
+    await requestPurchaseContinuation(tx, orderId, start.review.version, retryFailed);
+    await prepareEligibleLines(tx, order, start, actor, actor.id);
   }
   return purchaseWorkspace(tx, orderId);
+}
+
+export async function continuePurchasePreparation(tx: Db, orderId: string, taskId: string) {
+  const order = await loadPurchaseOrderSource(tx, orderId);
+  const activities = await readPurchaseActivities(tx, orderId);
+  const start = await purchaseStartReview(tx, order, activities);
+  const acceptance = start.review.acceptance;
+  // A reviewed archive names the historical accepting party separately from the responsible platform reviewer.
+  const ownerId = acceptance && (order.statusHistory.find(row => row.id === acceptance.id)?.actorId
+    ?? activities.find(row => row.id === acceptance.id && row.action === 'verify_acceptance')?.actorId) || null;
+  const hasDemand = canPrepareOrder(order) && order.orderItems.some(line => line.quantity > line.shippedQty);
+  const reason = hasDemand ? start.eligibility.reason ?? (!ownerId ? '请核对原接单经办人' : null) : null;
+  if (hasDemand && !reason && ownerId) {
+    await prepareEligibleLines(tx, order, start, { id: 'system:purchase-preparation', email: '' }, ownerId, taskId);
+  }
+  const requirements = await tx.purchaseRequirement.findMany({ where: { orderId }, select: { orderItemId: true }, orderBy: { orderItemId: 'asc' } });
+  return { orderId, version: start.review.version, acceptanceId: acceptance?.id ?? null, ownerId, reason,
+    outcome: reason ? 'waiting' : hasDemand ? 'prepared' : 'no_open_demand',
+    orderItemIds: requirements.map(row => row.orderItemId) };
 }
 
 async function touchDraft(tx: Db, orderId: string, id: string) {
