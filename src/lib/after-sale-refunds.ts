@@ -5,7 +5,7 @@ import { purchaseObject } from '@/lib/purchase-activity';
 import { requiredText } from '@/lib/purchase-terms';
 import { cents, choice, condition, type SaleEvidence } from '@/lib/after-sale-records';
 import { caseEvents, currentSaleAgreement, lastCaseEvent, saleOperation, type SaleCase, type AfterSaleWorkspace } from '@/lib/after-sale-workspace';
-import { eligibleAfterSalePayment, verifiedAfterSalePayment } from '@/lib/after-sale-payment-source';
+import { eligibleAfterSalePayment, independentAfterSalePayment, verifiedAfterSalePayment } from '@/lib/after-sale-payment-source';
 import { allocateAfterSaleTransfer, transferReference } from '@/lib/after-sale-transfers';
 
 type RefundTerms = { amountCents: number; recipient: string; destination: string; method: string; currency: 'CNY'; agreementId: string };
@@ -57,17 +57,18 @@ export async function refundPosition(tx: Db, view: AfterSaleWorkspace, row: Sale
     return paymentId ? (held ?? settledSource) === paymentId : !held || held === settledSource;
   });
   const used = sameReceipt.reduce((sum, item) => sum + reserved(item), 0);
+  const independentReceipt = Boolean(verified && finance.acceptanceId && independentAfterSalePayment(verified,finance));
   const onLine = sameReceipt.filter(item => item.orderItemId === row.orderItemId).reduce((sum, item) => sum + reserved(item), 0);
   const line = view.lines.find(item => item.id === row.orderItemId)!;
   const gross = Math.round(line.unitPrice * line.quantity * 100);
   const agreement = currentSaleAgreement(row);
   const refundQuantity = agreement && saleOperation(agreement).refundQuantity;
   const caseGoodsCents = Math.round(line.unitPrice * (typeof refundQuantity === 'number' ? refundQuantity : row.quantity) * 100);
-  condition(Number.isSafeInteger(gross) && gross >= 0, '请先核对原订单行金额');
+  condition(independentReceipt || Number.isSafeInteger(gross) && gross >= 0, '请先核对原订单行金额');
   return { paidCents: verified?.amountCents ?? finance.settlementCents, usedCents: used, originalLineCents: gross, caseGoodsCents, lineUsedCents: onLine,
     originalAcceptance: finance.acceptanceId, authorityConflict: finance.authorityConflict, recordedCents: actualRefunded(row),
     originalPointsBasisYuan: view.order.pointsRefundedCash, originalCash: finance.cash.map(item => [item.id, item.amountCents]),
-    originalPaymentId: paymentId ?? settledSource, verifiedPayment: verified,
+    originalPaymentId: paymentId ?? settledSource, verifiedPayment: verified, independentReceipt,
     sourceEligible: !verified || eligibleAfterSalePayment(verified, view.order, finance) };
 }
 
@@ -146,10 +147,12 @@ export async function refundStep(tx: Db, view: AfterSaleWorkspace, row: SaleCase
   }
   condition(position.verifiedPayment ? position.sourceEligible : !position.authorityConflict && position.originalAcceptance,
     '原单接单或回款归属待财务核对');
-  condition(terms.amountCents <= position.paidCents - position.usedCents - position.recordedCents
-    && terms.amountCents <= position.originalLineCents - position.lineUsedCents - position.recordedCents
-    && terms.amountCents <= position.caseGoodsCents - position.recordedCents,
-    '退款超过已核实的剩余实收款或原商品行范围');
+  condition(terms.amountCents <= position.paidCents - position.usedCents - position.recordedCents,
+    '退款超过已核实的剩余实收款（以本笔到账为准）');
+  if (!position.independentReceipt) {
+    condition(terms.amountCents <= position.originalLineCents - position.lineUsedCents - position.recordedCents
+      && terms.amountCents <= position.caseGoodsCents - position.recordedCents, '退款超过原商品行范围');
+  }
   if (action === 'prepare_refund') {
     condition(['awaiting_refund','refund_prepared'].includes(row.customerState), '当前事项不能准备新的退款');
     const historicCheck = requiredText(data.historyReview, '财务对既有实际退款、积分处理及外部回执的核对记录');

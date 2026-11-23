@@ -3,16 +3,19 @@ import { financeIdentity } from '@/lib/finance-workspace';
 import { purchaseWorkspace } from '@/lib/purchase-orders';
 import { requiredText } from '@/lib/purchase-terms';
 import { cents, choice, condition, type SaleEvidence } from '@/lib/after-sale-records';
-import { type SaleCase, type AfterSaleWorkspace, originalSaleParcel, originalSaleParcelShares, caseEvents, saleOperation } from '@/lib/after-sale-workspace';
+import { type SaleCase, type AfterSaleWorkspace, originalSaleParcel, originalSaleParcelShares, caseEvents, saleOperation, supplierProgress } from '@/lib/after-sale-workspace';
 import { allocateAfterSaleTransfer } from '@/lib/after-sale-transfers';
 
-export async function supplierAfterSale(tx: Db, view: AfterSaleWorkspace, row: SaleCase, data: Record<string, unknown>, proof: SaleEvidence) {
+export async function supplierAfterSale(tx: Db, view: AfterSaleWorkspace, row: SaleCase, data: Record<string, unknown>, proof: SaleEvidence, actorId: string) {
   const outcome = choice(data.outcome, ['following','no_claim','resolved','financial_result'] as const, '供应商处理结果');
   const purchasing = await purchaseWorkspace(tx, view.order.id);
   const sources = purchasing.orders.filter(po => po.orderReceipt?.lines.some(line => line.orderItemId === row.orderItemId));
   const loss = view.shortfalls.find(item => item.resolutionId === row.shortfallId);
   const shares = originalSaleParcelShares(row);
-  const selected = data.originalParcelLineId ?? (shares.length === 1 ? shares[0].parcelLineId : originalSaleParcel(row));
+  const scopes = supplierProgress(row,view.deliveries,loss).scopes.filter(part=>part.purchaseOrderId===data.purchaseOrderId);
+  const selected = data.originalParcelLineId ?? (scopes.length===1 ? scopes[0].parcelLineId : originalSaleParcel(row));
+  const existingScope = scopes.find(part=>part.parcelLineId===(selected??null));
+  condition(!scopes.length || existingScope, '请逐份选择本供应商实际处理的原包裹');
   const original = view.deliveries.find(item => item.id === selected && item.orderItemId===row.orderItemId);
   condition(!selected || original && (!shares.length || shares.some(part => part.parcelLineId === original.id)), '请核对本案指定的原实际包裹');
   const affectedPurchase = loss?.purchaseOrderId ?? original?.purchaseOrderId;
@@ -21,7 +24,7 @@ export async function supplierAfterSale(tx: Db, view: AfterSaleWorkspace, row: S
     condition(!affectedPurchase && !sources.length, '本行有原采购记录，请选择对应供方核对');
     return { operation: { outcome, purchaseOrderId: null, note }, supplierState: 'no_claim' };
   }
-  condition(affectedPurchase || sources.length<=1, '本商品有多张原采购记录，须凭实际运单确定本案相关供方');
+  condition(affectedPurchase || existingScope || sources.length<=1, '本商品有多张原采购记录，须凭实际运单确定本案相关供方');
   const purchase = sources.find(po => po.id === data.purchaseOrderId);
   condition(purchase && (!affectedPurchase || purchase.id === affectedPurchase), '这张采购单不属于原售后商品行或本案实际来源');
   const ordered = purchase.orderReceipt?.lines.find(line => line.orderItemId === row.orderItemId);
@@ -31,9 +34,10 @@ export async function supplierAfterSale(tx: Db, view: AfterSaleWorkspace, row: S
     && financeIdentity(supplier) === financeIdentity(line.terms.supplier) && purchase.orderReceipt!.occurredAt! <= proof.occurredAt,
     '对应采购承诺、履约来源、原商品行及供应商主体须一致');
   const subject = { outcome, purchaseOrderId: purchase.id, orderItemId: row.orderItemId, supplier: line.terms.supplier,
-    originalParcelLineId: original?.id ?? null, shortfallId: loss?.resolutionId ?? null,
-    receipt: purchase.orderReceipt!.reference, note };
-  if (outcome !== 'financial_result') return { operation: subject, supplierState: outcome };
+    quantity: existingScope?.quantity ?? row.quantity, originalParcelLineId: original?.id ?? null,
+    shortfallId: loss?.resolutionId ?? null, receipt: purchase.orderReceipt!.reference, note };
+  const supplierState = supplierProgress(row,view.deliveries,loss,{...subject,ownerId:actorId,reference:proof.reference,occurredAt:proof.occurredAt}).state;
+  if (outcome !== 'financial_result') return { operation: subject, supplierState };
   const money = { amountCents: cents(data.amountCents), method: requiredText(data.method, '供方退款或抵扣方式'),
     destination: requiredText(data.destination, '实收的 Libereal 去向或抵扣出处'), referenceNo: requiredText(data.referenceNo, '实际退款或抵扣流水') };
   const existing = view.cases.filter(item => item.orderItemId === row.orderItemId)
@@ -46,5 +50,5 @@ export async function supplierAfterSale(tx: Db, view: AfterSaleWorkspace, row: S
     direction: 'supplier_return', method: money.method, party: line.terms.supplier, destination: money.destination,
     referenceNo: money.referenceNo,
   }, data, proof, money.amountCents);
-  return { operation: { ...subject, ...money, transfer }, supplierState: 'resolved' };
+  return { operation: { ...subject, ...money, transfer }, supplierState };
 }

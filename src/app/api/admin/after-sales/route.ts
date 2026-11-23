@@ -3,10 +3,11 @@ import { Prisma } from '@prisma/client';
 import { afterSaleInvoiceChoices } from '@/lib/after-sale-invoices';
 import { eligibleAfterSalePayment, verifiedAfterSalePayment } from '@/lib/after-sale-payment-source';
 import { financeWorkspace } from '@/lib/finance-workspace';
+import { saleSnapshotFor } from '@/lib/after-sale-visibility';
 import { afterSaleAction } from '@/lib/after-sale-actions';
 import { refundPosition, refundTerms } from '@/lib/after-sale-refunds';
 import { saleInput, salePermission } from '@/lib/after-sale-records';
-import { afterSaleAdminView, afterSaleWorkspace } from '@/lib/after-sale-workspace';
+import { afterSaleAdminView, afterSaleQueue, afterSaleWorkspace } from '@/lib/after-sale-workspace';
 import { extractStepUpToken } from '@/lib/admin-order-step-up';
 import { isPriceAdjustmentApprovalHash, pricingContentHash } from '@/lib/pricing-adjustment-approval';
 import { prisma } from '@/lib/prisma';
@@ -36,10 +37,7 @@ export async function GET(req: NextRequest) {
         const refundDrafts=permissions.includes('finance.read') ? await Promise.all(view.cases
           .filter(row=>['awaiting_refund','refund_prepared','refund_approved','refund_followup'].includes(row.customerState))
           .map(async row=>({caseId:row.id,terms:refundTerms(row),position:await refundPosition(tx,view,row)}))) : [];
-        const invoiceChoices = (await afterSaleInvoiceChoices(tx,id)).map(choice=>({
-          ...choice, amountCents:permissions.includes('finance.read')?choice.amountCents:null,
-          correction:permissions.includes('finance.read')?choice.correction:null,
-        }));
+        const invoiceChoices = await afterSaleInvoiceChoices(tx,id,permissions.includes('finance.read'));
         const candidates = permissions.includes('finance.read')
           ? await tx.paymentAttempt.findMany({where:{orderId:id,provider:'alipay',tradeNo:{not:null}},select:{id:true}}) : [];
         const finances = candidates.length ? await financeWorkspace(tx,id) : null;
@@ -57,10 +55,7 @@ export async function GET(req: NextRequest) {
     }
     const search=req.nextUrl.searchParams.get('search')?.trim();
     const pending=req.nextUrl.searchParams.get('pending')==='1';
-    const cases=await prisma.afterSaleCase.findMany({where:{
-      ...(search ? { OR:[{id:{contains:search}},{orderId:{contains:search}},{item:{name:{contains:search}}}] } : {}),
-      ...(pending ? { NOT:{customerState:'closed',supplierState:{in:['resolved','no_claim']}} } : {}),
-    },select:{id:true,orderId:true,quantity:true,issue:true,ownerId:true,customerState:true,supplierState:true,item:{select:{name:true}}},orderBy:[{createdAt:'desc'},{id:'desc'}],take:100});
+    const cases=await prisma.$transaction(tx=>afterSaleQueue(tx,search,pending));
     const sourceSearch = search ? Prisma.sql`AND (instr(lower(p.orderId),lower(${search}))>0 OR instr(lower(i.name),lower(${search}))>0 OR instr(lower(e.reference),lower(${search}))>0)` : Prisma.empty;
     const sourceRows=await prisma.$queryRaw<{id:string;orderId:string;orderItemId:string;name:string;reference:string;remaining:bigint}[]>`
       SELECT r.id,p.orderId,l.orderItemId,i.name,e.reference,r.quantity-COALESCE(SUM(c.quantity),0) AS remaining
@@ -86,7 +81,10 @@ export async function POST(req: NextRequest) {
     if (!permissions.includes(requiredRead) || !permissions.includes('admin.access')) return NextResponse.json({error:'缺少该业务的查看权限'},{status:403});
     const actor={id:user.id,email:user.email};
     if (body.stage==='preview') {
-      return NextResponse.json({preview:await prisma.$transaction(tx=>afterSaleAction(tx,input,actor))});
+      const preview=await prisma.$transaction(tx=>afterSaleAction(tx,input,actor));
+      return NextResponse.json({preview:{...preview,snapshot:saleSnapshotFor(preview.snapshot,permissions)}},
+        {headers:{'Cache-Control':'private, no-store'}});
+
     }
     if (body.stage!=='confirm'||!isPriceAdjustmentApprovalHash(body.actionHash)) throw new PurchaseError('请先核对本次完整预览');
     const token=extractStepUpToken(body);

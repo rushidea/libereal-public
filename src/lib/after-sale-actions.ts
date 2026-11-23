@@ -5,9 +5,9 @@ import type { FulfillmentDb as Db } from '@/lib/fulfillment-records';
 import { afterSaleChannels, afterSaleIssues, afterSaleRemedies, hasChoice } from '@/lib/after-sale-options';
 import { cents, choice, condition, quantity, salePermission, saleProof, type SaleActor, type SaleAuthorization, type SaleEvidence, type SaleInput } from '@/lib/after-sale-records';
 import { activeRefundSourceReview, actualRefunded, refundStep, releaseRefundSource, reviewRefundSource } from '@/lib/after-sale-refunds';
-import { afterSaleWorkspace, caseEvents, currentSaleAgreement, lastCaseEvent, originalSaleParcel, originalSaleParcelShares, saleOperation, type AfterSaleWorkspace, type SaleCase } from '@/lib/after-sale-workspace';
+import { afterSaleCaseInclude, afterSaleWorkspace, caseEvents, currentSaleAgreement, lastCaseEvent, originalSaleParcel, originalSaleParcelShares, saleOperation, supplierProgress, type AfterSaleWorkspace, type SaleCase } from '@/lib/after-sale-workspace';
 
-import { invoiceAgreement, invoiceOutcome, invoiceReissue, verifyInvoiceLine } from '@/lib/after-sale-invoices';
+import { invoiceAgreement, invoiceOutcome, invoiceReissue, reviseInvoiceReissue, verifyInvoiceLine } from '@/lib/after-sale-invoices';
 import { supplierAfterSale } from '@/lib/after-sale-supplier';
 import { approveAfterSaleExchange } from '@/lib/after-sale-exchanges';
 import { transferReference } from '@/lib/after-sale-transfers';
@@ -56,8 +56,11 @@ function originalReceipt(view: AfterSaleWorkspace, row: SaleCase, data: Record<s
   condition(amount <= row.quantity - shares.reduce((sum, item) => sum + item.quantity, 0)
     && amount <= received - allocated.filter(item => item.parcelLineId === parcel.id).reduce((sum, item) => sum + item.quantity, 0),
     '本案剩余份额或这一包裹实际已签收的可关联数量不足');
-  return { operation: { parcelLineId: parcel.id, orderItemId: row.orderItemId, purchaseOrderId: parcel.purchaseOrderId,
-    quantity: amount, receivedQuantity: received, waybill: parcel.reference, note: requiredText(data.note, '原包裹与本案件数的核对依据') } };
+  const share = { parcelLineId:parcel.id, quantity:amount };
+  const supplierState = supplierProgress(row,view.deliveries,view.shortfalls.find(loss=>loss.resolutionId===row.shortfallId),undefined,share).state;
+  return { operation: { ...share, orderItemId:row.orderItemId,purchaseOrderId:parcel.purchaseOrderId,
+    receivedQuantity:received,waybill:parcel.reference,note:requiredText(data.note,'原包裹与本案件数的核对依据') }, supplierState };
+
 }
 
 function replacementPurchases(view: AfterSaleWorkspace, row: SaleCase, data: Record<string, unknown>,
@@ -114,6 +117,13 @@ async function agreement(tx: Db, view: AfterSaleWorkspace, row: SaleCase, data: 
     if (proof.occurredAt < latestDate) return { operation: { ...operation, historical:true, effectiveAgreementId:earlier.id } };
     condition(proof.occurredAt > latestDate && data.revisesAgreementId === earlier.id,
       '要修订当前客户决定，须选择其版本并提供实际发生在后的明确书面决定');
+  }
+  condition(remedy!=='invoice' || !caseEvents(row,'invoice_reissue').length,
+    '替代票已经实际签发并核对，请保留原案结果，新事项可另行登记');
+  if (row.customerState === 'awaiting_invoice_reissue') {
+    condition(remedy === 'invoice' && actualRefunded(row) === 0, '请仅修订原票待办的重开条件');
+    const revised = await reviseInvoiceReissue(tx,row,data,proof);
+    return { operation: { ...operation, revisesAgreementId: earlier?.id, invoice: revised.invoice }, customerState: revised.customerState };
   }
   condition(['reviewing','awaiting_customer','awaiting_technical','awaiting_fulfillment','awaiting_refund','refund_prepared',
     'refund_followup','awaiting_invoice','awaiting_close'].includes(row.customerState), '该事项已有须先核对的实际结果或有效的退款批准');
@@ -288,7 +298,7 @@ async function planAction(tx: Db, view: AfterSaleWorkspace, row: SaleCase, input
   }
   if (action === 'add_evidence') return { operation: { note: requiredText(data.note, '往来记录'), channel: choice(data.channel,
     ['email','koncket','handoff'] as const, '实际沟通来源') } };
-  if (action === 'supplier') return supplierAfterSale(tx,view,row,data,proof);
+  if (action === 'supplier') return supplierAfterSale(tx,view,row,data,proof,actor.id);
   if (action === 'agreement') return agreement(tx,view,row,data,proof);
   if (action === 'release_refund_source') return releaseRefundSource(tx,view,row,data,proof);
   condition(row.customerState !== 'closed','该客户事项已经办结，新增事项请另行登记并引用原单');
@@ -310,7 +320,7 @@ async function planAction(tx: Db, view: AfterSaleWorkspace, row: SaleCase, input
   const latestDecision = currentSaleAgreement(row);
   condition(!latestDecision || saleOperation(latestDecision).remedy !== 'keep' || !activeRefundSourceReview(row),
     '请先由财务核对并解除这笔未实际发出的退款预留');
-  return { operation: { note: requiredText(data.note,'办结依据、客户答复和实际处理结果'), supplierState: row.supplierState }, customerState: 'closed' };
+  return { operation: { note: requiredText(data.note,'办结依据、客户答复和实际处理结果'), supplierState: supplierProgress(row,view.deliveries,view.shortfalls.find(loss=>loss.resolutionId===row.shortfallId)).state }, customerState: 'closed' };
 }
 
 export async function afterSaleAction(tx: Db, input: SaleInput, actor: SaleActor, confirmation?: {
@@ -320,18 +330,28 @@ export async function afterSaleAction(tx: Db, input: SaleInput, actor: SaleActor
   const proof = saleProof(data);
   const requestKey = pricingContentHash({ action: 'after_sale', actor: actor.id, requestId });
   const intentHash = pricingContentHash({ action, orderId, caseId, data, actor: actor.id, customer });
+  const exchangeCase = action === 'approve_exchange' ? await tx.afterSaleCase.findFirst({ where: { id:caseId,orderId },include:afterSaleCaseInclude }) : null;
+  const shares = exchangeCase ? originalSaleParcelShares(exchangeCase) : [];
+  const exchangeParcel = data.parcelLineId ?? (shares.length===1 ? shares[0].parcelLineId : null);
   const natural = action === 'refund_result' && data.result === 'paid'
     ? { action, caseId, trace: transferReference(data.referenceNo) }
     : action === 'supplier' && data.outcome === 'financial_result' ? { action, caseId, trace: transferReference(data.referenceNo) }
     : { action, orderId, caseId, source: proof.sha256, row: proof.documentRow,
       ...(action === 'open' ? { item: data.orderItemId, shortfall: data.shortfallId ?? null }
         : action === 'bind_original_parcel' ? { parcelLineId: data.parcelLineId }
+        : action === 'approve_exchange' ? { parcelLineId:exchangeParcel }
+        : action === 'supplier' ? { purchaseOrderId:data.purchaseOrderId??null, parcelLineId:data.originalParcelLineId??null }
         : action === 'physical' ? { parcelLineId: data.parcelLineId, resolutionId: data.resolutionId ?? null } : {}) };
   const businessKey = pricingContentHash(natural);
   const prior = await tx.afterSaleEvent.findMany({ where: { OR: [{requestKey},{businessKey}] } });
+  if (!prior.length && exchangeCase) {
+    const legacy = caseEvents(exchangeCase,'approve_exchange').find(event=>event.sha256===proof.sha256
+      && event.documentRow===proof.documentRow && saleOperation(event).originalParcelLineId===exchangeParcel);
+    if (legacy) prior.push(legacy);
+  }
   if (prior.length) {
     const saved = prior[0];
-    condition(prior.length === 1 && (saved.businessKey === businessKey || saved.requestKey === requestKey) && saved.intentHash === intentHash, '这项操作或凭据已用于其他内容，请查看原记录');
+    condition(prior.length === 1 && saved.intentHash === intentHash, '这项操作或凭据已用于其他内容，请查看原记录');
     if (confirmation) condition(confirmation.hash === saved.approvedHash, '应使用实际确认的原预览');
     return { actionHash: saved.approvedHash, snapshot: purchaseObject(JSON.parse(saved.detail)).snapshot, caseId: saved.caseId, eventId: saved.id, repeated: true };
   }
@@ -344,10 +364,11 @@ export async function afterSaleAction(tx: Db, input: SaleInput, actor: SaleActor
   const operation = plan.operation;
   const itemId = opened?.orderItemId ?? row!.orderItemId;
   const line = view.lines.find(item => item.id === itemId)!;
+  const currentSupplierState = row && supplierProgress(row,view.deliveries,view.shortfalls.find(loss=>loss.resolutionId===row.shortfallId)).state;
   const snapshot = { action, orderId, caseId: row?.id ?? null, revision: row?.revision ?? null, item: line, owner: row?.ownerId ?? null,
     customer: { id: view.order.customerId, organization: view.order.organizationId, scope: view.order.ownerScope, email: view.order.email },
     orderTerms: view.order.termsVersion, previousState: row?.customerState ?? null, nextState: plan.customerState ?? row?.customerState ?? 'reported',
-    nextSupplierState: plan.supplierState ?? row?.supplierState ?? 'unreviewed', scopeQuantity: opened?.quantity ?? row!.quantity,
+    nextSupplierState: plan.supplierState ?? currentSupplierState ?? 'unreviewed', scopeQuantity: opened?.quantity ?? row!.quantity,
     actor: actor.id, proof, operation };
   const actionHash = pricingContentHash(snapshot);
   if (!confirmation) return { actionHash, snapshot, caseId: row?.id ?? null, eventId: null, repeated: false };
@@ -359,7 +380,7 @@ export async function afterSaleAction(tx: Db, input: SaleInput, actor: SaleActor
     sourceReference: proof.reference, sourceRow: proof.documentRow, sourceSha256: proof.sha256, createdBy: actor.id } }) : row!;
   if (!opened) {
     const updated = await tx.afterSaleCase.updateMany({ where: { id: saved.id, orderId, revision: saved.revision },
-      data: { revision: { increment: 1 }, customerState: plan.customerState, supplierState: plan.supplierState, ownerId: plan.ownerId, shortfallId: plan.shortfallId } });
+      data: { revision: { increment: 1 }, customerState: plan.customerState, supplierState: plan.supplierState ?? currentSupplierState, ownerId: plan.ownerId, shortfallId: plan.shortfallId } });
     condition(updated.count === 1,'售后记录已变化，请重新读取');
   }
   const event = await tx.afterSaleEvent.create({ data: { caseId: saved.id, action, actorId: actor.id, requestKey, businessKey, intentHash, approvedHash: actionHash,

@@ -35,12 +35,17 @@ export async function verifiedAfterSalePayment(tx: Db, orderId: string, paymentI
     arrivedAt: (attempt.paidAt ?? attempt.notifiedAt).toISOString(), auditId: verified[0].id, customer: attempt.order };
 }
 
-export function eligibleAfterSalePayment(source: Awaited<ReturnType<typeof verifiedAfterSalePayment>>,
-  order: { acceptance: unknown; status: string },
-  finance: { nativePaymentId: string | null; cash: { paymentAttemptId: string | null }[] }) {
-  if (!order.acceptance || ['cancelled','closed'].includes(order.status)) return true;
-  return isAlipayReconciliationStatus(source.status) && (source.status !== 'paid_stock_shortfall_reconciliation_required' || finance.nativePaymentId !== null)
+type VerifiedPayment = Awaited<ReturnType<typeof verifiedAfterSalePayment>>;
+type BookedPayments = { nativePaymentId: string | null; cash: { paymentAttemptId: string | null }[] };
+
+export function independentAfterSalePayment(source: VerifiedPayment, finance: BookedPayments) {
+  return isAlipayReconciliationStatus(source.status)
+    && (source.status !== 'paid_stock_shortfall_reconciliation_required' || finance.nativePaymentId !== null || finance.cash.length > 0)
     && source.paymentId !== finance.nativePaymentId && !finance.cash.some(row => row.paymentAttemptId === source.paymentId);
+}
+
+export function eligibleAfterSalePayment(source: VerifiedPayment, order: { acceptance: unknown; status: string }, finance: BookedPayments) {
+  return !order.acceptance || ['cancelled','closed'].includes(order.status) || independentAfterSalePayment(source,finance);
 }
 
 export async function afterSalePaymentUses(tx: Db, orderId: string) {

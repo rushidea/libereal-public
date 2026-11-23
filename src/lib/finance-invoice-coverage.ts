@@ -130,7 +130,10 @@ export function invoiceReservationBalances(commitments: ReturnType<typeof invoic
   return { constraints, rooms };
 }
 
-export function invoicePortionsFit(balances: ReturnType<typeof invoiceReservationBalances>, parts: { scopeId: string | null; amountCents: number }[]) {
+export function invoicePortionsFit(
+  balances: { constraints: ReadonlyMap<string, number>; rooms: ReadonlyMap<string, { constraintKeys: readonly string[] }> },
+  parts: { scopeId: string | null; amountCents: number }[],
+) {
   const required = new Map<string, number>();
   for (const part of parts) {
     const room = part.scopeId ? balances.rooms.get(part.scopeId) : undefined;
