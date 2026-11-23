@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import type { FinanceInput } from '@/lib/finance-actions';
 import type { FinanceWorkspace } from '@/lib/finance-workspace';
+import { invoicePeriodAt } from '@/lib/finance-invoice-timeline';
 import DocumentDigestField from '@/components/admin/purchases/DocumentDigestField';
 import { button, cents, field, money, primary } from '@/components/admin/purchases/PurchaseLineForm';
 
@@ -31,8 +32,11 @@ function Text({ name, label, initial, required = true }: { name: string; label: 
   return <label className="grid gap-1">{label}<input name={name} className={field} defaultValue={initial} required={required} maxLength={2000}/></label>;
 }
 
-function Time({ name, label, required = true }: { name: string; label: string; required?: boolean }) {
-  return <label className="grid gap-1">{label}<input className={field} name={name} type="datetime-local" step="1" required={required}/></label>;
+function Time({ name, label, required = true, value, onChange }: {
+  name: string; label: string; required?: boolean; value?: string; onChange?: (value: string) => void;
+}) {
+  return <label className="grid gap-1">{label}<input className={field} name={name} type="datetime-local" step="1" required={required}
+    value={value} onChange={onChange && (event => onChange(event.target.value))}/></label>;
 }
 
 function Amount({ name, label, allowZero = false }: { name: string; label: string; allowZero?: boolean }) {
@@ -41,7 +45,18 @@ function Amount({ name, label, allowZero = false }: { name: string; label: strin
 }
 
 const moneyFields = new Set(['receiptTotalCents', 'amountCents', 'grossCents']);
-const timeFields = new Set(['occurredAt', 'issuedAt', 'nextReviewAt', 'startedAt', 'effectiveAt']);
+const timeFields = new Set(['occurredAt', 'issuedAt', 'nextReviewAt', 'startedAt', 'effectiveAt', 'coverageAt']);
+
+type InvoicePlan = FinanceWorkspace['invoicePlans'][number];
+
+function canReviewUnissued(plan: InvoicePlan) {
+  return plan.remainingCents > 0 || plan.coveragePeriods?.some(period => period.remainingCents > 0);
+}
+
+export function canReviewInvoiceCoverage(plan: InvoicePlan) {
+  return plan.side === 'customer' && plan.invoiceScopeId && (canReviewUnissued(plan)
+    || plan.allocations.some(row => row.status !== 'voided'));
+}
 
 export default function FinanceForm({ view, action, busy, onPreview, onCancel, onError }: {
   view: FinanceWorkspace; action: FinanceInput['action']; busy: boolean;
@@ -69,7 +84,7 @@ export default function FinanceForm({ view, action, busy, onPreview, onCancel, o
   const chooseLines = !scopeBasis || !restates && (eligibleLines.length > 1 || eligibleLines[0]?.unverifiedQuantity > 1);
   const [documentKind, setDocumentKind] = useState('single_receipt');
   const plans = view.invoicePlans.filter(plan => action === 'verify_invoice_coverage'
-    ? plan.side === 'customer' && plan.invoiceScopeId && (plan.scheduledRemainingCents > 0 || plan.allocations.some(row => row.status !== 'voided'))
+    ? canReviewInvoiceCoverage(plan)
     : action === 'record_invoice' ? plan.recordable
     : !plan.closed && (action === 'chase_invoice' ? plan.side === 'supplier' && plan.remainingCents > 0
       : action === 'confirm_condition' ? plan.trigger === 'manual' && !plan.manualAt
@@ -77,16 +92,23 @@ export default function FinanceForm({ view, action, busy, onPreview, onCancel, o
   const [planId, setPlanId] = useState(plans[0]?.id ?? '');
   const [poId, setPoId] = useState(view.purchases[0]?.id ?? '');
   const [allocationId, setAllocationId] = useState('');
+  const [invoiceDate, setInvoiceDate] = useState('');
   const plan = plans.find(row => row.id === planId);
   const allocations = plan?.allocations.filter(row => row.status !== 'voided') ?? [];
-  const reviewingInvoice = allocations.find(row => row.id === allocationId) ?? (plan?.scheduledRemainingCents === 0 ? allocations[0] : undefined);
+  const reviewUnissued = plan && canReviewUnissued(plan);
+  const reviewingInvoice = allocations.find(row => row.id === allocationId) ?? (reviewUnissued ? undefined : allocations[0]);
+  const selectedAt = Date.parse(invoiceDate);
+  const at = action === 'verify_invoice_coverage' && reviewingInvoice ? reviewingInvoice.issuedAt
+    : Number.isFinite(selectedAt) ? new Date(selectedAt).toISOString() : null;
+  const period = at ? invoicePeriodAt(plan?.coveragePeriods ?? [], at) : null;
+  const reservation = at ? period?.review?.remaining : plan?.coverageReview?.remaining;
   const originalProof = scopes.find(row => row.id === plan?.invoiceScopeId);
   const originalFamily = families.find(row => row.id === originalProof?.familyId);
-  const confirmedAtInvoice = new Set(originalFamily?.timeline?.filter(point => !reviewingInvoice || point.at <= reviewingInvoice.issuedAt)
+  const confirmedAtInvoice = new Set(originalFamily?.timeline?.filter(point => !at || point.at <= at)
     .flatMap(point => point.confirmedEvidenceIds) ?? []);
   const coverageChoices = scopes.flatMap(proof => {
     if (!originalProof || originalProof.familyId !== proof.familyId) return [];
-    const reserved = plan?.coverageReview?.remaining?.find(row => row.invoiceScopeId === proof.id);
+    const reserved = action === 'record_invoice' ? reservation?.find(row => row.invoiceScopeId === proof.id) : undefined;
     if (action === 'verify_invoice_coverage' ? !confirmedAtInvoice.has(proof.id) : action !== 'record_invoice' || !reserved) return [];
     const lines = proof.lines.flatMap(line => {
       const max = reserved ? reserved.lines.find(row => row.orderItemId === line.id)?.quantity
@@ -241,12 +263,15 @@ export default function FinanceForm({ view, action, busy, onPreview, onCancel, o
         <select name="planId" value={planId} onChange={e => { setPlanId(e.target.value); setAllocationId(''); }} className={field} required>
           {plans.map(row => <option key={row.id} value={row.id}>{row.side === 'customer' ? '销项' : '进项'} · {row.reference}
             {action === 'record_invoice' ? ' · 按票面日期核对' : ' · 可用 ' + money(action === 'amend_plan' ? row.scheduledRemainingCents : row.remainingCents)}</option>)}</select></label>}
-      {action === 'verify_invoice_coverage' && <label className="grid gap-1">本次核对对象
-        <select name="allocationId" value={reviewingInvoice?.id ?? ''} onChange={e => setAllocationId(e.target.value)} className={field}>
-          {Boolean(plan?.scheduledRemainingCents) && <option value="">原安排未开金额 {money(plan?.scheduledRemainingCents)}</option>}
-          {allocations.map(row => <option key={row.id} value={row.id}>原票 {row.number} · 本项 {money(row.amountCents)}</option>)}
-        </select>
-      </label>}
+      {action === 'verify_invoice_coverage' && <>
+        <label className="grid gap-1">本次核对对象
+          <select name="allocationId" value={reviewingInvoice?.id ?? ''} onChange={e => setAllocationId(e.target.value)} className={field}>
+            {reviewUnissued && <option value="">原安排未开金额</option>}
+            {allocations.map(row => <option key={row.id} value={row.id}>原票 {row.number} · 本项 {money(row.amountCents)}</option>)}
+          </select>
+        </label>
+        {!reviewingInvoice && <Time name="coverageAt" label="所核对的原安排时间（留空按当前）" required={false} value={invoiceDate} onChange={setInvoiceDate}/>}
+      </>}
       {action === 'amend_plan' && <>
         <Amount name="amountCents" label="本次变更条件对应的未开金额"/>
         <Time name="effectiveAt" label="书面约定生效时间（与确认时间相同可留空）" required={false}/>
@@ -259,12 +284,14 @@ export default function FinanceForm({ view, action, busy, onPreview, onCancel, o
       </>}
       {action === 'record_invoice' && <><Text key={'issuer' + planId} name="issuer" label="票面开票方全称" initial={plan?.issuer}/>
         <Text key={'recipient' + planId} name="recipient" label="票面受票方全称" initial={plan?.recipient}/><Text name="number" label="票面号码"/>
-        <Time name="issuedAt" label="票面开票时间"/><Amount name="grossCents" label="整张发票含税合计"/>
+        <Time name="issuedAt" label="票面开票时间" value={invoiceDate} onChange={setInvoiceDate}/><Amount name="grossCents" label="整张发票含税合计"/>
         <Amount name="amountCents" label="本次归入此项金额"/></>}
       {(action === 'verify_invoice_coverage' || action === 'record_invoice' && plan?.coverageReview) && <div
-        key={planId + (reviewingInvoice?.id ?? '')} className="space-y-3 sm:col-span-2">
-        {action === 'verify_invoice_coverage' && <p>请按实际原件填写各书证覆盖的商品数量，金额合计须等于 {money(reviewingInvoice?.amountCents ?? plan?.scheduledRemainingCents)}。</p>}
-        {action === 'record_invoice' && plan?.coverageReview?.remaining && <p>全额开票可沿用已核未开明细。分次开票请填写本次各行实际数量和金额。</p>}
+        key={planId + (reviewingInvoice?.id ?? period?.key ?? '')} className="space-y-3 sm:col-span-2">
+        {action === 'verify_invoice_coverage' && <p>请按实际原件填写各书证覆盖的商品数量，金额合计须等于 {money(reviewingInvoice?.amountCents
+          ?? period?.remainingCents ?? plan?.remainingCents)}。</p>}
+        {action === 'record_invoice' && (reservation?.length ? <p>全额开票可沿用已核未开明细。分次开票请填写本次各行实际数量和金额。</p>
+          : <p>所填票面日期的未开份额待核，请核对当日适用的原安排。</p>)}
         {!coverageChoices.length && <p>请按原件核对适用日期、商品和数量。</p>}
         {coverageChoices.map(({ proof, lines, maxCents }) => <fieldset key={proof.id} className="space-y-2 rounded border p-3">
           <legend>{proof.reference} · {dateLabel(proof.occurredAt)}</legend>

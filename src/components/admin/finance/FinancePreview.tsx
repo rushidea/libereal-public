@@ -28,7 +28,8 @@ export default function FinancePreview({ preview, busy, onConfirm, onBack }: {
       {op.retroactiveReference && <p>书面追溯条款 {op.retroactiveReference}</p>}</>}
     {op.action === 'close_plan' && <p>本次止用的未开或未收金额 {money(op.stoppedCents)}</p>}
     {op.action === 'verify_invoice_coverage' && <p>
-      {op.subject.invoiceNumber ? '原票 ' + op.subject.invoiceNumber + ' · ' + dateLabel(op.subject.issuedAt) : '原安排未开金额'}
+      {op.subject.invoiceNumber ? '原票 ' + op.subject.invoiceNumber + ' · ' + dateLabel(op.subject.issuedAt)
+        : '原安排未开金额' + (op.coverageAt ? ' · ' + dateLabel(op.coverageAt) : '')}
       {' ' + money(op.amountCents) + ' · 原书证 ' + op.subject.originalReference + ' · 原安排 ' + op.subject.planReference}
     </p>}
     {op.action === 'record_invoice' && <><p>票号 {op.number} · {op.issuer} 开给 {op.recipient}</p>

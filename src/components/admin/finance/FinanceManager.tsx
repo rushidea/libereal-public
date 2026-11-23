@@ -6,7 +6,7 @@ import { button, field, money } from '@/components/admin/purchases/PurchaseLineF
 import type { FinanceInput } from '@/lib/finance-actions';
 import type { FinanceWorkspace } from '@/lib/finance-workspace';
 import { isOrderStatus, ORDER_STATUS_LABELS } from '@/lib/order-domain';
-import FinanceForm, { actionLabels, dateLabel, invoiceStateLabels, paymentCaseProgressLabels, triggerLabels } from './FinanceForm';
+import FinanceForm, { actionLabels, canReviewInvoiceCoverage, dateLabel, invoiceStateLabels, paymentCaseProgressLabels, triggerLabels } from './FinanceForm';
 import FinancePreview, { type FinancePreviewResult } from './FinancePreview';
 
 type OrderRow = { id: string; status: string; amount: number; receivableStatus: string | null; supplierCount: number;
@@ -92,8 +92,7 @@ export default function FinanceManager({ initialOrder }: { initialOrder: string 
       || view.purchases.some(row => row.agreedCents !== null)) actions.push('create_plan');
     const active = view.invoicePlans.filter(row => !row.closed);
     if (view.invoicePlans.some(row => row.recordable)) actions.push('record_invoice');
-    if (view.invoicePlans.some(row => row.side === 'customer' && row.invoiceScopeId
-      && (row.scheduledRemainingCents > 0 || row.allocations.some(doc => doc.status !== 'voided')))) actions.push('verify_invoice_coverage');
+    if (view.invoicePlans.some(canReviewInvoiceCoverage)) actions.push('verify_invoice_coverage');
     if (active.some(row => row.scheduledRemainingCents > 0)) actions.push('amend_plan');
     if (active.some(row => Math.min(row.remainingCents, row.scheduledRemainingCents) > 0)) actions.push('close_plan');
     if (active.some(row => row.trigger === 'manual' && !row.manualAt)) actions.push('confirm_condition');
@@ -201,8 +200,8 @@ export default function FinanceManager({ initialOrder }: { initialOrder: string 
         <p>经办人 {plan.ownerId}</p>
         {!plan.closed && plan.remainingCents > 0 && plan.lastFollowup && <p>下次追票 {dateLabel(String(plan.lastFollowup.operation.nextReviewAt))}
           {' · 跟进人 ' + plan.lastFollowup.actorId}</p>}
-        {plan.coverageReview && <p>{plan.coverageReview.remaining ? '未开商品和书证已核对' : '未开金额已变化，商品和书证待复核'}
-          {' · 经办人 ' + plan.coverageReview.actorId}</p>}
+        {plan.coverageReview && plan.remainingCents > 0 && <p>{plan.coverageReview.remaining
+          ? '当前未开商品和书证已核对 · 经办人 ' + plan.coverageReview.actorId : '当前未开金额或安排已变化，商品和书证待复核'}</p>}
         {plan.allocations.map(doc => <div key={doc.id}>
           <p>票号 {doc.number} · {invoiceStateLabels[doc.status]} · 票面 {money(doc.grossCents)} · 本项 {money(doc.amountCents)}</p>
           {doc.scopePortions?.map(part => <p key={part.invoiceScopeId}>已核额度 {money(part.amountCents)}
