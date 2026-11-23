@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import Link from 'next/link';
 import type { PurchaseActionInput, previewPurchaseAction } from '@/lib/purchase-orders';
 import type { PurchaseTerms } from '@/lib/purchase-terms';
 import { incidentLineTotals, incidentQuantityKey, type IncidentQuantity } from '@/lib/purchase-incident-scope';
@@ -56,8 +57,8 @@ const decisionPurposeLabels: Record<string,string> = {
 };
 type Pending = { input: PurchaseActionInput; preview: Preview };
 
-function inputField(name: string, label: string) {
-  return <label className="grid gap-1 text-sm">{label}<input className={field} name={name} required maxLength={2000}/></label>;
+function inputField(name: string, label: string, required = true) {
+  return <label className="grid gap-1 text-sm">{label}<input className={field} name={name} required={required} maxLength={2000}/></label>;
 }
 
 function DecisionDocumentFields({ label, rowLabel, row, coverage, restore, legacy, current, choices, onChange }: {
@@ -242,6 +243,9 @@ export default function PurchaseActions({ orderId, orderStatus, cancellation, po
   permissions: string[]; busy: boolean; request: PurchaseRequest; onError: (message: string) => void;
 }) {
   const [action, setAction] = useState<Action | null>(null);
+  const [paymentDocumentKind, setPaymentDocumentKind] = useState('single_receipt');
+  const [paymentIssueId, setPaymentIssueId] = useState('');
+  const [paymentIssueOutcome, setPaymentIssueOutcome] = useState('awaiting_disposition');
   const [pending, setPending] = useState<Pending | null>(null);
   const [retainedTerms,setRetainedTerms] = useState<Record<string,PurchaseTerms>>({});
   const [retainedDocuments,setRetainedDocuments] = useState<Record<string,DecisionDocumentInput>>({});
@@ -330,13 +334,20 @@ export default function PurchaseActions({ orderId, orderStatus, cancellation, po
   const recovery=unlinkedShortfalls.find(row=>row.key===shortfallHandoffKey);
   const waitingForDeliveryDecision=fulfillment.dispatchHolds.some(row=>row.purchaseOrderId===po.id && row.pending>0);
   const oldPayments = po.payments?.filter(row => row.canReviewTime) ?? [];
-  if (oldPayments.length && permit('pay')) choices.push('review_payment_time');
-  if (!waitingForDeliveryDecision && !unlinkedShortfalls.length && ['approved', 'ordered'].includes(po.status) && !po.needsLegacyReview && !po.needsFundingReapproval && (!closed || po.orderedBefore)
+  const paymentIssues = po.paymentExceptions?.filter(row => row.pending) ?? [];
+  const linkedPayment = paymentIssues.find(row => row.id === paymentIssueId);
+  if (permit('pay')) {
+    if (oldPayments.length) choices.push('review_payment_time');
+    choices.push('record_payment_exception');
+    if (paymentIssues.length) choices.push('review_payment_exception');
+  }
+  if (!paymentIssues.length && !waitingForDeliveryDecision && !unlinkedShortfalls.length && ['approved', 'ordered'].includes(po.status) && !po.needsLegacyReview && !po.needsFundingReapproval && (!closed || po.orderedBefore)
     && po.dueCents !== null && Math.min(po.dueCents, po.totalCents - po.paidCents) > 0 && permit('pay')) choices.push('record_payment');
   if (po.lines.length && permit('write')) choices.push('report_change');
 
   function choose(next: Action, selectedIncident?: string) {
     setIncidentId(selectedIncident);setShortfallHandoffKey(undefined); setAction(next); setOutcome(canContinueOriginal ? 'original_terms' : 'declined');
+    setPaymentIssueId(''); setPaymentIssueOutcome('awaiting_disposition');
     setRevisions({}); setDispositions({}); setCoordinationDocuments({}); setFileKinds({});
     setAffected({}); setHandling({}); setVerifiedScopeMatchesResult(false); setChangeKind('unavailable');
     setReviewResult('scope_confirmed');setRelatedIncidentId('');setRetainedTerms({});setRetainedDocuments({});setRetainedBuyerFiles({});
@@ -360,8 +371,14 @@ export default function PurchaseActions({ orderId, orderStatus, cancellation, po
         reference: value('reference'), referenceSha256: value('referenceSha256'),
         occurredAt: occurredAt ? new Date(occurredAt).toISOString() : undefined,
         description: value('description'), conditionReference: value('conditionReference'),
-        amountCents: action === 'record_payment' || action === 'review_payment_time' ? cents(String(data.get('amount') ?? '')) : undefined,
+        amountCents: ['record_payment', 'review_payment_time', 'record_payment_exception'].includes(action) && !linkedPayment
+          ? cents(String(data.get('amount') ?? '')) : undefined,
         sourcePaymentId: value('sourcePaymentId'), bankTrace: value('bankTrace'), payee: value('payee'),
+        paymentDocumentKind: value('paymentDocumentKind'),
+        paymentStatementRow: value('paymentStatementRow') ? Number(value('paymentStatementRow')) : undefined,
+        paymentIssueId: value('paymentIssueId'),
+        paymentIssueOutcome: value('paymentIssueOutcome') as PurchaseActionInput['paymentIssueOutcome'],
+        paymentIssueTargetPurchaseOrderId: value('paymentIssueTargetPurchaseOrderId'),
         changeKind: action === 'report_change' ? changeKind : undefined, outcome: action === 'resolve_change' ? outcome : undefined,
         incidentId: action === 'resolve_change' || action === 'review_change_scope' ? incidentId : undefined,
         reviewResult: action==='review_change_scope' ? reviewResult : undefined,
@@ -418,6 +435,23 @@ export default function PurchaseActions({ orderId, orderStatus, cancellation, po
     </p>}
     <p className="text-sm">{po.remainingScope || po.dueCents === null ? '原合同应付' : '本单应付'} <strong>{money(po.totalCents)}</strong>　已登记实际付款 {money(po.paidCents)}</p>
     {po.remainingScope && <p className="text-sm">核准的剩余商品应付 {money(po.remainingScope.totalCents)} · 经核实冲抵 {money(po.remainingScope.appliedPaidCents)} · 尚未付 {money(po.dueCents ?? undefined)}</p>}
+    {po.paymentExceptions?.map(issue => {
+      const { paymentEvidence: proof } = issue.original;
+      const target = issue.review?.operation.target;
+      const decision = issue.followup ?? issue.review;
+      return <section key={issue.id} className="space-y-1 rounded bg-slate-50 p-2 text-sm">
+        <p>{issue.pending ? '付款待核对' : issue.postingId ? '已核销原付款' : '已记录未冲本单的原因'} · {money(issue.original.amountCents)}
+          {' · 流水 ' + proof.bankTrace + ' · 收款方 ' + proof.payee + ' · 原经办人 ' + issue.ownerId}</p>
+        <p>{proof.reference} · 实际付款 {new Date(proof.occurredAt).toLocaleString('zh-CN')} · {decision?.operation.description ?? issue.original.description}</p>
+        {target && !issue.incoming && <Link className="underline" href={'/admin/purchases?orderId=' + encodeURIComponent(target.orderId)}>
+          目标采购单 {target.purchaseOrderId}
+        </Link>}
+        {issue.incoming && <p>转交自采购单 {issue.purchaseOrderId}</p>}
+        {issue.pending && !pending && permit('pay') && <button type="button" className={button} disabled={busy} onClick={() => {
+          choose(issue.original.sourcePaymentId ? 'review_payment_time' : 'record_payment'); setPaymentIssueId(issue.id);
+        }}>{issue.original.sourcePaymentId ? '接续核对已记原付款' : '凭原待办核销付款'}</button>}
+      </section>;
+    })}
     {waitingForDeliveryDecision && <p className="text-sm text-amber-900">相关实发份额待客户书面处理。请在原包裹核对结果后继续付款办理。</p>}
     {unlinkedShortfalls.map(row=><div key={row.key} className="space-y-1 rounded bg-amber-50 p-2 text-sm text-amber-900">
       <p>已核实误发短失待采购接续 · {row.reference} · {row.quantity} 件</p>
@@ -567,17 +601,48 @@ export default function PurchaseActions({ orderId, orderStatus, cancellation, po
         <DocumentDigestField name="referenceSha256" label="超长期书证摘要" required/>
         {inputField('description', '逐单例外批准结论')}
       </>}
-      {(action === 'record_payment' || action === 'review_payment_time') && <>
-        {action === 'review_payment_time' && <label className="grid gap-1 text-sm">待补核的原付款<select name="sourcePaymentId" className={field} required>
+      {(action === 'record_payment' || action === 'review_payment_time' || action === 'record_payment_exception') && <>
+        {linkedPayment ? <>
+          <input type="hidden" name="paymentIssueId" value={linkedPayment.id}/>
+          {linkedPayment.original.sourcePaymentId && <input type="hidden" name="sourcePaymentId" value={linkedPayment.original.sourcePaymentId}/>}
+          <p>原转账 {linkedPayment.original.paymentEvidence.bankTrace} · {money(linkedPayment.original.amountCents)} · {linkedPayment.original.paymentEvidence.payee}</p>
+          {action === 'record_payment' ? inputField('conditionReference', '付款当日已满足书面条件的档案出处或条款')
+            : inputField('description', '原凭证与历史付款的核对结论')}
+        </> : <>
+        {(action === 'review_payment_time' || action === 'record_payment_exception' && oldPayments.length > 0) && <label className="grid gap-1 text-sm">待补核的原付款<select name="sourcePaymentId" className={field} required={action === 'review_payment_time'}>
+          {action === 'record_payment_exception' && <option value="">此笔未记入原采购付款</option>}
           {oldPayments.map(row => <option key={row.id} value={row.id}>{row.reference} · {row.payee} · {money(row.amountCents)}</option>)}
         </select></label>}
         {inputField('amount', '本次实际支付金额（元）')}
-        {action === 'record_payment' ? inputField('conditionReference', '本次付款条件已满足的依据') : inputField('description', '原凭证与历史付款的核对结论')}
+        {action === 'record_payment' ? inputField('conditionReference', '本次付款条件已满足的依据')
+          : inputField('description', action === 'review_payment_time' ? '原凭证与历史付款的核对结论' : '已核实的付款事实及待处理原因')}
         {inputField('reference', '实际付款流水或银行凭证编号')}
+        <label className="grid gap-1 text-sm">银行原件类型<select name="paymentDocumentKind" className={field}
+          value={paymentDocumentKind} onChange={event => setPaymentDocumentKind(event.target.value)}>
+          <option value="single_receipt">单笔付款回单</option><option value="statement">银行对账单</option>
+        </select></label>
+        {paymentDocumentKind === 'statement' && <label className="grid gap-1 text-sm">对账单中的付款行号
+          <input name="paymentStatementRow" className={field} type="number" min="1" step="1" required/></label>}
         {inputField('bankTrace', '银行付款流水号')}
         {inputField('payee', '银行凭证所列收款方')}
         <label className="grid gap-1 text-sm">银行实际付款时间<input name="occurredAt" className={field} type="datetime-local" step="1" required/></label>
         <DocumentDigestField name="referenceSha256" label="银行付款凭证摘要" required/>
+        </>}
+      </>}
+      {action === 'review_payment_exception' && <>
+        <label className="grid gap-1 text-sm">待核付款<select name="paymentIssueId" className={field} required>
+          {paymentIssues.map(row => <option key={row.id} value={row.id}>{String(row.original.description)} · 负责人 {row.ownerId}</option>)}
+        </select></label>
+        <label className="grid gap-1 text-sm">处理结果<select name="paymentIssueOutcome" className={field} required value={paymentIssueOutcome}
+          onChange={event => setPaymentIssueOutcome(event.target.value)}>
+          <option value="awaiting_disposition">核实后仍待处理</option>
+          <option value="no_effective_approval">已查清当日无有效批准，登记原款去向</option>
+          <option value="outside_purchase">原件已证实不属本采购单</option>
+        </select></label>
+        {paymentIssueOutcome === 'outside_purchase' && inputField('paymentIssueTargetPurchaseOrderId', '已核实的目标采购单编号（如有）', false)}
+        {inputField('description', '已核实的处理结果与原款去向')}
+        {inputField('reference', '书面处理结果档案出处')}
+        <DocumentDigestField name="referenceSha256" label="付款差异处理结果书证摘要" required/>
       </>}
       {action === 'report_change' && (recovery ? <fieldset className="space-y-2">
         <legend className="font-medium">接续已核实的误发短失</legend>
@@ -775,9 +840,18 @@ export default function PurchaseActions({ orderId, orderStatus, cancellation, po
         <p>{op.description}</p>
       </div>}
       {op.action === 'record_payment' && <p>本次实际付款　<strong>{money(op.amountCents)}</strong> · 条件依据 {op.conditionReference}</p>}
+      {op.action === 'record_payment' && 'paymentIssueId' in op && op.paymentIssueId && <p>
+        原待办 {op.paymentIssueId} · 本采购单 {po.id} · 付款当日有效批准 {op.approvalId} · 可归属金额 {money(op.authorizedDueCents)}
+        {op.needsRemainingRecheck && ' · 本单剩余应付须重新核对已付分配'}
+      </p>}
       {op.action === 'review_payment_time' && <p>原付款 {op.original.reference} · {money(op.original.amountCents)} · 原登记 {new Date(op.original.recordedAt).toLocaleString('zh-CN')}</p>}
-      {(op.action === 'record_payment' || op.action === 'review_payment_time') && <p>
+      {op.action === 'record_payment_exception' && <p>待核对付款 {money(op.amountCents)} · 负责人 {op.responsibleActorId} · {op.description}</p>}
+      {op.action === 'review_payment_exception' && <p>原待办 {op.paymentIssueId} · 负责人 {op.responsibleActorId} · {op.description}</p>}
+      {op.action === 'review_payment_exception' && op.target && <p>转交采购单 {op.target.purchaseOrderId} · 原流水 {op.original.paymentEvidence.bankTrace}
+        {' · 收款方 ' + op.original.paymentEvidence.payee} · 实际转账 {money(op.original.amountCents)}</p>}
+      {(op.action === 'record_payment' || op.action === 'review_payment_time' || op.action === 'record_payment_exception') && <p>
         收款方 {op.paymentEvidence.payee} · 银行流水 {op.paymentEvidence.bankTrace} · 实际付款 {new Date(op.paymentEvidence.occurredAt).toLocaleString('zh-CN')}
+        {op.paymentEvidence.documentKind === 'statement' && ' · 对账单第 ' + op.paymentEvidence.statementRow + ' 行'}
       </p>}
       {op.action === 'report_change' && <>
         <p>供货变化　{op.description}</p>

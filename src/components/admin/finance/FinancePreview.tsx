@@ -18,7 +18,8 @@ export default function FinancePreview({ preview, busy, onConfirm, onBack }: {
       <p>含税金额 {money(op.grossCents)} · 办理条件 {triggerLabels[op.trigger]} {op.purchaseOrderId && ' · ' + op.purchaseOrderId}</p></>}
     {op.action === 'amend_plan' && <><p>原安排 {money(op.original.grossCents)} · 已占用 {money(op.original.usedCents)}
       {' · 原条件剩余 ' + money(op.original.remainingCents - op.amountCents)}</p>
-      <p>本次按新条件办理 {money(op.amountCents)} · {triggerLabels[op.trigger]}</p></>}
+      <p>本次按新条件办理 {money(op.amountCents)} · {triggerLabels[op.trigger]} · 生效 {dateLabel(op.effectiveAt)}</p>
+      {op.retroactiveReference && <p>书面追溯条款 {op.retroactiveReference}</p>}</>}
     {op.action === 'close_plan' && <p>本次止用的未开或未收金额 {money(op.stoppedCents)}</p>}
     {op.action === 'record_invoice' && <><p>票号 {op.number} · {op.issuer} 开给 {op.recipient}</p>
       <p>票面 {money(op.grossCents)} · 已分 {money(op.allocatedBeforeCents)} · 本次归入 {money(op.amountCents)}</p>
@@ -28,9 +29,12 @@ export default function FinancePreview({ preview, busy, onConfirm, onBack }: {
     {op.action === 'record_customer_receipt' && <><p>银行流水 {op.bank.bankTrace} · 分摊编号 {op.allocationReference}</p>
       <p>原额 {money(op.receiptTotalCents)} · 此前已分 {money(op.allocatedBeforeCents)} · 本次 {money(op.amountCents)}</p></>}
     {'accounting' in op && <p>本次核销 {money(op.accounting.amountCents)} · 本单余款 {money(op.accounting.remainingCents)} · 本次释放授信 {money(op.accounting.releaseCents)}</p>}
+    {'accounting' in op && op.accounting.creditReservationUnverified && <p>原授信预占凭据待核对。本次仅核销应收。</p>}
+    {op.action === 'verify_receivable_principal' && <p>原应收 {op.receivableId} · 原书证金额 {money(op.amountCents)} · 订单面额 {money(op.orderFaceCents)}</p>}
     {(op.action === 'restore_term' || op.action === 'set_term') && <p>原到期 {dateLabel(op.before.dueAt)} · 起算 {dateLabel(op.startedAt)} · {op.days} 天 · 到期 {dateLabel(op.dueAt)}</p>}
     {op.action === 'resume_alipay_payment' && <>
       <p>原支付宝流水 {op.payment.tradeNo} · {money(op.payment.amountCents)} · 平台回执时间 {dateLabel(op.payment.receivedAt)}</p>
+      {op.payment.providerPaidAt && <p>支付宝原付款时间 {dateLabel(op.payment.providerPaidAt)}</p>}
       <p>确认时核对原订单可售库存及付款状态。</p>
       <ul>{op.payment.lines.map(row => <li key={row.id}>{row.name} · {row.quantity} 件</li>)}</ul>
     </>}

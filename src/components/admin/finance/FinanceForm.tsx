@@ -8,6 +8,7 @@ import { button, cents, field, money, primary } from '@/components/admin/purchas
 
 export const actionLabels = {
   verify_bank_receipt: '核验银行到账原件', record_customer_receipt: '分摊银行回款', post_existing: '核销既有到账',
+  verify_receivable_principal: '核对原应收金额',
   restore_term: '按平台接单日期补齐账期', set_term: '登记单独约定的账期', create_plan: '登记开票或收票安排',
   amend_plan: '变更未开或未收部分的条件',
   confirm_condition: '核验约定开票条件', chase_invoice: '记录供应商追票', close_plan: '止用剩余开票或收票安排',
@@ -28,8 +29,8 @@ function Text({ name, label, initial, required = true }: { name: string; label: 
   return <label className="grid gap-1">{label}<input name={name} className={field} defaultValue={initial} required={required} maxLength={2000}/></label>;
 }
 
-function Time({ name, label }: { name: string; label: string }) {
-  return <label className="grid gap-1">{label}<input className={field} name={name} type="datetime-local" step="1" required/></label>;
+function Time({ name, label, required = true }: { name: string; label: string; required?: boolean }) {
+  return <label className="grid gap-1">{label}<input className={field} name={name} type="datetime-local" step="1" required={required}/></label>;
 }
 
 function Amount({ name, label }: { name: string; label: string }) {
@@ -37,7 +38,7 @@ function Amount({ name, label }: { name: string; label: string }) {
 }
 
 const moneyFields = new Set(['receiptTotalCents', 'amountCents', 'grossCents']);
-const timeFields = new Set(['occurredAt', 'issuedAt', 'nextReviewAt', 'startedAt']);
+const timeFields = new Set(['occurredAt', 'issuedAt', 'nextReviewAt', 'startedAt', 'effectiveAt']);
 
 export default function FinanceForm({ view, action, busy, onPreview, onCancel, onError }: {
   view: FinanceWorkspace; action: FinanceInput['action']; busy: boolean;
@@ -83,6 +84,10 @@ export default function FinanceForm({ view, action, busy, onPreview, onCancel, o
   }}>
     <h3 className="font-semibold">{actionLabels[action]}</h3>
     <fieldset className="grid gap-3 sm:grid-cols-2" disabled={busy}>
+      {action === 'verify_receivable_principal' && <>
+        <Amount name="amountCents" label="原凭证记载的应收金额"/>
+        <Time name="occurredAt" label="原书证确认应收时间"/>
+      </>}
       {action === 'verify_bank_receipt' && <>
         <label className="grid gap-1">银行原件类型<select name="documentKind" className={field} value={documentKind} onChange={e => setDocumentKind(e.target.value)}>
           <option value="single_receipt">单笔银行回单</option><option value="statement">银行对账单</option></select></label>
@@ -117,6 +122,8 @@ export default function FinanceForm({ view, action, busy, onPreview, onCancel, o
           {plans.map(row => <option key={row.id} value={row.id}>{row.side === 'customer' ? '销项' : '进项'} · {row.reference} · 余 {money(row.remainingCents)}</option>)}</select></label>}
       {action === 'amend_plan' && <>
         <Amount name="amountCents" label="本次变更条件对应的未开金额"/>
+        <Time name="effectiveAt" label="书面约定生效时间（与确认时间相同可留空）" required={false}/>
+        <Text name="retroactiveReference" label="书证中明确的追溯条款（早于确认时填写）" required={false}/>
         <label className="grid gap-1">新约定开票节点<select name="trigger" required className={field} defaultValue="">
           <option value="" disabled>选择书面约定</option>{Object.entries(triggerLabels).filter(([key]) =>
             plan?.side === 'customer' || !['dispatched', 'delivered'].includes(key))
