@@ -328,7 +328,7 @@ async function planAction(tx: Db, view: AfterSaleWorkspace, row: SaleCase, input
   if (action === 'review_refund_source') return reviewRefundSource(tx,view,row,data,proof);
   if (action === 'physical') return physical(view,row,data,proof);
   if (action === 'prepare_refund' || action === 'approve_refund' || action === 'refund_result' || action === 'stop_refund') return refundStep(tx,view,row,action,data,proof);
-  if (action === 'verify_invoice_line') return verifyInvoiceLine(tx,row,data,proof);
+  if (action === 'verify_invoice_line') return verifyInvoiceLine(tx,row,view.cases,data,proof);
   if (action === 'invoice_outcome') return invoiceOutcome(tx,row,data,proof);
   if (action === 'invoice_reissue') return invoiceReissue(tx,row,view.cases,data,proof);
   condition(action==='close','须先取得本案所需的实际办理结果');
