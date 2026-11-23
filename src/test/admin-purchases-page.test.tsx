@@ -149,7 +149,7 @@ describe('supplier purchasing page', () => {
         referenceSha256: 'f'.repeat(64), description: '已排除原采购单，目标待查' } };
     purchase.paymentExceptions = [{ id: issueId, purchaseOrderId: purchaseId, incoming: false, pending: false, postingId: null,
       ownerId: 'finance-origin', currentOwnerId: 'finance-origin', activePurchaseOrderId: null, postedToPurchaseOrderId: null,
-      appliedPaymentId: null, currentPosting: null, canRoute: true, awaitingTarget: true,
+      appliedPaymentId: null, currentPosting: null, canRoute: true, awaitingTarget: true, canReviewAttribution: false, noEffectiveApprovalId: null,
       reviewHistory: [review], review, followup: null, attributionApprovalId: null, recordedAt, original }];
     const posts = mockWorkspace(workspace,['purchases.read','purchases.pay'],body => {
       const result = preview(body,workspace);
@@ -180,7 +180,7 @@ describe('supplier purchasing page', () => {
     purchase.paymentExceptions = [{
       id: issueId, purchaseOrderId: 'TEST-ORIGIN-PURCHASE', incoming: true, pending: true, postingId: null, ownerId: 'finance-origin',
       currentOwnerId: 'finance-origin', activePurchaseOrderId: purchaseId, postedToPurchaseOrderId: null, appliedPaymentId: null,
-      currentPosting: null, canRoute: true, awaitingTarget: false, reviewHistory: [],
+      currentPosting: null, canRoute: true, awaitingTarget: false, reviewHistory: [], canReviewAttribution: true, noEffectiveApprovalId: null,
       recordedAt: proof.occurredAt, original: { amountCents: 600, paymentEvidence: proof, description: '转交指定采购单核对。' },
       review: { id: 'TEST-SUPPLIER-TRANSFER', actorId: 'finance-origin', purchaseOrderId: 'TEST-ORIGIN-PURCHASE', recordedAt: proof.occurredAt,
         operation: { paymentIssueId: issueId, outcome: 'outside_purchase',
@@ -226,7 +226,7 @@ describe('supplier purchasing page', () => {
     if (stage === 'confirm') purchase.paymentExceptions = [{ id: issueId, purchaseOrderId: purchase.id, ownerId: 'finance-origin', currentOwnerId: 'finance-reviewer',
       incoming: false, pending: true, postingId: null, postedToPurchaseOrderId: null, appliedPaymentId: null,
       currentPosting: { id: sourcePaymentId, orderId, purchaseOrderId: purchase.id },
-      activePurchaseOrderId: purchase.id, canRoute: true, awaitingTarget: false, original, recordedAt: occurredAt,
+      activePurchaseOrderId: purchase.id, canRoute: true, awaitingTarget: false, canReviewAttribution: true, noEffectiveApprovalId: null, original, recordedAt: occurredAt,
       reviewHistory: [], review: null, followup: null, attributionApprovalId: null }];
     const posts = mockWorkspace(workspace, ['purchases.read', 'purchases.pay'], body => {
       const result = preview(body, workspace);
@@ -259,6 +259,36 @@ describe('supplier purchasing page', () => {
     expect(await screen.findByRole('region', { name: '操作预览' })).toHaveTextContent('原实付 ¥9.00 · 本次仅核对原账');
     expect(posts[0]).toMatchObject({ action: 'review_payment_exception', paymentIssueId: issueId, paymentIssueOutcome: 'confirmed_current' });
     expect(posts[0]).not.toHaveProperty('amountCents');
+  });
+
+  it('offers independent attribution for a transfer whose original day had no approval', async () => {
+    const workspace = makeWorkspace('ordered');
+    const [purchase] = workspace.orders;
+    const issueId = 'original-not-authorized-at-payment';
+    const occurredAt = '2026-11-20T00:31:00.000Z';
+    const proof = { payee: '合成供方收款账户', bankTrace: 'TEST-BANK-BEFORE-APPROVAL', traceKey: 'TEST-BANK-BEFORE-APPROVAL',
+      reference: '银行原回单', occurredAt, sha256: 'e'.repeat(64), documentKind: 'single_receipt', statementRow: 1 } as const;
+    const original = { amountCents: 900, paymentEvidence: proof, description: '银行原件保留付款当天的事实。' };
+    purchase.paymentExceptions = [{ id: issueId, purchaseOrderId: purchase.id, ownerId: 'finance-origin', currentOwnerId: 'finance-origin',
+      incoming: false, pending: false, postingId: null, postedToPurchaseOrderId: null, appliedPaymentId: null, currentPosting: null,
+      activePurchaseOrderId: purchase.id, canRoute: true, canReviewAttribution: true, noEffectiveApprovalId: 'original-reviewed-result',
+      awaitingTarget: false, original, recordedAt: occurredAt, reviewHistory: [], review: null, followup: null, attributionApprovalId: null }];
+    const posts = mockWorkspace(workspace, ['purchases.read', 'purchases.approve'], body => {
+      const result = preview(body, workspace);
+      Object.assign(result.preview.snapshot.operation, { basis: { currentApprovalId: 'later-purchase-approval',
+        paymentEvidence: proof, amountCents: 900, noEffectiveApprovalId: 'original-reviewed-result' } });
+      return Response.json(result);
+    });
+    render(<PurchaseManager initialOrder={orderId}/>);
+    fireEvent.click(await screen.findByRole('button', { name: '批准已发生的付款归属' }));
+    expect(screen.getByText(/原实际转账.*原付款当日无有效批准/)).toHaveTextContent(proof.bankTrace);
+    expect(screen.queryByRole('button', { name: '凭原待办核销付款' })).not.toBeInTheDocument();
+    fill('付款归属及原合同的书证出处', '独立归属书证确认同一笔出款');
+    fill('处理结果书证摘要', 'c'.repeat(64));
+    fill('现批准的准确归属及原待办处理结果', '确认这笔出款可归原单。');
+    fireEvent.click(screen.getByRole('button', { name: '查看完整预览' }));
+    expect(await screen.findByRole('region', { name: '操作预览' })).toHaveTextContent('付款当日无有效批准的核对记录 original-reviewed-result');
+    expect(posts[0]).toMatchObject({ action: 'approve_payment_attribution', paymentIssueId: issueId });
   });
 
   it('offers the three written shortfall decisions and previews a free resend without changing the payable', async () => {

@@ -119,4 +119,54 @@ describe('admin finance workspace', () => {
     expect(within(screen.getByLabelText('当前进展')).getAllByRole('option').map(option => option.textContent))
       .toEqual(['按已有书证选择', '等待原交易书证', '等待获准并办妥的处理结果']);
   });
+
+  it.each(['supplement', 'clarification'] as const)('binds the written invoice scope for an exact %s', async action => {
+    const orderId = 'legacy-office-two-lines';
+    const at = '2026-01-02T08:00:00.000Z';
+    const root = 'office-original-scope';
+    const lines = [{ id: 'office-A', name: '合成文件夹', quantity: 1, unverifiedQuantity: 0 },
+      { id: 'office-B', name: '合成标签', quantity: 1, unverifiedQuantity: 0 }];
+    const parties = { issuer: '合成售方', recipient: '合成客户' };
+    const scope = { id: root, familyId: root, reference: '初始两件原书证', grossCents: 6000, lines, ...parties };
+    const pending = action === 'clarification';
+    const workspace = { orderId, version: 'two-item-version', status: 'confirmed', customerEmail: 'office@example.test', principalCents: 0,
+      settlementCents: 0, verifiedCents: 0, acceptanceId: 'original-order-acceptance', shipmentDates: { dispatched: null, delivered: null },
+      banks: [], receipts: [], cash: [], purchases: [], invoicePlans: [], events: [], latePayments: [],
+      originalInvoiceLines: lines, customerInvoiceScopes: [scope],
+      customerInvoiceFamilies: [{ id: root, authorizedCents: pending ? null : 6000, availableCents: pending ? null : 0, issuedCents: 6000,
+        plannedCents: 6000, invoiceConflicts: [], timeline: [{ at, needsReview: pending, evidenceIds: [root, 'later-conflicting-hash'] }],
+        evidence: [scope, { id: 'later-conflicting-hash', reference: '同一时间的冲突书证' }] }] };
+    const fetchFinance = vi.fn(async (_input: string, options?: RequestInit) => {
+      if (options?.method !== 'POST') return Response.json({ canWrite: true, workspace });
+      const { data } = JSON.parse(String(options.body));
+      return Response.json({ preview: { actionHash: 'checked-invoice-evidence', snapshot: { orderId, actor: { email: 'accountant@example.test' },
+        operation: { ...data, action: 'verify_customer_invoice_scope', acceptanceId: workspace.acceptanceId,
+          lines: pending ? lines : [lines[1]] } } } });
+    });
+    vi.stubGlobal('fetch', fetchFinance);
+    render(<FinanceManager initialOrder={orderId}/>);
+    fireEvent.click(await screen.findByRole('button', { name: '核对历史客户可开票范围' }));
+    if (pending) {
+      expect(screen.getByText(/书证生效顺序待核/)).toBeInTheDocument();
+      fireEvent.change(screen.getByLabelText('已有书证的待核时间'), { target: { value: at } });
+      fireEvent.click(screen.getByRole('checkbox', { name: '初始两件原书证' }));
+    } else {
+      fireEvent.click(screen.getByRole('checkbox', { name: '合成标签 · 1 件' }));
+    }
+    for (const [label, value] of [
+      [pending ? '澄清书证确认当时的累计可开额（元）' : '原书证明确补充的含税金额（元）', pending ? '60' : '40'],
+      [pending ? '澄清书证的实际确认时间' : '原书证载明的实际确认时间', '2026-01-03T08:00'],
+      ['书面依据或原件编号', '有明示内容的新书证'], ['原件 SHA-256 摘要', 'c'.repeat(64)],
+      ['核对结果或书面约定', pending ? '核明该时点依原书证。' : '新金额只对应合成标签。'],
+    ]) fireEvent.change(screen.getByLabelText(label), { target: { value } });
+    fireEvent.click(screen.getByRole('button', { name: '查看完整预览' }));
+    const panel = await screen.findByRole('region', { name: '票款操作预览' });
+    expect(panel).toHaveTextContent('合成标签 · 1 件');
+    const request = fetchFinance.mock.calls.find(([, options]) => options?.method === 'POST');
+    const { data } = JSON.parse(String(request?.[1]?.body));
+    expect(data).toMatchObject(pending ? { invoiceScopeBasisId: root, restateInvoiceCeiling: true, grossCents: 6000,
+      clarifiesInvoiceEvidenceAt: at, confirmedInvoiceEvidenceIds: [root] }
+      : { invoiceScopeBasisId: root, grossCents: 4000, invoiceLines: [{ orderItemId: 'office-B', quantity: 1 }] });
+    if (!pending) expect(panel).not.toHaveTextContent('合成文件夹');
+  });
 });

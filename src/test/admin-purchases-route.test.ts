@@ -920,6 +920,190 @@ describe('admin purchase endpoint', () => {
       return { ...paper(ref), bankReceiptId: id, amountCents: amount, allocationReference: ref };
     }
 
+    async function acceptLegacyInvoiceOrder(id: string, items: string[]) {
+      const createdAt = new Date(Date.now() - 6 * 86400000);
+      await prisma.order.create({ data: { id, customerId: buyer, email: email(buyer), subtotal: 0, total: 0, createdAt,
+        status: 'confirmed', paymentMethod: 'bank_transfer', orderItems: { create: items.map((item, position) => ({
+          id: item, position, name: 'Office evidence item ' + position, quantity: 1, unitPrice: 60,
+        })) } } });
+      signIn(staff.operator);
+      const before = (await expectJson(await readPurchases(id), 200)).workspace.startReview;
+      getTestDb().prepare('INSERT INTO AdminRolePermission (roleId,permissionId) VALUES (?,?)').run(staffRole[staff.merchant], 'purchases.read');
+      signIn(staff.merchant);
+      const input = { ...paper(id + '-signed-acceptance'), action: 'verify_acceptance', orderId: id, requestId: id + '-legacy-acceptance',
+        version: before.version, originalActor: staff.merchant, authorityReference: 'Historical signed order acceptance', occurredAt: createdAt.toISOString() };
+      const accepted = await expectJson(await post({ ...input, stage: 'preview' }), 200);
+      await expectJson(await post({ ...input, stage: 'confirm', actionHash: accepted.preview.actionHash, stepUpToken: await grant(staff.merchant) }), 200);
+      signIn(staff.accountant);
+    }
+
+    it.each(['limit at the actual invoice date', 'additional amount applies to one covered line'] as const)(
+      'verifies historical invoice authority by %s', async scenario => {
+        const id = 'office-legacy-dated-invoice';
+        const firstItem = id + '-first';
+        const otherItem = id + '-other';
+        const partial = scenario === 'additional amount applies to one covered line';
+        const day = 86400000;
+        const start = Date.now();
+        const actual = (before: number, hours = 0) => new Date(start - before * day + hours * 3600000).toISOString();
+        await acceptLegacyInvoiceOrder(id, partial ? [firstItem, otherItem] : [firstItem]);
+        const parties = { issuer: 'Office archival seller', recipient: 'Office archival buyer' };
+        const evidence = { ...parties, ...paper('office-day-one-signed-scope'), grossCents: partial ? 6000 : 10000,
+          invoiceLineIds: partial ? [firstItem, otherItem] : [firstItem], occurredAt: actual(5) };
+        const root = (await finish(await financePreview('verify_customer_invoice_scope', evidence, id))).eventId;
+        const restate = { ...parties, invoiceScopeBasisId: root, restateInvoiceCeiling: true };
+        let lowProof = '';
+        if (!partial) {
+          lowProof = (await finish(await financePreview('verify_customer_invoice_scope', { ...restate, ...paper('office-day-two-limit-60'),
+            grossCents: 6000, occurredAt: actual(4) }, id))).eventId;
+          await record('verify_customer_invoice_scope', { ...restate, ...paper('office-day-three-limit-100'), grossCents: 10000, occurredAt: actual(3) }, id);
+        }
+        const plan = (await record('create_plan', { ...parties, ...paper('office-legacy-invoice-arrangement'), invoiceScopeId: root,
+          side: 'customer', trigger: 'accepted', grossCents: partial ? 6000 : 8000 }, id)).invoicePlans[0];
+        const invoice = { ...parties, ...paper('office-original-invoice-follows-the-actual-paper'), planId: plan.id, number: 'OFFICE-HISTORIC-VOUCHER',
+          grossCents: partial ? 6000 : 8000, amountCents: partial ? 6000 : 8000, issuedAt: actual(4, 2) };
+        if (!partial) {
+          const state = (await expectJson(await financeRead(id), 200)).workspace;
+          await expectJson(await financePost({ orderId: id, version: state.version, requestId: 'over-limit-actual-date', action: 'record_invoice',
+            stage: 'preview', data: invoice }), 409);
+          const earlier = await record('verify_customer_invoice_scope', { ...parties, ...paper('older-addition-with-later-restatement'),
+            invoiceScopeBasisId: root, grossCents: 1000, occurredAt: actual(4, 4) }, id);
+          expect(earlier.customerInvoiceFamilies[0]).toMatchObject({ authorizedCents: 10000, timeline: [
+            { at: actual(5), authorizedCents: 10000 }, { at: actual(4), authorizedCents: 6000 }, { at: actual(4, 4), authorizedCents: 7000 },
+            { at: actual(3), authorizedCents: 10000 },
+          ] });
+          const sameTime = await record('verify_customer_invoice_scope', { ...restate, ...paper('conflicting-same-time-document'),
+            grossCents: 9000, occurredAt: actual(4) }, id);
+          expect(sameTime.customerInvoiceFamilies[0]).toMatchObject({ authorizedCents: 10000, timeline: expect.arrayContaining([
+            expect.objectContaining({ at: actual(4), needsReview: true, authorizedCents: null }),
+            expect.objectContaining({ at: actual(4, 4), authorizedCents: null }),
+          ]) });
+          const smaller = { ...invoice, amountCents: 5000, grossCents: 5000 };
+          const duringConflict = { orderId: id, requestId: randomUUID(), version: sameTime.version, action: 'record_invoice',
+            stage: 'preview', data: smaller };
+          expect((await expectJson(await financePost(duringConflict), 409)).error).toContain('待具名核对');
+          const clarification = await record('verify_customer_invoice_scope', { ...restate, ...paper('signed-clarification-authenticates-only-the-60-paper'),
+            grossCents: 6000, occurredAt: actual(1), clarifiesInvoiceEvidenceAt: actual(4), confirmedInvoiceEvidenceIds: [lowProof] }, id);
+          expect(clarification.customerInvoiceFamilies[0]).toMatchObject({ authorizedCents: 10000, timeline: expect.arrayContaining([
+            expect.objectContaining({ at: actual(4), needsReview: false, authorizedCents: 6000, confirmedEvidenceIds: [lowProof] }),
+          ]) });
+          const timelyProof = await financePreview('record_invoice', smaller, id);
+          expect(timelyProof.preview.snapshot.operation.invoiceAuthority).toMatchObject({ at: actual(4), authorizedCents: 6000 });
+          const valid = await record('record_invoice', { ...invoice, issuedAt: actual(3, 2) }, id);
+          expect(valid.invoicePlans[0]).toMatchObject({ usedCents: 8000 });
+          await record('verify_customer_invoice_scope', { ...restate, ...paper('later-confirmation-of-100-still-valid'),
+            grossCents: 10000, occurredAt: actual(2) }, id);
+          const conflict = await record('verify_customer_invoice_scope', { ...restate, ...paper('late-paper-appears-for-already-recorded-date'),
+            grossCents: 6000, occurredAt: actual(3, 1) }, id);
+          expect(conflict.customerInvoiceFamilies[0]).toMatchObject({ authorizedCents: 10000,
+            invoiceConflicts: [{ number: invoice.number, issuedAt: actual(3, 2) }] });
+          expect(conflict.invoicePlans[0]).toMatchObject({ usedCents: 8000, allocations: [{ status: 'recorded', amountCents: 8000 }] });
+          const originalInvoiceId = conflict.invoicePlans[0].allocations[0].invoiceId;
+          await record('open_correction', { ...paper('office-existing-real-conflicting-invoice-review'), invoiceId: originalInvoiceId,
+            occurredAt: new Date().toISOString() }, id);
+          const cleared = await record('resolve_correction', { ...paper('complete-written-red-note-from-issuer'), invoiceId: originalInvoiceId,
+            outcome: 'voided', occurredAt: new Date().toISOString() }, id);
+          expect(cleared.customerInvoiceFamilies[0].invoiceConflicts).toEqual([]);
+          expect(cleared.invoicePlans[0]).toMatchObject({ usedCents: 0, allocations: [{ status: 'voided', amountCents: 8000 }] });
+          return;
+        }
+        await record('record_invoice', invoice, id);
+        const add = await finish(await financePreview('verify_customer_invoice_scope', { ...parties, ...paper('office-only-B-additional-signed-40'),
+          invoiceScopeBasisId: root, grossCents: 4000, occurredAt: actual(3), invoiceLines: [{ orderItemId: otherItem, quantity: 1 }],
+        }, id));
+        expect(add.workspace.customerInvoiceScopes.find((row: { id: string }) => row.id === add.eventId)).toMatchObject({
+          familyId: root, grossCents: 4000, lines: [{ id: otherItem, quantity: 1 }],
+        });
+        expect(add.workspace.customerInvoiceScopes.at(0).lines).toMatchObject([{ id: firstItem, quantity: 1 }, { id: otherItem, quantity: 1 }]);
+        expect(add.workspace.invoicePlans[0].usedCents).toBe(6000);
+        const newPlan = { ...parties, ...paper('office-B-only-supplement-plan'), side: 'customer', trigger: 'accepted', grossCents: 4000 };
+        await expectJson(await financePost({ orderId: id, version: add.workspace.version, requestId: randomUUID(), action: 'create_plan',
+          stage: 'preview', data: { ...newPlan, invoiceScopeId: root } }), 409);
+        const financed = await record('create_plan', { ...newPlan, invoiceScopeId: add.eventId }, id);
+        const newPlanId = financed.invoicePlans.find((row: { invoiceScopeId: string }) => row.invoiceScopeId === add.eventId).id;
+        const all = await record('record_invoice', { ...invoice, ...paper('office-B-only-additional-invoice'), planId: newPlanId,
+          number: 'OFFICE-B-ONLY-SUPPLEMENT', issuedAt: actual(3, 1), amountCents: 4000, grossCents: 4000 }, id);
+        expect(all.invoicePlans).toMatchObject([{ usedCents: 6000 }, { usedCents: 4000 }]);
+        expect(all.customerInvoiceFamilies[0]).toMatchObject({ issuedCents: 10000, availableCents: 0 });
+      },
+    );
+
+    it.each(['already-booked during hold', 'later attribution after no approval'] as const)(
+      'continues the same original receipt %s', async scenario => {
+        const held = scenario === 'already-booked during hold';
+        let bankDate = new Date(Date.now() - 86400000).toISOString();
+        const execute = async (actor: keyof typeof staffRole, input: ActionRequest) => {
+          signIn(actor);
+          vi.setSystemTime(Date.now() + 3 * 60_000);
+          return expectJson(await confirm(await previewAction(input), await grant(actor)), 200);
+        };
+        await startActualSupply(orderId, 'office-authored-original-receipt');
+        let deniedAuthorityId: string | undefined;
+        if (held) {
+          await execute(staff.operator, { action: 'report_change', requestId: 'bank-held-supply-original-hold',
+            changeKind: 'delay', reference: '书面暂停两件供货', description: '供方暂缓本采购行两件。',
+            affectedLines: [{ orderItemId, quantity: 2, source: { kind: 'unshipped' } }] });
+          bankDate = new Date().toISOString();
+        }
+        const proof = { ...supplierPaymentProof('OFFICE-ORIGINAL-PAYMENT-WITHOUT-PRIOR-APPROVAL', procurementTerms.payee, bankDate),
+          reference: '原银行出款回执档案', amountCents: 900 };
+        const filed = await execute(staff.finance, { ...proof, action: 'record_payment_exception', requestId: 'retain-same-original-bank-receipt',
+          description: '保存确已发生的原银行出款，付款当时没有本次授权。' });
+        const issueId = filed.workspace.orders[0].paymentExceptions[0].id;
+        if (held) {
+          const incidentId = filed.workspace.orders[0].incidents[0].id;
+          await execute(staff.approver, { action: 'resolve_change', incidentId, requestId: 'close-real-original-hold', outcome: 'original_terms',
+            supplierReference: '原合同供方同意恢复', supplierSha256: pricingContentHash('real hold release signed offer'),
+            customerReference: '客户同意原条件', customerSha256: pricingContentHash('real hold buyer signed acceptance'),
+            description: '书面恢复原两件供应。', coordinationLines: [{ orderItemId, quantity: 2, source: { kind: 'unshipped' } }] });
+        } else {
+          const zero = await execute(staff.finance, { action: 'review_payment_exception', paymentIssueId: issueId, requestId: 'no-auth-on-actual-bank-date',
+            paymentIssueOutcome: 'no_effective_approval', reference: '原时点未批准的核对结果', referenceSha256: pricingContentHash('original date had no approval'),
+            description: '虽有实付，当时无有效批准。独立核归属后再回原合同办理。' });
+          expect(zero.workspace.orders[0].paymentExceptions[0]).toMatchObject({ pending: false });
+          deniedAuthorityId = zero.workspace.orders[0].paymentExceptions[0].noEffectiveApprovalId;
+          expect(deniedAuthorityId).toBeTruthy();
+        }
+        const authorized = await execute(staff.approver, { action: 'approve_payment_attribution', paymentIssueId: issueId,
+          requestId: 'review-current-application-of-the-real-bank-payment', reference: '现批准同一笔实际出款归属',
+          referenceSha256: pricingContentHash('later verified attribution of original payment'), description: '具名核实原实际出款金额与本合同应付。' });
+        const attributionApprovalId = authorized.workspace.orders[0].paymentExceptions[0].attributionApprovalId;
+        if (deniedAuthorityId) expect(authorized.workspace.orders[0].ledger.at(-1).detail.snapshot.operation.basis)
+          .toMatchObject({ noEffectiveApprovalId: deniedAuthorityId });
+        const posted = await execute(staff.finance, { action: 'record_payment', paymentIssueId: issueId, requestId: 'apply-original-cash-once',
+          conditionReference: '按现在审批归入原合同' });
+        const existingId = posted.workspace.orders[0].payments[0].id;
+        expect(posted.workspace.orders[0].ledger.find((row: { id: string }) => row.id === existingId).detail.snapshot.operation)
+          .toMatchObject({ approvalId: null, attributionApprovalId, paymentEvidence: { occurredAt: bankDate } });
+        if (deniedAuthorityId) expect(posted.workspace.orders[0].paymentExceptions[0]).toMatchObject({
+          noEffectiveApprovalId: deniedAuthorityId, reviewHistory: [{ id: deniedAuthorityId, operation: { outcome: 'no_effective_approval' } }],
+        });
+        if (held) {
+          await execute(staff.operator, { action: 'report_change', requestId: 'real-supply-later-cancels-one', changeKind: 'unavailable',
+            reference: '原单后来少一件', description: '一件取消，一件仍有效。' });
+          await execute(staff.approver, { action: 'resolve_change', requestId: 'real-supply-decreases-remaining-payable', outcome: 'declined',
+            supplierReference: '供方书面取消一件', supplierSha256: pricingContentHash('later seller cancelled one'),
+            customerReference: '客户书面放弃一件', customerSha256: pricingContentHash('later buyer cancelled one'), confirmsFullIncidentScope: true,
+            description: '保留一件原合同，财务随后核剩余金额。', refundFollowup: '若有退款另核，原现金不变。',
+            dispositions: [{ orderItemId, quantity: 1, outcome: 'cancel' }] });
+          const disputed = await execute(staff.finance, { action: 'record_payment_exception', sourcePaymentId: existingId,
+            requestId: 'recheck-previously-attributed-payment', description: '核实已记原实付的归属保持原单。' });
+          expect(disputed.workspace.orders[0]).toMatchObject({ needsRemainingReview: true, canApproveRemaining: false, disputedPaidCents: 900 });
+          const actualCase = disputed.workspace.orders[0].paymentExceptions.find((row: { pending: boolean }) => row.pending).id;
+          const bankPaid = await execute(staff.finance, { action: 'review_payment_exception', paymentIssueId: actualCase, requestId: 'confirm-same-earlier-attributed-cash',
+            paymentIssueOutcome: 'confirmed_current', reference: '沿原审核银行书证复确认', referenceSha256: pricingContentHash('note on already attributed cash'),
+            description: '原付款、付款时点与原具名归属都已经核实。' });
+          expect(bankPaid.workspace.orders[0]).toMatchObject({ paidCents: 900, dueCents: null, needsRemainingReview: true,
+            canApproveRemaining: true, payments: [{ id: existingId, occurredAt: bankDate }] });
+          const remainder = await execute(staff.approver, { action: 'approve_remaining', requestId: 'independent-remaining-scope-after-cash-confirmation',
+            reference: '只核剩余一件与原已付款', referenceSha256: pricingContentHash('real original remaining one and booked deposit'),
+            description: '只留一件对应应付，按旧定金抵扣。', remainingLines: [{ orderItemId, payableCents: 3673 }], appliedPaidCents: 900 });
+          expect(remainder.workspace.orders[0]).toMatchObject({ paidCents: 900, dueCents: 2773, needsRemainingReview: false });
+        }
+        expect(activity('record_payment')).toHaveLength(1);
+      },
+    );
+
     it('settles two orders from two actual bank transactions across finance and purchasing with partial credit release', async () => {
       const other = 'office-second-order';
       await seedAcceptedOrder(other, 'office-second-line');
@@ -1147,12 +1331,12 @@ describe('admin purchase endpoint', () => {
         number: 'SECOND-INVOICE-SAME-VERIFIED-ITEM', issuedAt: new Date().toISOString(), amountCents: 4000, grossCents: 4000 }, id);
       expect(newInvoice.invoicePlans.find((row: { id: string }) => row.id === plan.id)).toMatchObject({ usedCents: 6000, remainingCents: 0 });
       expect(newInvoice.invoicePlans.find((row: { id: string }) => row.id === additionalPlan.id)).toMatchObject({ usedCents: 4000, remainingCents: 0 });
-      const revise = { ...sameItemSupplement, restateInvoiceCeiling: true };
+      const revise = { ...sameItemSupplement, restateInvoiceCeiling: true, occurredAt: new Date().toISOString() };
       await expectJson(await financePost({ ...supplement.input, stage: 'preview', requestId: randomUUID(), version: newInvoice.version,
         data: { ...revise, ...paper('would-reduce-below-issued-on-this-item'), grossCents: 9999 } }), 409);
       const up = await record('verify_customer_invoice_scope', { ...revise, ...paper('new-same-item-ceiling'), grossCents: 11000 }, id);
       const release = await financePreview('verify_customer_invoice_scope', {
-        ...revise, ...paper('written-withdrawal-of-only-the-unallocated-extra-amount'), grossCents: 10000,
+        ...revise, ...paper('written-withdrawal-of-only-the-unallocated-extra-amount'), occurredAt: new Date().toISOString(), grossCents: 10000,
       }, id);
       expect(release.preview.snapshot.operation.scopeChange).toMatchObject({ beforeCents: 11000, deltaCents: -1000,
         afterCents: 10000, issuedCents: 10000, availableCents: 0 });
