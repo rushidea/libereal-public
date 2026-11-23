@@ -3,12 +3,17 @@ export type DatedInvoicePlan = {
   grossCents: number;
   amendedFromPlanId: string | null;
   effectiveAt: string | null;
+  scopeEffectiveAt: string | null;
   closedAt: string | null;
   stoppedCents: number;
   allocations: Array<{ id: string; issuedAt: string; amountCents: number; status: string }>;
 };
 
-type TermsDates = Pick<DatedInvoicePlan, 'id' | 'amendedFromPlanId' | 'effectiveAt' | 'closedAt'> & {
+export function invoicePlanStartsAt({ effectiveAt, scopeEffectiveAt }: Pick<DatedInvoicePlan, 'effectiveAt' | 'scopeEffectiveAt'>) {
+  return effectiveAt && (!scopeEffectiveAt || effectiveAt >= scopeEffectiveAt) ? effectiveAt : scopeEffectiveAt;
+}
+
+type TermsDates = Pick<DatedInvoicePlan, 'id' | 'amendedFromPlanId' | 'effectiveAt' | 'scopeEffectiveAt' | 'closedAt'> & {
   amendmentRecordedAt: string | null;
   closeRecordedAt: string | null;
 };
@@ -29,7 +34,8 @@ export function invoiceTermsPeriods(plan: TermsDates, plans: TermsDates[], known
   const revisions: Array<[string, string[]]> = [];
   return [null, ...boundaries].map((from, index) => {
     if (from) revisions.push([from, dates.get(from)!.sort()]);
-    return { from, until: boundaries[index] ?? null, key: JSON.stringify(revisions) };
+    return { from: invoicePlanStartsAt({ effectiveAt: from, scopeEffectiveAt: plan.scopeEffectiveAt }),
+      until: boundaries[index] ?? null, key: JSON.stringify(revisions) };
   });
 }
 
@@ -38,22 +44,26 @@ export function invoicePeriodAt<Period extends { from: string | null; until: str
 }
 
 type Entry =
+  | { kind: 'open'; at: number; plan: DatedInvoicePlan }
   | { kind: 'transfer'; at: number; plan: DatedInvoicePlan; from: string; depth: number }
   | { kind: 'close'; at: number; plan: DatedInvoicePlan }
   | { kind: 'invoice'; at: number; plan: DatedInvoicePlan; id: string; amountCents: number };
 
-const priority = { transfer: 0, close: 1, invoice: 2 };
+const priority = { open: 0, transfer: 1, close: 2, invoice: 3 };
 
 /** Actual invoices and written changes consume the same original allocation in date order. */
 export function invoiceTimeline(plans: DatedInvoicePlan[], through = Infinity) {
   const byId = new Map(plans.map(plan => [plan.id, plan]));
-  const remaining = new Map(plans.map(plan => [plan.id, plan.amendedFromPlanId ? 0 : plan.grossCents]));
+  const remaining = new Map<string, number>();
   const transfers = new Map<string, number>();
   const closed = new Set<string>();
   const conflicts = new Set<string>();
   const entries: Entry[] = [];
   for (const plan of plans) {
-    if (plan.amendedFromPlanId && plan.effectiveAt) {
+    const startsAt = invoicePlanStartsAt(plan);
+    remaining.set(plan.id, plan.amendedFromPlanId || startsAt ? 0 : plan.grossCents);
+    if (startsAt && !plan.amendedFromPlanId) entries.push({ kind: 'open', at: Date.parse(startsAt), plan });
+    if (startsAt && plan.amendedFromPlanId && plan.effectiveAt) {
       const ancestors = new Set([plan.id]);
       let parent = byId.get(plan.amendedFromPlanId);
       while (parent && !ancestors.has(parent.id)) {
@@ -61,7 +71,7 @@ export function invoiceTimeline(plans: DatedInvoicePlan[], through = Infinity) {
         parent = parent.amendedFromPlanId ? byId.get(parent.amendedFromPlanId) : undefined;
       }
       if (!parent && byId.has(plan.amendedFromPlanId)) entries.push({
-        kind: 'transfer', at: Date.parse(plan.effectiveAt), plan, from: plan.amendedFromPlanId, depth: ancestors.size,
+        kind: 'transfer', at: Date.parse(startsAt), plan, from: plan.amendedFromPlanId, depth: ancestors.size,
       });
     }
     if (plan.closedAt) entries.push({ kind: 'close', at: Date.parse(plan.closedAt), plan });
@@ -77,7 +87,9 @@ export function invoiceTimeline(plans: DatedInvoicePlan[], through = Infinity) {
     if (entry.at > through) break;
     const { plan } = entry;
     const available = remaining.get(plan.id) ?? 0;
-    if (entry.kind === 'transfer') {
+    if (entry.kind === 'open') {
+      if (!closed.has(plan.id)) remaining.set(plan.id, available + plan.grossCents);
+    } else if (entry.kind === 'transfer') {
       const availableFrom = remaining.get(entry.from) ?? 0;
       const assigned = Math.max(0, Math.min(availableFrom, plan.grossCents));
       transfers.set(plan.id, assigned);

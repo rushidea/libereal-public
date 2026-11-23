@@ -4,7 +4,7 @@ import { customerCashProjection, postVerifiedCustomerCash } from '@/lib/customer
 import { refreshCreditRestrictions } from '@/lib/customer-credit';
 import { invoiceAuthorityAt, invoiceAuthorityTimeline, invoiceScopeRooms, invoicesOutsideAuthority, type InvoiceAuthorityChange } from '@/lib/finance-invoice-authority';
 import { invoiceCharges, invoiceCommitments, readInvoicePortions } from '@/lib/finance-invoice-coverage';
-import { invoicePeriodAt, invoiceTimeline } from '@/lib/finance-invoice-timeline';
+import { invoicePeriodAt, invoicePlanStartsAt, invoiceTimeline } from '@/lib/finance-invoice-timeline';
 import { coveredCustomerInvoiceLines, customerInvoiceScopeVersion, financeIdentity, financeWorkspace, invoiceStatus, invoiceTriggers,
   type FinanceWorkspace, type InvoiceTrigger } from '@/lib/finance-workspace';
 import { jsonObject } from '@/lib/order-catalog-repricing';
@@ -68,11 +68,9 @@ function projectedInvoiceCommitments(plans: Plan[], timeline = invoiceTimeline(p
 }
 
 function invoiceCommitmentFits(view: FinanceWorkspace, side: string, purchaseOrderId: string | null, scopeId: string | null,
-  previousCents: number, proposedCents: number, recordingHistoricalInvoice = false,
+  previousCents: number, proposedCents: number,
 ) {
   if (side !== 'customer' || !scopeId) return proposedCents <= invoiceScopeLimit(view, side, purchaseOrderId);
-  // A valid historical invoice can consume an existing arrangement even if its unused portion is under review today.
-  if (recordingHistoricalInvoice && proposedCents <= previousCents) return true;
   const room = customerInvoiceScope(view, scopeId)?.roomCents;
   return room != null && proposedCents - previousCents <= room;
 }
@@ -213,8 +211,8 @@ export function invoiceReadyAt(view: FinanceWorkspace, plan: Plan) {
     : view.postingPrincipal && view.settlementCents === view.postingPrincipal.cents && !view.authorityConflict ? view.paidAt : null;
   if (!po && (plan.trigger === 'dispatched' || plan.trigger === 'delivered')) businessAt = view.shipmentDates[plan.trigger];
   if (!businessAt || !Number.isFinite(Date.parse(businessAt)) || plan.amendedFromPlanId && !plan.effectiveAt) return null;
-  const originalScopeAt = plan.side === 'customer' ? customerInvoiceScope(view, plan.invoiceScopeId)?.occurredAt : null;
-  return [businessAt, plan.effectiveAt, originalScopeAt].filter((time): time is string => Boolean(time)).sort().at(-1)!;
+  const startsAt = invoicePlanStartsAt(plan);
+  return startsAt && startsAt > businessAt ? startsAt : businessAt;
 }
 
 async function invoiceDocument(tx: Db, view: FinanceWorkspace, input: FinanceInput, evidence: Evidence) {
@@ -261,8 +259,8 @@ async function invoiceDocument(tx: Db, view: FinanceWorkspace, input: FinanceInp
   if (after.conflicts.has(allocationId)) throw new PurchaseError('票面日期超出原安排的有效范围或可用金额');
   const family = view.customerInvoiceFamilies.find(row => row.id === sourceScope?.familyId);
   const authority = family && invoiceAuthorityAt(family.timeline, issuedAt);
+  if (sourceScope && (!authority || authority.authorizedCents === null)) throw new PurchaseError('票面日期的有效开票书证待具名核对');
   if (family) {
-    if (!authority || authority.authorizedCents === null) throw new PurchaseError('票面日期的有效开票书证待具名核对');
     const actual = trial.find(row => row.id === plan.id)!.allocations.at(-1)!;
     const conflicts = invoicesOutsideAuthority(family.timeline, invoiceCharges([
       ...familyInvoicePlans(view, family), { ...plan, allocations: [actual] },
@@ -272,9 +270,9 @@ async function invoiceDocument(tx: Db, view: FinanceWorkspace, input: FinanceInp
       throw new PurchaseError('回填将超过实际开票日期适用的书证额度，请核对票面及同一范围的原票');
     }
   }
+  // Dated authority already checks actual scope use, including when the unissued arrangement was later stopped.
   if ([...after.conflicts].some(id => !before.conflicts.has(id))
-    || !invoiceCommitmentFits(view, plan.side, plan.purchaseOrderId, plan.invoiceScopeId,
-      projectedInvoiceCommitments(plans, before), projectedInvoiceCommitments(trial, after), true)) {
+    || (!family && projectedInvoiceCommitments(trial, after) > invoiceScopeLimit(view, plan.side, plan.purchaseOrderId))) {
     throw new PurchaseError('实际票面与已占用的开票额度冲突，请核对原票和安排');
   }
   const adjustedPlans = plans.flatMap(row => {
@@ -431,7 +429,8 @@ async function financeOperation(tx: Db, input: FinanceInput, actor: PurchaseActo
     }
     const occurredAt = actualTime(data.occurredAt, '书面变更确认时间');
     const effectiveAt = data.effectiveAt == null ? occurredAt : purchaseTimestamp(data.effectiveAt, '书面约定生效时间');
-    if (plan.amendedFromPlanId && (!plan.effectiveAt || Date.parse(effectiveAt) < Date.parse(plan.effectiveAt))) {
+    const startsAt = invoicePlanStartsAt(plan);
+    if ((plan.amendedFromPlanId && !plan.effectiveAt) || (startsAt && effectiveAt < startsAt)) {
       throw new PurchaseError('本次变更不得早于所选安排原来明确生效的时间，请核对前一份书证');
     }
     const retroactiveReference = Date.parse(effectiveAt) < Date.parse(occurredAt)

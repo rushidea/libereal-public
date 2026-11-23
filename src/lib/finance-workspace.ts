@@ -1,7 +1,7 @@
 import { Prisma } from '@prisma/client';
 import { isAlipayReconciliationStatus } from '@/lib/payment-concurrency';
 import { receivableOutstandingCents } from '@/lib/receivable-balance';
-import { invoicePeriodAt, invoiceTermsPeriods, invoiceTimeline } from '@/lib/finance-invoice-timeline';
+import { invoicePeriodAt, invoicePlanStartsAt, invoiceTermsPeriods, invoiceTimeline } from '@/lib/finance-invoice-timeline';
 import { invoiceCharges, invoiceCommitments, invoiceCoverageRemaining, readInvoicePortions } from '@/lib/finance-invoice-coverage';
 import { invoiceAuthorityTimeline, invoiceScopeRooms, invoicesOutsideAuthority, readInvoiceAuthorityChange } from '@/lib/finance-invoice-authority';
 import { confirmedCustomerDelivery, customerShipmentRows } from '@/lib/fulfillment-accounting';
@@ -62,7 +62,7 @@ function dateValue(value: unknown) {
   return typeof value === 'string' && Number.isFinite(Date.parse(value)) ? new Date(value).toISOString() : null;
 }
 
-function invoicePlanViews(plans: InvoicePlanRow[], events: FinanceEventView[], now: Date) {
+function invoicePlanViews(plans: InvoicePlanRow[], events: FinanceEventView[], now: Date, scopeDates?: ReadonlyMap<string, string>) {
   const creation = new Map(events.filter(row => row.action === 'create_plan').map(row => [row.planId, row.operation.invoiceScopeId]));
   const amendments = new Map(events.filter(row => row.action === 'amend_plan' && row.replacementPlanId)
     .map(row => [row.replacementPlanId, row]));
@@ -81,6 +81,7 @@ function invoicePlanViews(plans: InvoicePlanRow[], events: FinanceEventView[], n
     const history = events.filter(row => row.planId === plan.id);
     const amendment = amendments.get(plan.id);
     const close = history.findLast(row => row.action === 'close_plan');
+    const invoiceScopeId = scopeOf(plan.id);
     const allocations = plan.allocations.map(allocation => {
       const doc = allocation.invoice;
       const amountCents = Number(allocation.amountCents);
@@ -100,7 +101,7 @@ function invoicePlanViews(plans: InvoicePlanRow[], events: FinanceEventView[], n
     return { id: plan.id, orderId: plan.orderId, side: plan.side, purchaseOrderId: plan.purchaseOrderId, partyKey: plan.partyKey,
       issuer: plan.issuer, recipient: plan.recipient, grossCents: Number(plan.grossCents), trigger: plan.trigger,
       ownerId: plan.ownerId, reference: plan.reference, sha256: plan.sha256, allocations,
-      invoiceScopeId: scopeOf(plan.id),
+      invoiceScopeId, scopeEffectiveAt: invoiceScopeId ? dateValue(scopeDates?.get(invoiceScopeId)) : null,
       usedCents: allocations.filter(row => row.status !== 'voided').reduce((sum, row) => sum + row.amountCents, 0),
       amendedFromPlanId: amendment?.planId ?? null, effectiveAt: dateValue(amendment?.operation.effectiveAt ?? amendment?.operation.occurredAt),
       closed: Boolean(close), closedAt: dateValue(close?.operation.occurredAt) ?? close?.occurredAt ?? null,
@@ -150,8 +151,9 @@ function invoicePlanViews(plans: InvoicePlanRow[], events: FinanceEventView[], n
     const latest = planReviews.at(-1);
     const priorReview = latest && { id: latest.id, actorId: latest.actorId, occurredAt: latest.occurredAt, remaining: null };
     const coverageReview = invoicePeriodAt(periods, today)?.review ?? priorReview ?? null;
+    const startsAt = invoicePlanStartsAt(plan);
     return { ...plan, remainingCents: current.remaining.get(plan.id) ?? 0, coveragePeriods: periods, coverageReview,
-      recordable: !plan.effectiveAt || Date.parse(plan.effectiveAt) <= now.getTime(), scheduledRemainingCents: future.remaining.get(plan.id) ?? 0,
+      recordable: !startsAt || startsAt <= today, scheduledRemainingCents: future.remaining.get(plan.id) ?? 0,
       effectiveAllocationCents: plan.amendedFromPlanId ? future.transfers.get(plan.id) ?? 0 : plan.grossCents };
   });
 }
@@ -274,9 +276,10 @@ export async function financeWorkspace(tx: Db, orderId: string) {
     movement.filter(row => row.orderItemId === item.id).reduce((sum, row) => sum + row.effectiveQuantity, 0) === item.quantity);
   const shipmentDates = { dispatched: allDispatched ? lastDate(movement.map(row => row.shipment.shippedAt)) : null,
     delivered: signed ? lastDate(movement.map(row => row.shipment.deliveredAt)) : null };
-  const invoicePlans = invoicePlanViews(plans, events, new Date());
   const originalInvoiceLines = order.orderItems.map(({ id, name, quantity, unitPrice }) => ({ id, name, quantity, unitPrice }));
   const customerInvoiceReviewsFound = customerInvoiceReviews(financeEvents, orderId, customerKey, start.acceptance?.id ?? null, originalInvoiceLines);
+  const scopeDates = new Map(customerInvoiceReviewsFound.map(row => [row.id, row.occurredAt]));
+  const invoicePlans = invoicePlanViews(plans, events, new Date(), scopeDates);
   const scopeRooms: ReturnType<typeof invoiceScopeRooms> = new Map();
   const customerInvoiceFamilies = customerInvoiceReviewsFound.filter(row => row.familyId === row.id).map(root => {
     const evidence = customerInvoiceReviewsFound.filter(row => row.familyId === root.id);
