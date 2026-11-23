@@ -220,4 +220,61 @@ describe('admin finance workspace', () => {
       data: { invoiceScopeId: current, grossCents: 4000, ...parties } });
     expect(input.data).not.toHaveProperty('sha256');
   });
+
+  it('previews a named review of actual invoice lines and amounts against existing evidence', async () => {
+    const orderId = 'legacy-office-overlapping-coverage';
+    const planId = 'existing-plan';
+    const allocationId = 'existing-invoice-allocation';
+    const issuedAt = '2026-01-03T12:00:00.000Z';
+    const a = { id: 'part-A', name: '合成文件夹', quantity: 1 };
+    const b = { id: 'part-B', name: '合成标签', quantity: 1 };
+    const original = { id: 'original-scope', familyId: 'original-scope', grossCents: 6000, reference: '两类用品原书证',
+      issuer: '合成售方', recipient: '合成客户', lines: [a, b], occurredAt: '2026-01-01T00:00:00.000Z' };
+    const specific = { ...original, id: 'only-B-scope', reference: '只追加标签的书证', grossCents: 4000, lines: [b],
+      occurredAt: '2026-01-02T00:00:00.000Z' };
+    const plan = { id: planId, reference: '原安排', side: 'customer', invoiceScopeId: original.id, grossCents: 5000,
+      scheduledRemainingCents: 0, usedCents: 5000, remainingCents: 0, allocations: [
+        { id: allocationId, invoiceId: 'actual-original-id', number: 'OFFICE-ORIGINAL', status: 'recorded', issuedAt, grossCents: 5000, amountCents: 5000 },
+      ] };
+    const workspace = { orderId, version: 'legacy-reviewed-proof-version', status: 'confirmed', customerEmail: 'office@example.test',
+      principalCents: 0, settlementCents: 0, verifiedCents: 0, acceptanceId: 'original-order-acceptance', shipmentDates: { dispatched: null, delivered: null },
+      banks: [], receipts: [], cash: [], purchases: [], invoicePlans: [plan], events: [], latePayments: [],
+      originalInvoiceLines: [], customerInvoiceScopes: [original, specific],
+      customerInvoiceFamilies: [{ id: original.id, authorizedCents: 10000, issuedCents: 10000, availableCents: null,
+        timeline: [{ at: original.occurredAt, confirmedEvidenceIds: [original.id] }, { at: specific.occurredAt, confirmedEvidenceIds: [specific.id] }],
+        invoiceConflicts: [{ id: allocationId, number: plan.allocations[0].number, issuedAt }] }] };
+    const fetchFinance = vi.fn(async (_input: string, options?: RequestInit) => {
+      if (options?.method !== 'POST') return Response.json({ canWrite: true, workspace });
+      const { data } = JSON.parse(String(options.body));
+      const portions = data.portions.map((part: { invoiceScopeId: string; lines: Array<{ orderItemId: string }> }) => {
+        const scope = part.invoiceScopeId === original.id ? original : specific;
+        return { ...part, proof: scope, lines: part.lines.map(line => ({ ...line, name: scope.lines.find(row => row.id === line.orderItemId)?.name })) };
+      });
+      return Response.json({ preview: { actionHash: 'verified-actual-coverage', snapshot: { orderId, actor: { email: 'accountant@example.test' },
+        operation: { ...data, action: 'verify_invoice_coverage', amountCents: 5000, portions,
+          subject: { invoiceNumber: 'OFFICE-ORIGINAL', planReference: '原安排', originalReference: original.reference, issuedAt } } } } });
+    });
+    vi.stubGlobal('fetch', fetchFinance);
+    render(<FinanceManager initialOrder={orderId}/>);
+    fireEvent.click(await screen.findByRole('button', { name: '核对原票或安排的商品归属' }));
+    expect(screen.getByLabelText('本次核对对象')).toHaveValue(allocationId);
+    const first = within(screen.getByRole('group', { name: /两类用品原书证/ }));
+    const second = within(screen.getByRole('group', { name: /只追加标签的书证/ }));
+    fireEvent.change(first.getByLabelText('归入本书证的金额（元）'), { target: { value: '10' } });
+    fireEvent.change(first.getByLabelText('合成文件夹 · 本次实际数量'), { target: { value: '1' } });
+    fireEvent.change(second.getByLabelText('归入本书证的金额（元）'), { target: { value: '40' } });
+    fireEvent.change(second.getByLabelText('合成标签 · 本次实际数量'), { target: { value: '1' } });
+    for (const [label, value] of [
+      ['书面依据或原件编号', '原票行与确认书证核对档案'], ['原件 SHA-256 摘要', 'b'.repeat(64)],
+      ['核对结果或书面约定', '核实原票货品与独立增额实际覆盖范围。'],
+    ]) fireEvent.change(screen.getByLabelText(label), { target: { value } });
+    fireEvent.click(screen.getByRole('button', { name: '查看完整预览' }));
+    const preview = await screen.findByRole('region', { name: '票款操作预览' });
+    expect(preview).toHaveTextContent(/原票 OFFICE-ORIGINAL.*¥50.00/);
+    expect(preview).toHaveTextContent(/只追加标签的书证.*¥40.00.*合成标签 1 件/);
+    const request = fetchFinance.mock.calls.find(([, options]) => options?.method === 'POST');
+    expect(JSON.parse(String(request?.[1]?.body))).toMatchObject({ action: 'verify_invoice_coverage', data: { planId, allocationId,
+      portions: [{ invoiceScopeId: original.id, amountCents: 1000, lines: [{ orderItemId: a.id, quantity: 1 }] },
+        { invoiceScopeId: specific.id, amountCents: 4000, lines: [{ orderItemId: b.id, quantity: 1 }] }] } });
+  });
 });

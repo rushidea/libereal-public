@@ -920,11 +920,11 @@ describe('admin purchase endpoint', () => {
       return { ...paper(ref), bankReceiptId: id, amountCents: amount, allocationReference: ref };
     }
 
-    async function acceptLegacyInvoiceOrder(id: string, items: string[]) {
+    async function acceptLegacyInvoiceOrder(id: string, items: string[], firstQuantity = 1) {
       const createdAt = new Date(Date.now() - 6 * 86400000);
       await prisma.order.create({ data: { id, customerId: buyer, email: email(buyer), subtotal: 0, total: 0, createdAt,
         status: 'confirmed', paymentMethod: 'bank_transfer', orderItems: { create: items.map((item, position) => ({
-          id: item, position, name: 'Office evidence item ' + position, quantity: 1, unitPrice: 60,
+          id: item, position, name: 'Office evidence item ' + position, quantity: position === 0 ? firstQuantity : 1, unitPrice: 60,
         })) } } });
       signIn(staff.operator);
       const before = (await expectJson(await readPurchases(id), 200)).workspace.startReview;
@@ -1087,6 +1087,129 @@ describe('admin purchase endpoint', () => {
       expect(done.invoicePlans).toMatchObject([{ invoiceScopeId: original, usedCents: 6000 },
         { invoiceScopeId: later, usedCents: 4000 }, { invoiceScopeId: itemOnly, usedCents: 2000 }]);
       expect(done.customerInvoiceFamilies[0]).toMatchObject({ authorizedCents: 12000, issuedCents: 12000, availableCents: 0, invoiceConflicts: [] });
+    });
+
+    it.each([
+      ['issued', false], ['arranged', false], ['issued', true], ['arranged', true],
+    ] as const)('retains the %s use of cumulative authority after same-item additional evidence (earlier first: %s)', async (state, earlierFirst) => {
+      const id = 'archived-office-chair-with-same-item-increase';
+      const item = id + '-item';
+      const now = Date.now();
+      const actual = (before: number, hours = 0) => new Date(now - before * 86400000 + hours * 3600000).toISOString();
+      await acceptLegacyInvoiceOrder(id, [item]);
+      const parties = { issuer: 'Office seller', recipient: 'Office buyer' };
+      const verify = async (data: object) => (await finish(await financePreview('verify_customer_invoice_scope', { ...parties, ...data }, id))).eventId;
+      const initial = await verify({ ...paper('same-chair-60'), invoiceLineIds: [item], grossCents: 6000, occurredAt: actual(5) });
+      const arrange = { ...parties, side: 'customer', trigger: 'accepted', description: '核对同一把椅子的开票依据。' };
+      const planFor = async (invoiceScopeId: string, grossCents: number) =>
+        (await record('create_plan', { ...arrange, invoiceScopeId, grossCents }, id)).invoicePlans.find((row: { invoiceScopeId: string }) => row.invoiceScopeId === invoiceScopeId).id;
+      const book = (planId: string, number: string, amountCents: number, issuedAt: string) =>
+        record('record_invoice', { ...parties, ...paper(number), planId, number, amountCents, grossCents: amountCents, issuedAt }, id);
+      await book(await planFor(initial, 6000), 'OFFICE-SAME-CHAIR-60', 6000, actual(5, 1));
+      const added = { ...paper('increase-40-on-the-same-chair'), grossCents: 4000, occurredAt: actual(4),
+        invoiceScopeBasisId: initial, invoiceLines: [{ orderItemId: item, quantity: 1 }] };
+      const early = earlierFirst ? await verify(added) : null;
+      const cumulative = await verify({ ...paper('cumulative-100-for-the-same-chair'), grossCents: 10000, occurredAt: actual(3),
+        invoiceScopeBasisId: initial, restateInvoiceCeiling: true });
+      const planId = await planFor(cumulative, 4000);
+      if (state === 'issued') await book(planId, 'OFFICE-SAME-CHAIR-40', 4000, actual(3, 1));
+      const increase = early ?? await verify(added);
+      const view = (await expectJson(await financeRead(id), 200)).workspace;
+      expect(view.customerInvoiceFamilies[0]).toMatchObject({ authorizedCents: 10000, plannedCents: 10000, invoiceConflicts: [],
+        timeline: [{ authorizedCents: 6000 }, { authorizedCents: 10000 }, { authorizedCents: 10000 }] });
+      expect(view.invoicePlans[1]).toMatchObject({ id: planId, invoiceScopeId: cumulative, scheduledRemainingCents: state === 'issued' ? 0 : 4000 });
+      if (state === 'arranged') await book(planId, 'OFFICE-SAME-CHAIR-40', 4000, actual(3, 1));
+      const latest = (await expectJson(await financeRead(id), 200)).workspace;
+      expect(latest.customerInvoiceScopes.find((row: { id: string }) => row.id === increase)).toMatchObject({ authorizedCents: 4000, remainingCents: 0 });
+      for (const invoiceScopeId of [initial, increase, cumulative]) {
+        await expectJson(await financePost({ orderId: id, requestId: randomUUID(), stage: 'preview', version: latest.version,
+          action: 'create_plan', data: { ...arrange, invoiceScopeId, grossCents: 1 } }), 409);
+      }
+      expect(latest.invoicePlans.map((row: { usedCents: number }) => row.usedCents)).toEqual([6000, 4000]);
+      if (state === 'issued' && !earlierFirst) {
+        const future = await verify({ ...paper('subsequent-proved-cumulative-120'), grossCents: 12000, occurredAt: actual(2),
+          invoiceScopeBasisId: initial, restateInvoiceCeiling: true });
+        const current = (await expectJson(await financeRead(id), 200)).workspace;
+        await expectJson(await financePost({ orderId: id, requestId: randomUUID(), stage: 'preview', version: current.version,
+          action: 'create_plan', data: { ...arrange, invoiceScopeId: increase, grossCents: 1 } }), 409);
+        const legitimate = await financePreview('create_plan', { ...arrange, invoiceScopeId: future, grossCents: 2000 }, id);
+        expect(legitimate.preview.snapshot.operation.invoiceEvidence).toMatchObject({ id: future, remainingCents: 2000 });
+      }
+    });
+
+    it.each([['issued', false], ['arranged', false], ['issued', true], ['arranged', true]] as const)(
+      'reviews the precise lines and amounts of a partly overlapping %s amount (fewer of one line: %s)', async (kind, oneLine) => {
+      const id = 'archived-office-mixed-invoice';
+      const items = oneLine ? [id + '-A'] : [id + '-A', id + '-B'];
+      const specificItem = items.at(-1)!;
+      const now = Date.now();
+      const actual = (before: number, hours = 0) => new Date(now - before * 86400000 + hours * 3600000).toISOString();
+      await acceptLegacyInvoiceOrder(id, items, oneLine ? 2 : 1);
+      const parties = { issuer: 'Office seller', recipient: 'Office buyer' };
+      const verify = async (data: object) => (await finish(await financePreview('verify_customer_invoice_scope', { ...parties, ...data }, id))).eventId;
+      const initial = await verify({ ...paper('original-mixed-60'), invoiceLineIds: items, grossCents: 6000, occurredAt: actual(5) });
+      const arrange = { ...parties, side: 'customer', trigger: 'accepted', description: '按原安排对应的原件办。' };
+      const planFor = async (invoiceScopeId: string, grossCents: number) =>
+        (await record('create_plan', { ...arrange, invoiceScopeId, grossCents }, id)).invoicePlans.find((row: { invoiceScopeId: string }) => row.invoiceScopeId === invoiceScopeId).id;
+      const invoice = (planId: string, number: string, amountCents: number, issuedAt: string) =>
+        ({ ...parties, ...paper(number), planId, number, amountCents, grossCents: amountCents, issuedAt });
+      await record('record_invoice', invoice(await planFor(initial, 5000), 'OFFICE-MIXED-FIRST-50', 5000, actual(5, 1)), id);
+      const cumulative = await verify({ ...paper('mixed-cumulative-100'), invoiceScopeBasisId: initial, restateInvoiceCeiling: true,
+        grossCents: 10000, occurredAt: actual(3) });
+      const planId = await planFor(cumulative, 5000);
+      const actualInvoice = invoice(planId, 'OFFICE-MIXED-SECOND-50', 5000, actual(3, 1));
+      const issued = kind === 'issued' ? await record('record_invoice', actualInvoice, id) : null;
+      const allocationId = issued?.invoicePlans.find((row: { id: string }) => row.id === planId).allocations[0].id;
+      const extraPaper = paper('earlier-additional-40-for-a-precise-part-of-the-original-scope');
+      const specific = await verify({ ...extraPaper, invoiceScopeBasisId: initial, grossCents: 4000,
+        occurredAt: actual(4), invoiceLines: [{ orderItemId: specificItem, quantity: 1 }] });
+      const affected = (await expectJson(await financeRead(id), 200)).workspace;
+      expect(affected.customerInvoiceFamilies[0].invoiceConflicts.length).toBe(kind === 'issued' ? 1 : 0);
+      const portions = [
+        { invoiceScopeId: cumulative, amountCents: 1000, lines: [{ orderItemId: items[0], quantity: 1 }] },
+        { invoiceScopeId: specific, amountCents: 4000, lines: [{ orderItemId: specificItem, quantity: 1 }] },
+      ];
+      const reviewBody = { ...paper('comparison-of-existing-arrangement-and-actual-product-lines'), planId, allocationId, portions };
+      if (kind === 'issued' && !oneLine) {
+        const earlierPlan = affected.invoicePlans[0];
+        await expectJson(await financePost({ orderId: id, version: affected.version, requestId: randomUUID(), action: 'verify_invoice_coverage',
+          stage: 'preview', data: { ...reviewBody, planId: earlierPlan.id, allocationId: earlierPlan.allocations[0].id,
+            portions: [{ ...portions[0], invoiceScopeId: initial }, portions[1]] } }), 409);
+      }
+      for (const wrong of [
+        { ...portions[1], amountCents: 3999 },
+        { ...portions[1], lines: [{ orderItemId: specificItem, quantity: 2 }] },
+        { ...portions[1], lines: [{ orderItemId: oneLine ? 'outside-verified-order' : items[0], quantity: 1 }] },
+      ]) {
+        await expectJson(await financePost({ orderId: id, version: affected.version, requestId: randomUUID(), action: 'verify_invoice_coverage',
+          stage: 'preview', data: { ...reviewBody, portions: [portions[0], wrong] } }), 409);
+      }
+      const checked = await financePreview('verify_invoice_coverage', reviewBody, id);
+      expect(checked.preview.snapshot.operation).toMatchObject({ amountCents: 5000, planId, ownerId: staff.accountant,
+        subject: { originalScopeId: cumulative }, portions: expect.arrayContaining([
+          expect.objectContaining({ ...portions[1], lines: [expect.objectContaining({ orderItemId: specificItem, quantity: 1 })],
+            proof: { id: specific, sha256: extraPaper.sha256, occurredAt: actual(4), reference: extraPaper.reference } }),
+        ]) });
+      await expectJson(await financePost({ ...checked.input, stage: 'confirm', actionHash: checked.preview.actionHash }), 403);
+      const reviewed = (await finish(checked)).workspace;
+      expect(reviewed.customerInvoiceFamilies[0]).toMatchObject({ plannedCents: 10000, invoiceConflicts: [] });
+      expect(reviewed.invoicePlans[1]).toMatchObject({ id: planId, invoiceScopeId: cumulative });
+      let finished = reviewed;
+      if (kind === 'arranged') {
+        const first = invoice(planId, 'OFFICE-MIXED-A-10', 1000, actual(3, 1));
+        await expectJson(await financePost({ orderId: id, requestId: randomUUID(), version: reviewed.version, action: 'record_invoice',
+          stage: 'preview', data: first }), 409);
+        const half = await record('record_invoice', { ...first, portions: [portions[0]] }, id);
+        expect(half.invoicePlans[1].coverageReview.remaining).toMatchObject([portions[1]]);
+        finished = await record('record_invoice', invoice(planId, 'OFFICE-MIXED-B-40', 4000, actual(3, 2)), id);
+      }
+      const booked = finished.invoicePlans[1];
+      expect(booked).toMatchObject({ id: planId, invoiceScopeId: cumulative, usedCents: 5000 });
+      expect(booked.allocations.map((row: { number: string }) => row.number))
+        .toEqual(kind === 'issued' ? [actualInvoice.number] : ['OFFICE-MIXED-A-10', 'OFFICE-MIXED-B-40']);
+      expect(booked.allocations.flatMap((row: { scopePortions: unknown[] }) => row.scopePortions))
+        .toEqual(expect.arrayContaining(portions.map(part => expect.objectContaining(part))));
+      expect(finished.customerInvoiceFamilies[0]).toMatchObject({ issuedCents: 10000, availableCents: 0, invoiceConflicts: [] });
     });
 
     it.each([false, true])('uses the effective cumulative proof after an earlier addition is excluded (multiple lines: %s)', async multiple => {
