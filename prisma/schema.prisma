@@ -560,6 +560,7 @@ model Order {
   quoteSentAt     DateTime?
   addressSnapshot OrderAddressSnapshot?
   orderItems      OrderItem[]
+  afterSaleCases  AfterSaleCase[]
   statusHistory   OrderStatusHistory[]
   adjustments     OrderAdjustment[]
   shipments       Shipment[]
@@ -1064,6 +1065,9 @@ model OrderItem {
   inventoryReservation InventoryReservation?
   fulfillmentParcelLines FulfillmentParcelLine[]
 
+  afterSaleCases AfterSaleCase[]
+
+  @@unique([id, orderId])
   @@unique([orderId, position])
   @@index([orderId])
   @@index([catalogNumber])
@@ -2104,6 +2108,59 @@ model FulfillmentLineResolution {
   event        FulfillmentEvent @relation(fields: [eventId], references: [id], onDelete: Restrict)
   parcelLine   FulfillmentParcelLine @relation(fields: [parcelLineId], references: [id], onDelete: Restrict)
 
+  afterSaleCases AfterSaleCase[]
+
   @@unique([eventId, parcelLineId])
   @@index([parcelLineId])
+}
+
+model AfterSaleCase {
+  id              String @id @default(cuid())
+  orderId         String
+  orderItemId     String
+  quantity        Int
+  relatedCents    BigInt?
+  issue           String
+  channel         String
+  report          String
+  reportedAt      DateTime
+  sourceReference String
+  sourceSha256    String
+  sourceRow       Int
+  sourceKey       String @unique
+  shortfallId     String?
+  createdBy       String
+  ownerId         String?
+  customerState   String @default("reported")
+  supplierState   String @default("unreviewed")
+  revision        Int @default(1)
+  createdAt       DateTime @default(now())
+  order           Order @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  item            OrderItem @relation(fields: [orderItemId, orderId], references: [id, orderId], onDelete: Restrict)
+  shortfall       FulfillmentLineResolution? @relation(fields: [shortfallId], references: [id], onDelete: Restrict)
+  events          AfterSaleEvent[]
+
+  @@index([orderId, orderItemId])
+  @@index([shortfallId])
+  @@index([customerState, supplierState])
+}
+
+model AfterSaleEvent {
+  id             String @id @default(cuid())
+  caseId         String
+  action         String
+  actorId        String
+  requestKey     String @unique
+  businessKey    String @unique
+  intentHash     String
+  approvedHash   String
+  occurredAt     DateTime
+  reference      String
+  sha256         String
+  documentRow    Int
+  detail         String
+  createdAt      DateTime @default(now())
+  case           AfterSaleCase @relation(fields: [caseId], references: [id], onDelete: Restrict)
+
+  @@index([caseId, createdAt])
 }
