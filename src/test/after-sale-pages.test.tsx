@@ -95,8 +95,8 @@ describe('客户与经办人从原订单进入售后',()=>{
     expect(submissions[1]).not.toHaveProperty('data.amountCents');
   });
 
-  it('订单岗确认前显示本人这次录入的退款三项，既有财务历史只显示事项',async()=>{
-    const sale={id:'new-own-terms',orderItemId:line.id,quantity:1,issue:'other',ownerId:'order-clerk',customerState:'reviewing',
+  it('订单岗确认前显示客户原文和两件案中的一件退款，既有财务历史只显示事项',async()=>{
+    const sale={id:'new-own-terms',orderItemId:line.id,quantity:2,issue:'other',ownerId:'order-clerk',customerState:'reviewing',
       supplierState:'unreviewed',report:'合成办公用品售后',reference:'本案原件',reportedAt:'2026-11-01T02:00:00Z',
       events:[{id:'prior-finance',action:'refund_result',actorId:'finance',occurredAt:'2026-11-01T01:00:00Z',reference:null,operation:null}]};
     const workspace={order:{id:order,status:'confirmed',acceptedAt:'2026-11-01T01:00:00Z'},lines:[line],shortfalls:[],deliveries:[],
@@ -105,9 +105,9 @@ describe('客户与经办人从原订单进入售后',()=>{
     vi.stubGlobal('fetch',vi.fn((_input:string,init?:RequestInit)=>{
       if(init?.method==='POST'){
         const request=JSON.parse(String(init.body));submitted=request;
-        const {amountCents,recipient,destination,method}=request.data;
-        return res({preview:{actionHash:hash,snapshot:{item:line,scopeQuantity:1,nextState:'awaiting_refund',nextSupplierState:'unreviewed',
-          proof:{reference:request.data.reference},operation:{amountCents,recipient,destination,method,remedy:'refund'}}}});
+        const {amountCents,recipient,destination,method,customerDecision,refundQuantity}=request.data;
+        return res({preview:{actionHash:hash,snapshot:{item:line,scopeQuantity:2,nextState:'awaiting_refund',nextSupplierState:'unreviewed',
+          proof:{reference:request.data.reference},operation:{amountCents,recipient,destination,method,remedy:'refund',quantity:2,refundQuantity,decision:customerDecision}}}});
       }
       return res({workspace,permissions:['admin.access','orders.read','orders.write']});
     }));
@@ -115,7 +115,7 @@ describe('客户与经办人从原订单进入售后',()=>{
     fireEvent.click(await screen.findByRole('button',{name:'登记客户书面决定'}));
     fireEvent.change(screen.getByLabelText('客户同意的处理方式'),{target:{value:'refund'}});
     for(const [label,value] of [
-      ['客户确认的条件、范围和费用责任','仅记录本人收到的客户决定'],['约定退款金额（元）','100'],
+      ['客户确认的条件、范围和费用责任','仅记录本人收到的客户决定'],['约定退款金额（元）','100'],['本次退款件数','1'],
       ['核实的退款收款人','本次输入的合成收款人'],['收款去向标识','本次输入的合成去向'],['约定退款渠道','alipay'],
       ['办理说明','凭实际客户书证登记'],['凭据实际发生时间','2026-11-09T10:00'],['凭据名称或档案出处','本次客户原件'],
       ['原件 SHA-256',hash],
@@ -125,7 +125,10 @@ describe('客户与经办人从原订单进入售后',()=>{
     expect(within(confirmation).getByText('本次输入的合成收款人',{exact:true})).toBeTruthy();
     expect(within(confirmation).getByText('本次输入的合成去向',{exact:true})).toBeTruthy();
     expect(within(confirmation).getByText(/￥?¥?100[.]00/)).toBeTruthy();
-    expect(submitted).toMatchObject({action:'agreement',data:{amountCents:10000,recipient:'本次输入的合成收款人',destination:'本次输入的合成去向'}});
+    expect(within(confirmation).getByText('仅记录本人收到的客户决定',{exact:true})).toBeTruthy();
+    expect(within(confirmation).getByText('案件总件数',{exact:true}).nextElementSibling?.textContent).toBe('2');
+    expect(within(confirmation).getByText('本次退款件数',{exact:true}).nextElementSibling?.textContent).toBe('1');
+    expect(submitted).toMatchObject({action:'agreement',data:{refundQuantity:1,amountCents:10000,recipient:'本次输入的合成收款人',destination:'本次输入的合成去向'}});
   });
 
   it('客户重复提交同一内容时沿用原申请编号，回到自己的订单状态',async()=>{

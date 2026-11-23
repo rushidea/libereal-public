@@ -304,7 +304,8 @@ describe('售后正常 HTTP 入口、真实权限和单次身份确认', () => {
     const decision=action('agreement','written-authorization-for-real-old-trade',caseId,{
       remedy:'refund',amountCents:10000,recipient:payee,destination,method:'alipay',customerDecision:'按验签原流水100元退至书面确认账户'});
     const entered=(await expectJson(preview(decision),200)).preview.snapshot.operation;
-    expect(entered).toEqual({remedy:'refund',amountCents:10000,recipient:payee,destination,method:'alipay',quantity:1});
+    expect(entered).toEqual({remedy:'refund',amountCents:10000,recipient:payee,destination,method:'alipay',quantity:1,
+      decision:'按验签原流水100元退至书面确认账户',refundQuantity:1});
     const confirmed=await record(clerk,decision);
     expect(Object.keys(confirmed).sort()).toEqual(['applied','caseId','eventId','repeated']);
     expect((await expectJson(adminRead(),200)).workspace.cases[0].events.find((item:{id:string})=>item.id===confirmed.eventId).operation).toBeNull();
@@ -707,6 +708,119 @@ describe('售后正常 HTTP 入口、真实权限和单次身份确认', () => {
       replacementIssuedCents:3000,replacementRecordedCents:3000,replacementAmountCents:4000,replacementRemainingCents:1000});
     expect(await prisma.afterSaleEvent.count({where:{action:'invoice_reissue'}})).toBe(2);
     expect(await prisma.afterSaleCase.findUniqueOrThrow({where:{id:b.id}})).toMatchObject({customerState:'awaiting_invoice_reissue'});
+  });
+
+  async function correctionReceipt(invoiceId:string, marker:string, outcome:'voided'|'retained') {
+    return financeRecord('resolve_correction',personalOrder,'OFFICE-CORRECTION-RESULT-'+marker,{invoiceId,outcome});
+  }
+
+  function startCorrection(invoiceId:string,marker:string) {
+    return financeRecord('open_correction',personalOrder,'OFFICE-CORRECTION-OPEN-'+marker,{invoiceId});
+  }
+
+  it.each([false,true])('已签发但后来正式作废的替代票不会挡住凭新书证放弃重开（已回填 %s）',async attached=>{
+    const {original,begin,correct,issue}=await correctedInvoice();
+    const current=await begin('real-full-replacement-later-voided',10000);
+    const red=await correct([current]);
+    const replacement=await issue('OFFICE-ACTUAL-100-LATER-VOIDED',10000,red);
+    const result=action('invoice_reissue','initial-attachment-of-issued-100',current.id,{invoiceAllocationId:replacement.id,amountCents:10000});
+    if(attached) await record(finance,result);
+    const close=action('close','actual-case-closure-after-correction',current.id);
+    signIn(clerk,'admin');
+    const initial=attached?(await expectJson(preview(close),200)).preview:null;
+    await startCorrection(replacement.invoiceId,'OLD-REPLACEMENT-100');
+    await expectJson(preview(close),409);
+    signIn(finance,'admin');
+    const waiting=(await expectJson(adminRead(),200)).workspace.cases.find((row:{id:string})=>row.id===current.id);
+    expect(waiting).toMatchObject({customerState:'awaiting_invoice_reissue',invoiceReissue:{
+      issuedCents:0,pendingCents:10000,voidedCents:0,recordedCents:0,pendingReceipts:[{number:replacement.number,ownerId:finance}]}});
+    await correctionReceipt(replacement.invoiceId,'OLD-REPLACEMENT-100','voided');
+    const actual=(await expectJson(adminRead(),200)).workspace.cases.find((row:{id:string})=>row.id===current.id);
+    expect(actual.invoiceReissue).toMatchObject({issuedCents:0,pendingCents:0,voidedCents:10000,recordedCents:0});
+    signIn(clerk,'admin');
+    if(initial) await expectJson(confirm(close,initial.actionHash,await grant(clerk)),409);
+    const withdrawn=await record(clerk,action('agreement','customer-acknowledges-actual-void-and-withdraws-unissued',current.id,{
+      remedy:'invoice',revisesAgreementId:current.agreementId,invoiceAllocationId:original.id,invoiceOutcome:'voided',
+      customerDecision:'已取得替代票正式作废回执，客户书面确认不再重开'}));
+    expect(JSON.parse((await prisma.afterSaleEvent.findUniqueOrThrow({where:{id:withdrawn.eventId}})).detail).operation.invoice)
+      .toMatchObject({replacementIssuedCents:0,replacementVoidedCents:10000,replacementAmountCents:null});
+    // A previous close attempt did not create a record, so the actual agreement can be followed by closure.
+    await record(clerk,{...close,requestId:'actual-close-after-agreement'});
+    expect(await prisma.afterSaleEvent.count({where:{caseId:current.id,action:'invoice_reissue'}})).toBe(attached?1:0);
+    expect(await prisma.financeInvoice.count()).toBe(2);
+    expect((await prisma.$transaction(tx=>financeWorkspace(tx,personalOrder))).invoicePlans[0].allocations.find(row=>row.id===replacement.id)?.status)
+      .toBe('voided');
+    expect(await prisma.afterSaleCase.findUniqueOrThrow({where:{id:current.id}})).toMatchObject({customerState:'closed'});
+  });
+
+  it('作废曾回填60元的替代票后，60和40两张后继票按第二张红冲回执逐票办理',async()=>{
+    const {begin,correct,issue}=await correctedInvoice();
+    const current=await begin('actual-chain-to-second-red',10000);
+    const red=await correct([current]);
+    const middle=await issue('OFFICE-REPLACEMENT-THAT-WILL-BE-VOIDED',10000,red);
+    const attach=(allocationId:string,amountCents:number,ref:string)=>action('invoice_reissue',ref,current.id,{invoiceAllocationId:allocationId,amountCents});
+    const historical=await record(finance,attach(middle.id,6000,'verify-prior-actual-part-60'));
+    await startCorrection(middle.invoiceId,'SECOND-CORRECTION');
+    const secondRed=await correctionReceipt(middle.invoiceId,'SECOND-CORRECTION','voided');
+    const first=await issue('OFFICE-SUCCESSOR-60',6000,secondRed.eventId);
+    const second=await issue('OFFICE-SUCCESSOR-40',4000,secondRed.eventId);
+    vi.setSystemTime(Date.now()+3_600_000);
+    const firstRead=await record(finance,attach(first.id,6000,'verify-first-successor-60'));
+    expect(JSON.parse((await prisma.afterSaleEvent.findUniqueOrThrow({where:{id:firstRead.eventId}})).detail).operation).toMatchObject({
+      financeEventId:red,sourceCorrectionEventId:secondRed.eventId,alreadyRecordedCents:0,remainingCents:4000});
+    signIn(clerk,'admin');
+    await expectJson(preview(action('close','cannot-close-based-on-voided-60',current.id)),409);
+    signIn(finance,'admin');
+    const remaining=await record(finance,attach(second.id,4000,'verify-second-successor-40'));
+    expect(JSON.parse((await prisma.afterSaleEvent.findUniqueOrThrow({where:{id:remaining.eventId}})).detail).operation).toMatchObject({
+      financeEventId:red,sourceCorrectionEventId:secondRed.eventId,alreadyRecordedCents:6000,remainingCents:0});
+    const workspace=(await expectJson(adminRead(),200)).workspace.cases.find((row:{id:string})=>row.id===current.id);
+    expect(workspace.invoiceReissue).toMatchObject({issuedCents:10000,pendingCents:0,voidedCents:10000,recordedCents:10000});
+    expect(workspace.events.find((event:{id:string})=>event.id===historical.eventId).operation).toMatchObject({
+      allocationId:middle.id,amountCents:6000,financeEventId:red});
+    signIn(clerk,'admin');
+    await record(clerk,action('close','only-close-on-current-valid-invoices',current.id));
+    expect(await prisma.afterSaleEvent.count({where:{caseId:current.id,action:'invoice_reissue'}})).toBe(3);
+    expect(await prisma.customerCashPosting.count()).toBe(0);
+  });
+
+  it.each(['close','revise'] as const)('B4 重新确认同额票面后须重新预览（%s）',async mode=>{
+    const {original,begin,correct,issue}=await correctedInvoice();
+    const current=await begin('restore-same-amount-with-new-receipt',10000);
+    const red=await correct([current]);
+    const amountCents=mode==='close'?10000:6000;
+    const restored=await issue('OFFICE-REPLACEMENT-RECONFIRMED-AT-SAME-AMOUNT',amountCents,red);
+    await record(finance,action('invoice_reissue','verify-candidate-before-B4-restoration',current.id,{invoiceAllocationId:restored.id,amountCents}));
+    signIn(clerk,'admin');
+    const candidate=mode==='close'?action('close','close-after-new-receipt',current.id)
+      :action('agreement','adjust-unissued-after-restoration',current.id,{remedy:'invoice',revisesAgreementId:current.agreementId,
+        invoiceAllocationId:original.id,invoiceOutcome:'reissue',replacementAmountCents:3000,customerDecision:'只按新约定调整剩余未签发金额'});
+    const previous=(await expectJson(preview(candidate),200)).preview;
+    await startCorrection(restored.invoiceId,'RECORDED-AMOUNT-STAYS-THE-SAME');
+    await correctionReceipt(restored.invoiceId,'RECORDED-AMOUNT-STAYS-THE-SAME','retained');
+    const next=(await expectJson(preview(candidate),200)).preview;
+    expect(next.actionHash).not.toBe(previous.actionHash);
+    await expectJson(confirm(candidate,previous.actionHash,await grant(clerk)),409);
+    await expectJson(confirm(candidate,next.actionHash,await grant(clerk)),200);
+    expect(await prisma.afterSaleEvent.count({where:{caseId:current.id,action:'invoice_reissue'}})).toBe(1);
+  });
+
+  it('订单岗当前确认只显示客户原文、两件案与本次退一件',async()=>{
+    signIn(clerk,'admin');
+    const {caseId}=await record(clerk,action('open','client-two-goods-refund-case','',{orderItemId:line(personalOrder),quantity:2,issue:'return',channel:'email'}));
+    await record(clerk,action('claim','claim-two-goods-case',caseId));
+    const written='客户要求只为其中一件退款，作为同一案件继续办理另一件';
+    const request=action('agreement','only-one-among-two-refunded',caseId,{remedy:'refund',refundQuantity:1,amountCents:5000,
+      customerDecision:written,recipient:payee,destination,method:'bank'});
+    await expectJson(preview({...request,data:{...request.data,refundQuantity:3}}),409);
+    expect((await expectJson(preview(request),200)).preview.snapshot).toMatchObject({scopeQuantity:2,operation:{
+      amountCents:5000,quantity:2,refundQuantity:1,decision:written,recipient:payee,destination}});
+    const saved=await record(clerk,request);
+    expect((await expectJson(adminRead(),200)).workspace.cases[0].events.find((event:{id:string})=>event.id===saved.eventId).operation).toBeNull();
+    signIn(finance,'admin');
+    expect((await expectJson(adminRead(),200)).workspace.cases[0].events.find((event:{id:string})=>event.id===saved.eventId).operation)
+      .toMatchObject({quantity:2,refundQuantity:1,decision:written});
+    expect(await prisma.afterSaleEvent.count({where:{caseId,action:'refund_result'}})).toBe(0);
   });
 
   it.each([false,true])('B4 的共同金额按原件范围分别使用，不能借同票另一组（重叠范围 %s）',async overlap=>{

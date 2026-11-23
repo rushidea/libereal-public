@@ -331,6 +331,49 @@ describe('售后沿用原订单和短失事实', () => {
     expect(buyAfter).toMatchObject({totalCents:buyBefore?.totalCents,paidCents:buyBefore?.paidCents,dueCents:buyBefore?.dueCents});
   });
 
+  it('同一包裹两件均已签收，两案各具名认领一件后同一笔实款分30与20元',async()=>{
+    await acceptOrder();
+    const purchaseOrderId=await registerSupplierOrder(4000);
+    const box=await prisma.$transaction(tx=>dispatchParcel(tx,orderId,{
+      ...proof('ONE-REAL-PACKAGE-TWO-OFFICE-FOLDERS'),requestId:'dispatch-one-box-two-goods',route:'supplier_to_customer',
+      trackingNumber:'ACTUAL-WAYBILL-2',carrier:'合成承运人',lines:[{purchaseOrderId,orderItemId:itemId,quantity:2}],
+    },operator));
+    const parcelLineId=box.lines[0].id;
+    await parcelEvent(box.id,'SIGN-TWO-ON-SAME-LINE','customer_delivery',[{parcelLineId,quantity:2}]);
+    const subjects:{caseId:string;evidenceId:string}[]=[];
+    for(const tag of ['A','B']){
+      const created=await record(saleInput('open','case-tied-to-a-share-'+tag,{orderItemId:itemId,quantity:1,issue:'other',channel:'handoff'}));
+      const caseId=created.caseId!;
+      await record(saleInput('claim','claim-one-physical-piece-'+tag,{},caseId));
+      const named=await record(saleInput('bind_original_parcel','signed-original-share-proof-'+tag,{parcelLineId,quantity:1},caseId));
+      subjects.push({caseId,evidenceId:named.eventId!});
+    }
+    const third=await record(saleInput('open','third-unassigned-case',{orderItemId:itemId,quantity:1,issue:'other',channel:'handoff'}));
+    await record(saleInput('claim','take-third-unassigned-case',{},third.caseId!));
+    await expect(preview(saleInput('bind_original_parcel','try-claiming-physical-piece-three',{parcelLineId,quantity:1},third.caseId!)))
+      .rejects.toThrow('实际已签收');
+    const receipt={...proof('SAME-REAL-SYNTHETIC-SUPPLIER-RECEIPT-50'),documentRow:7};
+    const attribute=(caseId:string,key:string,amountCents:number)=>saleInput('supplier',key,{
+      ...receipt,purchaseOrderId,originalParcelLineId:parcelLineId,supplier:'合成办公供方',outcome:'financial_result',
+      destination:'合成供方实付到账账户',method:'bank',referenceNo:'SYNTHETIC-BANK-TRANSFER-50',
+      amountCents,transferTotalCents:5000,allocationReference:key,
+    },caseId);
+    const first=attribute(subjects[0].caseId,'original-evidence-allocation-a-30',3000);
+    const a=await record(first,procurement);
+    expect(a.snapshot).toMatchObject({operation:{transfer:{unallocatedAfterCents:2000,supplierScope:{parcelClaim:{
+      caseId:subjects[0].caseId,quantity:1,evidenceEventIds:[subjects[0].evidenceId]}}}}});
+    await expect(preview(attribute(subjects[0].caseId,'new-label-does-not-create-another-share',2000),procurement)).rejects.toThrow('原包裹份额');
+    await expect(preview(attribute(subjects[1].caseId,'over-actual-50',2001),procurement)).rejects.toThrow('真实交易总额');
+    const lastInput=attribute(subjects[1].caseId,'original-evidence-allocation-b-20',2000);
+    const last=await record(lastInput,procurement);
+    expect(last.snapshot).toMatchObject({operation:{transfer:{allocatedBeforeCents:3000,unallocatedAfterCents:0,supplierScope:{
+      orderId,purchaseOrderId,originalParcelLineId:parcelLineId,parcelClaim:{caseId:subjects[1].caseId,quantity:1,evidenceEventIds:[subjects[1].evidenceId]}}}}});
+    expect((await record({...lastInput,requestId:'repeated-valid-second-portion'},procurement))).toMatchObject({eventId:last.eventId,repeated:true});
+    await expect(preview(attribute(third.caseId!,'no-third-recognized-parcel-share',1),procurement)).rejects.toThrow('原包裹份额');
+    expect(await prisma.afterSaleEvent.count({where:{action:'supplier',sha256:receipt.sha256}})).toBe(2);
+    expect(await prisma.afterSaleEvent.count({where:{action:'refund_result'}})).toBe(0);
+  });
+
   it('仅用原指定包裹的真实已退商品另议退款，晚录旧决定留痕但不生效',async()=>{
     const {first,second}=await signedOriginalPair();
     const open=await record(saleInput('open','open-pinned-return',{orderItemId:itemId,quantity:1,issue:'return',channel:'email',originalParcelLineId:first.lines[0].id}));
