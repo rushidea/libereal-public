@@ -169,6 +169,13 @@ export function customerInvoiceScopeVersion(orderId: string, customerKey: string
   return pricingContentHash({ orderId, customerKey, acceptanceId, lines });
 }
 
+function supplierMatchVersion(scope: Record<string, unknown>) {
+  const { id, contentHash, supplier, payees, orderedAt, originalCents, agreedCents, paidCents, dueCents, payments,
+    disputedPaidCents = 0, invoices } = scope;
+  return pricingContentHash({ id, contentHash, supplier, payees, orderedAt, originalCents, agreedCents, paidCents, dueCents, payments,
+    disputedPaidCents, invoices });
+}
+
 function customerInvoiceReviews(events: EventRow[], orderId: string, customerKey: string, acceptanceId: string | null, originalLines: CustomerInvoiceLine[]) {
   if (!acceptanceId) return [];
   return events.flatMap(event => {
@@ -177,7 +184,10 @@ function customerInvoiceReviews(events: EventRow[], orderId: string, customerKey
     const op = purchaseObject(detail.operation);
     const authorization = purchaseObject(detail.authorization);
     const { grossCents, issuer, recipient, reference, sha256, lineIds, occurredAt } = op;
-    if (typeof grossCents !== 'number' || !invoiceQuantity(grossCents)
+    const change = purchaseObject(op.scopeChange);
+    const adjustment = typeof change.deltaCents === 'number' && Number.isSafeInteger(change.deltaCents) ? change.deltaCents : null;
+    const familyId = typeof change.familyId === 'string' ? change.familyId : event.id;
+    if (typeof grossCents !== 'number' || !Number.isSafeInteger(grossCents) || grossCents < 0 || grossCents === 0 && (adjustment === null || adjustment >= 0)
       || typeof issuer !== 'string' || typeof recipient !== 'string' || typeof reference !== 'string' || typeof sha256 !== 'string'
       || typeof occurredAt !== 'string' || !dateValue(occurredAt) || authorization.permission !== 'finance.write'
       || authorization.action !== 'admin_sensitive' || op.ownerId !== event.actorId) return [];
@@ -186,7 +196,7 @@ function customerInvoiceReviews(events: EventRow[], orderId: string, customerKey
     })) : null);
     const lines = coveredCustomerInvoiceLines(originalLines, scopeLines);
     if (!lines || op.scopeVersion !== customerInvoiceScopeVersion(orderId, customerKey, acceptanceId, lines)) return [];
-    return [{ id: event.id, actorId: event.actorId, grossCents, issuer, recipient, occurredAt, reference, sha256,
+    return [{ id: event.id, familyId, adjustment, actorId: event.actorId, grossCents, issuer, recipient, occurredAt, reference, sha256,
       documentRow: typeof op.documentRow === 'number' ? op.documentRow : null, lines }];
   });
 }
@@ -212,9 +222,19 @@ export async function financeWorkspace(tx: Db, orderId: string) {
     delivered: signed ? lastDate(movement.map(row => row.shipment.deliveredAt)) : null };
   const invoicePlans = invoicePlanViews(plans, events, new Date());
   const originalInvoiceLines = order.orderItems.map(({ id, name, quantity, unitPrice }) => ({ id, name, quantity, unitPrice }));
-  const customerInvoiceScopes = customerInvoiceReviews(financeEvents, orderId, customerKey, start.acceptance?.id ?? null, originalInvoiceLines);
+  const customerInvoiceReviewsFound = customerInvoiceReviews(financeEvents, orderId, customerKey, start.acceptance?.id ?? null, originalInvoiceLines);
+  const customerInvoiceScopes = customerInvoiceReviewsFound.filter(row => row.grossCents > 0);
+  const customerInvoiceFamilies = customerInvoiceScopes.filter(row => row.familyId === row.id).map(root => {
+    const related = customerInvoiceReviewsFound.filter(row => row.familyId === root.id);
+    const scopeIds = new Set(related.map(row => row.id));
+    const planned = invoicePlans.filter(plan => plan.invoiceScopeId && scopeIds.has(plan.invoiceScopeId));
+    const authorizedCents = related.reduce((sum, row) => sum + (row.adjustment ?? row.grossCents), 0);
+    const issuedCents = planned.reduce((sum, plan) => sum + plan.usedCents, 0);
+    const plannedCents = planned.reduce((sum, plan) => sum + plan.usedCents + plan.scheduledRemainingCents, 0);
+    return { id: root.id, authorizedCents, issuedCents, plannedCents, availableCents: Math.max(0, authorizedCents - plannedCents) };
+  });
   const verifiedQuantities = new Map<string, number>();
-  for (const scope of customerInvoiceScopes) {
+  for (const scope of customerInvoiceScopes.filter(row => row.familyId === row.id)) {
     for (const line of scope.lines) verifiedQuantities.set(line.id, (verifiedQuantities.get(line.id) ?? 0) + line.quantity);
   }
   const purchases = purchase.orders.filter(po => po.orderedBefore || po.paidCents > 0 || po.paymentExceptions.length > 0).map(po => {
@@ -230,15 +250,18 @@ export async function financeWorkspace(tx: Db, orderId: string) {
     const underCorrectionCents = invoiceAllocations.reduce((sum, row) => sum + (row.status === 'correction_pending' ? row.amountCents : 0), 0);
     const scope = { id: po.id, revision: po.revision, contentHash: po.contentHash, supplier: suppliers.length === 1 ? suppliers[0] : null,
       payees, orderedAt: po.orderReceipt?.occurredAt ?? null, originalCents: po.totalCents, agreedCents,
-      paidCents: po.paidCents, dueCents: po.dueCents, payments, paymentExceptions: po.paymentExceptions,
+      paidCents: po.paidCents, disputedPaidCents: po.disputedPaidCents, dueCents: po.dueCents, payments, paymentExceptions: po.paymentExceptions,
       paymentCorrections: po.paymentCorrections, invoicedCents, underCorrectionCents,
       invoices: invoiceAllocations.map(row => ({
         id: row.invoiceId, allocationId: row.id, amountCents: row.amountCents, sha256: row.sha256, status: row.status,
       })) };
-    const matchVersion = pricingContentHash(scope);
+    const matchVersion = supplierMatchVersion(scope);
     const lastMatch = events.findLast(row => row.action === 'reconcile_supplier' && row.operation.purchaseOrderId === po.id);
+    const reviewed = purchaseObject(lastMatch?.operation.purchase);
     return { ...scope, matchVersion,
-      reconciled: lastMatch?.operation.outcome === 'matched' && lastMatch.operation.matchVersion === matchVersion,
+      reconciled: agreedCents !== null && lastMatch?.operation.outcome === 'matched'
+        && (lastMatch.operation.matchVersion === matchVersion
+          || reviewed.matchVersion === lastMatch.operation.matchVersion && supplierMatchVersion(reviewed) === matchVersion),
       supplierFollowup: lastMatch?.operation.outcome === 'followup'
         ? { id: lastMatch.id, actorId: lastMatch.actorId, reference: lastMatch.operation.reference } : null,
       pendingInvoiceCents: agreedCents === null ? null : agreedCents - invoicedCents - underCorrectionCents,
@@ -276,7 +299,7 @@ export async function financeWorkspace(tx: Db, orderId: string) {
     cancellationRequest: late.length ? await alipayCancellationRequest(tx, orderId) : null,
     paidAt: order.paidAt?.toISOString() ?? null,
     verifiedCents: start.payment.receivedCents, settlementCents: native && !authorityConflict ? start.postingPrincipal?.cents ?? 0 : cashCents,
-    customerInvoiceScope: customerInvoiceScopes[0] ?? null, customerInvoiceScopes,
+    customerInvoiceScope: customerInvoiceScopes[0] ?? null, customerInvoiceScopes, customerInvoiceFamilies,
     originalInvoiceLines: originalInvoiceLines.map(line => ({ ...line, unverifiedQuantity: Math.max(0, line.quantity - (verifiedQuantities.get(line.id) ?? 0)) })),
     bankVersion: start.version, paymentPlanKnown: Boolean(start.plan), shipmentDates,
     receivable: ar && { id: ar.id, status: ar.status, originalCents: Math.round(ar.amount * 100),

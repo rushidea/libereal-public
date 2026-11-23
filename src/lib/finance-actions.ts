@@ -64,6 +64,16 @@ function projectedInvoiceCommitments(plans: Plan[], timeline = invoiceTimeline(p
     + (timeline.remaining.get(plan.id) ?? 0), 0);
 }
 
+function invoiceCommitmentFits(view: FinanceWorkspace, side: string, purchaseOrderId: string | null, scopeId: string | null,
+  previousCents: number, proposedCents: number,
+) {
+  if (proposedCents > invoiceScopeLimit(view, side, purchaseOrderId, scopeId)) return false;
+  if (side !== 'customer' || !scopeId) return true;
+  const familyId = customerInvoiceScope(view, scopeId)?.familyId;
+  const family = view.customerInvoiceFamilies.find(row => row.id === familyId);
+  return Boolean(family && family.plannedCents - previousCents + proposedCents <= family.authorizedCents);
+}
+
 function customerInvoiceScope(view: FinanceWorkspace, scopeId: unknown, allowSingle = false) {
   if (scopeId == null && view.principalCents > 0) return null;
   const scope = scopeId == null && allowSingle && view.customerInvoiceScopes.length === 1
@@ -120,7 +130,8 @@ async function invoiceDocument(tx: Db, view: FinanceWorkspace, input: FinanceInp
   const after = invoiceTimeline(trial);
   if (after.conflicts.has(allocationId)) throw new PurchaseError('票面日期超出原安排的有效范围或可用金额');
   if ([...after.conflicts].some(id => !before.conflicts.has(id))
-    || projectedInvoiceCommitments(trial, after) > invoiceScopeLimit(view, plan.side, plan.purchaseOrderId, plan.invoiceScopeId)) {
+    || !invoiceCommitmentFits(view, plan.side, plan.purchaseOrderId, plan.invoiceScopeId,
+      projectedInvoiceCommitments(plans, before), projectedInvoiceCommitments(trial, after))) {
     throw new PurchaseError('实际票面与已占用的开票额度冲突，请核对原票和安排');
   }
   const adjustedPlans = plans.flatMap(row => {
@@ -209,12 +220,13 @@ async function financeOperation(tx: Db, input: FinanceInput, actor: PurchaseActo
     const issuedTo = requiredText(recipient, '原书证受票方全称');
     if (financeIdentity(issuedBy) === financeIdentity(issuedTo)) throw new PurchaseError('请核对原书证中的购销双方');
     const ids = data.invoiceLineIds;
-    const selected = data.invoiceLines ?? (Array.isArray(ids) ? ids.map(orderItemId => ({
+    const basis = data.invoiceScopeBasisId == null ? null : customerInvoiceScope(view, requiredText(data.invoiceScopeBasisId, '原核对范围'));
+    const selected = data.invoiceLines ?? (basis ? basis.lines.map(line => ({ orderItemId: line.id, quantity: line.quantity })) : Array.isArray(ids) ? ids.map(orderItemId => ({
       orderItemId, quantity: view.originalInvoiceLines.find(line => line.id === orderItemId)?.quantity,
     })) : null);
     const lines = coveredCustomerInvoiceLines(view.originalInvoiceLines, selected);
     if (!lines) throw new PurchaseError('请选择可由原书证证实的实际订单行和数量');
-    if (lines.some(row => row.quantity > (view.originalInvoiceLines.find(line => line.id === row.id)?.unverifiedQuantity ?? 0))) {
+    if (!basis && lines.some(row => row.quantity > (view.originalInvoiceLines.find(line => line.id === row.id)?.unverifiedQuantity ?? 0))) {
       throw new PurchaseError('此份书证所列数量与已核实的份额重叠，请核对尚未确认的数量');
     }
     const documentRow = data.documentRow == null ? null : money(data.documentRow, '原件实际行号');
@@ -224,9 +236,32 @@ async function financeOperation(tx: Db, input: FinanceInput, actor: PurchaseActo
         AND (${documentRow} IS NULL OR json_extract(detail,'$.operation.documentRow') IS NULL
           OR json_extract(detail,'$.operation.documentRow')=${documentRow}) LIMIT 1`;
     if (prior.length) throw new PurchaseError('此原件或该原件行已经核对过开票范围，请回到原记录');
-    const grossCents = money(data.grossCents, '原书证可开的含税金额');
+    let grossCents;
+    let scopeChange;
+    if (basis) {
+      checkCustomerInvoiceParties(view, basis.id, issuedBy, issuedTo);
+      if (pricingContentHash(lines) !== pricingContentHash(basis.lines)) {
+        throw new PurchaseError('补证或修订必须明确对应同一已核商品和数量，请选择真实书证范围');
+      }
+      const family = view.customerInvoiceFamilies.find(row => row.id === basis.familyId);
+      if (!family) throw new PurchaseError('须核对可追溯的原开票范围及额度');
+      const restate = data.restateInvoiceCeiling === true;
+      const submitted = restate && data.grossCents === 0 ? 0
+        : money(data.grossCents, restate ? '原书证核定的新累计可开额' : '原书证明确补充的可开金额');
+      const next = restate ? submitted : family.authorizedCents + submitted;
+      if (!Number.isSafeInteger(next) || next === family.authorizedCents || next < family.plannedCents) {
+        throw new PurchaseError('新累计可开额须有实际变化并覆盖已开票与仍有效安排，请先核清原安排');
+      }
+      const deltaCents = next - family.authorizedCents;
+      grossCents = Math.max(0, deltaCents);
+      scopeChange = { familyId: family.id, basisId: basis.id, beforeCents: family.authorizedCents, deltaCents, afterCents: next,
+        issuedCents: family.issuedCents, plannedCents: family.plannedCents, availableCents: next - family.plannedCents };
+    } else {
+      if (data.restateInvoiceCeiling === true) throw new PurchaseError('修订累计可开额须选择已核实的原范围');
+      grossCents = money(data.grossCents, '原书证可开的含税金额');
+    }
     const occurredAt = actualTime(data.occurredAt, '原书证载明的实际确认时间');
-    return { ...evidence, action, issuer: issuedBy, recipient: issuedTo, grossCents, occurredAt, ownerId: actor.id, documentRow,
+    return { ...evidence, action, issuer: issuedBy, recipient: issuedTo, grossCents, occurredAt, ownerId: actor.id, documentRow, scopeChange,
       acceptanceId: view.acceptanceId, lines, lineIds: lines.map(row => row.id),
       invoiceLines: lines.map(row => ({ orderItemId: row.id, quantity: row.quantity })),
       scopeVersion: customerInvoiceScopeVersion(orderId, view.customerKey, view.acceptanceId, lines) };
@@ -248,9 +283,10 @@ async function financeOperation(tx: Db, input: FinanceInput, actor: PurchaseActo
     const grossCents = money(data.grossCents, '本次安排的含税金额');
     const scope = side === 'customer' ? checkCustomerInvoiceParties(view, data.invoiceScopeId, issuer, recipient, true) : null;
     const scopeId = scope?.id ?? null;
-    const agreed = invoiceScopeLimit(view, side, po?.id ?? null, scopeId);
     const planned = projectedInvoiceCommitments(sameInvoiceScope(view, side, po?.id ?? null, scopeId));
-    if (grossCents > agreed - planned) throw new PurchaseError('安排金额超过原单尚未安排的金额');
+    if (!invoiceCommitmentFits(view, side, po?.id ?? null, scopeId, planned, planned + grossCents)) {
+      throw new PurchaseError('安排金额超过原书证尚未安排的额度');
+    }
     return { ...evidence, action, side, issuer, recipient, grossCents, trigger, ownerId: actor.id, purchaseOrderId: po?.id ?? null,
       partyKey: po ? 'supplier:' + financeIdentity(issuer) : view.customerKey, invoiceScopeId: scope?.id ?? null };
   }
@@ -277,7 +313,8 @@ async function financeOperation(tx: Db, input: FinanceInput, actor: PurchaseActo
     if (next.transfers.get(replacementId) !== amountCents
       || [...prior.transfers].some(([id, available]) => next.transfers.get(id) !== available)
       || [...next.conflicts].some(id => !prior.conflicts.has(id))
-      || projectedInvoiceCommitments(amended, next) > invoiceScopeLimit(view, plan.side, plan.purchaseOrderId, plan.invoiceScopeId)) {
+      || !invoiceCommitmentFits(view, plan.side, plan.purchaseOrderId, plan.invoiceScopeId,
+        projectedInvoiceCommitments(plans, prior), projectedInvoiceCommitments(amended, next))) {
       throw new PurchaseError('变更金额超过本单有效的未开部分，或影响其他已经安排的额度');
     }
     return { ...evidence, action, planId: plan.id, original: plan, amountCents, retainedCents: next.remaining.get(plan.id) ?? 0,

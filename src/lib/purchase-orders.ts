@@ -10,7 +10,7 @@ import { agreedDocumentTerms, assertSupplierDocumentScopes, missingDocumentScope
 import { decisionDocumentRow, decisionMaterialTerms, decisionTermsChanged, previewDecisionDocuments, type CustomerDecisionDocument, type DecisionDocumentInput, type DecisionEffect } from '@/lib/purchase-decision-documents';
 import { pricingContentHash } from '@/lib/pricing-adjustment-approval';
 import { loadPurchaseOrderSource, loadPurchaseLines, type PurchaseSource, type SourceOrder } from '@/lib/purchase-source';
-import { assertUnusedSupplierPayment, readSupplierPaymentIssues, purchasePaymentRecords, supplierPaymentCorrections, supplierPaymentEvidence,
+import { assertNewSupplierPaymentRoutingEvidence, assertUnusedSupplierPayment, readSupplierPaymentIssues, purchasePaymentRecords, supplierPaymentCorrections, supplierPaymentEvidence,
   supplierPaymentExceptions, type PaymentEvidence, type PaymentIssueOutcome } from '@/lib/purchase-payments';
 import { creditExceptionMatches, paymentPlanAt, paymentPlanContent, paymentPlanFromReview, purchaseCreditVersion, purchaseStartReview, type PaymentPlan } from '@/lib/purchase-start';
 import { purchaseCreditAt } from '@/lib/purchase-credit-history';
@@ -206,6 +206,10 @@ export async function purchaseWorkspace(tx: Db, orderId: string) {
     if (!Number.isSafeInteger(totalCents)) throw new PurchaseError('采购合计超过可精确表示的金额');
     const payments = purchasePaymentRecords(ledger, header.id, paymentCorrections);
     const corrections = paymentCorrections.filter(row => row.targetPurchaseOrderId === header.id || row.operation.source.purchaseOrderId === header.id);
+    const paymentExceptions = supplierPaymentExceptions(header.id, paymentIssues);
+    const disputedPayments = new Set(paymentExceptions.filter(issue => issue.purchaseOrderId === header.id && !issue.postingId)
+      .map(issue => issue.original.sourcePaymentId));
+    const disputedPaidCents = payments.filter(row => disputedPayments.has(row.id)).reduce((sum, row) => sum + row.amountCents, 0);
     const paidCents = payments.reduce((sum, row) => sum + row.amountCents, 0);
     if (!Number.isSafeInteger(paidCents)) throw new PurchaseError('历史已付款超过可精确表示的金额');
     const contentHash = pricingContentHash(contractContent(orderId, header.id, totalCents, lines));
@@ -218,7 +222,7 @@ export async function purchaseWorkspace(tx: Db, orderId: string) {
     const hasGoodsPayable = commitment.state === 'ordinary' || commitment.state === 'payable_verified';
     const remainingDecision = supplierCancelled ? undefined : remainingApproval(ledger, disposed.ids, payments);
     const reviewedScope = snapshot(remainingDecision)?.operation.scope;
-    const dueCents = !hasGoodsPayable ? null : disposed.ids.length ? (reviewedScope
+    const contractDueCents = !hasGoodsPayable ? null : disposed.ids.length ? (reviewedScope
       ? Math.max(0, reviewedScope.totalCents - reviewedScope.appliedPaidCents - (paidCents - snapshot(remainingDecision)!.paidCents)) : null)
       : Math.max(0, totalCents - paidCents);
     const legacy = legacyApproval(ledger);
@@ -243,15 +247,16 @@ export async function purchaseWorkspace(tx: Db, orderId: string) {
         .map(line=>({orderItemId:line.orderItemId,changedAt:row.createdAt,reviewedAt:approval?.createdAt ?? null}));
     });
     const needsLegacyReview = Boolean(legacy && !legacyReview && header.approvedHash === contentHash);
-    const canApproveRemaining = hasGoodsPayable && needsRemainingReview && !incidents.length && !needsLegacyReview
+    const canApproveRemaining = hasGoodsPayable && needsRemainingReview && !incidents.length && !needsLegacyReview && !disputedPaidCents
       && (header.status === 'on_hold' || (header.status === 'ordered' && Boolean(registration))
         || header.status === 'approved' && corrections.length > 0)
       && (Boolean(registration) || eligibility.eligible);
     const canRegisterOrder = commitment.state === 'ordinary' && !registration && !needsLegacyReview && Boolean(latestApproval)
       && (startReview.active || Boolean(cancellation)) && (header.status === 'approved' || header.status === 'on_hold');
     const revision = Number(header.revision);
-    return { ...header, revision, totalCents, contentHash, lines, ledger, paidCents, dueCents, remaining, payments, paymentCorrections: corrections,
-      paymentExceptions: supplierPaymentExceptions(header.id, paymentIssues),
+    return { ...header, revision, totalCents, contentHash, lines, ledger, paidCents, contractDueCents,
+      dueCents: disputedPaidCents ? null : contractDueCents, disputedPaidCents, remaining, payments, paymentCorrections: corrections,
+      paymentExceptions,
       remainingScope: hasGoodsPayable ? reviewedScope ?? null : null, needsRemainingReview, payableReviewWindows, canApproveRemaining, needsLegacyReview,
       needsFundingReapproval: commitment.state === 'ordinary' && !registration && header.status === 'approved'
         && eligibility.eligible && Boolean(fundingApproval && latestApproval
@@ -907,7 +912,7 @@ function supplierAttributionBasis(view: Workspace, po: PO, issue: PendingSupplie
   const { amountCents, paymentEvidence } = issue.original;
   const holdsAtPayment = supplierPaymentHolds(view, po, Date.parse(paymentEvidence.occurredAt));
   const current = supplierPaymentApprovalAt(view, po, Date.now());
-  if (!paymentHeld(holdsAtPayment) || !current || po.dueCents === null || po.needsRemainingReview
+  if (!paymentHeld(holdsAtPayment) || !current || po.contractDueCents === null || po.needsRemainingReview
     || !current.original.lines.every(row => row.terms.payee === paymentEvidence.payee)) {
     throw new PurchaseError('须先核清该笔暂停、真实处理结果及本单仍有效的付款条件');
   }
@@ -918,9 +923,11 @@ function supplierAttributionBasis(view: Workspace, po: PO, issue: PendingSupplie
   const existing = po.payments.find(row => row.id === issue.original.sourcePaymentId
     || row.canReviewTime && row.amountCents === amountCents && row.payee === paymentEvidence.payee
     && Date.parse(row.recordedAt) >= Date.parse(paymentEvidence.occurredAt));
-  if (!existing && amountCents > Math.min(po.dueCents, po.totalCents - po.paidCents)) throw new PurchaseError('原款超过现核准的可归属应付金额');
+  if (!existing && (po.dueCents === null || amountCents > Math.min(po.dueCents, po.totalCents - po.paidCents))) {
+    throw new PurchaseError('原款超过现核准的可归属应付金额');
+  }
   return { issueId: issue.id, purchaseOrderId: po.id, amountCents, paymentEvidence, holdsAtPayment, relatedResolutions, dispatchReviews,
-    currentApprovalId: current.approval.id, contentHash: po.contentHash, dueCents: po.dueCents, alreadyBookedId: existing?.id ?? null };
+    currentApprovalId: current.approval.id, contentHash: po.contentHash, dueCents: po.contractDueCents, alreadyBookedId: existing?.id ?? null };
 }
 
 function reviewedSupplierAttribution(view: Workspace, po: PO, issue: PendingSupplierPayment, actor: PurchaseActor) {
@@ -962,29 +969,33 @@ function originalSupplierPayment(view: Workspace, po: PO, issue: PendingSupplier
     reviewedFrom: issue.purchaseOrderId, needsRemainingRecheck: Boolean(remainingReview && Date.parse(remainingReview.createdAt) > at) };
 }
 
-async function reviewSupplierPaymentIssue(tx: Db, view: Workspace, po: PO, input: PurchaseActionInput) {
+async function reviewSupplierPaymentIssue(tx: Db, view: Workspace, po: PO, input: PurchaseActionInput, actor: PurchaseActor) {
   if (po.version !== input.version) conflict();
   const outcome = input.paymentIssueOutcome;
   const issue = po.paymentExceptions.find(row => row.id === input.paymentIssueId && row.canRoute);
-  if (!issue || outcome !== 'awaiting_disposition' && outcome !== 'outside_purchase' && outcome !== 'no_effective_approval') conflict();
-  if (!issue.pending && outcome !== 'outside_purchase' && !(issue.awaitingTarget && outcome === 'awaiting_disposition')) {
+  const routes = outcome === 'outside_purchase' || outcome === 'assign_purchase';
+  if (!issue || !routes && outcome !== 'awaiting_disposition' && outcome !== 'no_effective_approval' && outcome !== 'confirmed_current') conflict();
+  if (!issue.pending && !routes && !(issue.awaitingTarget && outcome === 'awaiting_disposition')) {
     throw new PurchaseError('这笔转账仍待确认归属，请按实际书证补充进展或指定目标');
   }
   const referenceSha256 = documentSha256(input.referenceSha256, '付款差异处理结果书证摘要');
-  if (issue.reviewHistory.some(row => row.operation.referenceSha256 === referenceSha256)) {
+  if (outcome !== 'confirmed_current' && issue.reviewHistory.some(row => row.operation.referenceSha256 === referenceSha256)) {
     throw new PurchaseError('这份处理结果已登记');
   }
-  if (outcome !== 'awaiting_disposition' && issue.original.paymentEvidence.sha256 === referenceSha256) {
+  if (outcome !== 'awaiting_disposition' && outcome !== 'confirmed_current' && issue.original.paymentEvidence.sha256 === referenceSha256) {
     throw new PurchaseError('须提供原银行凭证之外的实际处理结果依据');
   }
+  if (routes) await assertNewSupplierPaymentRoutingEvidence(tx, issue.original.paymentEvidence.traceKey, referenceSha256);
   if (outcome === 'no_effective_approval' && supplierPaymentApprovalAt(view, po, Date.parse(issue.original.paymentEvidence.occurredAt))) {
     throw new PurchaseError('付款当日已有有效采购批准，请核对原款与本单的归属和付款条件');
   }
   const targetId = input.paymentIssueTargetPurchaseOrderId === undefined ? null
     : requiredText(input.paymentIssueTargetPurchaseOrderId, '已核实的目标采购单编号');
   let target: { orderId: string; purchaseOrderId: string } | null = null;
+  if (outcome === 'assign_purchase' && !targetId) throw new PurchaseError('请选择书证核实的原款归属', 400);
   if (targetId) {
-    if (outcome !== 'outside_purchase' || targetId === po.id || targetId === issue.purchaseOrderId
+    if (!routes || outcome === 'outside_purchase' && targetId === po.id
+      || targetId === issue.activePurchaseOrderId
       || !issue.incoming && issue.original.sourcePaymentId && !po.payments.some(row => row.id === issue.original.sourcePaymentId)) {
       throw new PurchaseError('仅尚未更正且有书证归属其他采购单的原转账可转交');
     }
@@ -992,9 +1003,24 @@ async function reviewSupplierPaymentIssue(tx: Db, view: Workspace, po: PO, input
     if (!destination) throw new PurchaseError('找不到待交接的目标采购单');
     target = { orderId: destination.orderId, purchaseOrderId: destination.id };
   }
+  const existing = outcome === 'confirmed_current' ? po.payments.find(row => row.id === issue.original.sourcePaymentId
+    && row.amountCents === issue.original.amountCents && row.payee === issue.original.paymentEvidence.payee) : null;
+  let confirmation;
+  if (outcome === 'confirmed_current') {
+    if (!existing?.paymentEvidence || pricingContentHash({ ...existing.paymentEvidence, reference: undefined })
+      !== pricingContentHash({ ...issue.original.paymentEvidence, reference: undefined })) {
+      throw new PurchaseError('须核对本单仍有效的同一笔银行实付；未绑定原凭证的付款请先补核原记录');
+    }
+    const historical = supplierPaymentApprovalAt(view, po, Date.parse(existing.paymentEvidence.occurredAt));
+    const reviewed = !historical && reviewedSupplierAttribution(view, po, issue, actor);
+    if (!historical && !reviewed) throw new PurchaseError('付款当日的原批准或暂停处理授权待核对');
+    confirmation = { sourcePaymentId: existing.id, approvalId: historical?.approval.id ?? null,
+      attributionApprovalId: reviewed ? reviewed.approval.id : null };
+  }
   return { action: 'review_payment_exception' as const, paymentIssueId: issue.id, outcome, original: issue.original,
+    ...confirmation,
     originPurchaseOrderId: issue.purchaseOrderId, previousTarget: issue.review?.operation.target ?? null, previousReviewId: issue.review?.id ?? null,
-    responsibleActorId: issue.ownerId, target, reference: requiredText(input.reference, '书面处理结果档案出处'), referenceSha256,
+    responsibleActorId: actor.id, target, reference: requiredText(input.reference, '书面处理结果档案出处'), referenceSha256,
     description: requiredText(input.description, '已核实的处理结果与原款去向') };
 }
 
@@ -1005,7 +1031,7 @@ async function correctSupplierPaymentAttribution(tx: Db, view: Workspace, po: PO
   const sourceOrder = await tx.purchaseOrder.findUnique({ where: { id: issue.purchaseOrderId }, select: { orderId: true } });
   if (!sourceOrder) conflict();
   const original = (await purchaseWorkspace(tx, sourceOrder.orderId)).orders.find(row => row.id === issue.purchaseOrderId);
-  const source = original?.payments.find(row => row.id === issue.original.sourcePaymentId && !row.sourcePaymentId);
+  const source = original?.payments.find(row => row.id === issue.original.sourcePaymentId);
   if (!original || !source || source.amountCents !== issue.original.amountCents || source.payee !== issue.original.paymentEvidence.payee) {
     throw new PurchaseError('原单有效的已记实付、原额或收款方已变化，请核对原记录');
   }
@@ -1089,7 +1115,7 @@ function actionDetails(
   }
   if (action === 'approve_payment_attribution') {
     const issue = pendingPaymentIssue(po, input);
-    if (!issue || issue.ownerId === actor.id) throw new PurchaseError('须由另一位有采购批准权限的人员核对原转账');
+    if (!issue || issue.ownerId === actor.id || issue.currentOwnerId === actor.id) throw new PurchaseError('须由另一位有采购批准权限的人员核对原转账');
     const basis = supplierAttributionBasis(view, po, issue);
     return { action, paymentIssueId: issue.id, basis, basisHash: pricingContentHash(basis),
       reference: requiredText(input.reference, '暂停处理及原合同的书证出处'),
@@ -1097,22 +1123,27 @@ function actionDetails(
       description: requiredText(input.description, '现批准的准确归属及原待办处理结果') };
   }
   if (action === 'record_payment_exception') {
-    if (!positiveCents(input.amountCents)) throw new PurchaseError('请填写实际银行凭证上的付款金额', 400);
-    const original = input.sourcePaymentId ? po.payments.find(row => row.id === input.sourcePaymentId
-      && !row.sourcePaymentId && row.amountCents === input.amountCents) : null;
-    if (input.sourcePaymentId && !original) throw new PurchaseError('原付款编号或原额不同，请核对');
-    const paymentEvidence = supplierPaymentEvidence(input, original?.payee ?? input.payee);
+    const original = input.sourcePaymentId ? po.payments.find(row => row.id === input.sourcePaymentId) : undefined;
+    if (input.sourcePaymentId && (!original || input.amountCents !== undefined && original.amountCents !== input.amountCents)) {
+      throw new PurchaseError('原付款编号或原额不同，请核对');
+    }
+    const amountCents = input.amountCents ?? original?.amountCents;
+    if (!positiveCents(amountCents)) throw new PurchaseError('请填写实际银行凭证上的付款金额', 400);
+    const hasNewEvidence = [input.reference, input.referenceSha256, input.bankTrace, input.payee, input.occurredAt,
+      input.paymentDocumentKind, input.paymentStatementRow].some(value => value !== undefined);
+    const paymentEvidence = !hasNewEvidence && original?.paymentEvidence
+      ? original.paymentEvidence : supplierPaymentEvidence(input, original?.payee ?? input.payee);
     if (original?.paymentEvidence && pricingContentHash({ ...original.paymentEvidence, reference: undefined })
       !== pricingContentHash({ ...paymentEvidence, reference: undefined })) {
       throw new PurchaseError('所选已记付款的原流水、日期、原件行或收款方不同，请核对原记录');
     }
-    const previousIssue = original?.paymentEvidence && po.paymentExceptions.find(row => row.postedToPurchaseOrderId === po.id
-      && (row.postingId === original.id || original.reviewId && row.postingId === original.reviewId)
+    const previousIssue = original?.paymentEvidence && po.paymentExceptions.findLast(row => row.postedToPurchaseOrderId === po.id
+      && row.appliedPaymentId === original.id
       && row.original.amountCents === original.amountCents);
     if (original && Date.parse(paymentEvidence.occurredAt) > Date.parse(original.recordedAt)) {
       throw new PurchaseError('原实际付款时间不能晚于原付款登记');
     }
-    return { action, amountCents: input.amountCents, paymentEvidence, sourcePaymentId: original?.id,
+    return { action, amountCents, paymentEvidence, sourcePaymentId: original?.id,
       previousPaymentIssueId: previousIssue ? previousIssue.id : undefined, responsibleActorId: actor.id,
       approvalAtPaymentId: approvalAt(po.ledger, Date.parse(paymentEvidence.occurredAt))?.id ?? null,
       description: requiredText(input.description, '已核实的付款事实及待处理原因') };
@@ -1346,20 +1377,19 @@ export async function previewPurchaseAction(tx: Db, input: PurchaseActionInput, 
   const currentLines = original ? await loadPurchaseLines(tx, original) : [];
   const remaining = original ? remainingDemand(original) : new Map<string, number>();
   const details = input.action === 'correct_payment_attribution' ? await correctSupplierPaymentAttribution(tx, view, po, input, actor)
-    : input.action === 'review_payment_exception' ? await reviewSupplierPaymentIssue(tx, view, po, input)
+    : input.action === 'review_payment_exception' ? await reviewSupplierPaymentIssue(tx, view, po, input, actor)
     : commitment ? await previewCommitment(tx, original!, view, po, input, actor) : actionDetails(view, po, input, currentLines, remaining, actor);
   const operation = details.action === 'resolve_change'
     ? await prepareCoordinationEvidence(tx, po, input, details)
     : details;
   if (operation.action === 'correct_payment_attribution') {
-    await assertUnusedSupplierPayment(tx, operation.paymentEvidence, operation.source.paymentId, operation.paymentIssueId, operation.previousPaymentIssueId);
+    await assertUnusedSupplierPayment(tx, operation.paymentEvidence, operation.source.paymentId, operation.paymentIssueId);
   } else if (operation.action === 'record_payment' || operation.action === 'review_payment_time' || operation.action === 'record_payment_exception') {
     await assertUnusedSupplierPayment(tx, operation.paymentEvidence,
-      'sourcePaymentId' in operation ? operation.sourcePaymentId : undefined, 'paymentIssueId' in operation ? operation.paymentIssueId : undefined,
-      operation.action === 'record_payment_exception' ? operation.previousPaymentIssueId : undefined);
+      'sourcePaymentId' in operation ? operation.sourcePaymentId : undefined, 'paymentIssueId' in operation ? operation.paymentIssueId : undefined);
   }
   if (operation.action === 'record_payment_exception' && operation.sourcePaymentId
-    && po.paymentExceptions.some(row => row.id !== operation.previousPaymentIssueId && row.purchaseOrderId === po.id
+    && po.paymentExceptions.some(row => !row.postingId && row.purchaseOrderId === po.id
       && row.original.sourcePaymentId === operation.sourcePaymentId)) {
     throw new PurchaseError('这笔已记实付已有原付款待核记录，请在原待办继续');
   }
