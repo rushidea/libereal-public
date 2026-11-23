@@ -7,6 +7,7 @@ import { Fragment, use } from 'react';
 import { useEffect, useState } from 'react';
 import { useSession } from 'next-auth/react';
 import { useRouter } from 'next/navigation';
+import OrderAfterSales from '@/components/account/OrderAfterSales';
 import Link from 'next/link';
 import {
   Package, CheckCircle, Clock, Truck, XCircle, RotateCcw,
@@ -448,6 +449,7 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
                 </div>
               </div>
             </div>
+            <OrderAfterSales key={order.id} orderId={order.id} items={parsedItems}/>
           </div>
         </div>
 

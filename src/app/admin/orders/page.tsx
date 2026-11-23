@@ -1628,6 +1628,9 @@ function OrderDetailPanel({
       {['confirmed','partially_shipped','shipped','completed','cancelled','closed'].includes(order.status) &&
         <FulfillmentPanel key={order.id} orderId={order.id} canWrite={permissions?.includes('orders.write') === true} stepUp={beginMfaStepUp} onUpdated={fetchData}/>}
 
+      {permissions?.includes('orders.read') && (
+        <Link href={`/admin/after-sales?orderId=${encodeURIComponent(order.id)}`} className="inline-flex text-sm font-medium text-brand-700 underline">查看本单售后</Link>
+      )}
       {permissions?.includes('finance.read') && (
         <Link href={`/admin/finance?orderId=${encodeURIComponent(order.id)}`} className="inline-flex text-sm font-medium text-brand-700 underline">查看本单票款</Link>
       )}
