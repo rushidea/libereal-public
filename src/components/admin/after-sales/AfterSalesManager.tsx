@@ -15,12 +15,12 @@ type Confirmation = {input:FormInput;hash:string;snapshot:Record<string,unknown>
 const date = (value:string) => new Date(value).toLocaleString('zh-CN',{hour12:false});
 const displayFields:Record<string,string>={quantity:'实际数量',decision:'客户决定',note:'办理说明',report:'问题说明',result:'处理结果',
   remedy:'处理方式',recipient:'收款人',destination:'收款去向',method:'收付渠道',referenceNo:'回执流水',amountCents:'本次金额',approvedCents:'已批准金额',
-  originalNumber:'原票号',number:'替代票号',waybill:'实际原运单',lineLimitCents:'本商品可核票面金额',purchaseOrderId:'原采购单',party:'出具意见的单位',contact:'技术联系人',supplier:'供应商',owner:'接手人',
+  refundQuantity:'本次退款件数',originalNumber:'原票号',number:'替代票号',waybill:'实际原运单',lineLimitCents:'本商品可核票面金额',purchaseOrderId:'原采购单',party:'出具意见的单位',contact:'技术联系人',supplier:'供应商',owner:'接手人',
   previousOwner:'原经办人',preparedId:'退款准备记录',approvalId:'独立批准',agreementId:'客户书面决定',financeEventId:'票款回执',shortfallId:'原履约记录',
   relatedCents:'关联金额',parcelLineId:'原包裹行',reference:'原运单',historyReview:'既有结算复核',historicCheck:'既有结算复核',outcome:'供方结果',
   totalCents:'同笔实际交易总额',allocatedBeforeCents:'原已分摊',unallocatedAfterCents:'本次后尚未分摊',allocationReference:'本行分摊书证',
   alreadyRecordedCents:'此前已核对重开金额',remainingCents:'本案尚待核对',
-  replacementIssuedCents:'原已签发',replacementRemainingCents:'新约定尚待签发',replacementRecordedCents:'本案已回填',
+  replacementIssuedCents:'仍有效的已签发票面',replacementPendingCents:'更正中待核',replacementVoidedCents:'已作废票面',replacementRemainingCents:'新约定尚待签发',replacementRecordedCents:'本案已回填',
   stoppedCents:'核实终止的未付额',releasedCents:'已确认不再支付的金额',previouslyRefundedCents:'原已实际退款金额'};
 function permitted(row:Case, rights:string[], view:Desk):AfterSaleAction[] {
   const out:AfterSaleAction[]=[];
@@ -69,12 +69,13 @@ function Details({value}:{value:Record<string,unknown>|null}) {
   const transfer=value.transfer as Record<string,unknown>|undefined;
   const invoice=value.invoice as Record<string,unknown>|undefined;
   const visible={...value,...(invoice&&{
-    replacementIssuedCents:invoice.replacementIssuedCents,replacementRemainingCents:invoice.replacementRemainingCents,
+    replacementIssuedCents:invoice.replacementIssuedCents,replacementPendingCents:invoice.replacementPendingCents,
+    replacementVoidedCents:invoice.replacementVoidedCents,replacementRemainingCents:invoice.replacementRemainingCents,
     replacementRecordedCents:invoice.replacementRecordedCents,
   }),...(transfer&&{totalCents:transfer.totalCents,allocatedBeforeCents:transfer.allocatedBeforeCents,
     unallocatedAfterCents:transfer.unallocatedAfterCents,allocationReference:transfer.allocationReference})};
   return <dl className="grid gap-1 text-sm sm:grid-cols-[max-content_1fr]">{Object.entries(visible).filter(([key,v])=>displayFields[key]&&v!=null&&typeof v!=='object').map(([key,v])=>
-    <div key={key} className="contents"><dt className="text-slate-600">{displayFields[key]}</dt>
+    <div key={key} className="contents"><dt className="text-slate-600">{key==='quantity'&&value.remedy==='refund'?'案件总件数':displayFields[key]}</dt>
       <dd className="break-words">{key.endsWith('Cents')?money(Number(v)):String(v)}</dd></div>)}</dl>;
 }
 
@@ -161,6 +162,14 @@ export default function AfterSalesManager({initialOrder,initialLoss=''}:{initial
         {(row.originalParcelShares??[]).map(part=><p key={part.evidenceEventId??part.parcelLineId} className="text-sm">
           原包裹 {view.deliveries.find(line=>line.id===part.parcelLineId)?.reference??part.parcelLineId} · 本案 {part.quantity} 件
         </p>)}
+        {row.invoiceReissue&&<div className="text-sm">
+          <p>有效已签发 {money(row.invoiceReissue.issuedCents)} · 已核回填 {money(row.invoiceReissue.recordedCents)}
+            {' · 更正待核 '+money(row.invoiceReissue.pendingCents)+' · 已作废 '+money(row.invoiceReissue.voidedCents)}</p>
+          {row.invoiceReissue.pendingReceipts.map(receipt=><p key={receipt.allocationId}>
+            票号 {receipt.number} 待财务更正 · 经办 {receipt.ownerId??'待认领'}
+          </p>)}
+          {row.invoiceReissue.needsAttribution&&<p>候选票份额待核，请凭原件逐案分配。</p>}
+        </div>}
         {(row.supplierScopes??[]).map(part=><p key={part.key} className="text-sm">
           {part.supplier??'原采购 '+part.purchaseOrderId}{part.reference&&' · '+part.reference} · {part.quantity} 件 · {afterSaleLabel(part.state)}
           {' · 经办 '+(part.ownerId??'待接手')}{part.lastReference&&' · 凭据 '+part.lastReference}

@@ -4,11 +4,15 @@ import { useState, type FormEvent } from 'react';
 import DocumentDigestField from '@/components/admin/purchases/DocumentDigestField';
 import { button, field, primary, money } from '@/components/admin/purchases/PurchaseLineForm';
 import { afterSaleActions, afterSaleChannels, afterSaleIssues, afterSaleRemedies, hasChoice, type AfterSaleAction } from '@/lib/after-sale-options';
-import type { afterSaleInvoiceChoices } from '@/lib/after-sale-invoices';
+import type { afterSaleInvoiceChoices, afterSaleReissueViews } from '@/lib/after-sale-invoices';
 import type { afterSaleAdminView } from '@/lib/after-sale-workspace';
 import type { refundTerms, refundPosition } from '@/lib/after-sale-refunds';
 
-export type Desk = ReturnType<typeof afterSaleAdminView> & {
+type AdminDesk = ReturnType<typeof afterSaleAdminView>;
+type Reissue = Awaited<ReturnType<typeof afterSaleReissueViews>>[number]['invoiceReissue'];
+
+export type Desk = Omit<AdminDesk,'cases'> & {
+  cases:Array<AdminDesk['cases'][number]&{invoiceReissue?:Reissue|null}>;
   refundDrafts: Array<{caseId:string;terms:ReturnType<typeof refundTerms>;position:Awaited<ReturnType<typeof refundPosition>>}>;
   refundSources?: Array<{id:string;tradeNo:string;amountCents:number;arrivedAt:string;customerKey:string|null}>;
   invoiceChoices?: Array<Omit<Awaited<ReturnType<typeof afterSaleInvoiceChoices>>[number],'amountCents'> & {amountCents:number|null}>;
@@ -78,8 +82,11 @@ export default function AfterSaleForm({view,current,action,chosenLoss,busy,onPre
   });
   const previousReissues=(current?.events??[]).filter(event=>event.action==='invoice_reissue'
     && event.operation?.financeEventId===currentCorrection?.operation?.financeEventId);
-  const reissueRemaining=decisionInvoice?.replacementAmountCents==null?null:decisionInvoice.replacementAmountCents
-    -previousReissues.reduce((sum,event)=>sum+Number(event.operation?.amountCents??0),0);
+  const reissueRemaining=current?.invoiceReissue?.remainingCents ?? (decisionInvoice?.replacementAmountCents==null?null
+    : decisionInvoice.replacementAmountCents-previousReissues.reduce((sum,event)=>sum+Number(event.operation?.amountCents??0),0));
+  const returnedQuantity=current?.events.filter(event=>event.action==='physical'&&event.operation?.result==='return')
+    .reduce((sum,event)=>sum+Number(event.operation?.quantity??0),0)??0;
+  const refundQuantity=returnedQuantity?Math.min(returnedQuantity,current?.quantity??returnedQuantity):current?.quantity;
   const selectedPortions=(view.invoiceChoices?.find(row=>row.id===selectedInvoice)?.linePortions??[]).filter(part=>
     part.lines.length>1&&part.lines.some(goods=>goods.orderItemId===lineId));
   const releaseIds=new Set(current?.events.filter(event=>event.action==='release_refund_source').map(event=>event.operation?.reviewId));
@@ -102,7 +109,7 @@ export default function AfterSaleForm({view,current,action,chosenLoss,busy,onPre
         if (['replacement:','invoicePortion:','exchangeDocument:'].some(prefix=>key.startsWith(prefix))) continue;
         if (typeof value==='string'&&value.trim()) data[key]=value.trim();
       }
-      for(const key of ['quantity','documentRow']) if(data[key]!=null) data[key]=Number(data[key]);
+      for(const key of ['quantity','documentRow','refundQuantity']) if(data[key]!=null) data[key]=Number(data[key]);
       for(const key of ['relatedCents','amountCents','transferTotalCents','replacementAmountCents']) if(typeof data[key]==='string') data[key]=inYuan(data[key]);
       if(record.reviseAgreement&&current?.agreementId)data.revisesAgreementId=current.agreementId;
       if(action==='stop_refund') Object.assign(data,{confirmStopped:record.confirmStopped==='on',
@@ -125,7 +132,7 @@ export default function AfterSaleForm({view,current,action,chosenLoss,busy,onPre
       }
       if(action==='release_refund_source') Object.assign(data,{reviewId:activeReview?.id,confirmUnsent:record.confirmUnsent==='on'});
       if(action==='invoice_reissue'&&record.confirmReplacementEvidence==='on') Object.assign(data,{
-        confirmReplacementEvidence:true,financeEventId:currentCorrection?.operation?.financeEventId});
+        confirmReplacementEvidence:true,financeEventId:data.financeEventId??currentCorrection?.operation?.financeEventId});
       if(action==='agreement'&&['exchange','resend'].includes(remedy)) {
         const replacementPurchaseShares=paidReplacements.flatMap(item=>{
           const qty=Number(record['replacement:'+item.purchaseOrderId]);
@@ -160,7 +167,8 @@ export default function AfterSaleForm({view,current,action,chosenLoss,busy,onPre
           .filter(([key])=>current?.customerState==='refund_followup'?['refund','refund_withdraw'].includes(key):key!=='refund_withdraw'))} onChange={setRemedy}/>}
         <Input name="customerDecision" label="客户确认的条件、范围和费用责任"/>
         {current?.agreementId&&<label className="flex items-center gap-2 text-sm"><input type="checkbox" name="reviseAgreement"/>这份较新的决定明确修订当前版本</label>}
-        {remedy==='refund'&&<><Input name="amountCents" label={current?.customerState==='refund_followup'?'重新约定的未付退款金额（元）':'约定退款金额（元）'}/><Input name="recipient" label="核实的退款收款人"/><Input name="destination" label="收款去向标识"/><Select name="method" label="约定退款渠道" options={methodLabels}/></>}
+        {remedy==='refund'&&<><Input name="refundQuantity" label="本次退款件数" type="number" max={refundQuantity} value={refundQuantity}/>
+          <Input name="amountCents" label={current?.customerState==='refund_followup'?'重新约定的未付退款金额（元）':'约定退款金额（元）'}/><Input name="recipient" label="核实的退款收款人"/><Input name="destination" label="收款去向标识"/><Select name="method" label="约定退款渠道" options={methodLabels}/></>}
         {['exchange','return'].includes(remedy)&&!originalShares.length&&Object.keys(originalChoices).length>0&&<Select name="originalParcelLineId" label="客户决定所指的原包裹"
           initial={current?.originalParcelLineId??undefined} options={originalChoices} required={remedy==='exchange'&&!linked}/>}
         {remedy==='exchange'&&!linked&&<Select name="returnRequirement" label="书证约定的退回要求" options={{required:'先核对原件实际退回',waived:'双方书面同意免退换货'}}/>}
@@ -239,7 +247,8 @@ export default function AfterSaleForm({view,current,action,chosenLoss,busy,onPre
         {reissueRemaining!=null&&<p className="text-sm">本案尚待核对 {money(reissueRemaining)}，多张实际票可以逐张回填。</p>}
         <p className="text-sm">原红冲回执 {String(currentCorrection?.operation?.financeEventId??'')}</p>
         <label className="flex items-center gap-2 text-sm sm:col-span-2"><input name="confirmReplacementEvidence" type="checkbox"/>
-          若开票时未关联原红冲，凭补充书证核实原票、红冲回执及替代票的对应关系</label></>}
+          若开票时未关联原红冲，凭补充书证核实原票、红冲回执及替代票的对应关系</label>
+        <Input name="financeEventId" label="补核后继票时填写直接对应的红冲回执记录号" required={false}/></>}
       {action==='release_refund_source'&&<label className="flex items-center gap-2 text-sm sm:col-span-2">
         <input name="confirmUnsent" type="checkbox" required/>核实这笔款未获退款批准、未发出指令，且客户后来书面要求保留原单
       </label>}
