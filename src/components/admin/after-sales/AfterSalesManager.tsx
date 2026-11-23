@@ -20,7 +20,7 @@ const displayFields:Record<string,string>={quantity:'实际数量',decision:'客
   relatedCents:'关联金额',parcelLineId:'原包裹行',reference:'原运单',historyReview:'既有结算复核',historicCheck:'既有结算复核',outcome:'供方结果',
   totalCents:'同笔实际交易总额',allocatedBeforeCents:'原已分摊',unallocatedAfterCents:'本次后尚未分摊',allocationReference:'本行分摊书证',
   alreadyRecordedCents:'此前已核对重开金额',remainingCents:'本案尚待核对',
-  predecessorNumber:'前序票号',sourceCorrectionEventId:'前序红冲回执',attributedCents:'本商品实际承接金额',
+  predecessorNumber:'前序票号',sourceCorrectionEventId:'前序红冲回执',attributedCents:'本商品实际承接金额',reissueScope:'这份金额的办理范围',
   replacementIssuedCents:'仍有效的已签发票面',replacementPendingCents:'更正中待核',replacementVoidedCents:'已作废票面',replacementRemainingCents:'新约定尚待签发',replacementRecordedCents:'本案已回填',
   stoppedCents:'核实终止的未付额',releasedCents:'已确认不再支付的金额',previouslyRefundedCents:'原已实际退款金额'};
 function permitted(row:Case, rights:string[], view:Desk):AfterSaleAction[] {
@@ -70,15 +70,22 @@ function Details({value}:{value:Record<string,unknown>|null}) {
   if (!value) return null;
   const transfer=value.transfer as Record<string,unknown>|undefined;
   const invoice=value.invoice as Record<string,unknown>|undefined;
+  const sources=Array.isArray(value.reissueSources)?value.reissueSources as {parentAllocationId:string;receiptId:string;amountCents:number;
+    number?:string;planReference?:string;reviewId?:string}[]:[];
   const visible={...value,...(invoice&&{
     replacementIssuedCents:invoice.replacementIssuedCents,replacementPendingCents:invoice.replacementPendingCents,
     replacementVoidedCents:invoice.replacementVoidedCents,replacementRemainingCents:invoice.replacementRemainingCents,
     replacementRecordedCents:invoice.replacementRecordedCents,
   }),...(transfer&&{totalCents:transfer.totalCents,allocatedBeforeCents:transfer.allocatedBeforeCents,
-    unallocatedAfterCents:transfer.unallocatedAfterCents,allocationReference:transfer.allocationReference})};
+    unallocatedAfterCents:transfer.unallocatedAfterCents,allocationReference:transfer.allocationReference}),
+    ...(typeof value.reissueScope==='string'&&{reissueScope:value.reissueScope==='other_plan'?'另一个实际开票安排':'本案书面约定的重开'})};
   return <dl className="grid gap-1 text-sm sm:grid-cols-[max-content_1fr]">{Object.entries(visible).filter(([key,v])=>displayFields[key]&&v!=null&&typeof v!=='object').map(([key,v])=>
     <div key={key} className="contents"><dt className="text-slate-600">{key==='quantity'&&value.remedy==='refund'?'案件总件数':displayFields[key]}</dt>
-      <dd className="break-words">{key.endsWith('Cents')?money(Number(v)):String(v)}</dd></div>)}</dl>;
+      <dd className="break-words">{key.endsWith('Cents')?money(Number(v)):String(v)}</dd></div>)}
+    {sources.length>1&&<><dt className="text-slate-600">实际前序分摊</dt><dd><ul className="space-y-1">{sources.map(source=>
+      <li key={source.reviewId??source.parentAllocationId}>{source.number??source.parentAllocationId}{source.planReference?' · '+source.planReference:''}
+        {' · '+money(source.amountCents)+' · 红冲回执 '+source.receiptId}</li>
+    )}</ul></dd></>}</dl>;
 }
 
 export default function AfterSalesManager({initialOrder,initialLoss=''}:{initialOrder:string;initialLoss?:string}) {

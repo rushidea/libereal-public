@@ -96,7 +96,8 @@ export default function AfterSaleForm({view,current,action,chosenLoss,busy,onPre
   const receipt=action==='invoice_outcome' ? view.invoiceChoices?.find(row=>row.id===decisionInvoice?.allocationId)?.correction : null;
   const invoiceOptions=Object.fromEntries((view.invoiceChoices??[])
     .filter(row=>action!=='invoice_reissue'||row.invoiceId!==decisionInvoice?.invoiceId)
-    .map(row=>[row.id,row.number+' · '+row.issuer+' · '+(row.amountCents==null?'':money(row.amountCents)+' · ')+new Date(row.issuedAt).toLocaleDateString('zh-CN')]));
+    .map(row=>[row.id,[row.number,row.issuer,row.planReference,row.amountCents==null?null:money(row.amountCents),
+      new Date(row.issuedAt).toLocaleDateString('zh-CN')].filter(Boolean).join(' · ')]));
   const checkedInvoice=(view.invoiceChoices??[]).find(row=>row.id===selectedInvoice);
   const predecessors=(view.invoiceChoices??[]).filter(row=>row.correction?.outcome==='voided'&&row.invoiceId!==checkedInvoice?.invoiceId);
   const predecessor=predecessors.find(row=>row.id===predecessorId);
@@ -244,10 +245,13 @@ export default function AfterSaleForm({view,current,action,chosenLoss,busy,onPre
           onChange={id=>{setSelectedInvoice(id);setPredecessorId('');}}/>
         <Input name="amountCents" label={reviewReissueLink?'本商品从前序红冲承接的实际金额（元）':'这张票归入本商品的全部金额（元）'}/>
         {reviewReissueLink&&<>
+          <Select name="reissueScope" label="这份金额实际所属的开票安排" initial="this_case"
+            options={{this_case:'本案书面约定的重开',other_plan:'另一个实际开票安排'}}/>
           <Select key={selectedInvoice} name="reissueParentAllocationId" label="前序红冲票的实际分摊"
             options={Object.fromEntries(predecessors.map(row=>[row.id,invoiceOptions[row.id]]))} onChange={setPredecessorId}/>
           {predecessor?.correction&&<><input type="hidden" name="sourceCorrectionEventId" value={predecessor.correction.id}/>
             <p className="text-sm">正式红冲回执 {predecessor.correction.reference} · {predecessor.correction.id}</p></>}
+          <p className="text-sm sm:col-span-2">同一后继票承接多份前序分摊时，按原件逐份核对，每次只填写这份分摊的金额。</p>
         </>}
         {!reviewReissueLink&&selectedPortions.length>0&&<fieldset key={selectedInvoice} className="grid gap-2 sm:col-span-2">
           <legend className="text-sm font-medium">覆盖本商品的共同书证</legend>
