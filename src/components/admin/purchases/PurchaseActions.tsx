@@ -337,12 +337,14 @@ export default function PurchaseActions({ orderId, orderStatus, cancellation, po
   const oldPayments = po.payments?.filter(row => row.canReviewTime) ?? [];
   const paymentIssues = po.paymentExceptions?.filter(row => row.pending) ?? [];
   const linkedPayment = paymentIssues.find(row => row.id === paymentIssueId);
+  const routingIssues = po.paymentExceptions?.filter(row => row.canRoute) ?? [];
+  const selectedRouting = routingIssues.find(row => row.id === paymentIssueId) ?? routingIssues[0];
   const matchingOld = (issue: typeof paymentIssues[number]) => oldPayments.filter(row => row.amountCents === issue.original.amountCents
     && row.payee === issue.original.paymentEvidence.payee && Date.parse(row.recordedAt) >= Date.parse(issue.original.paymentEvidence.occurredAt));
   if (permit('pay')) {
     if (oldPayments.length) choices.push('review_payment_time');
     choices.push('record_payment_exception');
-    if (paymentIssues.length) choices.push('review_payment_exception');
+    if (routingIssues.length) choices.push('review_payment_exception');
   }
   if (!paymentIssues.length && ['approved', 'ordered', ...(stillHeld ? ['on_hold'] : [])].includes(po.status) && !po.needsLegacyReview
     && (!po.needsFundingReapproval || stillHeld) && (!closed || po.orderedBefore)
@@ -449,13 +451,23 @@ export default function PurchaseActions({ orderId, orderStatus, cancellation, po
       const correction = issue.incoming && issue.original.sourcePaymentId;
       const attachExisting = !correction && (issue.original.sourcePaymentId || matchingOld(issue).length > 0);
       return <section key={issue.id} className="space-y-1 rounded bg-slate-50 p-2 text-sm">
-        <p>{issue.pending ? '付款待核对' : issue.postingId ? '已核销原付款' : '已记录未冲本单的原因'} · {money(issue.original.amountCents)}
+        <p>{issue.awaitingTarget ? '目标采购单待核对' : issue.pending ? '付款待核对'
+          : issue.postingId ? '原付款已归属' : '已记录未冲本单的原因'} · {money(issue.original.amountCents)}
           {' · 流水 ' + proof.bankTrace + ' · 收款方 ' + proof.payee + ' · 原经办人 ' + issue.ownerId}</p>
         <p>{proof.reference} · 实际付款 {new Date(proof.occurredAt).toLocaleString('zh-CN')} · {decision?.operation.description ?? issue.original.description}</p>
-        {target && !issue.incoming && <Link className="underline" href={'/admin/purchases?orderId=' + encodeURIComponent(target.orderId)}>
+        {target && target.purchaseOrderId !== po.id && <Link className="underline" href={'/admin/purchases?orderId=' + encodeURIComponent(target.orderId)}>
           目标采购单 {target.purchaseOrderId}
         </Link>}
         {issue.incoming && <p>转交自采购单 {issue.purchaseOrderId}</p>}
+        {issue.reviewHistory.length > 0 && <details>
+          <summary className="cursor-pointer">查看归属核对记录</summary>
+          {issue.reviewHistory.map(row => <p key={row.id}>{row.operation.reference} · 经办人 {row.actorId}
+            {row.operation.target && ' · 目标采购单 ' + row.operation.target.purchaseOrderId}</p>)}
+        </details>}
+        {issue.canRoute && (issue.awaitingTarget || issue.incoming) && !pending && permit('pay') &&
+          <button type="button" className={button} disabled={busy} onClick={() => {
+            choose('review_payment_exception'); setPaymentIssueId(issue.id);
+          }}>{issue.awaitingTarget ? '补记核实的目标采购单' : '核对付款目标'}</button>}
         {issue.pending && !pending && permit('pay') && <button type="button" className={button} disabled={busy} onClick={() => {
           choose(correction ? 'correct_payment_attribution' : attachExisting ? 'review_payment_time' : 'record_payment'); setPaymentIssueId(issue.id);
         }}>{correction ? actionNames.correct_payment_attribution : attachExisting ? '关联本单已有付款' : '凭原待办核销付款'}</button>}
@@ -660,13 +672,14 @@ export default function PurchaseActions({ orderId, orderStatus, cancellation, po
         {inputField('description', '现批准的准确归属及原待办处理结果')}
       </>}
       {action === 'review_payment_exception' && <>
-        <label className="grid gap-1 text-sm">待核付款<select name="paymentIssueId" className={field} required>
-          {paymentIssues.map(row => <option key={row.id} value={row.id}>{String(row.original.description)} · 负责人 {row.ownerId}</option>)}
+        <label className="grid gap-1 text-sm">待核付款<select name="paymentIssueId" className={field} required value={selectedRouting?.id ?? ''}
+          onChange={event => { setPaymentIssueId(event.target.value); setPaymentIssueOutcome('awaiting_disposition'); }}>
+          {routingIssues.map(row => <option key={row.id} value={row.id}>{row.original.paymentEvidence.bankTrace} · {money(row.original.amountCents)} · 负责人 {row.ownerId}</option>)}
         </select></label>
         <label className="grid gap-1 text-sm">处理结果<select name="paymentIssueOutcome" className={field} required value={paymentIssueOutcome}
           onChange={event => setPaymentIssueOutcome(event.target.value)}>
           <option value="awaiting_disposition">核实后仍待处理</option>
-          <option value="no_effective_approval">已查清当日无有效批准，登记原款去向</option>
+          {selectedRouting?.pending && <option value="no_effective_approval">已查清当日无有效批准，登记原款去向</option>}
           <option value="outside_purchase">原件已证实不属本采购单</option>
         </select></label>
         {paymentIssueOutcome === 'outside_purchase' && inputField('paymentIssueTargetPurchaseOrderId', '已核实的目标采购单编号（如有）', false)}
@@ -882,6 +895,7 @@ export default function PurchaseActions({ orderId, orderStatus, cancellation, po
       {op.action === 'review_payment_time' && <p>原付款 {op.original.reference} · {money(op.original.amountCents)} · 原登记 {new Date(op.original.recordedAt).toLocaleString('zh-CN')}</p>}
       {op.action === 'record_payment_exception' && <p>待核对付款 {money(op.amountCents)} · 负责人 {op.responsibleActorId} · {op.description}</p>}
       {op.action === 'review_payment_exception' && <p>原待办 {op.paymentIssueId} · 负责人 {op.responsibleActorId} · {op.description}</p>}
+      {op.action === 'review_payment_exception' && op.previousTarget && <p>此前核对目标 {op.previousTarget.purchaseOrderId}</p>}
       {op.action === 'review_payment_exception' && op.target && <p>转交采购单 {op.target.purchaseOrderId} · 原流水 {op.original.paymentEvidence.bankTrace}
         {' · 收款方 ' + op.original.paymentEvidence.payee} · 实际转账 {money(op.original.amountCents)}</p>}
       {(op.action === 'record_payment' || op.action === 'review_payment_time' || op.action === 'record_payment_exception'

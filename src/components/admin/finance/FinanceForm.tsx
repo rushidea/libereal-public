@@ -45,8 +45,12 @@ export default function FinanceForm({ view, action, busy, onPreview, onCancel, o
   view: FinanceWorkspace; action: FinanceInput['action']; busy: boolean;
   onPreview: (input: FinanceInput) => Promise<void>; onCancel: () => void; onError: (message: string) => void;
 }) {
-  const customerCanPlan = view.acceptanceId && (view.principalCents > 0 || view.customerInvoiceScope);
+  const scopes = view.customerInvoiceScopes ?? [];
+  const customerCanPlan = view.acceptanceId && (view.principalCents > 0 || scopes.length > 0);
   const [side, setSide] = useState(customerCanPlan ? 'customer' : 'supplier');
+  const [scopeId, setScopeId] = useState(scopes[0]?.id ?? '');
+  const selectedScope = scopes.find(row => row.id === scopeId);
+  const openLines = view.originalInvoiceLines?.filter(line => line.unverifiedQuantity > 0) ?? [];
   const [documentKind, setDocumentKind] = useState('single_receipt');
   const plans = view.invoicePlans.filter(plan => action === 'record_invoice'
     ? plan.recordable
@@ -80,11 +84,14 @@ export default function FinanceForm({ view, action, busy, onPreview, onCancel, o
       const form = new FormData(event.currentTarget);
       for (const [key, entry] of form) {
         if (typeof entry !== 'string' || !entry.trim()) continue;
-        if (key === 'invoiceLineIds') continue;
+        if (key.startsWith('invoiceQuantity:')) continue;
         data[key] = key === 'confirmContinueAfterCancellation' ? true : moneyFields.has(key) ? cents(entry) : timeFields.has(key) ? new Date(entry).toISOString()
-          : key === 'days' || key === 'statementRow' ? Number(entry) : entry.trim();
+          : key === 'days' || key === 'statementRow' || key === 'documentRow' ? Number(entry) : entry.trim();
       }
-      if (action === 'verify_customer_invoice_scope') data.invoiceLineIds = form.getAll('invoiceLineIds');
+      if (action === 'verify_customer_invoice_scope') data.invoiceLines = openLines.flatMap(line => {
+        const quantity = Number(form.get('invoiceQuantity:' + line.id));
+        return quantity > 0 ? [{ orderItemId: line.id, quantity }] : [];
+      });
       await onPreview({ orderId: view.orderId, version: view.version, requestId: crypto.randomUUID(), action, data });
     } catch (error) { onError(error instanceof Error ? error.message : '请核对填写内容'); }
   }}>
@@ -98,9 +105,15 @@ export default function FinanceForm({ view, action, busy, onPreview, onCancel, o
         <Text name="issuer" label="原书证开票方全称"/><Text name="recipient" label="原书证受票方全称"/>
         <Amount name="grossCents" label="原书证可开的含税金额"/>
         <Time name="occurredAt" label="原书证载明的实际确认时间"/>
+        <label className="grid gap-1">书证分行核对时填写原件行号
+          <input name="documentRow" type="number" min="1" step="1" className={field}/>
+        </label>
         <fieldset className="space-y-1 sm:col-span-2"><legend>原书证覆盖的实际订单行</legend>
-          {view.originalInvoiceLines.map(line => <label key={line.id} className="flex items-center gap-2">
-            <input name="invoiceLineIds" type="checkbox" value={line.id}/>{line.name} · {line.quantity} 件
+          {openLines.map(line => <label key={line.id} className="flex items-center gap-2">
+            {line.unverifiedQuantity === 1
+              ? <><input name={'invoiceQuantity:' + line.id} type="checkbox" value="1"/>{line.name} · 1 件</>
+              : <>{line.name} · 可核实 {line.unverifiedQuantity} 件
+                <input name={'invoiceQuantity:' + line.id} type="number" min="0" max={line.unverifiedQuantity} step="1" className={field}/></>}
           </label>)}
         </fieldset>
       </>}
@@ -128,8 +141,13 @@ export default function FinanceForm({ view, action, busy, onPreview, onCancel, o
           {customerCanPlan && <option value="customer">Libereal 给客户开票</option>}
           {view.purchases.some(row => row.agreedCents !== null) && <option value="supplier">向供应商收票</option>}</select></label>
         {side === 'supplier' && poSelect}
-        <Text key={side + poId} name="issuer" label="约定开票方全称" initial={side === 'supplier' ? po?.supplier ?? '' : view.customerInvoiceScope?.issuer}/>
-        <Text key={'recipient-' + side} name="recipient" label="约定受票方全称" initial={side === 'customer' ? view.customerInvoiceScope?.recipient : undefined}/>
+        {side === 'customer' && scopes.length > 0 && <label className="grid gap-1">本次开票对应的已核书证
+          <select name="invoiceScopeId" value={scopeId} onChange={e => setScopeId(e.target.value)} className={field} required>
+            {scopes.map(row => <option key={row.id} value={row.id}>{row.reference}{row.documentRow && ' · 第 ' + row.documentRow + ' 行'}
+              {' · ' + row.lines.map(line => line.name + ' ' + line.quantity + ' 件').join('、') + ' · ' + money(row.grossCents)}</option>)}
+          </select></label>}
+        <Text key={side + poId + scopeId} name="issuer" label="约定开票方全称" initial={side === 'supplier' ? po?.supplier ?? '' : selectedScope?.issuer}/>
+        <Text key={'recipient-' + side + scopeId} name="recipient" label="约定受票方全称" initial={side === 'customer' ? selectedScope?.recipient : undefined}/>
         <Amount name="grossCents" label="本项安排含税金额"/>
         <label className="grid gap-1">约定开票节点<select name="trigger" required className={field} defaultValue="">
           <option value="" disabled>选择书面约定</option>{Object.entries(triggerLabels).filter(([key]) => side === 'customer' || !['dispatched', 'delivered'].includes(key))

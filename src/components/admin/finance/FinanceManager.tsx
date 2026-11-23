@@ -83,10 +83,11 @@ export default function FinanceManager({ initialOrder }: { initialOrder: string 
       if (!view.receivable.termStartedAt && !view.receivable.dueAt) actions.push('restore_term');
       actions.push('set_term');
     }
-    const invoiceScopeMissing = view.acceptanceId && !view.archived && !['closed', 'cancelled'].includes(view.status)
-      && view.principalCents <= 0 && !view.customerInvoiceScope;
-    if (invoiceScopeMissing) actions.push('verify_customer_invoice_scope');
-    if (view.acceptanceId && !invoiceScopeMissing && !['closed', 'cancelled'].includes(view.status)
+    const canArrangeCustomerInvoice = view.acceptanceId && !view.archived && !['closed', 'cancelled'].includes(view.status);
+    if (canArrangeCustomerInvoice && view.principalCents <= 0 && view.originalInvoiceLines?.some(row => row.unverifiedQuantity > 0)) {
+      actions.push('verify_customer_invoice_scope');
+    }
+    if (canArrangeCustomerInvoice && (view.principalCents > 0 || view.customerInvoiceScopes?.length)
       || view.purchases.some(row => row.agreedCents !== null)) actions.push('create_plan');
     const active = view.invoicePlans.filter(row => !row.closed);
     if (view.invoicePlans.some(row => row.recordable)) actions.push('record_invoice');
@@ -132,8 +133,11 @@ export default function FinanceManager({ initialOrder }: { initialOrder: string 
       {view.receivable && <p>账期 {view.receivable.terms} 天 · 起算 {dateLabel(view.receivable.termStartedAt)} · 到期 {dateLabel(view.receivable.dueAt)}</p>}
       {view.receivable?.needsPrincipalReview && <p>保留原应收余额。订单面额待财务核对后再核销。</p>}
       {view.postingPrincipal?.reviewId && <p>原应收金额已核对 {money(view.postingPrincipal.cents)} · 核对记录 {view.postingPrincipal.reviewId}</p>}
-      {view.customerInvoiceScope && <p>历史客户可开票范围 {money(view.customerInvoiceScope.grossCents)} · {view.customerInvoiceScope.issuer} 开给 {view.customerInvoiceScope.recipient}
-        {' · 原书证 ' + view.customerInvoiceScope.reference}</p>}
+      {view.customerInvoiceScopes?.map(scope => <div key={scope.id}>
+        <p>历史客户可开票范围 {money(scope.grossCents)} · {scope.issuer} 开给 {scope.recipient} · 原书证 {scope.reference}
+          {scope.documentRow && ' · 第 ' + scope.documentRow + ' 行'}</p>
+        <p>{scope.lines.map(line => line.name + ' ' + line.quantity + ' 件').join('、')}</p>
+      </div>)}
       {view.receivable?.needsTermReview && <p>旧账期的起算日期与平台接单日期不同，请核对本单书面约定。</p>}
       <p>平台接单 {dateLabel(view.acceptedAt)} · 客户已签收 {dateLabel(view.shipmentDates.delivered)}</p>
       {view.authorityConflict && <p role="alert">到账来源有重叠，须由财务核对原件。</p>}
@@ -154,7 +158,8 @@ export default function FinanceManager({ initialOrder }: { initialOrder: string 
         <p>收款方 {po.payees.join('、')} · 原采购 {money(po.originalCents)} · 已登记付款 {money(po.paidCents)} · 余款 {money(po.dueCents ?? undefined)}</p>
         <p>有效来票 {money(po.invoicedCents)} · 更正中 {money(po.underCorrectionCents)} · 待收票 {money(po.pendingInvoiceCents ?? undefined)} · {po.reconciled ? '已记录本版对账结果' : '待对账'}</p>
         {po.supplierFollowup && <p>供方差异待跟进 · 经办人 {po.supplierFollowup.actorId} · {String(po.supplierFollowup.reference)}</p>}
-        {po.paymentExceptions.filter(row => row.pending).map(row => <p key={row.id}>付款待核对 {money(row.original.amountCents)}
+        {po.paymentExceptions.filter(row => row.pending || row.awaitingTarget).map(row => <p key={row.id}>
+          {row.awaitingTarget ? '原付款待确定目标采购单' : '付款待核对'} {money(row.original.amountCents)}
           {' · 原流水 ' + row.original.paymentEvidence.bankTrace + ' · 负责人 ' + row.ownerId} · {row.followup?.operation.description ?? row.original.description}</p>)}
         {po.paymentCorrections.map(row => <p key={row.id}>已记实付等额归属更正 {money(row.operation.amountCents)}
           {' · 原采购单 ' + row.operation.source.purchaseOrderId + ' · 目标采购单 ' + row.targetPurchaseOrderId + ' · 原流水 ' + row.operation.paymentEvidence.bankTrace}</p>)}
@@ -167,6 +172,7 @@ export default function FinanceManager({ initialOrder }: { initialOrder: string 
         <p>{plan.issuer} 开给 {plan.recipient} · 原安排 {money(plan.grossCents)} · 已占用 {money(plan.usedCents)}
           {' · 尚可办理 ' + money(plan.remainingCents)} · {triggerLabels[plan.trigger]}</p>
         {plan.effectiveAt && <p>约定生效 {dateLabel(plan.effectiveAt)}</p>}
+        {plan.invoiceScopeId && <p>对应原书证 {view.customerInvoiceScopes.find(row => row.id === plan.invoiceScopeId)?.reference ?? '待核实'}</p>}
         {plan.amendedFromPlanId && plan.effectiveAllocationCents !== plan.grossCents && <p>结合原安排的实际票面，本版可用的总额度 {money(plan.effectiveAllocationCents)}</p>}
         <p>经办人 {plan.ownerId}</p>
         {!plan.closed && plan.remainingCents > 0 && plan.lastFollowup && <p>下次追票 {dateLabel(String(plan.lastFollowup.operation.nextReviewAt))}

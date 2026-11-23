@@ -35,6 +35,7 @@ export default function FinancePreview({ preview, busy, onConfirm, onBack }: {
     {op.action === 'verify_receivable_principal' && <p>原应收 {op.receivableId} · 原书证金额 {money(op.amountCents)} · 订单面额 {money(op.orderFaceCents)}</p>}
     {op.action === 'verify_customer_invoice_scope' && <>
       <p>{op.issuer} 开给 {op.recipient} · 书证可开含税金额 {money(op.grossCents)} · 原接单记录 {op.acceptanceId}</p>
+      {op.documentRow && <p>本次核对原件第 {op.documentRow} 行</p>}
       <ul>{op.lines.map(line => <li key={line.id}>{line.name} · {line.quantity} 件</li>)}</ul>
     </>}
     {(op.action === 'restore_term' || op.action === 'set_term') && <p>原到期 {dateLabel(op.before.dueAt)} · 起算 {dateLabel(op.startedAt)} · {op.days} 天 · 到期 {dateLabel(op.dueAt)}</p>}
