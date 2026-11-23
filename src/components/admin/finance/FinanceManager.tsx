@@ -144,7 +144,9 @@ export default function FinanceManager({ initialOrder }: { initialOrder: string 
             {scope.documentRow && ' · 第 ' + scope.documentRow + ' 行'}
             {scope.occurredAt && ' · 生效 ' + dateLabel(scope.occurredAt)}</p>
           <p>{scope.lines.map(line => line.name + ' ' + line.quantity + ' 件').join('、')}</p>
-          {scope.remainingCents != null && scope.remainingCents > 0 && <p>这份书证尚可安排 {money(scope.remainingCents)}</p>}
+          {scope.remainingCents != null && scope.remainingCents > 0 && <p>
+            {scope.change?.mode === 'increase' ? '本份增额尚可安排' : '累计范围共享额度尚可安排'} {money(scope.remainingCents)}
+          </p>}
           {amounts && <>
             <p>累计可开 {money(amounts.authorizedCents ?? undefined)} · 已开及更正中 {money(amounts.issuedCents)}
               {' · 尚可安排 ' + money(amounts.availableCents ?? undefined)}</p>

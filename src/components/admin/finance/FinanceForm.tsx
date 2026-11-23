@@ -200,7 +200,7 @@ export default function FinanceForm({ view, action, busy, onPreview, onCancel, o
           <select name="invoiceScopeId" value={scopeId} onChange={e => setScopeId(e.target.value)} className={field} required>
             {availableScopes.map(row => <option key={row.id} value={row.id}>{row.reference}{row.documentRow && ' · 第 ' + row.documentRow + ' 行'}
               {' · 生效 ' + dateLabel(row.occurredAt) + ' · ' + row.lines.map(line => line.name + ' ' + line.quantity + ' 件').join('、')
-                + ' · 可安排 ' + money(row.remainingCents ?? undefined)}</option>)}
+                + (row.change?.mode === 'increase' ? ' · 本份增额可安排 ' : ' · 共享额度可安排 ') + money(row.remainingCents ?? undefined)}</option>)}
           </select></label>}
         <Text key={side + poId + scopeId} name="issuer" label="约定开票方全称" initial={side === 'supplier' ? po?.supplier ?? '' : selectedScope?.issuer}/>
         <Text key={'recipient-' + side + scopeId} name="recipient" label="约定受票方全称" initial={side === 'customer' ? selectedScope?.recipient : undefined}/>
