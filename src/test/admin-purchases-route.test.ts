@@ -1795,6 +1795,112 @@ describe('admin purchase endpoint', () => {
       expect(await prisma.financeEvent.count({ where: { orderId: lateOrder } })).toBe(2);
     });
 
+    async function coveredFutureAmendment(transferCents: number) {
+      const id = 'legacy-reviewed-office-before-new-terms';
+      const items = [id + '-A', id + '-B'];
+      await acceptLegacyInvoiceOrder(id, items);
+      const parties = { issuer: 'Office seller', recipient: 'Office buyer' };
+      const verify = async (data: object) => (await finish(await financePreview('verify_customer_invoice_scope', { ...parties, ...data }, id))).eventId;
+      const now = Date.now();
+      const actual = (days: number, hours = 0) => new Date(now - days * 86400000 + hours * 3600000).toISOString();
+      const base = await verify({ ...paper('original-60-for-A-and-B'), grossCents: 6000, invoiceLineIds: items, occurredAt: actual(3) });
+      const scope = await verify({ ...paper('current-100-whole-scope'), invoiceScopeBasisId: base, restateInvoiceCeiling: true,
+        grossCents: 10000, occurredAt: actual(1) });
+      const arrange = { ...parties, side: 'customer', trigger: 'accepted', description: '按原书证可证实的范围安排。' };
+      const old = (await record('create_plan', { ...arrange, invoiceScopeId: base, grossCents: 5000 }, id)).invoicePlans[0];
+      const invoice = (planId: string, number: string, amountCents: number, issuedAt: string) =>
+        ({ ...parties, ...paper(number), number, planId, grossCents: amountCents, amountCents, issuedAt });
+      await record('record_invoice', invoice(old.id, 'OFFICE-ORIGINAL-50', 5000, actual(3, 1)), id);
+      const before = await record('create_plan', { ...arrange, invoiceScopeId: scope, grossCents: 5000 }, id);
+      const original = before.invoicePlans[1];
+      const specific = await verify({ ...paper('independent-40-only-for-B'), invoiceScopeBasisId: base, grossCents: 4000,
+        invoiceLines: [{ orderItemId: items[1], quantity: 1 }], occurredAt: actual(2) });
+      const portions = [{ invoiceScopeId: scope, amountCents: 1000, lines: [{ orderItemId: items[0], quantity: 1 }] },
+        { invoiceScopeId: specific, amountCents: 4000, lines: [{ orderItemId: items[1], quantity: 1 }] }];
+      const check = await record('verify_invoice_coverage', { ...paper('confirmed-real-amount-of-each-covered-item'), planId: original.id, portions }, id);
+      expect(check.invoicePlans[1].coverageReview.remaining).toMatchObject(portions);
+      const occurredAt = new Date().toISOString();
+      const effectiveAt = new Date(Date.now() + 7 * 86400000).toISOString();
+      const change = await record('amend_plan', { ...paper('signed-change-effective-next-week'), planId: original.id,
+        amountCents: transferCents, occurredAt, effectiveAt, trigger: 'accepted' }, id);
+      return { id, originalId: original.id as string, replacementId: change.invoicePlans.find((row: { amendedFromPlanId: string }) =>
+        row.amendedFromPlanId === original.id).id as string, effectiveAt, beforeEffective: new Date().toISOString(), portions, invoice };
+    }
+
+    it.each([[5000, false], [4000, false], [5000, true], [4000, true]] as const)(
+      'uses the reviewed original invoice scope before a %i future change (late filing: %s)', async (amount, late) => {
+        const { id, originalId, replacementId, effectiveAt, beforeEffective, portions, invoice } = await coveredFutureAmendment(amount);
+        if (late) vi.setSystemTime(Date.parse(effectiveAt) + 3600000);
+        const workspace = (await expectJson(await financeRead(id), 200)).workspace;
+        const bill = { ...invoice(originalId, 'OFFICE-BEFORE-TERMS-CHANGE', 5000, beforeEffective), portions };
+        const review = { ...paper('recheck-the-goods-in-the-original-date'), planId: originalId, portions,
+          coverageAt: late ? beforeEffective : undefined };
+        const answer = async (action: string, data: object) => {
+          const input = { orderId: id, action, requestId: randomUUID(), version: workspace.version, data };
+          const response = await financePost({ ...input, stage: 'preview' });
+          return { input, status: response.status, body: await response.json() };
+        };
+        const invoiceResult = await answer('record_invoice', bill);
+        const reviewResult = await answer('verify_invoice_coverage', review);
+        expect([invoiceResult.status, reviewResult.status], JSON.stringify([invoiceResult.body.error, reviewResult.body.error])).toEqual([200, 200]);
+        expect(reviewResult.body.preview.snapshot.operation.amountCents).toBe(5000);
+        await finish({ input: reviewResult.input, preview: reviewResult.body.preview });
+        const saved = await record('record_invoice', bill, id);
+        expect(saved.invoicePlans.find((row: { id: string }) => row.id === originalId)).toMatchObject({ usedCents: 5000, scheduledRemainingCents: 0 });
+        expect(saved.invoicePlans.find((row: { id: string }) => row.id === replacementId)).toMatchObject({ effectiveAllocationCents: 0 });
+        vi.setSystemTime(Date.parse(effectiveAt) + 7200000);
+        const current = (await expectJson(await financeRead(id), 200)).workspace;
+        for (const target of [originalId, replacementId]) await expectJson(await financePost({
+          orderId: id, action: 'record_invoice', requestId: randomUUID(), version: current.version, stage: 'preview',
+          data: invoice(target, 'OFFICE-CANNOT-ISSUE-AGAIN', 1, new Date().toISOString()),
+        }), 409);
+      },
+    );
+
+    it('keeps the later issued invoice and uses only the actual shared amount left for a late original invoice', async () => {
+      const { id, originalId, replacementId, effectiveAt, beforeEffective, portions, invoice } = await coveredFutureAmendment(5000);
+      const preChange = (await expectJson(await financeRead(id), 200)).workspace;
+      const originalReview = preChange.invoicePlans.find((row: { id: string }) => row.id === originalId).coverageReview.id;
+      vi.setSystemTime(Date.parse(effectiveAt) + 3600000);
+      await record('verify_invoice_coverage', { ...paper('goods-under-the-newly-effective-terms'), planId: replacementId, portions }, id);
+      const laterInvoice = { ...invoice(replacementId, 'OFFICE-LATER-INVOICE-30', 3000, new Date().toISOString()),
+        portions: [{ ...portions[1], amountCents: 3000 }] };
+      const later = await record('record_invoice', laterInvoice, id);
+      const occupied = { ...invoice(originalId, 'OFFICE-OVERLAPPING-LATE-21', 2100, beforeEffective),
+        portions: [portions[0], { ...portions[1], amountCents: 1100 }] };
+      await expectJson(await financePost({ orderId: id, action: 'record_invoice', requestId: randomUUID(), version: later.version,
+        stage: 'preview', data: occupied }), 409);
+      const actual = { ...invoice(originalId, 'OFFICE-ACTUAL-LATE-20', 2000, beforeEffective),
+        portions: [portions[0], { ...portions[1], amountCents: 1000 }] };
+      const previewed = await financePreview('record_invoice', actual, id);
+      expect(previewed.preview.snapshot.operation).toMatchObject({ reviewedReservationId: originalReview,
+        adjustedPlans: [{ planId: replacementId, previousCents: 5000, effectiveCents: 3000 }] });
+      const posted = await finish(previewed);
+      expect((await finish(previewed)).eventId).toBe(posted.eventId);
+      expect(posted.workspace.invoicePlans).toEqual(expect.arrayContaining([
+        expect.objectContaining({ id: originalId, usedCents: 2000, remainingCents: 0 }),
+        expect.objectContaining({ id: replacementId, usedCents: 3000, remainingCents: 0, effectiveAllocationCents: 3000,
+          allocations: [expect.objectContaining({ number: laterInvoice.number, issuedAt: laterInvoice.issuedAt, amountCents: 3000 })] }),
+      ]));
+      expect(await prisma.financeInvoice.count({ where: { number: actual.number } })).toBe(1);
+    });
+
+    it('preserves the original dated review when the retained amount is reviewed again after a partial change', async () => {
+      const { id, originalId, replacementId, effectiveAt, beforeEffective, portions, invoice } = await coveredFutureAmendment(4000);
+      const initial = (await expectJson(await financeRead(id), 200)).workspace;
+      const first = initial.invoicePlans.find((row: { id: string }) => row.id === originalId).coverageReview.id;
+      vi.setSystemTime(Date.parse(effectiveAt) + 3600000);
+      await record('verify_invoice_coverage', { ...paper('new-terms-for-the-B-portion'), planId: replacementId, portions: [portions[1]] }, id);
+      const retained = await record('verify_invoice_coverage', { ...paper('retained-part-A'), planId: originalId, portions: [portions[0]] }, id);
+      const current = retained.invoicePlans.find((row: { id: string }) => row.id === originalId).coverageReview;
+      expect(current.id).not.toBe(first);
+      expect(current.remaining).toMatchObject([portions[0]]);
+      const old = await financePreview('record_invoice', invoice(originalId, 'OFFICE-BEFORE-THE-PARTIAL-CHANGE', 5000, beforeEffective), id);
+      expect(old.preview.snapshot.operation).toMatchObject({ reviewedReservationId: first, portions });
+      const active = await financePreview('record_invoice', invoice(originalId, 'OFFICE-CURRENT-RETAINED-PART', 1000, new Date().toISOString()), id);
+      expect(active.preview.snapshot.operation).toMatchObject({ reviewedReservationId: current.id, portions: [portions[0]] });
+    });
+
     it.each(['customer', 'supplier'] as const)('uses an old %s invoice arrangement before a written future change and for late reporting', async side => {
       if (side === 'supplier') await startActualSupply(orderId, 'office-future-supplier-invoice');
       const purchase = side === 'supplier' ? await currentPurchase() : null;

@@ -277,4 +277,37 @@ describe('admin finance workspace', () => {
       portions: [{ invoiceScopeId: original.id, amountCents: 1000, lines: [{ orderItemId: a.id, quantity: 1 }] },
         { invoiceScopeId: specific.id, amountCents: 4000, lines: [{ orderItemId: b.id, quantity: 1 }] }] } });
   });
+
+  it('lets finance select the terms in effect on the date of a late invoice or arrangement review', async () => {
+    const item = { id: 'office-label', name: '合成标签', quantity: 1 };
+    const scope = { id: 'original-scope', familyId: 'original-scope', reference: '标签原书证',
+      lines: [item], occurredAt: '2026-01-01T00:00:00.000Z' };
+    const effectiveAt = '2026-01-15T00:00:00.000Z';
+    const portions = [{ invoiceScopeId: scope.id, amountCents: 5000, lines: [{ orderItemId: item.id, quantity: 1 }] }];
+    const review = { id: 'reviewed-old-terms', remaining: portions };
+    const plan = { id: 'original-arrangement', reference: '改约前安排', side: 'customer', issuer: '合成商家', recipient: '合成客户',
+      invoiceScopeId: scope.id, grossCents: 5000, scheduledRemainingCents: 0, usedCents: 0, remainingCents: 0, recordable: true,
+      allocations: [], coverageReview: { ...review, remaining: null }, coveragePeriods: [
+        { key: 'before', from: null, until: effectiveAt, remainingCents: 5000, review },
+        { key: 'after', from: effectiveAt, until: null, remainingCents: 0, review: null },
+      ] };
+    const workspace = { orderId: 'office-with-previous-terms', version: 'dated-invoice-view', status: 'confirmed', principalCents: 0,
+      settlementCents: 0, shipmentDates: {}, banks: [], receipts: [], cash: [], purchases: [], invoicePlans: [plan], events: [], latePayments: [],
+      customerInvoiceScopes: [scope], customerInvoiceFamilies: [{ id: scope.id, timeline: [{ at: scope.occurredAt, confirmedEvidenceIds: [scope.id] }],
+        invoiceConflicts: [] }] };
+    vi.stubGlobal('fetch', vi.fn(async () => Response.json({ canWrite: true, workspace })));
+    render(<FinanceManager initialOrder={workspace.orderId}/>);
+    fireEvent.click(await screen.findByRole('button', { name: '核对原票或安排的商品归属' }));
+    fireEvent.change(screen.getByLabelText('所核对的原安排时间（留空按当前）'), { target: { value: '2026-01-06T12:00' } });
+    expect(screen.getByRole('option', { name: '原安排未开金额' })).toBeInTheDocument();
+    expect(screen.getByText(/金额合计须等于 ¥50.00/)).toBeInTheDocument();
+    expect(screen.getByRole('group', { name: /标签原书证/ })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '收起' }));
+    fireEvent.click(screen.getByRole('button', { name: '回填实际发票' }));
+    fireEvent.change(screen.getByLabelText('票面开票时间'), { target: { value: '2026-01-20T12:00' } });
+    expect(screen.queryByRole('group', { name: /标签原书证/ })).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('票面开票时间'), { target: { value: '2026-01-06T12:00' } });
+    expect(within(screen.getByRole('group', { name: /标签原书证/ })).getByLabelText('归入本书证的金额（元）')).toHaveAttribute('max', '50');
+  });
+
 });
