@@ -1028,6 +1028,67 @@ describe('admin purchase endpoint', () => {
       },
     );
 
+    it.each([
+      ['issued', false], ['arranged', false], ['issued', true], ['arranged', true],
+    ] as const)('keeps the %s invoice tied to its cumulative proof when the equivalent paper is received early: %s', async (state, earlierFirst) => {
+      const id = 'office-same-cumulative-ceiling';
+      const lines = [id + '-A', id + '-B'];
+      const now = Date.now();
+      const actual = (before: number, hours = 0) => new Date(now - before * 86400000 + hours * 3600000).toISOString();
+      await acceptLegacyInvoiceOrder(id, lines);
+      const parties = { issuer: 'Office archival seller', recipient: 'Office archival buyer' };
+      const verify = async (data: object) => (await finish(await financePreview('verify_customer_invoice_scope', { ...parties, ...data }, id))).eventId;
+      const original = await verify({ ...paper('original-office-60'), invoiceLineIds: lines, grossCents: 6000, occurredAt: actual(5) });
+      const arrangement = { ...parties, side: 'customer', trigger: 'accepted', description: '按原件真实日期及适用范围办理。' };
+      const planFor = async (invoiceScopeId: string, grossCents: number) => {
+        const view = await record('create_plan', { ...arrangement, invoiceScopeId, grossCents }, id);
+        return view.invoicePlans.find((row: { invoiceScopeId: string }) => row.invoiceScopeId === invoiceScopeId).id as string;
+      };
+      async function book(planId: string, label: string, amountCents: number, issuedAt: string) {
+        return record('record_invoice', { ...parties, ...paper(label), planId, number: label, issuedAt,
+          grossCents: amountCents, amountCents }, id);
+      }
+      await book(await planFor(original, 6000), 'OFFICE-ORIGINAL-60', 6000, actual(5, 1));
+      const basis = { invoiceScopeBasisId: original, restateInvoiceCeiling: true };
+      const earlierProof = { ...basis, ...paper('equivalent-earlier-cumulative-100'), grossCents: 10000, occurredAt: actual(4) };
+      const earlier = earlierFirst ? await verify(earlierProof) : null;
+      const later = await verify({ ...basis, ...paper('original-later-cumulative-100'), grossCents: 10000, occurredAt: actual(3) });
+      const planId = await planFor(later, 4000);
+      const invoiceAt = actual(3, 1);
+      if (state === 'issued') await book(planId, 'OFFICE-REMAINING-40', 4000, invoiceAt);
+      const retainedEarlier = earlier ?? await verify(earlierProof);
+      const existing = (await expectJson(await financeRead(id), 200)).workspace;
+      expect(existing.customerInvoiceFamilies[0]).toMatchObject({ authorizedCents: 10000, plannedCents: 10000,
+        availableCents: 0, invoiceConflicts: [], timeline: [{ authorizedCents: 6000 }, { authorizedCents: 10000 }, { authorizedCents: 10000 }] });
+      expect(existing.invoicePlans.find((row: { id: string }) => row.id === planId)).toMatchObject({
+        invoiceScopeId: later, usedCents: state === 'issued' ? 4000 : 0, scheduledRemainingCents: state === 'issued' ? 0 : 4000,
+      });
+      if (state === 'arranged') await book(planId, 'OFFICE-REMAINING-40', 4000, invoiceAt);
+      if (state === 'issued' && !earlierFirst) {
+        const limited = await verify({ ...basis, ...paper('same-time-narrower-80-paper'), grossCents: 8000, occurredAt: actual(3) });
+        await verify({ ...basis, ...paper('signed-clarification-confirms-the-shared-100-and-the-prior-limited-paper'),
+          grossCents: 10000, occurredAt: actual(2), clarifiesInvoiceEvidenceAt: actual(3), confirmedInvoiceEvidenceIds: [limited, later] });
+        const confirmed = (await expectJson(await financeRead(id), 200)).workspace;
+        expect(confirmed.customerInvoiceScopes.find((row: { id: string }) => row.id === limited))
+          .toMatchObject({ authorizedCents: 8000, remainingCents: 0 });
+        expect(confirmed.customerInvoiceFamilies[0].invoiceConflicts).toEqual([]);
+      }
+      const itemOnly = await verify({ invoiceScopeBasisId: original, ...paper('late-B-only-20'), grossCents: 2000, occurredAt: actual(2),
+        invoiceLines: [{ orderItemId: lines[1], quantity: 1 }] });
+      const total = await verify({ ...basis, ...paper('whole-cumulative-120-includes-the-20-currently-reserved-to-B'),
+        grossCents: 12000, occurredAt: actual(1) });
+      const withB = (await expectJson(await financeRead(id), 200)).workspace;
+      expect(withB.customerInvoiceFamilies[0]).toMatchObject({ authorizedCents: 12000, issuedCents: 10000, availableCents: 2000, invoiceConflicts: [] });
+      for (const invoiceScopeId of [original, retainedEarlier, later, total]) {
+        await expectJson(await financePost({ orderId: id, version: withB.version, requestId: randomUUID(), action: 'create_plan',
+          stage: 'preview', data: { ...arrangement, invoiceScopeId, grossCents: 1 } }), 409);
+      }
+      const done = await book(await planFor(itemOnly, 2000), 'OFFICE-SEPARATE-B-20', 2000, actual(2, 1));
+      expect(done.invoicePlans).toMatchObject([{ invoiceScopeId: original, usedCents: 6000 },
+        { invoiceScopeId: later, usedCents: 4000 }, { invoiceScopeId: itemOnly, usedCents: 2000 }]);
+      expect(done.customerInvoiceFamilies[0]).toMatchObject({ authorizedCents: 12000, issuedCents: 12000, availableCents: 0, invoiceConflicts: [] });
+    });
+
     it.each([false, true])('uses the effective cumulative proof after an earlier addition is excluded (multiple lines: %s)', async multiple => {
       const id = 'office-cumulative-proof-after-clarification';
       const lines = multiple ? [id + '-A', id + '-B'] : [id + '-A'];
@@ -1064,12 +1125,12 @@ describe('admin purchase endpoint', () => {
       expect(clarified.customerInvoiceFamilies[0]).toMatchObject({ authorizedCents: 10000, issuedCents: 6000, availableCents: 4000,
         invoiceConflicts: [], timeline: [{ authorizedCents: 6000 }, { authorizedCents: 6000 }, { authorizedCents: 10000 }] });
       expect(clarified.customerInvoiceScopes.find((row: { id: string }) => row.id === effective))
-        .toMatchObject({ grossCents: 0, authorizedCents: 4000, remainingCents: 4000 });
+        .toMatchObject({ grossCents: 0, authorizedCents: 10000, remainingCents: 4000 });
       const remaining = { ...plan, reference: undefined, sha256: undefined, invoiceScopeId: effective, grossCents: 4000 };
       const proposed = await financePreview('create_plan', remaining, id);
       expect(proposed.preview.snapshot.operation).toMatchObject({ reference: cumulative.reference, sha256: cumulative.sha256 });
       expect(proposed.preview.snapshot.operation.invoiceEvidence).toMatchObject({ id: effective, occurredAt: actual(3),
-        reference: cumulative.reference, authorizedCents: 4000, remainingCents: 4000, lines: lines.map(id => ({ id, quantity: 1 })) });
+        reference: cumulative.reference, authorizedCents: 10000, remainingCents: 4000, lines: lines.map(id => ({ id, quantity: 1 })) });
       for (const data of [{ ...remaining, invoiceScopeId: addition }, { ...remaining, grossCents: 4001 }]) {
         await expectJson(await financePost({ ...proposed.input, requestId: randomUUID(), stage: 'preview', data }), 409);
       }

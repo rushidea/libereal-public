@@ -171,7 +171,7 @@ describe('admin finance workspace', () => {
     if (!pending) expect(panel).not.toHaveTextContent('合成文件夹');
   });
 
-  it('offers the existing cumulative document by its verified date, goods, and current remaining amount', async () => {
+  it('offers equivalent cumulative documents with one shared balance and keeps the selected original', async () => {
     const orderId = 'legacy-cumulative-office-authority';
     const base = 'office-original-60';
     const current = 'office-third-day-cumulative-100';
@@ -179,14 +179,15 @@ describe('admin finance workspace', () => {
       { id: 'office-B', name: '合成标签', quantity: 1, unverifiedQuantity: 0 }];
     const parties = { issuer: '合成售方', recipient: '合成客户' };
     const scope = { id: current, familyId: base, change: { mode: 'restate', amountCents: 10000 }, reference: '第三日累计100的原件',
-      occurredAt: '2026-01-03T08:00:00.000Z', grossCents: 0, authorizedCents: 4000, remainingCents: 4000, lines, ...parties };
+      occurredAt: '2026-01-03T08:00:00.000Z', grossCents: 0, authorizedCents: 10000, remainingCents: 4000, sharesCumulativeLimit: true, lines, ...parties };
+    const earlier = { ...scope, id: 'office-second-day-same-ceiling', reference: '第二日累计100的原件', occurredAt: '2026-01-02T08:00:00.000Z' };
     const workspace = { orderId, version: 'office-recomputed-ceiling-version', status: 'confirmed', customerEmail: 'office@example.test', principalCents: 0,
       settlementCents: 0, verifiedCents: 0, acceptanceId: 'original-order-acceptance', shipmentDates: { dispatched: null, delivered: null },
       banks: [], receipts: [], cash: [], purchases: [], invoicePlans: [], events: [], latePayments: [],
       originalInvoiceLines: lines, customerInvoiceScopes: [
         { ...scope, change: null, id: base, grossCents: 6000, remainingCents: 0, reference: '第一日已开60的原件' },
         { ...scope, id: 'excluded-old-addition', authorizedCents: null, remainingCents: null, reference: '被澄清排除的旧增额原件' },
-        scope,
+        scope, earlier,
       ],
       customerInvoiceFamilies: [{ id: base, authorizedCents: 10000, issuedCents: 6000, plannedCents: 6000, availableCents: 4000 }] };
     const fetchFinance = vi.fn(async (_input: string, options?: RequestInit) => {
@@ -200,9 +201,10 @@ describe('admin finance workspace', () => {
     fireEvent.click(await screen.findByRole('button', { name: '登记开票或收票安排' }));
     const selection = screen.getByRole('combobox', { name: '本次开票对应的已核书证' });
     expect(selection).toHaveValue(current);
-    const [option] = within(selection).getAllByRole('option');
-    expect(option).toHaveTextContent(/第三日累计100的原件.*生效.*合成文件夹 1 件、合成标签 1 件.*可安排 ¥40.00/);
-    expect(within(selection).getAllByRole('option')).toHaveLength(1);
+    const options = within(selection).getAllByRole('option');
+    expect(options).toHaveLength(2);
+    expect(options[0]).toHaveTextContent(/第三日累计100的原件.*生效.*合成文件夹 1 件、合成标签 1 件.*共享额度可安排 ¥40.00/);
+    expect(options[1]).toHaveTextContent(/第二日累计100的原件.*生效.*共享额度可安排 ¥40.00/);
     expect(screen.getByText('沿用已核书证 第三日累计100的原件')).toBeInTheDocument();
     expect(screen.queryByLabelText('原件 SHA-256 摘要')).not.toBeInTheDocument();
     for (const [label, value] of [
@@ -211,7 +213,7 @@ describe('admin finance workspace', () => {
     ]) fireEvent.change(screen.getByLabelText(label), { target: { value } });
     fireEvent.click(screen.getByRole('button', { name: '查看完整预览' }));
     const panel = await screen.findByRole('region', { name: '票款操作预览' });
-    expect(panel).toHaveTextContent(/原书证 第三日累计100的原件.*生效.*可安排 ¥40.00/);
+    expect(panel).toHaveTextContent(/原书证 第三日累计100的原件.*生效.*共享额度可安排 ¥40.00/);
     const request = fetchFinance.mock.calls.find(([, options]) => options?.method === 'POST');
     const input = JSON.parse(String(request?.[1]?.body));
     expect(input).toMatchObject({ action: 'create_plan',
