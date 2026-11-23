@@ -16,6 +16,10 @@ export default function FinancePreview({ preview, busy, onConfirm, onBack }: {
     <p>订单 {snapshot.orderId} · 经办人 {snapshot.actor.email}</p>
     {op.action === 'create_plan' && <><p>{op.side === 'customer' ? '客户开票' : '供应商来票'} · {op.issuer} 开给 {op.recipient}</p>
       <p>含税金额 {money(op.grossCents)} · 办理条件 {triggerLabels[op.trigger]} {op.purchaseOrderId && ' · ' + op.purchaseOrderId}</p></>}
+    {op.action === 'amend_plan' && <><p>原安排 {money(op.original.grossCents)} · 已占用 {money(op.original.usedCents)}
+      {' · 原条件剩余 ' + money(op.original.remainingCents - op.amountCents)}</p>
+      <p>本次按新条件办理 {money(op.amountCents)} · {triggerLabels[op.trigger]}</p></>}
+    {op.action === 'close_plan' && <p>本次止用的未开或未收金额 {money(op.stoppedCents)}</p>}
     {op.action === 'record_invoice' && <><p>票号 {op.number} · {op.issuer} 开给 {op.recipient}</p>
       <p>票面 {money(op.grossCents)} · 已分 {money(op.allocatedBeforeCents)} · 本次归入 {money(op.amountCents)}</p>
       <p>开票时间 {dateLabel(op.issuedAt)} · 约定条件达成 {dateLabel(op.readyAt)}</p></>}
@@ -25,6 +29,11 @@ export default function FinancePreview({ preview, busy, onConfirm, onBack }: {
       <p>原额 {money(op.receiptTotalCents)} · 此前已分 {money(op.allocatedBeforeCents)} · 本次 {money(op.amountCents)}</p></>}
     {'accounting' in op && <p>本次核销 {money(op.accounting.amountCents)} · 本单余款 {money(op.accounting.remainingCents)} · 本次释放授信 {money(op.accounting.releaseCents)}</p>}
     {(op.action === 'restore_term' || op.action === 'set_term') && <p>原到期 {dateLabel(op.before.dueAt)} · 起算 {dateLabel(op.startedAt)} · {op.days} 天 · 到期 {dateLabel(op.dueAt)}</p>}
+    {op.action === 'resume_alipay_payment' && <>
+      <p>原支付宝流水 {op.payment.tradeNo} · {money(op.payment.amountCents)} · 平台回执时间 {dateLabel(op.payment.receivedAt)}</p>
+      <p>确认时核对原订单可售库存及付款状态。</p>
+      <ul>{op.payment.lines.map(row => <li key={row.id}>{row.name} · {row.quantity} 件</li>)}</ul>
+    </>}
     {op.action === 'reconcile_supplier' && <><p>采购单 {op.purchase.id} · 供方 {op.purchase.supplier} · 收款方 {op.purchase.payees.join('、')}</p>
       <p>原采购 {money(op.purchase.originalCents)} · 已付 {money(op.purchase.paidCents)} · 余款 {money(op.purchase.dueCents ?? undefined)} · 有效来票 {money(op.purchase.invoicedCents)}</p>
       <ul>{op.purchase.payments.map(row => <li key={row.id}>付款凭据 {row.reference} · {money(row.amountCents)}</li>)}

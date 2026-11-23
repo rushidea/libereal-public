@@ -34,7 +34,7 @@ export default function PurchaseStartReview({ review, permissions, busy, request
   if (review.active && finance) {
     allowed.push('review_customer_terms');
     allowed.push('verify_bank_receipt');
-    if (review.plan && review.outstandingCents > 0 && review.bankReceipts.length > 0) allowed.push('record_customer_receipt');
+    if (review.acceptance && review.plan && review.outstandingCents > 0 && review.bankReceipts.length > 0) allowed.push('record_customer_receipt');
     if (review.creditExceptionRequired) allowed.push('approve_credit_exception');
   }
 
@@ -76,6 +76,7 @@ export default function PurchaseStartReview({ review, permissions, busy, request
     {review.credit && <p className="text-sm">授信应收 {money(review.credit.owedCents)} · 总占用 {money(review.credit.occupiedCents)}
       {' · '}当前可用总额度 {money(review.credit.limitCents)} · 账期 {review.credit.paymentTermDays} 天</p>}
     {review.plan?.balanceTerms && <p className="text-sm">余款条件 {review.plan.balanceTerms}</p>}
+    {!review.acceptance && review.bankReceipts.length > 0 && <p className="text-sm">银行回单已留存，核销前须补齐平台接单依据。</p>}
     {!pending && allowed.length > 0 && <div className="flex flex-wrap gap-2">{allowed.map(item =>
       <button key={item} type="button" className={button} disabled={busy} onClick={() => {
         setAction(item);

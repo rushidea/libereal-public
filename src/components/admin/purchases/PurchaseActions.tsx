@@ -329,6 +329,8 @@ export default function PurchaseActions({ orderId, orderStatus, cancellation, po
   const unlinkedShortfalls=fulfillment.unlinkedDispatchShortfalls.filter(row=>row.purchaseOrderId===po.id);
   const recovery=unlinkedShortfalls.find(row=>row.key===shortfallHandoffKey);
   const waitingForDeliveryDecision=fulfillment.dispatchHolds.some(row=>row.purchaseOrderId===po.id && row.pending>0);
+  const oldPayments = po.payments?.filter(row => row.canReviewTime) ?? [];
+  if (oldPayments.length && permit('pay')) choices.push('review_payment_time');
   if (!waitingForDeliveryDecision && !unlinkedShortfalls.length && ['approved', 'ordered'].includes(po.status) && !po.needsLegacyReview && !po.needsFundingReapproval && (!closed || po.orderedBefore)
     && po.dueCents !== null && Math.min(po.dueCents, po.totalCents - po.paidCents) > 0 && permit('pay')) choices.push('record_payment');
   if (po.lines.length && permit('write')) choices.push('report_change');
@@ -358,7 +360,8 @@ export default function PurchaseActions({ orderId, orderStatus, cancellation, po
         reference: value('reference'), referenceSha256: value('referenceSha256'),
         occurredAt: occurredAt ? new Date(occurredAt).toISOString() : undefined,
         description: value('description'), conditionReference: value('conditionReference'),
-        amountCents: action === 'record_payment' ? cents(String(data.get('amount') ?? '')) : undefined,
+        amountCents: action === 'record_payment' || action === 'review_payment_time' ? cents(String(data.get('amount') ?? '')) : undefined,
+        sourcePaymentId: value('sourcePaymentId'), bankTrace: value('bankTrace'), payee: value('payee'),
         changeKind: action === 'report_change' ? changeKind : undefined, outcome: action === 'resolve_change' ? outcome : undefined,
         incidentId: action === 'resolve_change' || action === 'review_change_scope' ? incidentId : undefined,
         reviewResult: action==='review_change_scope' ? reviewResult : undefined,
@@ -564,10 +567,17 @@ export default function PurchaseActions({ orderId, orderStatus, cancellation, po
         <DocumentDigestField name="referenceSha256" label="超长期书证摘要" required/>
         {inputField('description', '逐单例外批准结论')}
       </>}
-      {action === 'record_payment' && <>
+      {(action === 'record_payment' || action === 'review_payment_time') && <>
+        {action === 'review_payment_time' && <label className="grid gap-1 text-sm">待补核的原付款<select name="sourcePaymentId" className={field} required>
+          {oldPayments.map(row => <option key={row.id} value={row.id}>{row.reference} · {row.payee} · {money(row.amountCents)}</option>)}
+        </select></label>}
         {inputField('amount', '本次实际支付金额（元）')}
-        {inputField('conditionReference', '本次付款条件已满足的依据')}
+        {action === 'record_payment' ? inputField('conditionReference', '本次付款条件已满足的依据') : inputField('description', '原凭证与历史付款的核对结论')}
         {inputField('reference', '实际付款流水或银行凭证编号')}
+        {inputField('bankTrace', '银行付款流水号')}
+        {inputField('payee', '银行凭证所列收款方')}
+        <label className="grid gap-1 text-sm">银行实际付款时间<input name="occurredAt" className={field} type="datetime-local" step="1" required/></label>
+        <DocumentDigestField name="referenceSha256" label="银行付款凭证摘要" required/>
       </>}
       {action === 'report_change' && (recovery ? <fieldset className="space-y-2">
         <legend className="font-medium">接续已核实的误发短失</legend>
@@ -764,7 +774,11 @@ export default function PurchaseActions({ orderId, orderStatus, cancellation, po
         <p>剩余商品应付 {money(op.scope.totalCents)} · 已付款确认抵扣 {money(op.scope.appliedPaidCents)} · 本次核实未付 {money(op.scope.totalCents - op.scope.appliedPaidCents)}</p>
         <p>{op.description}</p>
       </div>}
-      {op.action === 'record_payment' && <p>本次实际付款　<strong>{money(op.amountCents)}</strong> · 收款方 {po.lines[0].terms.payee} · 条件依据 {op.conditionReference}</p>}
+      {op.action === 'record_payment' && <p>本次实际付款　<strong>{money(op.amountCents)}</strong> · 条件依据 {op.conditionReference}</p>}
+      {op.action === 'review_payment_time' && <p>原付款 {op.original.reference} · {money(op.original.amountCents)} · 原登记 {new Date(op.original.recordedAt).toLocaleString('zh-CN')}</p>}
+      {(op.action === 'record_payment' || op.action === 'review_payment_time') && <p>
+        收款方 {op.paymentEvidence.payee} · 银行流水 {op.paymentEvidence.bankTrace} · 实际付款 {new Date(op.paymentEvidence.occurredAt).toLocaleString('zh-CN')}
+      </p>}
       {op.action === 'report_change' && <>
         <p>供货变化　{op.description}</p>
         {'shortfallRecovery' in op && op.shortfallRecovery && <div className="space-y-1">

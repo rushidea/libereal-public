@@ -73,8 +73,9 @@ export default function FinanceManager({ initialOrder }: { initialOrder: string 
 
   const actions: FinanceInput['action'][] = [];
   if (view && canWrite) {
-    if (view.acceptanceId && !['closed','cancelled'].includes(view.status)) actions.push('verify_bank_receipt');
-    if (view.banks.some(row => row.availableCents > 0) && !view.authorityConflict && !view.paidAt && view.principalCents > view.verifiedCents) actions.push('record_customer_receipt');
+    if (!view.archived && !['closed','cancelled'].includes(view.status)) actions.push('verify_bank_receipt');
+    if (view.acceptanceId && view.banks.some(row => row.availableCents > 0) && !view.authorityConflict
+      && !view.paidAt && view.principalCents > view.verifiedCents) actions.push('record_customer_receipt');
     if (view.receipts.some(row => row.counted && !view.cash.some(post => post.bankAllocationId === row.id))
       || view.nativePaymentId && !view.cash.some(post => post.paymentAttemptId === view.nativePaymentId)) actions.push('post_existing');
     if (view.receivable && ['open', 'overdue'].includes(view.receivable.status) && view.acceptanceId) {
@@ -83,16 +84,16 @@ export default function FinanceManager({ initialOrder }: { initialOrder: string 
     }
     if (view.acceptanceId || view.purchases.length) actions.push('create_plan');
     const active = view.invoicePlans.filter(row => !row.closed);
-    if (active.some(row => row.usedCents < row.grossCents)) actions.push('record_invoice');
+    if (active.some(row => row.remainingCents > 0)) actions.push('record_invoice', 'amend_plan', 'close_plan');
     if (active.some(row => row.trigger === 'manual' && !row.manualAt)) actions.push('confirm_condition');
-    if (active.some(row => row.side === 'supplier' && row.usedCents < row.grossCents)) actions.push('chase_invoice');
-    if (active.some(row => !row.usedCents)) actions.push('close_plan');
-    if (active.some(row => row.allocations.some(a => a.status === 'recorded'))) actions.push('open_correction');
-    if (active.some(row => row.allocations.some(a => a.status === 'correction_pending'))) actions.push('resolve_correction');
+    if (active.some(row => row.side === 'supplier' && row.remainingCents > 0)) actions.push('chase_invoice');
+    if (view.invoicePlans.some(row => row.allocations.some(a => a.status === 'recorded'))) actions.push('open_correction');
+    if (view.invoicePlans.some(row => row.allocations.some(a => a.status === 'correction_pending'))) actions.push('resolve_correction');
     if (view.purchases.length) actions.push('reconcile_supplier');
     const cases = [...view.latePayments, ...view.receipts.filter(row => !row.counted && !row.reconciled)];
     if (cases.some(row => !row.review)) actions.push('review_payment_case');
     if (cases.some(row => row.review)) actions.push('update_payment_case');
+    if (view.latePayments.some(row => row.status === 'paid_stock_shortfall_reconciliation_required' && row.tradeNo)) actions.push('resume_alipay_payment');
   }
   return <main className="mx-auto max-w-6xl space-y-5 p-4 text-slate-800 md:p-6">
     <h1 className="text-2xl font-semibold">票款与对账</h1>
@@ -122,6 +123,7 @@ export default function FinanceManager({ initialOrder }: { initialOrder: string 
       <p>已核销或平台确认 {money(view.settlementCents)} · 已核验可归属 {money(view.verifiedCents)}
         {view.receivable && ' · 应收余额 ' + money(view.receivable.outstandingCents)}</p>
       {view.receivable && <p>账期 {view.receivable.terms} 天 · 起算 {dateLabel(view.receivable.termStartedAt)} · 到期 {dateLabel(view.receivable.dueAt)}</p>}
+      {view.receivable?.needsPrincipalReview && <p>保留原应收余额。订单面额待财务核对后再核销。</p>}
       {view.receivable?.needsTermReview && <p>旧账期的起算日期与平台接单日期不同，请核对本单书面约定。</p>}
       <p>平台接单 {dateLabel(view.acceptedAt)} · 客户已签收 {dateLabel(view.shipmentDates.delivered)}</p>
       {view.authorityConflict && <p role="alert">到账来源有重叠，须由财务核对原件。</p>}
@@ -130,6 +132,7 @@ export default function FinanceManager({ initialOrder }: { initialOrder: string 
         <p>平台到账待核对 · {row.outTradeNo} · {money(row.amountCents)}{row.tradeNo && ' · 支付宝流水 ' + row.tradeNo}</p>
         {row.review && <p>跟进负责人 {row.review.ownerId} · {paymentCaseProgressLabels[String(row.review.lastRecord.operation.outcome)] ?? '已领取待核对'}</p>}
       </div>)}
+      {!view.acceptanceId && view.banks.length > 0 && <p>银行回单已留存。核销前请在采购页补齐平台接单依据。</p>}
     </section>
     {view.banks.length > 0 && <section aria-label="客户银行回款" className="space-y-2"><h2 className={heading}>客户银行回款</h2>
       {view.banks.map(bank => <p key={bank.id}>{bank.bankTrace} · {bank.payer} · 到账 {money(bank.totalCents)} · 尚可分配 {money(bank.availableCents)}</p>)}
@@ -140,14 +143,16 @@ export default function FinanceManager({ initialOrder }: { initialOrder: string 
         <p>收款方 {po.payees.join('、')} · 原采购 {money(po.originalCents)} · 已登记付款 {money(po.paidCents)} · 余款 {money(po.dueCents ?? undefined)}</p>
         <p>有效来票 {money(po.invoicedCents)} · 更正中 {money(po.underCorrectionCents)} · 待收票 {money(po.pendingInvoiceCents ?? undefined)} · {po.reconciled ? '已记录本版对账结果' : '待对账'}</p>
         {po.supplierFollowup && <p>供方差异待跟进 · 经办人 {po.supplierFollowup.actorId} · {String(po.supplierFollowup.reference)}</p>}
-        {po.payments.map(row => <p key={row.id}>实际付款凭据 {row.reference} · {money(row.amountCents)}</p>)}
+        {po.payments.map(row => <p key={row.id}>付款凭据 {row.reference} · {money(row.amountCents)} · 实际付款 {dateLabel(row.occurredAt)}
+          {' · 原登记 ' + dateLabel(row.recordedAt)}{row.reviewedBy && ' · 补核人 ' + row.reviewedBy}</p>)}
       </article>)}</section>}
     {view.invoicePlans.length > 0 && <section aria-label="发票安排与原件" className="space-y-2"><h2 className={heading}>发票安排与原件</h2>
       {view.invoicePlans.map(plan => <article key={plan.id} className="space-y-1 rounded border border-slate-200 p-3 text-sm">
         <h3 className="font-semibold">{plan.side === 'customer' ? '客户开票' : '供应商来票'} · {plan.reference}{plan.closed && ' · 已关闭'}</h3>
-        <p>{plan.issuer} 开给 {plan.recipient} · 安排 {money(plan.grossCents)} · 已回填 {money(plan.usedCents)} · {triggerLabels[plan.trigger]}</p>
+        <p>{plan.issuer} 开给 {plan.recipient} · 原安排 {money(plan.grossCents)} · 已占用 {money(plan.usedCents)}
+          {' · 尚可办理 ' + money(plan.remainingCents)} · {triggerLabels[plan.trigger]}</p>
         <p>经办人 {plan.ownerId}</p>
-        {!plan.closed && plan.usedCents < plan.grossCents && plan.lastFollowup && <p>下次追票 {dateLabel(String(plan.lastFollowup.operation.nextReviewAt))}
+        {!plan.closed && plan.remainingCents > 0 && plan.lastFollowup && <p>下次追票 {dateLabel(String(plan.lastFollowup.operation.nextReviewAt))}
           {' · 跟进人 ' + plan.lastFollowup.actorId}</p>}
         {plan.allocations.map(doc => <p key={doc.id}>票号 {doc.number} · {invoiceStateLabels[doc.status]} · 票面 {money(doc.grossCents)} · 本项 {money(doc.amountCents)}</p>)}
       </article>)}</section>}
