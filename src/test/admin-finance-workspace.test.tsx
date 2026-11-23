@@ -310,4 +310,32 @@ describe('admin finance workspace', () => {
     expect(within(screen.getByRole('group', { name: /标签原书证/ })).getByLabelText('归入本书证的金额（元）')).toHaveAttribute('max', '50');
   });
 
+
+  it('distinguishes a blocked shared arrangement from a separate available amount', async () => {
+    const orderId = 'office-current-invoice-authority';
+    const orderItem = { id: 'office-B', name: '合成标签', quantity: 1 };
+    const scope = { id: 'original-scope', familyId: 'original-scope', reference: '原共同书证', lines: [orderItem], remainingCents: 0 };
+    const dedicated = { ...scope, id: 'dedicated-B', reference: '标签独立书证', remainingCents: 4000 };
+    const shared = { id: 'unissued-shared', reference: '共同安排10', side: 'customer',
+      issuer: '合成商家', recipient: '合成客户', invoiceScopeId: scope.id, grossCents: 1000, usedCents: 0, ownerId: '原票款经办',
+      remainingCents: 1000, scheduledRemainingCents: 1000, issuableCents: 0, readyAt: '2026-01-03T12:00:00.000Z',
+      recordable: true, allocations: [] };
+    const separate = { ...shared, id: 'unissued-B', invoiceScopeId: dedicated.id, reference: '标签安排40',
+      grossCents: 4000, remainingCents: 4000, scheduledRemainingCents: 4000, issuableCents: 4000 };
+    const workspace = { orderId, version: 'invoice-current-authority', status: 'confirmed', principalCents: 0,
+      settlementCents: 0, shipmentDates: {}, banks: [], receipts: [], cash: [], purchases: [],
+      invoicePlans: [separate, shared], events: [], latePayments: [], customerInvoiceScopes: [scope, dedicated],
+      customerInvoiceFamilies: [{ id: scope.id, authorizedCents: 10000, issuedCents: 6000, availableCents: 0, invoiceConflicts: [], timeline: [] }] };
+    vi.stubGlobal('fetch', vi.fn(async () => Response.json({ canWrite: true, workspace })));
+    render(<FinanceManager initialOrder={orderId}/>);
+    const plans = await screen.findByRole('region', { name: '发票安排与原件' });
+    const [availableCard, blockedCard] = within(plans).getAllByRole('article');
+    const blocked = within(blockedCard);
+    const available = within(availableCard);
+    expect(blocked.getByText(/安排未开 ¥10.00/)).toBeInTheDocument();
+    expect(blocked.getByText(/当前可办理 ¥0.00/)).toBeInTheDocument();
+    expect(available.getByText(/当前可办理 ¥40.00/)).toBeInTheDocument();
+    fireEvent.click(blocked.getByRole('button', { name: '核对商品和书证' }));
+    expect(screen.getByLabelText('发票安排')).toHaveValue(shared.id);
+  });
 });

@@ -1795,6 +1795,84 @@ describe('admin purchase endpoint', () => {
       expect(await prisma.financeEvent.count({ where: { orderId: lateOrder } })).toBe(2);
     });
 
+    async function invoiceWithSharedAndDedicatedEvidence(laterIssued: boolean) {
+      const id = 'office-shared-and-dedicated-invoice-evidence';
+      const lines = [id + '-A', id + '-B'];
+      await acceptLegacyInvoiceOrder(id, lines);
+      const parties = { issuer: 'Office seller', recipient: 'Office buyer' };
+      const arrangement = { ...parties, side: 'customer', trigger: 'accepted', description: '按原件核对该单商品、日期和开票额度。' };
+      const opening = Date.now();
+      const date = (daysBefore: number, hours = 0) => new Date(opening - daysBefore * 86400000 + hours * 3600000).toISOString();
+      const verify = async (data: object) => (await finish(await financePreview('verify_customer_invoice_scope', { ...parties, ...data }, id))).eventId;
+      const base = await verify({ ...paper('original-common-60'), invoiceLineIds: lines, grossCents: 6000, occurredAt: date(5) });
+      const arrange = async (invoiceScopeId: string, grossCents: number) => (await record('create_plan', { ...arrangement, invoiceScopeId, grossCents }, id))
+        .invoicePlans.find((row: { invoiceScopeId: string }) => row.invoiceScopeId === invoiceScopeId).id as string;
+      const invoice = (planId: string, number: string, amountCents: number, issuedAt: string) => ({
+        ...parties, ...paper(number), number, planId, amountCents, grossCents: amountCents, issuedAt,
+      });
+      const early = await arrange(base, 6000);
+      await record('record_invoice', invoice(early, 'OFFICE-COMMON-FIRST-50', 5000, date(5, 1)), id);
+      const intermediate = await verify({ ...paper('earlier-written-cumulative-100'), invoiceScopeBasisId: base,
+        restateInvoiceCeiling: true, grossCents: 10000, occurredAt: date(3) });
+      const historical = laterIssued ? await arrange(intermediate, 2000) : null;
+      const laterScope = await verify({ ...paper('later-written-cumulative-100'), invoiceScopeBasisId: base,
+        restateInvoiceCeiling: true, grossCents: 10000, occurredAt: date(2) });
+      const laterPlan = await arrange(laterScope, laterIssued ? 2000 : 1000);
+      const laterBill = invoice(laterPlan, 'OFFICE-LATER-COMMON-20', 2000, date(2, 1));
+      if (laterIssued) await record('record_invoice', laterBill, id);
+      const dedicated = await verify({ ...paper('supplement-40-only-for-B'), invoiceScopeBasisId: base, grossCents: 4000,
+        invoiceLines: [{ orderItemId: lines[1], quantity: 1 }], occurredAt: date(4) });
+      return { id, lines, early, historical, dedicated, laterScope, laterPlan, laterBill, date, invoice, arrangement };
+    }
+
+    it('records an independent historical invoice alongside an unchanged earlier dispute and rejects worsening it', async () => {
+      const { id, early, lines, historical, dedicated, laterBill, laterPlan, date, invoice, arrangement } = await invoiceWithSharedAndDedicatedEvidence(true);
+      const before = (await expectJson(await financeRead(id), 200)).workspace;
+      expect(before.customerInvoiceFamilies[0]).toMatchObject({ issuedCents: 7000, invoiceConflicts: [{ number: laterBill.number }] });
+      const parts = [{ invoiceScopeId: dedicated, amountCents: 2000, lines: [{ orderItemId: lines[1], quantity: 1 }] }];
+      const historicalAt = date(3, 1);
+      await record('verify_invoice_coverage', { ...paper('review-actual-customer-invoice-only-for-B'),
+        planId: historical, coverageAt: historicalAt, portions: parts }, id);
+      const bill = { ...invoice(historical!, 'OFFICE-HISTORICAL-INDEPENDENT-B-20', 2000, historicalAt), portions: parts };
+      const checked = await financePreview('record_invoice', bill, id);
+      const { workspace: saved, eventId } = await finish(checked);
+      expect((await finish(checked)).eventId).toBe(eventId);
+      expect(saved.customerInvoiceFamilies[0]).toMatchObject({ authorizedCents: 10000, issuedCents: 9000,
+        invoiceConflicts: [{ number: laterBill.number, ownerId: staff.accountant }] });
+      expect(saved.customerInvoiceFamilies[0].invoiceConflicts).toEqual(before.customerInvoiceFamilies[0].invoiceConflicts);
+      expect(saved.invoicePlans).toEqual(expect.arrayContaining([
+        expect.objectContaining({ id: historical, usedCents: 2000,
+          allocations: [expect.objectContaining({ number: bill.number, issuedAt: historicalAt, scopePortions: parts })] }),
+        expect.objectContaining({ id: laterPlan, allocations: [expect.objectContaining({ number: laterBill.number, status: 'recorded' })] }),
+      ]));
+      const worsens = await expectJson(await financePost({ orderId: id, action: 'record_invoice', requestId: randomUUID(),
+        version: saved.version, stage: 'preview', data: invoice(early, 'OFFICE-INCREASES-ONLY-THE-COMMON-DEFICIT', 1000, date(5, 2)) }), 409);
+      expect(worsens.error).toBe('回填将超过实际开票日期适用的书证额度，请核对票面及同一范围的原票');
+      const arranged = await record('create_plan', { ...arrangement, invoiceScopeId: dedicated, grossCents: 1000 }, id);
+      const fresh = arranged.invoicePlans.find((row: { invoiceScopeId: string }) => row.invoiceScopeId === dedicated);
+      expect(fresh).toMatchObject({ remainingCents: 1000, issuableCents: 1000 });
+      const settled = await record('record_invoice', invoice(fresh.id, 'OFFICE-FROM-NEW-DEDICATED-ARRANGEMENT', 1000, date(1)), id);
+      expect(settled.customerInvoiceFamilies[0]).toMatchObject({ issuedCents: 10000,
+        invoiceConflicts: before.customerInvoiceFamilies[0].invoiceConflicts });
+    });
+
+    it('keeps a shared plan pending at zero issuable amount without consuming the separate B capacity', async () => {
+      const { id, early, dedicated, laterPlan, date, invoice, arrangement } = await invoiceWithSharedAndDedicatedEvidence(false);
+      const before = (await expectJson(await financeRead(id), 200)).workspace;
+      // Two pending shared claims cannot reserve the same last ten twice against the separate scope.
+      expect(before.customerInvoiceScopes.find((row: { id: string }) => row.id === dedicated)).toMatchObject({ remainingCents: 4000 });
+      const after = await record('record_invoice', invoice(early, 'OFFICE-USES-THE-FINAL-10-COMMON', 1000, date(5, 2)), id);
+      expect(after.customerInvoiceFamilies[0]).toMatchObject({ authorizedCents: 10000, issuedCents: 6000, invoiceConflicts: [] });
+      expect(after.invoicePlans.find((row: { id: string }) => row.id === laterPlan)).toMatchObject({ remainingCents: 1000, issuableCents: 0 });
+      expect(after.customerInvoiceScopes.find((row: { id: string }) => row.id === dedicated)).toMatchObject({ remainingCents: 4000 });
+      const withB = await record('create_plan', { ...arrangement, invoiceScopeId: dedicated, grossCents: 4000 }, id);
+      const planB = withB.invoicePlans.find((row: { invoiceScopeId: string }) => row.invoiceScopeId === dedicated);
+      expect(planB).toMatchObject({ remainingCents: 4000, issuableCents: 4000 });
+      const refused = await expectJson(await financePost({ orderId: id, action: 'record_invoice', requestId: randomUUID(),
+        version: withB.version, stage: 'preview', data: invoice(laterPlan, 'OFFICE-EXCEEDS-COMMON-BUT-FAMILY-HAS-ROOM', 1, date(1)) }), 409);
+      expect(refused.error).toBe('回填将超过实际开票日期适用的书证额度，请核对票面及同一范围的原票');
+    });
+
     async function coveredFutureAmendment(transferCents: number, reviewFirst = true) {
       const id = 'legacy-reviewed-office-before-new-terms';
       const items = [id + '-A', id + '-B'];
