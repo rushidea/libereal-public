@@ -44,36 +44,51 @@ export async function approveAfterSaleExchange(tx: Db, view: AfterSaleWorkspace,
     && (line.source.productId || line.source.catalogNumber), '换货须对应原实际供货方与可核实的原商品身份');
   const usedDocument = await tx.afterSaleEvent.findMany({ where:{action:'approve_exchange',sha256:proof.sha256,documentRow:proof.documentRow},
     orderBy:[{createdAt:'asc'},{id:'asc'}] });
-  const lastScope = usedDocument.map(saleOperation).findLast(op=>Array.isArray(op.supplierDocumentShares)
-    && op.supplierDocumentScopeExplicit!==false)?.supplierDocumentShares;
-  condition(usedDocument.every(event=>{
-    const op=saleOperation(event);
-    return event.caseId===row.id && event.occurredAt.toISOString()===proof.occurredAt && op.returnRequirement===decision.returnRequirement
-      && financeIdentity(String(op.supplier??''))===financeIdentity(line.terms.supplier!);
-  }),
-    '同一供方书证行须保留原客户事项、实际时间和供方主体');
-  const priorParts = usedDocument.map(saleOperation).flatMap(op => typeof op.originalParcelLineId==='string' && positiveCents(op.quantity)
-    ? [{parcelLineId:op.originalParcelLineId,quantity:op.quantity}] : []);
-  const input = data.supplierDocumentShares ?? lastScope ?? (priorParts.length ? priorParts : [{parcelLineId:original.id,quantity:amount}]);
-  condition(Array.isArray(input) && input.length > 0, '须按供方同一书证行填写实际覆盖的原包裹和件数');
-  const documentParts = input.map(purchaseObject).map(part=>{
-    const parcelId = requiredText(part.parcelLineId,'书证所列原包裹行');
-    const source = view.deliveries.find(line=>line.id===parcelId && line.orderItemId===row.orderItemId && !line.afterSaleApprovalId);
+  const priorScopes = usedDocument.map(event=>({ event, op:saleOperation(event) }));
+  const explicit = priorScopes.findLast(({op})=>Array.isArray(op.supplierDocumentShares) && op.supplierDocumentScopeExplicit!==false);
+  const scopeKey = ({caseId,parcelLineId}:{caseId:string;parcelLineId:string}) => JSON.stringify([caseId,parcelLineId]);
+  const normalize = (raw:unknown[],defaultCaseId:string) => raw.map(purchaseObject).map(part=>({
+    caseId:part.caseId===undefined?defaultCaseId:requiredText(part.caseId,'书证所列原售后案件'),
+    parcelLineId:requiredText(part.parcelLineId,'书证所列原包裹行'),
+    quantity:part.quantity,
+  })).sort((a,b)=>scopeKey(a).localeCompare(scopeKey(b)));
+  const lastScope = explicit ? normalize(explicit.op.supplierDocumentShares as unknown[],explicit.event.caseId) : null;
+  condition(priorScopes.every(({event,op})=>view.cases.some(item=>item.id===event.caseId)
+    && event.occurredAt.toISOString()===proof.occurredAt && op.returnRequirement===decision.returnRequirement
+    && financeIdentity(String(op.supplier??''))===financeIdentity(line.terms.supplier!)),
+    '同一供方书证行须保留原订单、实际时间和供方主体');
+  const priorParts = priorScopes.flatMap(({event,op})=>typeof op.originalParcelLineId==='string' && positiveCents(op.quantity)
+    ? [{caseId:event.caseId,parcelLineId:op.originalParcelLineId,quantity:op.quantity}] : []);
+  const selected = {caseId:row.id,parcelLineId:original.id,quantity:amount};
+  const input = data.supplierDocumentShares ?? lastScope ?? (priorParts.length ? priorParts : [selected]);
+  condition(Array.isArray(input) && input.length>0, '须按供方同一书证行填写实际覆盖的案件、原包裹和件数');
+  const signedByParcel = new Map<string,number>();
+  const documentParts = normalize(input,row.id).map(part=>{
+    const subject = view.cases.find(item=>item.id===part.caseId);
+    const source = view.deliveries.find(item=>item.id===part.parcelLineId && item.orderItemId===subject?.orderItemId && !item.afterSaleApprovalId);
     const supplierOrder = purchases.find(po=>po.id===source?.purchaseOrderId);
-    const party = supplierOrder?.lines.find(item=>item.orderItemId===row.orderItemId)?.terms.supplier;
-    const assigned = shares.filter(share=>share.parcelLineId===parcelId).reduce((sum,share)=>sum+share.quantity,0);
+    const party = supplierOrder?.lines.find(item=>item.orderItemId===subject?.orderItemId)?.terms.supplier;
+    const assigned = subject ? originalSaleParcelShares(subject).filter(share=>share.parcelLineId===part.parcelLineId)
+      .reduce((sum,share)=>sum+share.quantity,0) : 0;
     const signed = source?.receipts.filter(receipt=>receipt.at<=Date.parse(proof.occurredAt)).reduce((sum,receipt)=>sum+receipt.quantity,0) ?? 0;
     condition(party && financeIdentity(party)===financeIdentity(line.terms.supplier!) && positiveCents(part.quantity)
-      && part.quantity<=assigned && part.quantity<=signed, '此供方书证列出的原包裹及数量须与本案实际签收和供方一致');
-    return { parcelLineId:parcelId, quantity:part.quantity };
-  }).sort((a,b)=>a.parcelLineId.localeCompare(b.parcelLineId));
-  condition(new Set(documentParts.map(part=>part.parcelLineId)).size===documentParts.length
+      && part.quantity<=assigned && part.quantity<=signed, '此供方书证列出的案件、原包裹及件数须与实际签收和供方一致');
+    signedByParcel.set(part.parcelLineId,signed);
+    return {...part,quantity:part.quantity};
+  });
+  condition(new Set(documentParts.map(scopeKey)).size===documentParts.length
     && (!lastScope || pricingContentHash(documentParts)===pricingContentHash(lastScope)),
-    '请沿用同一书证已核对的原包裹份额，或提供确有变更的新书证');
-  const alreadyByParcel = new Map<string,number>();
-  for (const part of priorParts) alreadyByParcel.set(part.parcelLineId,(alreadyByParcel.get(part.parcelLineId)??0)+part.quantity);
-  alreadyByParcel.set(original.id,(alreadyByParcel.get(original.id)??0)+amount);
-  condition([...alreadyByParcel].every(([id,count])=>count<=(documentParts.find(part=>part.parcelLineId===id)?.quantity??0)),
+    '请沿用同一书证已核对的案件和包裹份额，或提供确有变更的新书证');
+  for (const [id,signed] of signedByParcel) {
+    condition(documentParts.filter(part=>part.parcelLineId===id).reduce((sum,part)=>sum+part.quantity,0)<=signed,
+      '同一实际原包裹在各案的书证份额合计超过实际签收');
+  }
+  const documentUsed = new Map<string,number>();
+  for (const part of [...priorParts,selected]) {
+    const key = scopeKey(part);
+    documentUsed.set(key,(documentUsed.get(key)??0)+part.quantity);
+  }
+  condition([...documentUsed].every(([key,count])=>count<=(documentParts.find(part=>scopeKey(part)===key)?.quantity??0)),
     '本次办理超过该供方书证已确认的包裹份额');
   return { operation: { agreementId: approvedForCustomer.id, technicalId: decision.technicalId, originalParcelLineId: original.id,
     purchaseOrderId: purchase.id, orderItemId: row.orderItemId, quantity: amount, supplier: line.terms.supplier,

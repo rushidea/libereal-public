@@ -38,8 +38,13 @@ export function saleOperationFor(action: string, op: Record<string,unknown>, per
   return visible;
 }
 
-export function saleSnapshotFor(raw: unknown, permissions: readonly string[]) {
+export function saleSnapshotFor(raw: unknown, permissions: readonly string[], submittedBy?: string) {
   const snapshot = purchaseObject(raw);
   const action = typeof snapshot.action==='string'?snapshot.action:'';
-  return { ...snapshot, operation:saleOperationFor(action,purchaseObject(snapshot.operation),permissions) };
+  const operation = purchaseObject(snapshot.operation);
+  const ownRefundRequest = submittedBy && snapshot.actor===submittedBy && action==='agreement' && operation.remedy==='refund'
+    && permissions.includes('orders.read') && permissions.includes('orders.write') && !readsSaleFinance(permissions);
+  return { ...snapshot, operation:ownRefundRequest
+    ? select(operation,['remedy','amountCents','recipient','destination','method','quantity'])
+    : saleOperationFor(action,operation,permissions) };
 }

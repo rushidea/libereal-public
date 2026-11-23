@@ -118,13 +118,13 @@ async function agreement(tx: Db, view: AfterSaleWorkspace, row: SaleCase, data: 
     condition(proof.occurredAt > latestDate && data.revisesAgreementId === earlier.id,
       '要修订当前客户决定，须选择其版本并提供实际发生在后的明确书面决定');
   }
-  condition(remedy!=='invoice' || !caseEvents(row,'invoice_reissue').length,
-    '替代票已经实际签发并核对，请保留原案结果，新事项可另行登记');
   if (row.customerState === 'awaiting_invoice_reissue') {
     condition(remedy === 'invoice' && actualRefunded(row) === 0, '请仅修订原票待办的重开条件');
-    const revised = await reviseInvoiceReissue(tx,row,data,proof);
+    const revised = await reviseInvoiceReissue(tx,row,view.cases,data,proof);
     return { operation: { ...operation, revisesAgreementId: earlier?.id, invoice: revised.invoice }, customerState: revised.customerState };
   }
+  condition(remedy!=='invoice' || !caseEvents(row,'invoice_reissue').length,
+    '替代票已经实际签发并核对，请保留原案结果，新事项可另行登记');
   condition(['reviewing','awaiting_customer','awaiting_technical','awaiting_fulfillment','awaiting_refund','refund_prepared',
     'refund_followup','awaiting_invoice','awaiting_close'].includes(row.customerState), '该事项已有须先核对的实际结果或有效的退款批准');
   const technical = lastCaseEvent(row, 'technical');
@@ -315,7 +315,7 @@ async function planAction(tx: Db, view: AfterSaleWorkspace, row: SaleCase, input
   if (action === 'prepare_refund' || action === 'approve_refund' || action === 'refund_result' || action === 'stop_refund') return refundStep(tx,view,row,action,data,proof);
   if (action === 'verify_invoice_line') return verifyInvoiceLine(tx,row,data,proof);
   if (action === 'invoice_outcome') return invoiceOutcome(tx,row,data,proof);
-  if (action === 'invoice_reissue') return invoiceReissue(tx,row,data,proof);
+  if (action === 'invoice_reissue') return invoiceReissue(tx,row,view.cases,data,proof);
   condition(action === 'close' && row.customerState === 'awaiting_close','须先取得本案所需的实际办理结果');
   const latestDecision = currentSaleAgreement(row);
   condition(!latestDecision || saleOperation(latestDecision).remedy !== 'keep' || !activeRefundSourceReview(row),
@@ -335,15 +335,24 @@ export async function afterSaleAction(tx: Db, input: SaleInput, actor: SaleActor
   const exchangeParcel = data.parcelLineId ?? (shares.length===1 ? shares[0].parcelLineId : null);
   const natural = action === 'refund_result' && data.result === 'paid'
     ? { action, caseId, trace: transferReference(data.referenceNo) }
-    : action === 'supplier' && data.outcome === 'financial_result' ? { action, caseId, trace: transferReference(data.referenceNo) }
+    : action === 'supplier' && data.outcome === 'financial_result' ? {
+      action,caseId,trace:transferReference(data.referenceNo),purchaseOrderId:data.purchaseOrderId??null,
+      parcelLineId:data.originalParcelLineId??null,allocationReference:typeof data.allocationReference==='string'?data.allocationReference.normalize('NFKC').trim():null }
     : { action, orderId, caseId, source: proof.sha256, row: proof.documentRow,
       ...(action === 'open' ? { item: data.orderItemId, shortfall: data.shortfallId ?? null }
         : action === 'bind_original_parcel' ? { parcelLineId: data.parcelLineId }
         : action === 'approve_exchange' ? { parcelLineId:exchangeParcel }
         : action === 'supplier' ? { purchaseOrderId:data.purchaseOrderId??null, parcelLineId:data.originalParcelLineId??null }
+        : action === 'invoice_reissue' ? { allocationId:data.invoiceAllocationId }
         : action === 'physical' ? { parcelLineId: data.parcelLineId, resolutionId: data.resolutionId ?? null } : {}) };
   const businessKey = pricingContentHash(natural);
   const prior = await tx.afterSaleEvent.findMany({ where: { OR: [{requestKey},{businessKey}] } });
+  if (!prior.length && (action==='invoice_reissue' || action==='supplier' && data.outcome==='financial_result')) {
+    const oldKey = action==='invoice_reissue' ? {action,orderId,caseId,source:proof.sha256,row:proof.documentRow}
+      : {action,caseId,trace:transferReference(data.referenceNo)};
+    const replay = await tx.afterSaleEvent.findFirst({where:{businessKey:pricingContentHash(oldKey),intentHash}});
+    if (replay) prior.push(replay);
+  }
   if (!prior.length && exchangeCase) {
     const legacy = caseEvents(exchangeCase,'approve_exchange').find(event=>event.sha256===proof.sha256
       && event.documentRow===proof.documentRow && saleOperation(event).originalParcelLineId===exchangeParcel);

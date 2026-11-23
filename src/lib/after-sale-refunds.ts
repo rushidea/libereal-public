@@ -57,7 +57,7 @@ export async function refundPosition(tx: Db, view: AfterSaleWorkspace, row: Sale
     return paymentId ? (held ?? settledSource) === paymentId : !held || held === settledSource;
   });
   const used = sameReceipt.reduce((sum, item) => sum + reserved(item), 0);
-  const independentReceipt = Boolean(verified && finance.acceptanceId && independentAfterSalePayment(verified,finance));
+  const independentReceipt = Boolean(verified && independentAfterSalePayment(verified,finance));
   const onLine = sameReceipt.filter(item => item.orderItemId === row.orderItemId).reduce((sum, item) => sum + reserved(item), 0);
   const line = view.lines.find(item => item.id === row.orderItemId)!;
   const gross = Math.round(line.unitPrice * line.quantity * 100);

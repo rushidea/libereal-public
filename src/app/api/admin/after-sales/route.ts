@@ -82,7 +82,7 @@ export async function POST(req: NextRequest) {
     const actor={id:user.id,email:user.email};
     if (body.stage==='preview') {
       const preview=await prisma.$transaction(tx=>afterSaleAction(tx,input,actor));
-      return NextResponse.json({preview:{...preview,snapshot:saleSnapshotFor(preview.snapshot,permissions)}},
+      return NextResponse.json({preview:{...preview,snapshot:saleSnapshotFor(preview.snapshot,permissions,actor.id)}},
         {headers:{'Cache-Control':'private, no-store'}});
 
     }

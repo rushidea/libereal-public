@@ -48,7 +48,8 @@ export async function supplierAfterSale(tx: Db, view: AfterSaleWorkspace, row: S
     '供方实际处理金额超过该采购行原书面金额，须另行核对');
   const transfer = await allocateAfterSaleTransfer(tx, {
     direction: 'supplier_return', method: money.method, party: line.terms.supplier, destination: money.destination,
-    referenceNo: money.referenceNo,
+    referenceNo: money.referenceNo, supplierScope: { orderId:row.orderId, purchaseOrderId:purchase.id,orderItemId:row.orderItemId,
+      originalParcelLineId:subject.originalParcelLineId,shortfallId:subject.shortfallId },
   }, data, proof, money.amountCents);
   return { operation: { ...subject, ...money, transfer }, supplierState };
 }
