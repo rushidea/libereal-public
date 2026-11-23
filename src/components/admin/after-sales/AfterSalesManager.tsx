@@ -17,8 +17,10 @@ const displayFields:Record<string,string>={quantity:'实际数量',decision:'客
   remedy:'处理方式',recipient:'收款人',destination:'收款去向',method:'收付渠道',referenceNo:'回执流水',amountCents:'本次金额',approvedCents:'已批准金额',
   originalNumber:'原票号',purchaseOrderId:'原采购单',party:'出具意见的单位',contact:'技术联系人',supplier:'供应商',owner:'接手人',
   previousOwner:'原经办人',preparedId:'退款准备记录',approvalId:'独立批准',agreementId:'客户书面决定',financeEventId:'票款回执',shortfallId:'原履约记录',
-  relatedCents:'关联金额',parcelLineId:'原包裹行',reference:'原运单',historyReview:'既有结算复核',historicCheck:'既有结算复核',outcome:'供方结果'};
-function permitted(row:Case, rights:string[]):AfterSaleAction[] {
+  relatedCents:'关联金额',parcelLineId:'原包裹行',reference:'原运单',historyReview:'既有结算复核',historicCheck:'既有结算复核',outcome:'供方结果',
+  totalCents:'同笔实际交易总额',allocatedBeforeCents:'原已分摊',unallocatedAfterCents:'本次后尚未分摊',allocationReference:'本行分摊书证',
+  stoppedCents:'核实终止的未付额',releasedCents:'已确认不再支付的金额',previouslyRefundedCents:'原已实际退款金额'};
+function permitted(row:Case, rights:string[], view:Desk):AfterSaleAction[] {
   const out:AfterSaleAction[]=[];
   const ops=rights.includes('orders.read')&&rights.includes('orders.write');
   const buy=rights.includes('purchases.read')&&rights.includes('purchases.write');
@@ -29,22 +31,33 @@ function permitted(row:Case, rights:string[]):AfterSaleAction[] {
     out.push('add_evidence');
     if(!row.shortfallId&&row.customerState!=='closed')out.push('link_shortfall');
     if(['reviewing','awaiting_technical','awaiting_customer'].includes(row.customerState)&&['quality','technical'].includes(row.issue))out.push('technical');
-    if(['reviewing','awaiting_customer','awaiting_technical','awaiting_fulfillment','awaiting_refund','refund_prepared','awaiting_invoice','awaiting_close'].includes(row.customerState))out.push('agreement');
+    if(['reviewing','awaiting_customer','awaiting_technical','awaiting_fulfillment','awaiting_refund','refund_prepared','refund_followup','awaiting_invoice','awaiting_close'].includes(row.customerState)
+      || row.agreementId)out.push('agreement');
     if(row.customerState==='awaiting_fulfillment')out.push('physical');
     if(row.customerState==='awaiting_close')out.push('close');
   }
   if(buy || rights.includes('purchases.pay')&&rights.includes('purchases.read'))out.push('supplier');
   if(buy&&['quality','technical'].includes(row.issue)&&['reviewing','awaiting_technical','awaiting_customer'].includes(row.customerState)&&!out.includes('technical'))out.push('technical');
+  const effective=row.events.find(event=>event.id===row.agreementId)?.operation;
+  if(rights.includes('purchases.read')&&rights.includes('purchases.approve')&&row.customerState==='awaiting_fulfillment'
+    && effective?.remedy==='exchange'&&effective.returnRequirement&&!row.events.some(event=>event.action==='approve_exchange'
+      && event.operation?.agreementId===row.agreementId))out.push('approve_exchange');
+  if(buy&&row.shortfallId&&row.customerState!=='closed'&&view.deliveries.some(line=>line.attributionRequired&&line.orderItemId===row.orderItemId
+    && view.shortfalls.find(loss=>loss.resolutionId===row.shortfallId)?.approved.some(approval=>approval.id===line.approvalId)))out.push('attribute_resend');
   if(finance) {
     if(row.customerState==='awaiting_invoice')out.push('invoice_outcome');
     if(['awaiting_refund','refund_prepared'].includes(row.customerState))out.push('prepare_refund');
     if(row.customerState==='refund_prepared')out.push('approve_refund');
-    if(row.customerState==='refund_approved')out.push('refund_result');
+    if(row.customerState==='awaiting_refund'&&view.refundSources?.length&&!row.events.some(event=>event.action==='review_refund_source'))out.push('review_refund_source');
+    if(row.customerState==='refund_approved')out.push('refund_result','stop_refund');
   }
   return out;
 }
 function Details({value}:{value:Record<string,unknown>}) {
-  return <dl className="grid gap-1 text-sm sm:grid-cols-[max-content_1fr]">{Object.entries(value).filter(([key,v])=>displayFields[key]&&v!=null&&typeof v!=='object').map(([key,v])=>
+  const transfer=value.transfer as Record<string,unknown>|undefined;
+  const visible={...value,...(transfer&&{totalCents:transfer.totalCents,allocatedBeforeCents:transfer.allocatedBeforeCents,
+    unallocatedAfterCents:transfer.unallocatedAfterCents,allocationReference:transfer.allocationReference})};
+  return <dl className="grid gap-1 text-sm sm:grid-cols-[max-content_1fr]">{Object.entries(visible).filter(([key,v])=>displayFields[key]&&v!=null&&typeof v!=='object').map(([key,v])=>
     <div key={key} className="contents"><dt className="text-slate-600">{displayFields[key]}</dt>
       <dd className="break-words">{key.endsWith('Cents')?money(Number(v)):String(v)}</dd></div>)}</dl>;
 }
@@ -129,10 +142,12 @@ export default function AfterSalesManager({initialOrder,initialLoss=''}:{initial
       {view.cases.map(row=><section key={row.id} className="space-y-2 rounded border p-4"><h2 className="font-semibold">{issueName(row.issue)} · {view.lines.find(l=>l.id===row.orderItemId)?.name} × {row.quantity}</h2>
         <p className="text-sm">{row.report}</p><p className="text-sm">客户侧 {afterSaleLabel(row.customerState)} · 供应商侧 {afterSaleLabel(row.supplierState)} · 经办 {row.ownerId??'待接手'}</p>
         <p className="text-sm">原凭据 {row.reference} · {date(row.reportedAt)}{row.relatedCents!=null&&' · 关联 '+money(row.relatedCents)}</p>
+        {row.events.some(event=>event.action==='approve_exchange')&&<Link className="text-sm underline"
+          href={'/admin/orders?orderId='+encodeURIComponent(view.order.id)}>打开原单物流，登记已准售后换货</Link>}
         <details><summary className="cursor-pointer text-sm">办理记录（{row.events.length}）</summary>{row.events.map(event=><div className="my-2 border-l-2 pl-3 text-sm" key={event.id}>
           <p>{afterSaleActions[event.action as AfterSaleAction]??event.action} · {date(event.occurredAt)} · {event.actorId}</p>{event.reference&&<p>{event.reference}</p>}
           {event.operation&&<Details value={event.operation}/>}</div>)}</details>
-        <div className="flex flex-wrap gap-2">{permitted(row,rights).map(action=><button key={action} className={button} disabled={busy} onClick={()=>choose({action,caseId:row.id})}>{afterSaleActions[action]}</button>)}</div></section>)}
+        <div className="flex flex-wrap gap-2">{permitted(row,rights,view).map(action=><button key={action} className={button} disabled={busy} onClick={()=>choose({action,caseId:row.id})}>{afterSaleActions[action]}</button>)}</div></section>)}
       {form&&<div hidden={!!pending}><AfterSaleForm key={[form.action,form.caseId,form.chosenLoss].join('/')} view={view} current={selected} action={form.action} chosenLoss={form.chosenLoss}
         busy={busy} onPreview={preview} onCancel={()=>choose(null)}/></div>}
       {pending&&<section aria-label="售后办理预览" className="space-y-3 rounded border border-slate-300 bg-slate-50 p-4"><h2 className="font-semibold">{afterSaleActions[pending.input.action]} · 确认预览</h2>

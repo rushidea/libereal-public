@@ -121,7 +121,7 @@ export default function FinanceForm({ view, action, initialPlanId, busy, onPrevi
   const invoices = [...new Map(view.invoicePlans.flatMap(row => row.allocations).map(doc => [doc.invoiceId, doc])).values()]
     .filter(doc => action === 'open_correction' ? doc.status === 'recorded' : doc.status === 'correction_pending');
   const sources = [
-    ...view.latePayments.map(row => ({ id: row.id, review: row.review, label: row.outTradeNo + ' · ' + money(row.amountCents),
+    ...view.latePayments.filter(row=>!row.refund).map(row => ({ id: row.id, review: row.review, label: row.outTradeNo + ' · ' + money(row.amountCents),
       stockHeld: row.status === 'paid_stock_shortfall_reconciliation_required' })),
     ...view.receipts.filter(row => !row.counted && !row.reconciled).map(row => ({ id: row.id, review: row.review, label: row.id })),
   ].filter(row => action === 'resume_alipay_payment' ? 'stockHeld' in row && row.stockHeld

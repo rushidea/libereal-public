@@ -61,15 +61,23 @@ export function DispatchForm({ view, submit, busy, readAt, canReviewHold }: {
     finally { setLooking(false); }
   }
   const forwarding = route === 'libereal_to_customer';
+  const canSendOrdinary = sources && ['confirmed','partially_shipped'].includes(sources.order.status);
+  const exchanges = sources?.exchangeApprovals ?? [];
   const rows = !sources ? [] : forwarding ? sources.receipts.flatMap(receipt => {
-    const p = sources.purchases.find(row => row.purchaseOrderId === receipt.purchaseOrderId && row.orderItemId === receipt.orderItemId);
-    return p ? [{ ...p, sourceReceiptId: receipt.id, batchNumber: receipt.batchNumber, available: receipt.available, holdAllowance:receipt.holdAllowance, resendApprovalId: undefined }] : [];
+    const p = receipt.afterSaleApprovalId ? exchanges.find(row=>row.id===receipt.afterSaleApprovalId)
+      : canSendOrdinary ? sources.purchases.find(row => row.purchaseOrderId === receipt.purchaseOrderId && row.orderItemId === receipt.orderItemId) : null;
+    return p ? [{ ...p, sourceReceiptId: receipt.id, batchNumber: receipt.batchNumber, available: receipt.available, holdAllowance:receipt.holdAllowance,
+      resendApprovalId:undefined,resendShortfallId:undefined,afterSaleApprovalId:receipt.afterSaleApprovalId??undefined }] : [];
   }) : [
-    ...sources.purchases.filter(p => p.available > 0).map(p => ({ ...p, sourceReceiptId: null, batchNumber: null, resendApprovalId: undefined })),
-    ...sources.freeResends.flatMap(resend => {
+    ...(canSendOrdinary ? sources.purchases.filter(p => p.available > 0).map(p => ({ ...p, sourceReceiptId:null,batchNumber:null,
+      resendApprovalId:undefined,resendShortfallId:undefined,afterSaleApprovalId:undefined })) : []),
+    ...(canSendOrdinary ? sources.freeResends.flatMap(resend => {
       const p = sources.purchases.find(row => row.purchaseOrderId === resend.purchaseOrderId && row.orderItemId === resend.orderItemId);
-      return p ? [{ ...p, sourceReceiptId: null, batchNumber: null, available: resend.available, holdAllowance:resend.holdAllowance, resendApprovalId: resend.approvalId }] : [];
-    }),
+      return p ? [{ ...p, sourceReceiptId:null,batchNumber:null,available:resend.available,holdAllowance:resend.holdAllowance,
+        resendApprovalId:resend.approvalId,resendShortfallId:resend.shortfallId,afterSaleApprovalId:undefined }] : [];
+    }) : []),
+    ...exchanges.filter(row=>row.available>0 && !reviewHold).map(row=>({ ...row,sourceReceiptId:null,batchNumber:null,holdAllowance:undefined,
+      resendApprovalId:undefined,resendShortfallId:undefined,afterSaleApprovalId:row.id })),
   ];
   return <div className="space-y-3">
     <label className="flex gap-2 text-sm"><input type="checkbox" checked={earlier} disabled={looking || busy}
@@ -92,7 +100,7 @@ export function DispatchForm({ view, submit, busy, readAt, canReviewHold }: {
       const holdAssignments=(row.holdAllowance?.assignable ?? []).map(part=>({incidentId:part.incidentId,
         quantity:Number(read(form,'held-'+index+'-'+part.incidentId))})).filter(part=>part.quantity>0);
       return {purchaseOrderId:row.purchaseOrderId,orderItemId:row.orderItemId,sourceReceiptId:row.sourceReceiptId,
-        resendApprovalId:row.resendApprovalId,quantity:Number(read(form,'qty'+index)),
+        resendApprovalId:row.resendApprovalId,resendShortfallId:row.resendShortfallId,afterSaleApprovalId:row.afterSaleApprovalId,quantity:Number(read(form,'qty'+index)),
         holdAssignments:holdAssignments.length ? holdAssignments : undefined};
     }).filter(row=>row.quantity>0 || row.holdAssignments);
     const holdReview=reviewHold ? {supplierReference:read(form,'heldSupplierReference'),
@@ -105,9 +113,9 @@ export function DispatchForm({ view, submit, busy, readAt, canReviewHold }: {
       {Object.entries(routeLabels).filter(([value]) => value !== 'legacy_customer').map(([value,label]) => <option key={value} value={value}>{label}</option>)}
     </select></Label>
     {rows.length ? <fieldset key={route} className="space-y-1"><legend className="text-sm font-medium">本次实际发出的商品</legend>
-      {rows.map((row,index)=><div key={JSON.stringify([row.purchaseOrderId,row.orderItemId,row.sourceReceiptId,row.resendApprovalId])} className="space-y-1">
+      {rows.map((row,index)=><div key={JSON.stringify([row.purchaseOrderId,row.orderItemId,row.sourceReceiptId,row.resendApprovalId,row.resendShortfallId,row.afterSaleApprovalId])} className="space-y-1">
         <Label title={[row.name,row.supplier,row.purchaseOrderId,row.batchNumber && '批次 '+row.batchNumber,
-          row.resendApprovalId && '已批准的免费重发',reviewHold ? '当时正常可发 '+(row.holdAllowance?.ordinarilyAvailable ?? 0)+' · 可核对实发 '+row.available : '可发 '+row.available]
+          row.resendApprovalId && ('已批准的免费重发 · 原短失 '+row.resendShortfallId),row.afterSaleApprovalId && ('已准售后换货 · '+row.afterSaleApprovalId),reviewHold ? '当时正常可发 '+(row.holdAllowance?.ordinarilyAvailable ?? 0)+' · 可核对实发 '+row.available : '可发 '+row.available]
           .filter(Boolean).join(' · ')}>
           <input className={inputStyle} type="number" name={'qty'+index} min={0} max={row.available} step={1} defaultValue={0}/>
         </Label>

@@ -101,10 +101,10 @@ export default function FinanceManager({ initialOrder }: { initialOrder: string 
     if (view.invoicePlans.some(row => row.allocations.some(a => a.status === 'recorded'))) actions.push('open_correction');
     if (view.invoicePlans.some(row => row.allocations.some(a => a.status === 'correction_pending'))) actions.push('resolve_correction');
     if (view.purchases.length) actions.push('reconcile_supplier');
-    const cases = [...view.latePayments, ...view.receipts.filter(row => !row.counted && !row.reconciled)];
+    const cases = [...view.latePayments.filter(row=>!row.refund), ...view.receipts.filter(row => !row.counted && !row.reconciled)];
     if (cases.some(row => !row.review)) actions.push('review_payment_case');
     if (cases.some(row => row.review)) actions.push('update_payment_case');
-    if (view.latePayments.some(row => row.status === 'paid_stock_shortfall_reconciliation_required' && row.tradeNo)) actions.push('resume_alipay_payment');
+    if (view.latePayments.some(row => !row.refund && row.status === 'paid_stock_shortfall_reconciliation_required' && row.tradeNo)) actions.push('resume_alipay_payment');
   }
   return <main className="mx-auto max-w-6xl space-y-5 p-4 text-slate-800 md:p-6">
     <h1 className="text-2xl font-semibold">票款与对账</h1>
@@ -168,8 +168,12 @@ export default function FinanceManager({ initialOrder }: { initialOrder: string 
       {view.nativePaymentId && <p>支付宝原生交易 {view.nativePaymentId}</p>}
       {view.cancellationRequest && <p>取消或移除申请已记录 · {dateLabel(view.cancellationRequest.recordedAt)} · 等待财务核对原到账和处理意愿。</p>}
       {view.latePayments.map(row => <div key={row.id} className="text-sm">
-        <p>平台到账待核对 · {row.outTradeNo} · {money(row.amountCents)}{row.tradeNo && ' · 支付宝流水 ' + row.tradeNo}</p>
-        {row.review && <p>跟进负责人 {row.review.ownerId} · {paymentCaseProgressLabels[String(row.review.lastRecord.operation.outcome)] ?? '已领取待核对'}</p>}
+        <p>{row.refund ? row.refund.paidCents>=row.refund.receivedCents?'原平台实收已退回':'原平台实收由售后接续' : '平台到账待核对'}
+          {' · '+row.outTradeNo+' · '+money(row.amountCents)}{row.tradeNo && ' · 支付宝流水 ' + row.tradeNo}</p>
+        {row.refund && <p>售后经办 {row.refund.ownerId} · 已实际退回 {money(row.refund.paidCents)} · <a className="underline"
+          href={'/admin/after-sales?orderId='+encodeURIComponent(view.orderId)}>查看原售后记录</a></p>}
+        {row.review && <p>{row.refund?'原财务跟进人 ':'跟进负责人 '}{row.review.ownerId}
+          {' · ' + (row.refund?'已移交售后':paymentCaseProgressLabels[String(row.review.lastRecord.operation.outcome)] ?? '已领取待核对')}</p>}
       </div>)}
       {!view.acceptanceId && view.banks.length > 0 && <p>银行回单已留存。核销前请在采购页补齐平台接单依据。</p>}
     </section>

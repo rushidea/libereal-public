@@ -23,7 +23,7 @@ const labels: Record<string,string> = {
   holdReview:'发运偏差核对',unreleased:'发运时未放行的数量',incidentIds:'当时相关供货事项',incidentId:'原暂停事项',
   status:'办理状态',originalIncidentId:'发运时的原事项',resolutionId:'实际短失或退回记录',shortfallEvidence:'原短失凭据',holdAssignments:'实发暂停份额',holdDecisions:'逐项处理结果',holdResponsibility:'处理责任人',outcome:'实际处理结果',holdSource:'实际货物来源',
   responsibility:'责任人',supplierReference:'供方书面核对',customerReference:'客户书面回复',
-  resendApprovalId:'免费重发批准', resend:'原免费重发依据', allocation:'原出库流水归属', shipmentItemId:'原运单商品行',
+  resendApprovalId:'免费重发批准',resendShortfallId:'原短失记录',afterSaleApprovalId:'售后换货批准', resend:'原免费重发依据', allocation:'原出库流水归属', shipmentItemId:'原运单商品行',
 };
 const parcelStatuses = {
   dispatched: statusLabels.dispatched, in_transit: statusLabels.in_transit,
@@ -184,7 +184,9 @@ export default function FulfillmentPanel({ orderId, canWrite, stepUp, onUpdated 
           <summary className="cursor-pointer">补核历史发货记录和原运单</summary>
           <HistoricalShipmentForm view={view} busy={busy} submit={preview}/>
         </details>}
-        {canWrite && ['confirmed','partially_shipped'].includes(view.order.status) && <details className="rounded border border-gray-200 p-3">
+        {canWrite && (['confirmed','partially_shipped'].includes(view.order.status)
+          || ['shipped','completed'].includes(view.order.status) && (view.exchangeApprovals?.some(row=>row.available>0)
+            || view.receipts.some(row=>row.afterSaleApprovalId))) && <details className="rounded border border-gray-200 p-3">
           <summary className="cursor-pointer text-sm font-medium text-brand-700">登记采购发货或转发</summary>
           <div className="mt-3"><DispatchForm view={view} submit={preview} busy={busy} readAt={readAt} canReviewHold={capabilities.shortfall}/></div></details>}
         {!view.parcels.length && !view.legacyShipments.length && <p className="text-sm text-gray-600">这笔订单还没有实际发出的包裹。</p>}
