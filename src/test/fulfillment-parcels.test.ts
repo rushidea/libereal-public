@@ -1,3 +1,6 @@
+import { afterSaleAction } from '@/lib/after-sale-actions';
+import { salePermission, type SaleInput } from '@/lib/after-sale-records';
+import { afterSaleWorkspace } from '@/lib/after-sale-workspace';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { NextRequest } from 'next/server';
 import { GET as orderGET, PATCH as orderPATCH } from '@/app/api/admin/orders/[id]/route';
@@ -1693,13 +1696,50 @@ describe('actual scope of a supply incident', () => {
       expect(peer).toMatchObject({status:'draft',approvedHash:null,paidCents:0,totalCents:3140,remaining:[line(relayLineId,1)]});
       all.push(peer.id);
     }
+    const delivered = [];
     for (const purchaseOrderId of all) {
       expect(adjusted.fulfillment.replacementsWithPriorHoldTransfer).toContainEqual({purchaseOrderId,orderItemId:relayLineId});
       await purchaseAction(purchaseOrderId,{action:'approve',requestId:'independent-split-approval-'+purchaseOrderId});
       await purchaseAction(purchaseOrderId,{action:'register_order',requestId:'actual-split-order-'+purchaseOrderId,
         reference:'TEST-ACTUAL-SPLIT-ORDER-'+purchaseOrderId,referenceSha256:pricingContentHash({purchaseOrderId,proof:'actual split order'}),
         occurredAt:nextOccurrence()},operator);
-      await dispatch(dispatchInput('real-split-dispatched-'+purchaseOrderId,'supplier_to_customer',[goods(purchaseOrderId,relayLineId)]));
+      const parcel=await dispatch(dispatchInput('real-split-dispatched-'+purchaseOrderId,'supplier_to_customer',[goods(purchaseOrderId,relayLineId)]));
+      await event(parcel.id,eventInput('actual-customer-signed-'+purchaseOrderId,'customer_delivery',
+        [{parcelLineId:parcel.lines[0].id,quantity:1}]));
+      delivered.push({purchaseOrderId,parcelLineId:parcel.lines[0].id});
+    }
+    if(outcome==='revised_terms') {
+      const view=await prisma.$transaction(tx=>afterSaleWorkspace(tx,orderId));
+      expect(view.replacements).toHaveLength(2);
+      expect(view.replacements).toEqual(expect.arrayContaining([
+        expect.objectContaining({purchaseOrderId:all[0],shortfallId:loss.resolutionId,decisionId:originalRow.authorizationId,quantity:1,payableCents:2630}),
+        expect.objectContaining({purchaseOrderId:all[1],shortfallId:loss.resolutionId,decisionId:originalRow.authorizationId,quantity:1,payableCents:3140}),
+      ]));
+      const source=view.shortfalls.find(row=>row.resolutionId===loss.resolutionId)!;
+      async function handle(action:SaleInput['action'],requestId:string,caseId:string,data:Record<string,unknown>={}) {
+        const input:SaleInput={orderId,action,requestId,caseId,data:{reference:'OFFICE-'+requestId,sha256:pricingContentHash(requestId),occurredAt:nextOccurrence(),note:'按两张真实订购及签收逐份归案',...data}};
+        return prisma.$transaction(async tx=>{
+          const checked=await afterSaleAction(tx,input,operator);
+          return afterSaleAction(tx,input,operator,{hash:checked.actionHash,authorization:{permission:salePermission(input),
+            sessionFingerprint:pricingContentHash(operator),verifiedAt:new Date().toISOString()}});
+        });
+      }
+      const opened=await handle('open','sale-from-one-real-loss','',{orderItemId:relayLineId,quantity:2,issue:'shortage',channel:'fulfillment',
+        shortfallId:source.resolutionId,reference:source.reference,sha256:source.sha256,occurredAt:source.occurredAt,documentRow:source.documentRow});
+      const caseId=opened.caseId!;
+      await handle('claim','own-case-both-replacements',caseId);
+      const choose=(parts:{purchaseOrderId:string;quantity:number}[])=>handle('agreement','select-original-draft-distributed-purchases',caseId,
+        {remedy:'resend',customerDecision:'客户书面同意两家供方各一件的补采份额',replacementPurchaseShares:parts});
+      await expect(choose([{purchaseOrderId:all[0],quantity:2}])).rejects.toThrow('独立补采购行和数量');
+      const decision=await choose(all.map(purchaseOrderId=>({purchaseOrderId,quantity:1})));
+      expect(decision.snapshot).toMatchObject({operation:{replacements:all.map(purchaseOrderId=>({purchaseOrderId,quantity:1}))}});
+      for(const [index,part] of delivered.entries()){
+        const result=await handle('physical','verified-replacement-delivery-'+index,caseId,{result:'delivery',parcelLineId:part.parcelLineId,quantity:1});
+        expect(result.snapshot).toMatchObject({nextState:index===0?'awaiting_fulfillment':'awaiting_close',
+          operation:{replacement:{purchaseOrderId:part.purchaseOrderId,shortfallId:source.resolutionId}}});
+      }
+      expect(await current(all[0])).toMatchObject({totalCents:2630,paidCents:0});
+      expect(await current(all[1])).toMatchObject({totalCents:3140,paidCents:0});
     }
     const reservation=await prisma.inventoryReservation.findUniqueOrThrow({where:{orderItemId:relayLineId}});
     expect(reservation.releasedQuantity).toBe(2);

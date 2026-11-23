@@ -34,6 +34,44 @@ describe('客户与经办人从原订单进入售后',()=>{
       occurredAt:scope.shortfalls[0].occurredAt,reference:'少件原件',sha256:hash,issue:'shortage',channel:'fulfillment'}});
     expect(within(preview).getByRole('button',{name:'确认登记售后'})).toBeTruthy();
   });
+  it('第二张订单直接使用第一张办理的整票红冲回执，重开另选实际发票',async()=>{
+    const receipt={id:'CORRECTION-FROM-A',orderId:'OFFICE-ORDER-A',outcome:'voided',reference:'跨单整票红冲原件',sha256:hash,
+      occurredAt:'2026-11-02T01:01:01.123Z'};
+    const original={id:'PART-B-ORIGINAL',invoiceId:'SHARED-OLD',number:'整票原号',issuer:'办公开票方',amountCents:4000,
+      issuedAt:'2026-11-01T01:01:01Z',correction:receipt};
+    const replacement={...original,id:'PART-B-REISSUE',invoiceId:'NEW',number:'实际重开票号',correction:null};
+    const agreement={id:'AGREED',action:'agreement',actorId:'clerk',occurredAt:'2026-11-01T03:00:00Z',operation:{
+      remedy:'invoice',invoice:{allocationId:original.id,invoiceId:original.invoiceId,expectedOutcome:'reissue',replacementAmountCents:4000}}};
+    const corrected={...agreement,id:'LINKED',action:'invoice_outcome',operation:{agreementId:agreement.id,financeEventId:receipt.id,allocationId:original.id}};
+    const sale={id:'B-SALE-CASE',orderItemId:line.id,quantity:1,issue:'invoice',ownerId:'finance',customerState:'awaiting_invoice',supplierState:'unreviewed',
+      report:'客户要求红冲并重开',reference:'原售后请求',reportedAt:'2026-11-01T02:00:00Z',agreementId:agreement.id,events:[agreement]};
+    const desk={order:{id:order,status:'confirmed',acceptedAt:'2026-11-01T01:00:00Z'},lines:[line],shortfalls:[],deliveries:[],
+      cases:[sale],refundDrafts:[],invoiceChoices:[original,replacement]};
+    const submissions:unknown[]=[];
+    vi.stubGlobal('fetch',vi.fn((_input:string,init?:RequestInit)=>{
+      if(init?.method==='POST'){
+        submissions.push(JSON.parse(String(init.body)));
+        return res({preview:{actionHash:hash,snapshot:{item:line,scopeQuantity:1,nextState:'awaiting_invoice_reissue',nextSupplierState:'unreviewed',
+          proof:{reference:receipt.reference},operation:{financeEventId:receipt.id}}}});
+      }
+      return res({workspace:desk,permissions:['admin.access','finance.read','finance.write']});
+    }));
+    render(<AfterSalesManager initialOrder={order}/>);
+    fireEvent.click(await screen.findByRole('button',{name:'回填发票处理结果'}));
+    expect(screen.getByText(/办理订单 OFFICE-ORDER-A/)).toBeTruthy();
+    fireEvent.change(screen.getByLabelText('办理说明'),{target:{value:'本单实际分摊与整票红冲一致'}});
+    fireEvent.click(screen.getByRole('button',{name:'预览本次内容'}));
+    await screen.findByRole('region',{name:'售后办理预览'});
+    expect(submissions[0]).toMatchObject({orderId:order,caseId:sale.id,action:'invoice_outcome',
+      data:{financeEventId:receipt.id,sha256:receipt.sha256,reference:receipt.reference,occurredAt:receipt.occurredAt}});
+    Object.assign(sale,{customerState:'awaiting_invoice_reissue',events:[agreement,corrected]});
+    fireEvent.click(screen.getByRole('button',{name:'刷新本单'}));
+    fireEvent.click(await screen.findByRole('button',{name:'关联已实际重开的替代发票'}));
+    const picker=screen.getByLabelText('财务已实际登记的替代票分摊');
+    expect(within(picker).queryByRole('option',{name:/整票原号/})).toBeNull();
+    expect(within(picker).getByRole('option',{name:/实际重开票号/})).toBeTruthy();
+  });
+
   it('客户重复提交同一内容时沿用原申请编号，回到自己的订单状态',async()=>{
     const attempts:Array<Record<string,unknown>>=[];let saved=false;
     vi.stubGlobal('fetch',vi.fn((_input:string,init?:RequestInit)=>{
