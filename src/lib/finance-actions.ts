@@ -2,8 +2,8 @@ import type { Prisma } from '@prisma/client';
 import { applyStockHeldAlipayPayment, previewStockHeldAlipayPayment } from '@/lib/alipay-order-settlement';
 import { customerCashProjection, postVerifiedCustomerCash } from '@/lib/customer-cash';
 import { refreshCreditRestrictions } from '@/lib/customer-credit';
-import { invoiceAuthorityAt, invoiceAuthorityTimeline, invoiceScopeRooms, invoicesOutsideAuthority, type InvoiceAuthorityChange } from '@/lib/finance-invoice-authority';
-import { invoiceCharges, invoiceCommitments, readInvoicePortions } from '@/lib/finance-invoice-coverage';
+import { datedInvoiceChargesWorsen, invoiceAuthorityAt, invoiceAuthorityTimeline, invoicesOutsideAuthority, type InvoiceAuthorityChange } from '@/lib/finance-invoice-authority';
+import { invoiceCharges, invoiceCommitments, invoicePortionsFit, invoiceReservationBalances, readInvoicePortions } from '@/lib/finance-invoice-coverage';
 import { invoicePeriodAt, invoicePlanStartsAt, invoiceTimeline } from '@/lib/finance-invoice-timeline';
 import { coveredCustomerInvoiceLines, customerInvoiceScopeVersion, financeIdentity, financeWorkspace, invoiceStatus, invoiceTriggers,
   type FinanceWorkspace, type InvoiceTrigger } from '@/lib/finance-workspace';
@@ -132,9 +132,9 @@ function reviewedInvoiceCoverage(view: FinanceWorkspace, data: FinanceInput['dat
     const reassigned = plans.map(row => row.id !== plan.id ? row : {
       ...row, allocations: row.allocations.map(used => used.id === allocation.id ? { ...used, scopePortions: portions } : used),
     });
-    const conflicts = invoicesOutsideAuthority(family.timeline, invoiceCharges(reassigned));
-    const previouslyUnclear = new Set(family.invoiceConflicts.map(row => row.id));
-    if (conflicts.some(row => row.id === allocation.id || !previouslyUnclear.has(row.id))) {
+    const charges = invoiceCharges(reassigned);
+    if (invoicesOutsideAuthority(family.timeline, charges).some(row => row.id === allocation.id)
+      || datedInvoiceChargesWorsen(family.timeline, invoiceCharges(plans), charges)) {
       throw new PurchaseError('本次核对的原票金额、书证日期或其他已经占用的额度仍有冲突');
     }
   } else {
@@ -144,11 +144,9 @@ function reviewedInvoiceCoverage(view: FinanceWorkspace, data: FinanceInput['dat
       scheduledRemainingCents: row.id === plan.id ? amountCents : dated.remaining.get(row.id) ?? 0,
       coverageReview: invoicePeriodAt(row.coveragePeriods, at)?.review ?? (row.coverageReview && { remaining: null }),
     }));
-    const reassigned = applicable.map(row => row.id === plan.id ? { ...row, coverageReview: { remaining: portions } } : row);
-    const before = invoiceScopeRooms(family.timeline, invoiceCommitments(applicable), at);
-    const after = invoiceScopeRooms(family.timeline, invoiceCommitments(reassigned), at);
-    if (portions.some(part => (after.get(part.invoiceScopeId)?.roomCents ?? -1) < 0)
-      || [...after].some(([id, room]) => room.roomCents < 0 && (before.get(id)?.roomCents ?? 0) >= 0)) {
+    const commitments = invoiceCommitments(family.timeline, applicable, at);
+    const available = invoiceReservationBalances(commitments, plan.id);
+    if (!invoicePortionsFit(available, portions.map(part => ({ scopeId: part.invoiceScopeId, amountCents: part.amountCents })))) {
       throw new PurchaseError('本次核对的原安排金额超过有效书证或影响其他已占用额度');
     }
   }
@@ -202,23 +200,10 @@ function customerInvoiceScopeChange(view: FinanceWorkspace, basis: FinanceWorksp
     availableCents: currentCents === null || invoiceConflicts.length ? null : Math.max(0, currentCents - family.plannedCents) } };
 }
 
-export function invoiceReadyAt(view: FinanceWorkspace, plan: Plan) {
-  const po = view.purchases.find(row => row.id === plan.purchaseOrderId);
-  let businessAt: string | null = null;
-  if (plan.trigger === 'manual') businessAt = plan.manualAt;
-  if (plan.trigger === 'accepted') businessAt = po ? po.orderedAt : view.acceptedAt;
-  if (plan.trigger === 'paid') businessAt = po ? po.paidInFullAt
-    : view.postingPrincipal && view.settlementCents === view.postingPrincipal.cents && !view.authorityConflict ? view.paidAt : null;
-  if (!po && (plan.trigger === 'dispatched' || plan.trigger === 'delivered')) businessAt = view.shipmentDates[plan.trigger];
-  if (!businessAt || !Number.isFinite(Date.parse(businessAt)) || plan.amendedFromPlanId && !plan.effectiveAt) return null;
-  const startsAt = invoicePlanStartsAt(plan);
-  return startsAt && startsAt > businessAt ? startsAt : businessAt;
-}
-
 async function invoiceDocument(tx: Db, view: FinanceWorkspace, input: FinanceInput, evidence: Evidence) {
   const data = input.data;
   const plan = planFor(view, data.planId, true);
-  const readyAt = invoiceReadyAt(view, plan);
+  const readyAt = plan.readyAt;
   if (!readyAt) throw new PurchaseError('约定的开票条件尚未取得实际结果');
   const issuedAt = actualTime(data.issuedAt, '人工开票时间');
   if (Date.parse(issuedAt) < Date.parse(readyAt)) throw new PurchaseError('票面开票时间早于约定条件的实际完成时间，请核对原件或更正约定');
@@ -262,11 +247,9 @@ async function invoiceDocument(tx: Db, view: FinanceWorkspace, input: FinanceInp
   if (sourceScope && (!authority || authority.authorizedCents === null)) throw new PurchaseError('票面日期的有效开票书证待具名核对');
   if (family) {
     const actual = trial.find(row => row.id === plan.id)!.allocations.at(-1)!;
-    const conflicts = invoicesOutsideAuthority(family.timeline, invoiceCharges([
-      ...familyInvoicePlans(view, family), { ...plan, allocations: [actual] },
-    ]));
-    const alreadyDisputed = new Set(family.invoiceConflicts.map(row => row.id));
-    if (family.invoiceConflicts.some(row => row.issuedAt >= issuedAt) || conflicts.some(row => !alreadyDisputed.has(row.id))) {
+    const existing = invoiceCharges(familyInvoicePlans(view, family));
+    const added = invoiceCharges([{ ...plan, allocations: [actual] }]);
+    if (datedInvoiceChargesWorsen(family.timeline, existing, [...existing, ...added])) {
       throw new PurchaseError('回填将超过实际开票日期适用的书证额度，请核对票面及同一范围的原票');
     }
   }

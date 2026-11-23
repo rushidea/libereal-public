@@ -119,60 +119,103 @@ export function invoiceAuthorityAt(timeline: InvoiceAuthorityTimeline, at: strin
   return timeline.findLast(row => row.at <= at);
 }
 
-export function invoiceScopeRooms(
+type InvoiceScopeRoom = {
+  authorizedCents: number;
+  roomCents: number;
+  sharesCumulativeLimit: boolean;
+  cumulativeCents?: number;
+  constraintKeys: string[];
+};
+
+export function invoiceAuthorityBalances(
   timeline: InvoiceAuthorityTimeline, usedByScope: ReadonlyMap<string, number>, at = timeline.at(-1)?.at,
 ) {
   const through = timeline.filter(row => at && row.at <= at);
   const available = through.at(-1);
-  const rooms = new Map<string, { authorizedCents: number; roomCents: number; sharesCumulativeLimit: boolean }>();
-  if (!available || available.authorizedCents === null) return rooms;
-  const proofs = through.flatMap(row => row.scopeLimits);
+  const rooms = new Map<string, InvoiceScopeRoom>();
   const used = [...usedByScope.values()].reduce((sum, amount) => sum + amount, 0);
-  const familyRoom = available.authorizedCents - used;
-  const commonUsed = new Map<number, number>();
-  for (const { id, cumulativeCents } of proofs) {
-    if (cumulativeCents !== undefined) commonUsed.set(cumulativeCents, (commonUsed.get(cumulativeCents) ?? 0) + (usedByScope.get(id) ?? 0));
+  const familyRoom = (available?.authorizedCents ?? 0) - used;
+  const constraints = new Map<string, number>([['total', familyRoom]]);
+  const knownScopes = new Set<string>();
+  if (available && available.authorizedCents !== null) {
+    const proofs = through.flatMap(row => row.scopeLimits);
+    const commonUsed = new Map<number, number>();
+    for (const { id, cumulativeCents } of proofs) {
+      if (cumulativeCents !== undefined) commonUsed.set(cumulativeCents, (commonUsed.get(cumulativeCents) ?? 0) + (usedByScope.get(id) ?? 0));
+    }
+    const ceilings = [...commonUsed.keys()].sort((left, right) => left - right);
+    let cumulativeUsed = 0;
+    for (const ceiling of ceilings) {
+      cumulativeUsed += commonUsed.get(ceiling) ?? 0;
+      constraints.set('ceiling:' + ceiling, ceiling - cumulativeUsed);
+    }
+    constraints.set('common', (available.cumulativeCents ?? 0) - cumulativeUsed);
+    for (const { id, cents, cumulativeCents } of proofs) {
+      knownScopes.add(id);
+      const scopeKey = 'scope:' + id;
+      constraints.set(scopeKey, cents - (usedByScope.get(id) ?? 0));
+      const constraintKeys = ['total', scopeKey];
+      // A commitment under a smaller ceiling also occupies the larger cumulative ceilings.
+      if (cumulativeCents !== undefined) {
+        if (available.cumulativeCents === null) continue;
+        constraintKeys.push('common', ...ceilings.filter(ceiling => ceiling >= cumulativeCents).map(ceiling => 'ceiling:' + ceiling));
+      }
+      rooms.set(id, { authorizedCents: cents, roomCents: Math.min(...constraintKeys.map(key => constraints.get(key)!)),
+        sharesCumulativeLimit: cumulativeCents !== undefined, cumulativeCents, constraintKeys });
+    }
   }
-  const ceilings = [...commonUsed.keys()].sort((left, right) => left - right);
-  let cumulativeUsed = 0;
-  const remainingAtCeiling = new Map(ceilings.map(ceiling => {
-    cumulativeUsed += commonUsed.get(ceiling) ?? 0;
-    return [ceiling, ceiling - cumulativeUsed];
-  }));
-  // A commitment under a smaller ceiling also occupies the larger cumulative ceilings.
-  let commonRoom = available.cumulativeCents === null ? null : available.cumulativeCents - cumulativeUsed;
-  for (const ceiling of ceilings.reverse()) {
-    if (commonRoom === null) break;
-    commonRoom = Math.min(commonRoom, remainingAtCeiling.get(ceiling)!);
-    remainingAtCeiling.set(ceiling, commonRoom);
-  }
-  for (const { id, cents, cumulativeCents } of proofs) {
-    const ownRoom = cents - (usedByScope.get(id) ?? 0);
-    const sharedRoom = cumulativeCents === undefined ? ownRoom
-      : available.cumulativeCents === null ? null : remainingAtCeiling.get(cumulativeCents) ?? null;
-    if (sharedRoom !== null) rooms.set(id, { authorizedCents: cents, roomCents: Math.min(familyRoom, ownRoom, sharedRoom),
-      sharesCumulativeLimit: cumulativeCents !== undefined });
-  }
-  return rooms;
+  for (const [id, amount] of usedByScope) if (!knownScopes.has(id)) constraints.set('scope:' + id, -amount);
+  return { rooms, constraints };
 }
 
-export function invoicesOutsideAuthority(timeline: InvoiceAuthorityTimeline, allocations: Array<{
-  id: string; number: string; issuedAt: string; amountCents: number; status: string; scopeId: string | null;
-}>) {
-  const effective = allocations.filter(row => row.status !== 'voided').sort((a, b) => a.issuedAt.localeCompare(b.issuedAt));
-  const usedByScope = new Map<string, number>();
-  const dated = new Map<string, typeof effective>();
-  for (const row of effective) {
+export function invoiceConstraintsWorsen(before: ReadonlyMap<string, number>, after: ReadonlyMap<string, number>) {
+  return [...after].some(([key, cents]) => cents < Math.min(0, before.get(key) ?? 0));
+}
+
+export type InvoiceCharge = { id: string; number: string; issuedAt: string; amountCents: number; status: string; scopeId: string | null };
+
+export function addInvoiceCharge(used: Map<string, number>, scopeId: string | null, cents: number) {
+  const key = scopeId ?? '';
+  used.set(key, (used.get(key) ?? 0) + cents);
+}
+
+function invoiceChargesByDate(allocations: InvoiceCharge[]) {
+  const dated = new Map<string, InvoiceCharge[]>();
+  for (const row of allocations) {
+    if (row.status === 'voided') continue;
     const sameDate = dated.get(row.issuedAt) ?? [];
     sameDate.push(row);
     dated.set(row.issuedAt, sameDate);
   }
-  return [...dated].flatMap(([at, rows]) => {
-    for (const row of rows) {
-      const key = row.scopeId ?? '';
-      usedByScope.set(key, (usedByScope.get(key) ?? 0) + row.amountCents);
-    }
-    const rooms = invoiceScopeRooms(timeline, usedByScope, at);
+  return dated;
+}
+
+function addDatedCharges(used: Map<string, number>, allocations?: InvoiceCharge[]) {
+  for (const row of allocations ?? []) addInvoiceCharge(used, row.scopeId, row.amountCents);
+}
+
+export function datedInvoiceChargesWorsen(timeline: InvoiceAuthorityTimeline, before: InvoiceCharge[], after: InvoiceCharge[]) {
+  const original = invoiceChargesByDate(before);
+  const trial = invoiceChargesByDate(after);
+  const dates = [...new Set([...original.keys(), ...trial.keys()])].sort();
+  const originalUsage = new Map<string, number>();
+  const trialUsage = new Map<string, number>();
+  for (const at of dates) {
+    addDatedCharges(originalUsage, original.get(at));
+    addDatedCharges(trialUsage, trial.get(at));
+    if (invoiceConstraintsWorsen(invoiceAuthorityBalances(timeline, originalUsage, at).constraints,
+      invoiceAuthorityBalances(timeline, trialUsage, at).constraints)) return true;
+  }
+  return false;
+}
+
+export function invoicesOutsideAuthority(timeline: InvoiceAuthorityTimeline, allocations: InvoiceCharge[]) {
+  const usedByScope = new Map<string, number>();
+  const dated = invoiceChargesByDate(allocations);
+  return [...dated.keys()].sort().flatMap(at => {
+    const rows = dated.get(at)!;
+    addDatedCharges(usedByScope, rows);
+    const { rooms } = invoiceAuthorityBalances(timeline, usedByScope, at);
     return [...new Map(rows.filter(row => (rooms.get(row.scopeId ?? '')?.roomCents ?? -1) < 0)
       .map(row => [row.id, { id: row.id, number: row.number, issuedAt: row.issuedAt }])).values()];
   });

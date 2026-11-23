@@ -2,8 +2,8 @@ import { Prisma } from '@prisma/client';
 import { isAlipayReconciliationStatus } from '@/lib/payment-concurrency';
 import { receivableOutstandingCents } from '@/lib/receivable-balance';
 import { invoicePeriodAt, invoicePlanStartsAt, invoiceTermsPeriods, invoiceTimeline } from '@/lib/finance-invoice-timeline';
-import { invoiceCharges, invoiceCommitments, invoiceCoverageRemaining, readInvoicePortions } from '@/lib/finance-invoice-coverage';
-import { invoiceAuthorityTimeline, invoiceScopeRooms, invoicesOutsideAuthority, readInvoiceAuthorityChange } from '@/lib/finance-invoice-authority';
+import { invoiceCharges, invoiceCommitments, invoiceCoverageRemaining, invoiceIssuableAmount, invoiceReservationBalances, readInvoicePortions } from '@/lib/finance-invoice-coverage';
+import { invoiceAuthorityBalances, invoiceAuthorityTimeline, invoicesOutsideAuthority, readInvoiceAuthorityChange } from '@/lib/finance-invoice-authority';
 import { confirmedCustomerDelivery, customerShipmentRows } from '@/lib/fulfillment-accounting';
 import { jsonObject } from '@/lib/order-catalog-repricing';
 import { alipayCancellationRequest } from '@/lib/order-payment-review';
@@ -257,6 +257,29 @@ function customerInvoiceReviews(events: EventRow[], orderId: string, customerKey
   });
 }
 
+type InvoiceConditions = {
+  acceptedAt: string | null;
+  paidAt: string | null;
+  postingPrincipal: { cents: number } | null;
+  settlementCents: number;
+  authorityConflict: boolean;
+  shipmentDates: Record<'dispatched' | 'delivered', string | null>;
+  purchases: Array<{ id: string; orderedAt: string | null; paidInFullAt: string | null }>;
+};
+
+function invoiceReadyAt(view: InvoiceConditions, plan: ReturnType<typeof invoicePlanViews>[number]) {
+  const po = view.purchases.find(row => row.id === plan.purchaseOrderId);
+  let businessAt: string | null = null;
+  if (plan.trigger === 'manual') businessAt = plan.manualAt;
+  if (plan.trigger === 'accepted') businessAt = po ? po.orderedAt : view.acceptedAt;
+  if (plan.trigger === 'paid') businessAt = po ? po.paidInFullAt
+    : view.postingPrincipal && view.settlementCents === view.postingPrincipal.cents && !view.authorityConflict ? view.paidAt : null;
+  if (!po && (plan.trigger === 'dispatched' || plan.trigger === 'delivered')) businessAt = view.shipmentDates[plan.trigger];
+  if (!businessAt || !Number.isFinite(Date.parse(businessAt)) || plan.amendedFromPlanId && !plan.effectiveAt) return null;
+  const startsAt = invoicePlanStartsAt(plan);
+  return startsAt && startsAt > businessAt ? startsAt : businessAt;
+}
+
 export async function financeWorkspace(tx: Db, orderId: string) {
   const order = await loadPurchaseOrderSource(tx, orderId);
   const purchase = await purchaseWorkspace(tx, orderId);
@@ -279,24 +302,32 @@ export async function financeWorkspace(tx: Db, orderId: string) {
   const originalInvoiceLines = order.orderItems.map(({ id, name, quantity, unitPrice }) => ({ id, name, quantity, unitPrice }));
   const customerInvoiceReviewsFound = customerInvoiceReviews(financeEvents, orderId, customerKey, start.acceptance?.id ?? null, originalInvoiceLines);
   const scopeDates = new Map(customerInvoiceReviewsFound.map(row => [row.id, row.occurredAt]));
-  const invoicePlans = invoicePlanViews(plans, events, new Date(), scopeDates);
-  const scopeRooms: ReturnType<typeof invoiceScopeRooms> = new Map();
+  const now = new Date();
+  const asOf = now.toISOString();
+  const invoicePlans = invoicePlanViews(plans, events, now, scopeDates);
+  const scopeRooms: ReturnType<typeof invoiceAuthorityBalances>['rooms'] = new Map();
+  const scopeIssuable = new Map<string, number | null>();
   const customerInvoiceFamilies = customerInvoiceReviewsFound.filter(row => row.familyId === row.id).map(root => {
     const evidence = customerInvoiceReviewsFound.filter(row => row.familyId === root.id);
     const scopeIds = new Set(evidence.map(row => row.id));
     const planned = invoicePlans.filter(plan => plan.invoiceScopeId && scopeIds.has(plan.invoiceScopeId));
     const timeline = invoiceAuthorityTimeline(evidence);
     const authorizedCents = timeline.at(-1)!.authorizedCents;
-    const invoiceConflicts = invoicesOutsideAuthority(timeline, invoiceCharges(planned));
+    const owners = new Map(planned.flatMap(plan => plan.allocations.map(row => [row.id, plan.ownerId] as const)));
+    const invoiceConflicts = invoicesOutsideAuthority(timeline, invoiceCharges(planned))
+      .map(row => ({ ...row, ownerId: owners.get(row.id) ?? null }));
     const issuedCents = planned.reduce((sum, plan) => sum + plan.usedCents, 0);
     const plannedCents = planned.reduce((sum, plan) => sum + plan.usedCents + plan.scheduledRemainingCents, 0);
-    if (!invoiceConflicts.length) {
-      const scheduled = planned.map(plan => ({ ...plan, coverageReview: plan.coveragePeriods.at(-1)?.review
-        ?? (plan.coverageReview && { remaining: null }) }));
-      for (const [scopeId, room] of invoiceScopeRooms(timeline, invoiceCommitments(scheduled))) scopeRooms.set(scopeId, room);
-    }
+    const current = planned.map(plan => ({ ...plan, scheduledRemainingCents: plan.remainingCents }));
+    const currentCommitments = invoiceCommitments(timeline, current, asOf);
+    for (const plan of current) scopeIssuable.set(plan.id, invoiceIssuableAmount(currentCommitments, plan));
+    const scheduled = planned.map(plan => ({ ...plan, coverageReview: plan.coveragePeriods.at(-1)?.review
+      ?? (plan.coverageReview && { remaining: null }) }));
+    const scheduledCommitments = invoiceCommitments(timeline, scheduled, asOf);
+    const { rooms, constraints } = invoiceReservationBalances(scheduledCommitments);
+    for (const [scopeId, room] of rooms) scopeRooms.set(scopeId, room);
     return { id: root.id, authorizedCents, issuedCents, plannedCents, invoiceConflicts, timeline, evidence,
-      availableCents: authorizedCents === null || invoiceConflicts.length ? null : Math.max(0, authorizedCents - plannedCents) };
+      availableCents: authorizedCents === null ? null : Math.max(0, constraints.get('total') ?? 0) };
   });
   const customerInvoiceScopes = customerInvoiceReviewsFound.filter(row => row.change?.mode !== 'clarify').map(evidence => {
     const room = scopeRooms.get(evidence.id);
@@ -379,8 +410,23 @@ export async function financeWorkspace(tx: Db, orderId: string) {
       needsTermReview: Boolean(ar.termStartedAt && start.acceptance && ar.termStartedAt.toISOString() !== start.acceptance.at
         && !events.some(row => row.action === 'set_term' || row.action === 'restore_term')),
       terms: ar.paymentTermDaysSnapshot, termStartedAt: ar.termStartedAt?.toISOString() ?? null, dueAt: ar.dueAt?.toISOString() ?? null },
-    purchases, invoicePlans, events };
-  return { ...state, version: pricingContentHash(state) };
+    purchases, events };
+  const availableInvoicePlans = invoicePlans.map(plan => {
+    const readyAt = invoiceReadyAt(state, plan);
+    let issuableCents: number | null = 0;
+    if (plan.remainingCents > 0 && readyAt && readyAt <= asOf) {
+      if (plan.invoiceScopeId) issuableCents = scopeIssuable.get(plan.id) ?? null;
+      else {
+        const cap = plan.side === 'customer' ? state.principalCents : purchases.find(row => row.id === plan.purchaseOrderId)?.agreedCents;
+        const total = invoicePlans.filter(row => !row.invoiceScopeId && row.side === plan.side && row.purchaseOrderId === plan.purchaseOrderId)
+          .reduce((sum, row) => sum + row.usedCents + row.scheduledRemainingCents, 0);
+        issuableCents = cap == null ? null : total <= cap ? plan.remainingCents : 0;
+      }
+    }
+    return { ...plan, issuableCents, readyAt };
+  });
+  const result = { ...state, invoicePlans: availableInvoicePlans };
+  return { ...result, version: pricingContentHash(result) };
 }
 
 export type FinanceWorkspace = Awaited<ReturnType<typeof financeWorkspace>>;
