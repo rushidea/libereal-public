@@ -581,9 +581,14 @@ function committedDispositions(
   view: Workspace, po: PO, input: PurchaseActionInput, customerLines: PurchaseSource[], remainingQuantities: ReadonlyMap<string, number>,
 ): Disposition[] {
   const entries = input.dispositions;
-  if (!Array.isArray(entries) || !entries.length || entries.some(entry => !entry || typeof entry.orderItemId !== 'string')
-    || new Set(entries.map(entry => entry.orderItemId)).size !== entries.length) {
+  if (!Array.isArray(entries) || !entries.length || entries.some(entry => !entry || typeof entry.orderItemId !== 'string')) {
     throw new PurchaseError('须逐行填写替代或取消数量', 400);
+  }
+  const grouped = new Map<string, typeof entries>();
+  for (const entry of entries) grouped.set(entry.orderItemId,[...(grouped.get(entry.orderItemId)??[]),entry]);
+  for (const rows of grouped.values()) {
+    if (rows.length>1 && (rows.some(row=>row.shortfallDecision!=='free_resend'||!row.shortfallId)
+      || new Set(rows.map(row=>row.shortfallId)).size!==rows.length)) throw new PurchaseError('同一商品的免费补件须对应各自已核实的短失，其他改约仍须逐行办理');
   }
   const prior = dispositionSummary(po.ledger).quantities;
   const dispositions = entries.map((entry): Disposition => {
@@ -1362,7 +1367,8 @@ async function prepareCoordinationEvidence(
   const { orderId, purchaseOrderId } = input;
   const { supplierSha256 } = details;
   let { customerSha256 } = details;
-  const effects: DecisionEffect[] = details.dispositions ?? [];
+  const effects: DecisionEffect[] = details.dispositions?.map(row=>({ ...row, document:input.dispositions?.find(source=>
+    source.orderItemId===row.orderItemId && (source.shortfallId??source.forwardingLossId)===row.shortfallId) })) ?? [];
   if (details.outcome==='revised_terms') {
     for (const edit of details.revisedTerms ?? []) {
       const prior = po.lines.find(row=>row.orderItemId===edit.orderItemId);
@@ -1390,7 +1396,7 @@ async function prepareCoordinationEvidence(
   }
   if (!effects.length) return { ...details, decisionDocuments: undefined };
   const decisionDocuments = await previewDecisionDocuments(tx, { orderId,purchaseOrderId,supplierSha256,customerSha256,effects,
-    documents: details.dispositions ? input.dispositions! : input.decisionDocumentLines ?? [],
+    documents: details.dispositions ? [] : input.decisionDocumentLines ?? [],
   });
   return { ...details,customerSha256,decisionDocuments };
 }

@@ -341,7 +341,8 @@ export async function recordParcelEvent(tx: Db, orderId: string, parcelId: strin
     await tx.fulfillmentLineResolution.create({ data: { eventId: event.id, parcelLineId: row.parcelLineId, kind: row.kind, quantity: row.quantity } });
     if (row.receipt) await disposeProcurementBatch(tx, { receiptId: row.receipt.id, orderId, quantity: row.quantity, disposition: 'returned_to_supplier', actorId: actor.id });
   }
-  if (resolutions.length && parcel.shipmentId) await reduceCustomerShipment(tx, orderId, plan.order.status, resolutions, actor, event.id);
+  const originalResolutions = resolutions.filter(row=>!parcel.lines.find(line=>line.id===row.parcelLineId)?.afterSaleApprovalId);
+  if (originalResolutions.length && parcel.shipmentId) await reduceCustomerShipment(tx, orderId, plan.order.status, originalResolutions, actor, event.id);
   for (const row of lines) {
     const changed = await tx.fulfillmentParcelLine.updateMany({ where: { id: row.parcelLineId, parcelId,
       receivedQuantity: { lte: parcel.lines.find(line => line.id === row.parcelLineId)!.quantity - row.quantity } },

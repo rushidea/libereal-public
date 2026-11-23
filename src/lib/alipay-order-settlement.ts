@@ -1,4 +1,5 @@
 import type { Prisma } from '@prisma/client';
+import { afterSalePaymentUses } from '@/lib/after-sale-payment-source';
 import { normalizeOrderPaymentMethod } from '@/data/payment-methods';
 import { alipayAmountToCents } from '@/lib/alipay';
 import { writeAuditLog } from '@/lib/audit';
@@ -60,6 +61,9 @@ export async function previewStockHeldAlipayPayment(tx: Db, orderId: string, pay
   if (!attempt || attempt.orderId !== orderId || attempt.provider !== 'alipay' || attempt.status !== STOCK_SHORTFALL_STATUS
     || !attempt.tradeNo || !attempt.notifiedAt) throw new AlipayStockReceiptDeferred('须选择有支付宝验签收款依据的库存待核对记录');
   const { order } = attempt;
+  if ((await afterSalePaymentUses(tx, orderId)).has(paymentId)) {
+    throw new AlipayStockReceiptDeferred('该笔实际到账已进入具名售后退款核对，请保留原订单及交易');
+  }
   if (await tx.paymentAttempt.findFirst({
     where: { ...alipayReceiptWhere, tradeNo: attempt.tradeNo, id: { not: attempt.id } }, select: { id: true },
   })) throw new AlipayStockReceiptDeferred('同一支付宝流水还有其他到账记录，请核对原交易归属');

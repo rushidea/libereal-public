@@ -498,7 +498,7 @@ async function financeOperation(tx: Db, input: FinanceInput, actor: PurchaseActo
     return { ...evidence, action, sourceId, payment, caseId: view.latePayments.find(row => row.id === sourceId)?.review?.claimId ?? null };
   }
   const sourceId = requiredText(data.sourceId, '待核对的原交易');
-  const alipay = view.latePayments.find(row => row.id === sourceId);
+  const alipay = view.latePayments.find(row => row.id === sourceId && !row.refund);
   const bank = view.receipts.find(row => row.id === sourceId && !row.counted && !row.reconciled);
   const source = alipay ? { ...alipay, kind: 'alipay' as const } : bank && { ...bank, kind: 'bank' as const };
   if (!source) throw new PurchaseError('找不到所选交易的待核对记录');

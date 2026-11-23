@@ -1,4 +1,5 @@
 import { Prisma } from '@prisma/client';
+import { afterSalePaymentUses } from '@/lib/after-sale-payment-source';
 import { isAlipayReconciliationStatus } from '@/lib/payment-concurrency';
 import { receivableOutstandingCents } from '@/lib/receivable-balance';
 import { invoicePeriodAt, invoicePlanStartsAt, invoiceTermsPeriods, invoiceTimeline } from '@/lib/finance-invoice-timeline';
@@ -374,10 +375,12 @@ export async function financeWorkspace(tx: Db, orderId: string) {
     bankAllocationId: row.bankAllocationId, paymentAttemptId: row.paymentAttemptId, actorId: row.actorId }));
   const cashCents = cash.reduce((sum, row) => sum + row.amountCents, 0);
   const native = start.payment.paymentAttemptId;
+  const refundUses = await afterSalePaymentUses(tx,orderId);
   const late = order.paymentAttempts.filter(row => row.provider === 'alipay' && isAlipayReconciliationStatus(row.status))
     .map(row => ({ id: row.id, status: row.status, outTradeNo: row.outTradeNo, tradeNo: row.tradeNo,
       amountCents: Math.round(row.amount * 100), gatewayPaidAt: row.paidAt?.toISOString() ?? null,
-      notifiedAt: row.notifiedAt?.toISOString() ?? null, review: paymentCaseReview(events, row.id) }));
+      notifiedAt: row.notifiedAt?.toISOString() ?? null, review: paymentCaseReview(events, row.id),
+      refund: refundUses.get(row.id) ?? null }));
   const authorityConflict = Boolean(native && start.payment.allocatedCents || cash.some(post => post.bankAllocationId
     && !start.payment.receipts.some(row => row.id === post.bankAllocationId && row.counted)));
   const ar = order.receivable;

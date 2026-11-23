@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { Prisma } from '@prisma/client';
+import { afterSaleInvoiceChoices } from '@/lib/after-sale-invoices';
+import { verifiedAfterSalePayment } from '@/lib/after-sale-payment-source';
 import { afterSaleAction } from '@/lib/after-sale-actions';
 import { refundPosition, refundTerms } from '@/lib/after-sale-refunds';
 import { saleInput, salePermission } from '@/lib/after-sale-records';
@@ -31,9 +33,22 @@ export async function GET(req: NextRequest) {
         const view=await afterSaleWorkspace(tx,id);
         const screen=afterSaleAdminView(view,permissions);
         const refundDrafts=permissions.includes('finance.read') ? await Promise.all(view.cases
-          .filter(row=>['awaiting_refund','refund_prepared','refund_approved'].includes(row.customerState))
+          .filter(row=>['awaiting_refund','refund_prepared','refund_approved','refund_followup'].includes(row.customerState))
           .map(async row=>({caseId:row.id,terms:refundTerms(row),position:await refundPosition(tx,view,row)}))) : [];
-        return {...screen,refundDrafts};
+        const invoiceChoices = (await afterSaleInvoiceChoices(tx,id)).map(choice=>({
+          id:choice.id, number:choice.invoice.number, issuer:choice.invoice.issuer,
+          issuedAt:choice.invoice.issuedAt.toISOString(), amountCents:permissions.includes('finance.read')?Number(choice.amountCents):null,
+        }));
+        const canVerify = permissions.includes('finance.read') && (!view.order.acceptance || ['cancelled','closed'].includes(view.order.status));
+        const candidates = canVerify ? await tx.paymentAttempt.findMany({where:{orderId:id,provider:'alipay',tradeNo:{not:null}},select:{id:true}}) : [];
+        const refundSources = (await Promise.all(candidates.map(async item=>{
+          try {
+            const verified=await verifiedAfterSalePayment(tx,id,item.id);
+            return {id:item.id,tradeNo:verified.tradeNo,amountCents:verified.amountCents,arrivedAt:verified.arrivedAt,
+              customerKey:verified.customer.organizationId??verified.customer.customerId};
+          } catch(error) {if(error instanceof PurchaseError)return null;throw error;}
+        }))).filter(item=>item!==null);
+        return {...screen,refundDrafts,invoiceChoices,refundSources};
       });
       return NextResponse.json({workspace,permissions},{headers:{'Cache-Control':'private, no-store'}});
     }

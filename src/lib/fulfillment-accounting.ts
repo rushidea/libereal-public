@@ -45,10 +45,10 @@ export async function customerShipmentRows(tx: Db, orderId: string) {
     where: { shipment: { orderId, shippedAt: { not: null }, status: { in: ['shipped','delivered','completed'] } } },
     include: { shipment: { include: { fulfillmentParcel: { select: { route: true,
       events: { where: { kind: {in:['backfill_legacy','dispatch','review_dispatch_hold']} }, select: {kind:true,status:true,details:true,createdAt:true} }, lines: { select: {
-      id: true, orderItemId: true, purchaseOrderId: true, quantity: true, receivedQuantity: true, resolutions: true,
+      id: true, orderItemId: true, purchaseOrderId: true, quantity: true, receivedQuantity: true, resolutions: true, afterSaleApprovalId: true,
     } } } } } } }, orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
   });
-  return rows.map(row => {
+  return rows.filter(row => !row.shipment.fulfillmentParcel?.lines.some(line => line.afterSaleApprovalId)).map(row => {
     const parcel = row.shipment.fulfillmentParcel;
     if (!parcel) return { ...row, effectiveQuantity: row.quantity, received: row.shipment.deliveredAt ? row.quantity : 0,
       sources: [], commercialPending:false, historicalAttributionId: null };

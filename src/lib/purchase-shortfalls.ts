@@ -1,6 +1,6 @@
 import { dispatchHoldFacts } from '@/lib/fulfillment-holds';
 import { dispatchShortfallKey, unlinkedShortfall, type DispatchShortfall, type SavedDispatchShortfall } from '@/lib/purchase-shortfall-followup';
-import { purchaseOperation, type PurchaseActivity } from '@/lib/purchase-activity';
+import { purchaseObject, purchaseOperation, type PurchaseActivity } from '@/lib/purchase-activity';
 import { jsonObject } from '@/lib/order-catalog-repricing';
 import { availableReceipt, parcelLineBalance, type FulfillmentDb as Db } from '@/lib/fulfillment-records';
 import type { IncidentCandidate } from '@/lib/purchase-incident-scope';
@@ -13,6 +13,9 @@ type DecisionRow = {
 };
 type SourceQuantity = { purchaseOrderId: string; orderItemId: string; quantity: number };
 const sourceKey = (purchaseOrderId: string, orderItemId: string) => JSON.stringify([purchaseOrderId,orderItemId]);
+
+const resendKey = (approvalId: string, orderItemId: string, shortfallId: string) => JSON.stringify([approvalId, orderItemId, shortfallId]);
+type ResendAttribution = { approvalId: string; shortfallId: string; sourceParcelLineId: string; parcelLineId: string; quantity: number };
 
 type StockSource = { purchaseLine: string; shortfallId?: never } | { purchaseLine?: never; shortfallId: string };
 export type ContractDispatchSource = { purchaseOrderId: string; orderItemId: string; parcelLineId: string; reference: string };
@@ -54,7 +57,17 @@ export async function purchaseShortfalls(tx: Db, orderId: string, activities: Pu
   const replacements = await tx.purchaseReplacementLine.findMany({ where: { orderId },
     select: { purchaseOrderId: true, orderItemId: true, fromPurchaseOrderId: true, authorizationId: true, quantity: true } });
   const authorized = new Map(dispositions.map(row => [sourceKey(row.approvalId,row.orderItemId),row]));
-  const authorizedShortfalls = new Map(decisions.map(row => [sourceKey(row.approvalId,row.orderItemId),row]));
+  const resendRights = decisions.filter(row => row.kind === 'free_resend');
+  const attributed = await tx.afterSaleEvent.findMany({ where: { action: 'attribute_resend', case: { orderId } },
+    select: { detail: true, approvedHash: true } });
+  const resendAttributions = attributed.flatMap(row => {
+    const detail = jsonObject(row.detail);
+    const proof = purchaseObject(detail.authorization);
+    const op = purchaseObject(detail.operation);
+    return row.approvedHash && proof.permission === 'purchases.write' && typeof op.approvalId === 'string'
+      && typeof op.shortfallId === 'string' && typeof op.sourceParcelLineId === 'string' && typeof op.parcelLineId === 'string'
+      && positiveCents(op.quantity) ? [op as ResendAttribution] : [];
+  });
   // Each draft split spends a share of the already authorized quantity. It never creates a new shortfall decision.
   const replacementRights = new Map([...authorized].filter(([,row])=>row.outcome==='replace'));
   for (const entry of activities) {
@@ -92,38 +105,60 @@ export async function purchaseShortfalls(tx: Db, orderId: string, activities: Pu
   const contractedDispatches = new Map<string,SourceQuantity>();
   const resendDispatches = new Map<string,number>();
   const diverted = new Map<string,number>();
+  const pendingResendGroups = new Set<string>();
+  const unverifiedOrigins = new Set<string>();
+  const resendShipments: Array<{ parcelLineId: string; approvalId: string; orderItemId: string; purchaseOrderId: string;
+    quantity: number; ambiguous: boolean; allocations: ResendAttribution[] }> = [];
   for (const {parcel,line,purchaseOrderId} of companyParcels) {
-    if (parcel.route === 'libereal_to_customer') continue;
+    if (parcel.route === 'libereal_to_customer' || line.afterSaleApprovalId) continue;
     const { lines } = jsonObject(parcel.events.find(row=>row.kind==='dispatch')?.details);
     const dispatch = Array.isArray(lines) ? lines.find(row => row?.purchaseOrderId === purchaseOrderId && row.orderItemId === line.orderItemId
       && (!row.parcelLineId || row.parcelLineId === line.id)) : undefined;
-    if (dispatch?.resendApprovalId) {
-      const key = sourceKey(dispatch.resendApprovalId,line.orderItemId);
-      const approval = authorizedShortfalls.get(key);
-      if (approval?.kind !== 'free_resend' || approval.purchaseOrderId !== purchaseOrderId) throw new PurchaseError('补发包裹缺少对应的采购批准');
-      resendDispatches.set(key,(resendDispatches.get(key) ?? 0) + line.quantity);
-      freeDispatches.set(line.id,approval);
-    } else {
+    if (!dispatch?.resendApprovalId) {
       contractedDispatches.set(line.id,{purchaseOrderId,orderItemId:line.orderItemId,quantity:line.quantity});
+      continue;
     }
+    const candidates = resendRights.filter(row => row.approvalId === dispatch.resendApprovalId
+      && row.orderItemId === line.orderItemId && row.purchaseOrderId === purchaseOrderId
+      && (!dispatch.resendShortfallId || row.shortfallId === dispatch.resendShortfallId));
+    if (!candidates.length) throw new PurchaseError('补发包裹缺少对应的采购批准');
+    const direct = candidates.length === 1 ? candidates[0] : null;
+    const allocations = direct ? [{ approvalId:direct.approvalId, shortfallId:direct.shortfallId, sourceParcelLineId:line.id,
+      parcelLineId:line.id, quantity:line.quantity }] : resendAttributions.filter(row => row.sourceParcelLineId === line.id
+        && candidates.some(allowed => allowed.approvalId === row.approvalId && allowed.shortfallId === row.shortfallId));
+    const allocated = allocations.reduce((n, row) => n + row.quantity, 0);
+    if (allocated > line.quantity) throw new PurchaseError('补发原包裹的已核归属超过实物数量');
+    if (allocated < line.quantity) pendingResendGroups.add(sourceKey(dispatch.resendApprovalId,line.orderItemId));
+    const unique = new Set(allocations.map(row => row.shortfallId));
+    const provedSource = direct ?? (allocated === line.quantity && unique.size === 1
+      ? candidates.find(row => unique.has(row.shortfallId)) : null);
+    if (provedSource) freeDispatches.set(line.id, provedSource);
+    else unverifiedOrigins.add(line.id);
+    for (const row of allocations) {
+      const key = resendKey(row.approvalId, line.orderItemId, row.shortfallId);
+      resendDispatches.set(key, (resendDispatches.get(key) ?? 0) + row.quantity);
+    }
+    resendShipments.push({ parcelLineId:line.id, approvalId:dispatch.resendApprovalId, orderItemId:line.orderItemId, purchaseOrderId,
+      quantity:line.quantity, ambiguous:!direct, allocations });
   }
   for (const decision of decisions) {
     if (!decision.revisesResendApprovalId) continue;
-    const key = sourceKey(decision.revisesResendApprovalId,decision.orderItemId);
-    const previous = authorized.get(key);
-    if (decision.kind === 'free_resend' || previous?.kind !== 'free_resend' || previous.purchaseOrderId !== decision.purchaseOrderId
-      || previous.shortfallId !== decision.shortfallId) throw new PurchaseError('改办记录缺少对应的原免费重发批准');
+    const previous = resendRights.find(row => row.approvalId === decision.revisesResendApprovalId
+      && row.purchaseOrderId === decision.purchaseOrderId && row.orderItemId === decision.orderItemId && row.shortfallId === decision.shortfallId);
+    if (decision.kind === 'free_resend' || !previous) throw new PurchaseError('改办记录缺少对应的原免费重发批准');
+    const key = resendKey(previous.approvalId, previous.orderItemId, previous.shortfallId);
     diverted.set(key,(diverted.get(key) ?? 0) + decision.quantity);
   }
 
-  function dispatchStockSource(record: typeof companyParcels[number]): StockSource {
+  function dispatchStockSource(record: typeof companyParcels[number]): StockSource | null {
     const free = freeDispatches.get(record.line.id);
+    if (unverifiedOrigins.has(record.line.id)) return null;
     return free ? { shortfallId: free.shortfallId } : { purchaseLine: sourceKey(record.purchaseOrderId,record.line.orderItemId) };
   }
 
   // A replacement can change who supplies and is paid while retaining the original stock reservation.
   // Only a customer leg or an actual warehouse receipt moves that reservation.
-  function originalHoldAlreadyMoved(source: StockSource): boolean | null {
+  function originalHoldAlreadyMoved(source: StockSource | null): boolean | null {
     const seen = new Set<string>();
     let current: StockSource | null | undefined = source;
     while (current) {
@@ -167,7 +202,7 @@ export async function purchaseShortfalls(tx: Db, orderId: string, activities: Pu
   const parcelLinesWithUnverifiedStockSource: string[] = [];
   for (const record of companyParcels) {
     if (record.parcel.route !== 'supplier_to_libereal') continue;
-    const moved = originalHoldAlreadyMoved(dispatchStockSource(record));
+    const moved = record.line.afterSaleApprovalId ? true : originalHoldAlreadyMoved(dispatchStockSource(record));
     if (moved === true) parcelLinesWithPriorHoldTransfer.push(record.line.id);
     if (moved === null) parcelLinesWithUnverifiedStockSource.push(record.line.id);
   }
@@ -180,7 +215,7 @@ export async function purchaseShortfalls(tx: Db, orderId: string, activities: Pu
   }
 
   const shortened = new Map<string,number>();
-  const shortfalls = [...resolutions.values()].map(record => {
+  const shortfalls = [...resolutions.values()].filter(record=>!record.line.afterSaleApprovalId).map(record => {
     const { parcel,line,purchaseOrderId,resolution } = record;
     const tied = decisions.filter(row => row.shortfallId === resolution.id && row.purchaseOrderId === purchaseOrderId && row.orderItemId === line.orderItemId);
     const contractSource = contractDispatch(record);
@@ -205,19 +240,21 @@ export async function purchaseShortfalls(tx: Db, orderId: string, activities: Pu
     const quantity = (supplierDispatched.get(key)?.quantity ?? 0) + source.quantity - (shortened.get(parcelLineId) ?? 0);
     supplierDispatched.set(key,{purchaseOrderId,orderItemId,quantity});
   }
-  const freeResends = decisions.filter(row => row.kind === 'free_resend').map(row => {
-    const key = sourceKey(row.approvalId,row.orderItemId);
+  const freeResends = resendRights.map(row => {
+    const key = resendKey(row.approvalId,row.orderItemId,row.shortfallId);
     const dispatched = resendDispatches.get(key) ?? 0;
     const redirected = diverted.get(key) ?? 0;
     const available = row.quantity - dispatched - redirected;
     if (available < 0) throw new PurchaseError('已登记的免费重发或改办超过书面核准数量');
-    return { ...row, dispatched, redirected, available, originalHoldAlreadyMoved: originalHoldAlreadyMoved({ shortfallId: row.shortfallId }) };
+    const pendingAttribution = pendingResendGroups.has(sourceKey(row.approvalId, row.orderItemId));
+    return { ...row, dispatched, redirected, available: pendingAttribution ? 0 : available, pendingAttribution,
+      originalHoldAlreadyMoved: originalHoldAlreadyMoved({ shortfallId: row.shortfallId }) };
   });
   const supplierReceived: SourceQuantity[] = [];
   const warehouseReceived: SourceQuantity[] = [];
   const warehouseTransit: SourceQuantity[] = [];
   for (const {parcel,line,purchaseOrderId} of companyParcels) {
-    if (parcel.route === 'libereal_to_customer') continue;
+    if (parcel.route === 'libereal_to_customer' || line.afterSaleApprovalId) continue;
     const {received,pending} = parcelLineBalance(line);
     const source = {purchaseOrderId,orderItemId:line.orderItemId};
     if (received > 0) supplierReceived.push({...source,quantity:received});
@@ -228,6 +265,7 @@ export async function purchaseShortfalls(tx: Db, orderId: string, activities: Pu
   }
   const incidentSources: Array<IncidentCandidate & { purchaseOrderId: string }> = [];
   for (const {parcel,line,purchaseOrderId} of companyParcels) {
+    if (line.afterSaleApprovalId) continue;
     const target = {purchaseOrderId,orderItemId:line.orderItemId};
     const {pending} = parcelLineBalance(line);
     if (pending) incidentSources.push({...target,quantity:pending,source:{kind:'parcel',id:line.id},reference:parcel.trackingNumber ?? parcel.reference});
@@ -256,7 +294,7 @@ export async function purchaseShortfalls(tx: Db, orderId: string, activities: Pu
     return [{...target,key:dispatchShortfallKey(reviewEventId,target),reviewEventId,reference,sha256,reviewedAt:decision.recordedAt.toISOString()}];
   }));
   const unlinkedDispatchShortfalls = unlinkedDispatchShortfallsAt(reviewedDispatchShortfalls, activities);
-  return { supplierDispatched: [...supplierDispatched.values()], supplierReceived, warehouseReceived, warehouseTransit, shortfalls, freeResends, incidentSources,dispatchHolds,unlinkedDispatchShortfalls,
+  return { resendShipments, supplierDispatched: [...supplierDispatched.values()], supplierReceived, warehouseReceived, warehouseTransit, shortfalls, freeResends, incidentSources,dispatchHolds,unlinkedDispatchShortfalls,
     reviewedDispatchShortfalls,
     parcelLinesWithPriorHoldTransfer, replacementsWithPriorHoldTransfer, parcelLinesWithUnverifiedStockSource, replacementsWithUnverifiedStockSource };
 }
