@@ -45,6 +45,8 @@ export default function AfterSaleForm({view,current,action,chosenLoss,busy,onPre
   const revisingReissue=action==='agreement'&&current?.customerState==='awaiting_invoice_reissue';
   const [remedy,setRemedy]=useState(revisingReissue?'invoice':'');const [outcome,setOutcome]=useState('');const [error,setError]=useState('');
   const [selectedInvoice,setSelectedInvoice]=useState('');
+  const [reviewReissueLink,setReviewReissueLink]=useState(false);
+  const [predecessorId,setPredecessorId]=useState('');
   const [supplierScope,setSupplierScope]=useState(current?.supplierScopes?.length===1?current.supplierScopes[0].key:'');
   const [physical,setPhysical]=useState('');const [parcelId,setParcel]=useState('');
   const [selectedPayment,setSelectedPayment]=useState('');
@@ -95,6 +97,9 @@ export default function AfterSaleForm({view,current,action,chosenLoss,busy,onPre
   const invoiceOptions=Object.fromEntries((view.invoiceChoices??[])
     .filter(row=>action!=='invoice_reissue'||row.invoiceId!==decisionInvoice?.invoiceId)
     .map(row=>[row.id,row.number+' · '+row.issuer+' · '+(row.amountCents==null?'':money(row.amountCents)+' · ')+new Date(row.issuedAt).toLocaleDateString('zh-CN')]));
+  const checkedInvoice=(view.invoiceChoices??[]).find(row=>row.id===selectedInvoice);
+  const predecessors=(view.invoiceChoices??[]).filter(row=>row.correction?.outcome==='voided'&&row.invoiceId!==checkedInvoice?.invoiceId);
+  const predecessor=predecessors.find(row=>row.id===predecessorId);
   const payment=(view.refundSources??[]).find(item=>item.id===selectedPayment);
   const approvalId=current?.events.findLast(event=>event.action==='approve_refund')?.id;
   const results=new Map(current?.events.filter(event=>event.action==='refund_result' && event.operation?.approvalId===approvalId
@@ -122,7 +127,7 @@ export default function AfterSaleForm({view,current,action,chosenLoss,busy,onPre
         });
         if(shares.length)data.supplierDocumentShares=shares;
       }
-      if(action==='verify_invoice_line'&&selectedPortions.length>1) data.portionAmounts=selectedPortions.flatMap(part=>{
+      if(action==='verify_invoice_line'&&!reviewReissueLink&&selectedPortions.length>1) data.portionAmounts=selectedPortions.flatMap(part=>{
         const value=record['invoicePortion:'+part.invoiceScopeId];
         return typeof value==='string'&&value.trim()?[{scopeId:part.invoiceScopeId,amountCents:inYuan(value.trim())}]:[];
       });
@@ -188,8 +193,10 @@ export default function AfterSaleForm({view,current,action,chosenLoss,busy,onPre
           {outcome==='reissue'&&<><Input name="replacementAmountCents" label="本商品书面约定的重开金额（元）"/>
             {revisingReissue&&<p className="text-sm">只填尚未签发部分的新金额，已签发的票仍按实际票面办理。</p>}</>}</>}</>}
       {action==='bind_original_parcel'&&<>
-        <Select name="parcelLineId" label="本次核对的实际原包裹行" options={Object.fromEntries(actualLines
-          .filter(line=>!line.afterSaleApprovalId&&line.receipts.length).map(line=>[line.id,originalChoices[line.id]]))}/>
+        <Select name="parcelLineId" label="本次核对的实际原包裹行" initial={current?.originalParcelLineId??undefined}
+          options={Object.fromEntries(actualLines.filter(line=>!line.afterSaleApprovalId&&line.receipts.length
+            && (!current?.originalParcelLineId||current.originalParcelLineId===line.id)).map(line=>[line.id,originalChoices[line.id]]))}/>
+        {current?.originalParcelLineId&&<p className="text-sm">原案已指定此包裹。请凭实际签收和分份书证核对本案件数。</p>}
         <Input name="quantity" label="本案在该包裹中的实际件数" type="number"/>
       </>}
       {action==='physical'&&<><Select name="result" label="实物结果" options={physicalLabels} required={false} onChange={setPhysical}/>
@@ -228,9 +235,21 @@ export default function AfterSaleForm({view,current,action,chosenLoss,busy,onPre
           <Input name="allocationReference" label="本行分摊依据（分摊时填写）" required={false}/></>}</>}
       {action==='invoice_outcome'&&(receipt?<p>实际更正回执 {receipt.reference} · 办理订单 {receipt.orderId} · 记录 {receipt.id}</p>
         :<Input name="financeEventId" label="已办完的票据更正记录号"/>)}
-      {action==='verify_invoice_line'&&<><Select name="invoiceAllocationId" label="须凭原件核对的发票分摊" options={invoiceOptions} onChange={setSelectedInvoice}/>
-        <Input name="amountCents" label="这张票归入本商品的全部金额（元）"/>
-        {selectedPortions.length>0&&<fieldset key={selectedInvoice} className="grid gap-2 sm:col-span-2">
+      {action==='verify_invoice_line'&&<>
+        {current?.customerState==='awaiting_invoice_reissue'&&<label className="flex items-center gap-2 text-sm sm:col-span-2">
+          <input type="checkbox" checked={reviewReissueLink} onChange={event=>setReviewReissueLink(event.target.checked)}/>
+          凭补充原件核对前序红冲和本商品承接份额
+        </label>}
+        <Select name="invoiceAllocationId" label="须凭原件核对的发票分摊" options={invoiceOptions}
+          onChange={id=>{setSelectedInvoice(id);setPredecessorId('');}}/>
+        <Input name="amountCents" label={reviewReissueLink?'本商品从前序红冲承接的实际金额（元）':'这张票归入本商品的全部金额（元）'}/>
+        {reviewReissueLink&&<>
+          <Select key={selectedInvoice} name="reissueParentAllocationId" label="前序红冲票的实际分摊"
+            options={Object.fromEntries(predecessors.map(row=>[row.id,invoiceOptions[row.id]]))} onChange={setPredecessorId}/>
+          {predecessor?.correction&&<><input type="hidden" name="sourceCorrectionEventId" value={predecessor.correction.id}/>
+            <p className="text-sm">正式红冲回执 {predecessor.correction.reference} · {predecessor.correction.id}</p></>}
+        </>}
+        {!reviewReissueLink&&selectedPortions.length>0&&<fieldset key={selectedInvoice} className="grid gap-2 sm:col-span-2">
           <legend className="text-sm font-medium">覆盖本商品的共同书证</legend>
           {selectedPortions.length>1&&<p className="text-sm">分别填写原件确实归给本商品的分项金额，未使用的书证留空。</p>}
           {selectedPortions.map(part=>{
