@@ -19,7 +19,7 @@ const inYuan=(s: string) => {
 };
 function Input({name,label,required=true,type='text',value}: {name:string;label:string;required?:boolean;type?:string;value?:string|number}) {
   return <label className="grid gap-1 text-sm">{label}<input className={field} name={name} type={type} required={required} defaultValue={value}
-    min={type==='number'?1:undefined} step={type==='number'?1:undefined} maxLength={type==='text'?2000:undefined}/></label>;
+    min={type==='number'?1:undefined} step={type==='number'?1:type==='datetime-local'?'0.001':undefined} maxLength={type==='text'?2000:undefined}/></label>;
 }
 const methodLabels={bank:'银行转账',alipay:'支付宝',other:'书面约定的其他渠道'};
 const physicalLabels={delivery:'补件实际签收',return:'实际退回'};
