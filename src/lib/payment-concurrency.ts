@@ -1,3 +1,7 @@
+export const alipayReconciliationCount = {
+  select: { paymentAttempts: { where: { provider: 'alipay', status: { endsWith: '_reconciliation_required' } } } },
+} as const;
+
 /**
  * Shared payment-attempt concurrency rules.
  *

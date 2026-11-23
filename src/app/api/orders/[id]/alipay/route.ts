@@ -8,7 +8,7 @@ import { canPayOrderWithAlipay, getAlipayPaymentExpiresAt } from '@/data/alipay-
 import { normalizeOrderPaymentMethod } from '@/data/payment-methods';
 import { OrganizationRbacError, requireOrganizationPermission } from '@/lib/organization-service';
 import { emailKeyedAccess } from '@/lib/verified-email-access';
-import { ACTIVE_PAYMENT_ATTEMPT_STATUSES, isUniqueConstraintError } from '@/lib/payment-concurrency';
+import { alipayReconciliationCount, ACTIVE_PAYMENT_ATTEMPT_STATUSES, isUniqueConstraintError } from '@/lib/payment-concurrency';
 
 function amountsEqualInCents(left: number, right: number): boolean {
   const leftCents = alipayAmountToCents(left);
@@ -43,6 +43,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       pointsGroupId: true,
       pointsApplied: true,
       pointsDiscount: true,
+      _count: alipayReconciliationCount,
     },
   });
   if (!order) return NextResponse.json({ error: '订单不存在' }, { status: 404 });
@@ -63,6 +64,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   }
   if (normalizeOrderPaymentMethod(order.paymentMethod) !== 'alipay') return NextResponse.json({ error: '订单付款方式不匹配' }, { status: 409 });
   if (order.paidAt) return NextResponse.json({ error: '订单已付款' }, { status: 409 });
+  if (order._count.paymentAttempts > 0) return NextResponse.json({ error: '已有到账正在核对，请等待处理结果', code: 'PAYMENT_RECONCILIATION_REQUIRED' }, { status: 409 });
   if (await pendingOrderRepricing(prisma, id)) return NextResponse.json({ error: '原订单价格正在复核，请确认新价后再付款', code: 'QUOTE_REPRICE_REQUIRED' }, { status: 409 });
   if (!canPayOrderWithAlipay(order)) {
     return NextResponse.json({ error: '支付宝付款期限已过', expiresAt: getAlipayPaymentExpiresAt(order.createdAt).toISOString() }, { status: 410 });
@@ -96,13 +98,15 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     try {
       attempt = await prisma.$transaction(async (tx) => {
         await assertOrderPricingResolved(tx, id);
-        const current = await tx.order.findUnique({ where: { id }, select: { total: true, status: true, paidAt: true } });
+        const current = await tx.order.findUnique({ where: { id }, select: { total: true, status: true, paidAt: true, _count: alipayReconciliationCount } });
         if (!current || current.paidAt || current.status !== order.status || !amountsEqualInCents(current.total, order.total)) throw new Error('QUOTE_REPRICE_REQUIRED');
+        if (current._count.paymentAttempts > 0) throw new Error('PAYMENT_RECONCILIATION_REQUIRED');
         return tx.paymentAttempt.create({ data: { orderId: id, provider: 'alipay', outTradeNo, amount: current.total } });
       });
       await writeAuditLog({ actorId: user.id, actorEmail: user.email, action: 'payment.alipay_created', resource: 'payments', targetType: 'Order', targetId: id, after: { outTradeNo, amount: order.total } });
     } catch (error) {
       if (error instanceof Error && error.message === 'QUOTE_REPRICE_REQUIRED') return NextResponse.json({ error: '订单价格已变化，请刷新核对', code: error.message }, { status: 409 });
+      if (error instanceof Error && error.message === 'PAYMENT_RECONCILIATION_REQUIRED') return NextResponse.json({ error: '已有到账正在核对', code: error.message }, { status: 409 });
       if (!isUniqueConstraintError(error)) throw error;
       attempt = await prisma.paymentAttempt.findFirst({
         where: { orderId: id, provider: 'alipay', status: { in: ACTIVE_ALIPAY_ATTEMPT_STATUSES } },

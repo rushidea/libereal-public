@@ -8,7 +8,7 @@ import { canPayOrderWithAlipay, formatAlipayTimeExpire } from '@/data/alipay-pay
 import { reportError } from '@/lib/errorReporting';
 import { OrganizationRbacError, requireOrganizationPermission } from '@/lib/organization-service';
 import { emailKeyedAccess } from '@/lib/verified-email-access';
-import { isActivePaymentAttemptStatus } from '@/lib/payment-concurrency';
+import { alipayReconciliationCount, isActivePaymentAttemptStatus } from '@/lib/payment-concurrency';
 
 function amountsEqualInCents(left: number, right: number): boolean {
   const leftCents = alipayAmountToCents(left);
@@ -29,7 +29,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
 
   const attempt = await prisma.paymentAttempt.findUnique({
     where: { outTradeNo: attemptId },
-    include: { order: { select: { id: true, email: true, total: true, status: true, paymentMethod: true, paidAt: true, createdAt: true, customerId: true, organizationId: true, ownerScope: true } } },
+    include: { order: { select: { _count: alipayReconciliationCount, id: true, email: true, total: true, status: true, paymentMethod: true, paidAt: true, createdAt: true, customerId: true, organizationId: true, ownerScope: true } } },
   });
   if (!attempt || attempt.orderId !== id || attempt.provider !== 'alipay') {
     return NextResponse.json({ error: '付款请求不存在' }, { status: 404 });
@@ -48,6 +48,9 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   } else if (attempt.order.customerId !== user.id && !(await emailKeyedAccess(user.id, attempt.order.email))) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+  }
+  if (attempt.order._count.paymentAttempts > 0) {
+    return NextResponse.json({ error: '已有到账正在核对，请等待处理结果', code: 'PAYMENT_RECONCILIATION_REQUIRED' }, { status: 409 });
   }
   if (!amountsEqualInCents(attempt.amount, attempt.order.total)) {
     return NextResponse.json({ error: '订单金额已变更，请重新发起支付' }, { status: 409 });
