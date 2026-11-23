@@ -15,7 +15,16 @@ vi.mock('@/lib/finance-workspace', () => ({
   }),
 }));
 
-const tx = { afterSaleEvent: { findMany: async () => [] } } as unknown as Prisma.TransactionClient;
+const tx = {
+  afterSaleEvent: { findMany: async () => [] },
+  paymentAttempt: { findFirst: async ({where}:{where:{id:string|object}}) => typeof where.id==='string' ? {
+    id:where.id, status:'paid_superseded_reconciliation_required', amount:300, tradeNo:'SYNTHETIC-SEPARATE-B4-TRADE',
+    outTradeNo:'SYNTHETIC-SEPARATE-B4-ATTEMPT', notifiedAt:new Date('2026-11-19T01:00:00.000Z'), paidAt:new Date('2026-11-19T01:00:00.000Z'),
+    order:{customerId:'synthetic-member',organizationId:null,ownerScope:'personal',email:'office@example.invalid'},
+  } : null },
+  auditLog: { findMany: async () => [{id:'synthetic-signed-receipt',afterData:JSON.stringify({ tradeNo:'SYNTHETIC-SEPARATE-B4-TRADE',
+    outTradeNo:'SYNTHETIC-SEPARATE-B4-ATTEMPT',amount:300,reason:'superseded_attempt_paid' })}] },
+} as unknown as Prisma.TransactionClient;
 const orderId = 'office-logic-only';
 const itemId = 'office-folder-logic-only';
 const permissionAt = new Date('2026-11-20T01:00:00.000Z');
@@ -38,12 +47,12 @@ function item(customerState: string, events: SaleCase['events']): SaleCase {
     customerState, supplierState: 'following', revision: 3, createdAt: permissionAt, events };
 }
 
-function preview(row: SaleCase, action: string, input: Record<string, unknown>, proof = evidence) {
+function preview(row: SaleCase, action: string, input: Record<string, unknown>, proof = evidence, others: SaleCase[] = []) {
   const view: AfterSaleWorkspace = {
     order: { id: orderId, status: 'completed', total: 200, email: 'office@example.invalid', customerId: 'synthetic-member',
       organizationId: null, ownerScope: 'personal', acceptance: null, termsVersion: 'original-terms', pointsRefundedCash: 23 },
     lines: [{ id: itemId, name: '合成文件夹', catalogNumber: 'OFFICE-A4', brand: null, quantity: 2, unitPrice: 100 }],
-    cases: [row], deliveries: [], shortfalls: [], replacements: [], resendShipments: [],
+    cases: [row,...others], deliveries: [], shortfalls: [], replacements: [], supplierParties:new Map(), resendShipments: [],
   };
   return refundStep(tx, view, row, action, input, proof);
 }
@@ -69,6 +78,23 @@ describe('售后退款规则仅计算预览，不连接数据库', () => {
       .rejects.toThrow('客户同意的退款条件已变化');
     await expect(preview(item('awaiting_refund', [event('two-units-worth', 'agreement', { ...agreement, amountCents: 10001 })]),
       'prepare_refund', { note: '仅一件', historyReview: '合成核对' })).rejects.toThrow('原商品行范围');
+  });
+
+  it('独立验签实收按本交易已退与有效预留扣减，普通货款单独计上限',async()=>{
+    const link=event('extra-reviewed','review_refund_source',{originalPayment:{paymentId:'extra-300'}});
+    const previous=event('extra-previous-approved','approve_refund',{amountCents:10000});
+    const paid=event('extra-prior-paid-part','refund_result',{result:'paid',amountCents:3000,approvalId:previous.id});
+    const pending={...item('refund_approved',[link,previous,paid]),id:'other-in-progress'};
+    const historic={...item('closed',[link,event('actual-earlier-simulated-refund','refund_result',{result:'paid',amountCents:2000})]),id:'older-case'};
+    const old=[pending,historic];
+    const data={note:'具名核对该独立流水的实际实付和在途指令',historyReview:'仅计算合成记录，不写数据库'};
+    const apply=(amountCents:number)=>preview(item('awaiting_refund',[link,event('new-paper','agreement',{...agreement,amountCents})]),
+      'prepare_refund',data,evidence,old);
+    expect(await apply(18000)).toMatchObject({operation:{amountCents:18000,position:{
+      originalPaymentId:'extra-300',paidCents:30000,usedCents:12000,caseGoodsCents:10000,independentReceipt:true}}});
+    await expect(apply(18001)).rejects.toThrow('剩余实收款');
+    expect(await preview(item('awaiting_refund',[event('normal-case','agreement',{...agreement,amountCents:10000})]),
+      'prepare_refund',data,evidence,old)).toMatchObject({operation:{position:{independentReceipt:false,usedCents:0,paidCents:20000}}});
   });
 
   it('实际回执必须晚于批准、绑定原批准收款条件，并受批准剩余金额限制', async () => {

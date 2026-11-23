@@ -45,6 +45,11 @@ describe('客户与经办人从原订单进入售后',()=>{
     const corrected={...agreement,id:'LINKED',action:'invoice_outcome',operation:{agreementId:agreement.id,financeEventId:receipt.id,allocationId:original.id}};
     const sale={id:'B-SALE-CASE',orderItemId:line.id,quantity:1,issue:'invoice',ownerId:'finance',customerState:'awaiting_invoice',supplierState:'unreviewed',
       report:'客户要求红冲并重开',reference:'原售后请求',reportedAt:'2026-11-01T02:00:00Z',agreementId:agreement.id,events:[agreement]};
+    const suppliers=[{key:'primary',purchaseOrderId:'PO-A',supplier:'办公供方甲',parcelLineId:'P-A',quantity:1,
+      reference:'甲实际运单',state:'resolved',ownerId:'首位经办',lastReference:'甲书面结案'},
+      {key:'other',purchaseOrderId:'PO-B',supplier:'办公供方乙',parcelLineId:'P-B',quantity:1,
+      reference:'乙实际运单',state:'following',ownerId:'另一位经办',lastReference:'乙书面仍待办'}];
+    Object.assign(sale,{supplierScopes:suppliers});
     const desk={order:{id:order,status:'confirmed',acceptedAt:'2026-11-01T01:00:00Z'},lines:[line],shortfalls:[],deliveries:[],
       cases:[sale],refundDrafts:[],invoiceChoices:[original,replacement]};
     const submissions:unknown[]=[];
@@ -54,9 +59,11 @@ describe('客户与经办人从原订单进入售后',()=>{
         return res({preview:{actionHash:hash,snapshot:{item:line,scopeQuantity:1,nextState:'awaiting_invoice_reissue',nextSupplierState:'unreviewed',
           proof:{reference:receipt.reference},operation:{financeEventId:receipt.id}}}});
       }
-      return res({workspace:desk,permissions:['admin.access','finance.read','finance.write']});
+      return res({workspace:desk,permissions:['admin.access','finance.read','finance.write','orders.read','orders.write']});
     }));
     render(<AfterSalesManager initialOrder={order}/>);
+    expect(await screen.findByText(/办公供方甲.*已独立办结.*首位经办/)).toBeTruthy();
+    expect(screen.getByText(/办公供方乙.*跟进中.*另一位经办/)).toBeTruthy();
     fireEvent.click(await screen.findByRole('button',{name:'回填发票处理结果'}));
     expect(screen.getByText(/办理订单 OFFICE-ORDER-A/)).toBeTruthy();
     fireEvent.change(screen.getByLabelText('办理说明'),{target:{value:'本单实际分摊与整票红冲一致'}});
@@ -70,6 +77,22 @@ describe('客户与经办人从原订单进入售后',()=>{
     const picker=screen.getByLabelText('财务已实际登记的替代票分摊');
     expect(within(picker).queryByRole('option',{name:/整票原号/})).toBeNull();
     expect(within(picker).getByRole('option',{name:/实际重开票号/})).toBeTruthy();
+    fireEvent.click(screen.getByRole('button',{name:'返回'}));
+    fireEvent.click(screen.getByRole('button',{name:'登记客户书面决定'}));
+    expect(screen.getByText(/登记客户对待办重开的新决定/)).toBeTruthy();
+    fireEvent.change(screen.getByLabelText('书面决定要求的实际更正结果'),{target:{value:'reissue'}});
+    fireEvent.change(screen.getByLabelText('本商品书面约定的重开金额（元）'),{target:{value:'60'}});
+    fireEvent.click(screen.getByLabelText('这份较新的决定明确修订当前版本'));
+    fireEvent.change(screen.getByLabelText('客户确认的条件、范围和费用责任'),{target:{value:'新的真实书面条件仅调整重开金额'}});
+    fireEvent.change(screen.getByLabelText('办理说明'),{target:{value:'沿同一原票红冲回执继续'}});
+    fireEvent.change(screen.getByLabelText('凭据实际发生时间'),{target:{value:'2026-11-06T10:00'}});
+    fireEvent.change(screen.getByLabelText('凭据名称或档案出处'),{target:{value:'客户新书面决定原件'}});
+    fireEvent.change(screen.getByLabelText('原件 SHA-256',{exact:true}),{target:{value:hash}});
+    fireEvent.click(screen.getByRole('button',{name:'预览本次内容'}));
+    await waitFor(()=>expect(submissions).toHaveLength(2));
+    expect(submissions[1]).toMatchObject({action:'agreement',caseId:sale.id,data:{remedy:'invoice',invoiceAllocationId:original.id,
+      invoiceOutcome:'reissue',replacementAmountCents:6000,revisesAgreementId:agreement.id}});
+    expect(submissions[1]).not.toHaveProperty('data.amountCents');
   });
 
   it('客户重复提交同一内容时沿用原申请编号，回到自己的订单状态',async()=>{
