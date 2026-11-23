@@ -1,0 +1,133 @@
+'use client';
+
+import { useState } from 'react';
+import type { FinanceInput } from '@/lib/finance-actions';
+import type { FinanceWorkspace } from '@/lib/finance-workspace';
+import DocumentDigestField from '@/components/admin/purchases/DocumentDigestField';
+import { button, cents, field, money, primary } from '@/components/admin/purchases/PurchaseLineForm';
+
+export const actionLabels = {
+  verify_bank_receipt: '核验银行到账原件', record_customer_receipt: '分摊银行回款', post_existing: '核销既有到账',
+  restore_term: '按平台接单日期补齐账期', set_term: '登记单独约定的账期', create_plan: '登记开票或收票安排',
+  confirm_condition: '核验约定开票条件', chase_invoice: '记录供应商追票', close_plan: '关闭未使用的安排',
+  record_invoice: '回填实际发票', open_correction: '登记发票更正待办', resolve_correction: '回填发票更正结果',
+  reconcile_supplier: '核对采购、付款与来票', review_payment_case: '领取到账差异', resolve_payment_case: '登记差异核对结果',
+} satisfies Record<FinanceInput['action'], string>;
+
+export const triggerLabels: Record<string, string> = { accepted: '本方接单或供方确认订购', dispatched: '全部对客发货后',
+  delivered: '客户实际签收后', paid: '实际付清后', manual: '经办人核验书面约定' };
+export const invoiceStateLabels: Record<string, string> = { recorded: '有效', correction_pending: '更正办理中', voided: '原票已红冲或作废' };
+export const dateLabel = (value?: string | null) => value ? new Date(value).toLocaleString('zh-CN', { hour12: false }) : '待核对';
+
+function Text({ name, label, initial, required = true }: { name: string; label: string; initial?: string; required?: boolean }) {
+  return <label className="grid gap-1">{label}<input name={name} className={field} defaultValue={initial} required={required} maxLength={2000}/></label>;
+}
+
+function Time({ name, label }: { name: string; label: string }) {
+  return <label className="grid gap-1">{label}<input className={field} name={name} type="datetime-local" step="1" required/></label>;
+}
+
+function Amount({ name, label }: { name: string; label: string }) {
+  return <label className="grid gap-1">{label}（元）<input className={field} name={name} type="number" step="0.01" min="0.01" required/></label>;
+}
+
+const moneyFields = new Set(['receiptTotalCents', 'amountCents', 'grossCents']);
+const timeFields = new Set(['occurredAt', 'issuedAt', 'nextReviewAt', 'startedAt']);
+
+export default function FinanceForm({ view, action, busy, onPreview, onCancel, onError }: {
+  view: FinanceWorkspace; action: FinanceInput['action']; busy: boolean;
+  onPreview: (input: FinanceInput) => Promise<void>; onCancel: () => void; onError: (message: string) => void;
+}) {
+  const [side, setSide] = useState('customer');
+  const [documentKind, setDocumentKind] = useState('single_receipt');
+  const plans = view.invoicePlans.filter(plan => !plan.closed && (
+    action === 'chase_invoice' ? plan.side === 'supplier' && plan.usedCents < plan.grossCents
+    : action === 'confirm_condition' ? plan.trigger === 'manual' && !plan.manualAt
+    : action === 'close_plan' ? !plan.usedCents : plan.usedCents < plan.grossCents));
+  const [planId, setPlanId] = useState(plans[0]?.id ?? '');
+  const [poId, setPoId] = useState(view.purchases[0]?.id ?? '');
+  const plan = plans.find(row => row.id === planId);
+  const po = view.purchases.find(row => row.id === poId);
+  const invoices = [...new Map(view.invoicePlans.flatMap(row => row.allocations).map(doc => [doc.invoiceId, doc])).values()]
+    .filter(doc => action === 'open_correction' ? doc.status === 'recorded' : doc.status === 'correction_pending');
+  const sources = [...view.latePayments.map(row => ({ id: row.id, label: row.outTradeNo })),
+    ...view.receipts.filter(row => !row.counted && !row.reconciled).map(row => ({ id: row.id, label: row.id }))];
+  const cashSources = view.receipts.filter(row => row.counted && !view.cash.some(entry => entry.bankAllocationId === row.id))
+    .map(row => ({ id: row.id, label: '银行回款 ' + money(row.amountCents) + ' · ' + row.id }));
+  if (view.nativePaymentId && !view.cash.some(entry => entry.paymentAttemptId === view.nativePaymentId)) {
+    cashSources.push({ id: view.nativePaymentId, label: '支付宝 · ' + view.nativePaymentId });
+  }
+
+  const poSelect = <label className="grid gap-1">对应采购单<select className={field} name="purchaseOrderId" value={poId} required onChange={e => setPoId(e.target.value)}>
+    {view.purchases.map(row => <option key={row.id} value={row.id}>{row.supplier ?? '供方待核'} · {row.id}</option>)}</select></label>;
+  return <form className="space-y-4 rounded border border-slate-200 p-4 text-sm" onSubmit={async event => {
+    event.preventDefault();
+    try {
+      const data: Record<string, unknown> = {};
+      for (const [key, entry] of new FormData(event.currentTarget)) {
+        if (typeof entry !== 'string' || !entry.trim()) continue;
+        data[key] = moneyFields.has(key) ? cents(entry) : timeFields.has(key) ? new Date(entry).toISOString()
+          : key === 'days' || key === 'statementRow' ? Number(entry) : entry.trim();
+      }
+      await onPreview({ orderId: view.orderId, version: view.version, requestId: crypto.randomUUID(), action, data });
+    } catch (error) { onError(error instanceof Error ? error.message : '请核对填写内容'); }
+  }}>
+    <h3 className="font-semibold">{actionLabels[action]}</h3>
+    <fieldset className="grid gap-3 sm:grid-cols-2" disabled={busy}>
+      {action === 'verify_bank_receipt' && <>
+        <label className="grid gap-1">银行原件类型<select name="documentKind" className={field} value={documentKind} onChange={e => setDocumentKind(e.target.value)}>
+          <option value="single_receipt">单笔银行回单</option><option value="statement">银行对账单</option></select></label>
+        {documentKind === 'statement' && <label className="grid gap-1">对账单中的交易行号<input name="statementRow" type="number" className={field} min="1" step="1" required/></label>}
+        <Text name="bankTrace" label="银行流水号"/><Text name="receivingAccount" label="实际收款账户的档案标识"/>
+        <Text name="payer" label="原件所列付款人"/><Amount name="receiptTotalCents" label="该笔实际到账金额"/><Time name="occurredAt" label="实际到账时间"/>
+      </>}
+      {action === 'record_customer_receipt' && <>
+        <label className="grid gap-1">已核验的银行到账<select className={field} name="bankReceiptId" required>{view.banks.filter(row => row.availableCents > 0)
+          .map(row => <option key={row.id} value={row.id}>{row.bankTrace} · 可分 {money(row.availableCents)}</option>)}</select></label>
+        <Text name="allocationReference" label="本单分摊编号"/><Amount name="amountCents" label="本次归入原单金额"/>
+        {view.receipts.some(row => !row.bankReceiptId && !row.reconciled) && <label className="grid gap-1">对应旧分摊<select className={field} name="legacyAllocationId">
+          <option value="">本次新增</option>{view.receipts.filter(row => !row.bankReceiptId && !row.reconciled).map(row =>
+            <option key={row.id} value={row.id}>{row.id} · {money(row.amountCents)}</option>)}</select></label>}
+      </>}
+      {action === 'post_existing' && <label className="grid gap-1">既有到账<select className={field} name="sourceId" required>{cashSources.map(row =>
+        <option key={row.id} value={row.id}>{row.label}</option>)}</select></label>}
+      {action === 'set_term' && <><Time name="startedAt" label="书面约定的起算时间"/>
+        <label className="grid gap-1">约定天数<input className={field} name="days" type="number" step="1" min="0" required/></label></>}
+      {action === 'create_plan' && <>
+        <label className="grid gap-1">发票方向<select name="side" className={field} value={side} onChange={e => setSide(e.target.value)}>
+          <option value="customer">Libereal 给客户开票</option><option value="supplier">向供应商收票</option></select></label>
+        {side === 'supplier' && poSelect}
+        <Text key={side + poId} name="issuer" label="约定开票方全称" initial={side === 'supplier' ? po?.supplier ?? '' : ''}/>
+        <Text name="recipient" label="约定受票方全称"/><Amount name="grossCents" label="本项安排含税金额"/>
+        <label className="grid gap-1">约定开票节点<select name="trigger" required className={field} defaultValue="">
+          <option value="" disabled>选择书面约定</option>{Object.entries(triggerLabels).filter(([key]) => side === 'customer' || !['dispatched', 'delivered'].includes(key))
+            .map(([key, label]) => <option value={key} key={key}>{label}</option>)}</select></label>
+      </>}
+      {['record_invoice','confirm_condition','close_plan','chase_invoice'].includes(action) && <label className="grid gap-1">发票安排
+        <select name="planId" value={planId} onChange={e => setPlanId(e.target.value)} className={field} required>
+          {plans.map(row => <option key={row.id} value={row.id}>{row.side === 'customer' ? '销项' : '进项'} · {row.reference} · {money(row.grossCents)}</option>)}</select></label>}
+      {action === 'record_invoice' && <><Text key={'issuer' + planId} name="issuer" label="票面开票方全称" initial={plan?.issuer}/>
+        <Text key={'recipient' + planId} name="recipient" label="票面受票方全称" initial={plan?.recipient}/><Text name="number" label="票面号码"/>
+        <Time name="issuedAt" label="票面开票时间"/><Amount name="grossCents" label="整张发票含税合计"/>
+        <Amount name="amountCents" label="本次归入此项金额"/></>}
+      {['chase_invoice','confirm_condition','close_plan','open_correction','resolve_correction','review_payment_case','resolve_payment_case'].includes(action)
+        && <Time name="occurredAt" label="实际办理时间"/>}
+      {action === 'chase_invoice' && <Time name="nextReviewAt" label="约定下次跟进时间"/>}
+      {(action === 'open_correction' || action === 'resolve_correction') && <label className="grid gap-1">原发票<select name="invoiceId" className={field} required>
+        {invoices.map(row => <option key={row.invoiceId} value={row.invoiceId}>{row.number} · {money(row.grossCents)}</option>)}</select></label>}
+      {action === 'resolve_correction' && <label className="grid gap-1">实际办理结果<select className={field} name="outcome" defaultValue="" required>
+        <option value="" disabled>核对书面结果后选择</option><option value="retained">原票继续有效</option><option value="voided">原票已整张红冲或作废</option></select></label>}
+      {action === 'reconcile_supplier' && <>{poSelect}<label className="grid gap-1">对账结果<select className={field} name="outcome" defaultValue="" required>
+        <option value="" disabled>请选择</option><option value="matched">本次核对一致</option><option value="followup">有差异，继续跟进</option></select></label></>}
+      {(action === 'review_payment_case' || action === 'resolve_payment_case') && <label className="grid gap-1">待核对的交易<select name="sourceId" className={field} required>
+        {sources.map(row => <option key={row.id} value={row.id}>{row.label}</option>)}</select></label>}
+      <Text name="reference" label="书面依据或原件编号" initial={action === 'restore_term' ? view.acceptanceId ?? '' : ''}/>
+      {action === 'restore_term' && view.acceptanceEvidenceHash
+        ? <label className="grid gap-1">平台接单资料摘要<input className={field} readOnly name="sha256" value={view.acceptanceEvidenceHash}/></label>
+        : <DocumentDigestField name="sha256" label="原件 SHA-256 摘要" required/>}
+      <label className="grid gap-1 sm:col-span-2">核对结果或书面约定<textarea className={field} rows={2} name="description" required maxLength={2000}/></label>
+    </fieldset>
+    <div className="flex gap-2"><button className={primary} disabled={busy}>查看完整预览</button>
+      <button type="button" onClick={onCancel} className={button} disabled={busy}>收起</button></div>
+  </form>;
+}

@@ -1,0 +1,146 @@
+'use client';
+
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { useAdminMfaStepUp } from '@/components/admin/AdminMfaStepUpDialog';
+import { button, field, money } from '@/components/admin/purchases/PurchaseLineForm';
+import type { FinanceInput } from '@/lib/finance-actions';
+import type { FinanceWorkspace } from '@/lib/finance-workspace';
+import { isOrderStatus, ORDER_STATUS_LABELS } from '@/lib/order-domain';
+import FinanceForm, { actionLabels, dateLabel, invoiceStateLabels, triggerLabels } from './FinanceForm';
+import FinancePreview, { type FinancePreviewResult } from './FinancePreview';
+
+type OrderRow = { id: string; status: string; amount: number; receivableStatus: string | null; supplierCount: number };
+const arLabel: Record<string, string> = { open: '待回款', overdue: '逾期未结', paid: '已结清', cancelled: '已取消' };
+const orderLabel = (status: string) => isOrderStatus(status) ? ORDER_STATUS_LABELS[status] : status;
+const heading = 'text-base font-semibold text-slate-900';
+
+export default function FinanceManager({ initialOrder }: { initialOrder: string }) {
+  const [query, setQuery] = useState('');
+  const [view, setView] = useState<FinanceWorkspace | null>(null);
+  const [list, setList] = useState<OrderRow[]>([]);
+  const [canWrite, setCanWrite] = useState(false);
+  const [action, setAction] = useState<FinanceInput['action'] | null>(null);
+  const [pending, setPending] = useState<{ input: FinanceInput; preview: FinancePreviewResult } | null>(null);
+  const [message, setMessage] = useState('');
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [loaded, setLoaded] = useState(false);
+  const generation = useRef(0);
+  const selected = useRef('');
+  const { begin, dialog } = useAdminMfaStepUp();
+
+  const load = useCallback(async (orderId: string, search = '', signal?: AbortSignal) => {
+    const id = ++generation.current;
+    selected.current = orderId;
+    setBusy(true); setLoaded(false); setError(''); setMessage(''); setView(null); setList([]); setPending(null); setAction(null); setCanWrite(false);
+    try {
+      const params = orderId ? { orderId } : { search };
+      const response = await fetch('/api/admin/finance?' + new URLSearchParams(Object.entries(params)), { cache: 'no-store', signal });
+      const body = await response.json();
+      if (generation.current !== id || signal?.aborted) return;
+      if (!response.ok) throw new Error(response.status === 403 ? '当前账号没有财务查看权限' : body.error || '账务读取失败');
+      setCanWrite(body.canWrite === true); setView(body.workspace ?? null); setList(body.orders ?? []); setLoaded(true);
+    } catch (err) { if (generation.current === id && !signal?.aborted) setError(err instanceof Error ? err.message : '账务读取失败'); }
+    finally { if (generation.current === id && !signal?.aborted) setBusy(false); }
+  }, []);
+  useEffect(() => {
+    const controller = new AbortController();
+    queueMicrotask(() => { if (!controller.signal.aborted) void load(initialOrder, '', controller.signal); });
+    return () => controller.abort();
+  }, [initialOrder, load]);
+
+  async function send(input: FinanceInput, approval?: { hash: string; token: string }) {
+    if (selected.current !== input.orderId) return;
+    const id = generation.current;
+    setError(''); setMessage(''); setBusy(true);
+    try {
+      const response = await fetch('/api/admin/finance', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...input, stage: approval ? 'confirm' : 'preview', actionHash: approval?.hash, stepUpToken: approval?.token }) });
+      const body = await response.json();
+      if (generation.current !== id) return;
+      if (!response.ok) throw new Error(body.error || '票款登记未完成');
+      if (approval) {
+        setView(body.workspace); setAction(null); setPending(null); setMessage('已登记 · ' + body.eventId);
+      } else setPending({ input, preview: body.preview });
+    } catch (err) { if (generation.current === id) setError(err instanceof Error ? err.message : '请刷新原单核对登记结果'); }
+    finally { if (generation.current === id) setBusy(false); }
+  }
+
+  const actions: FinanceInput['action'][] = [];
+  if (view && canWrite) {
+    if (view.acceptanceId && !['closed','cancelled'].includes(view.status)) actions.push('verify_bank_receipt');
+    if (view.banks.some(row => row.availableCents > 0) && !view.authorityConflict && !view.paidAt && view.principalCents > view.verifiedCents) actions.push('record_customer_receipt');
+    if (view.receipts.some(row => row.counted && !view.cash.some(post => post.bankAllocationId === row.id))
+      || view.nativePaymentId && !view.cash.some(post => post.paymentAttemptId === view.nativePaymentId)) actions.push('post_existing');
+    if (view.receivable && ['open', 'overdue'].includes(view.receivable.status) && view.acceptanceId) {
+      if (!view.receivable.termStartedAt && !view.receivable.dueAt) actions.push('restore_term');
+      actions.push('set_term');
+    }
+    if (view.acceptanceId || view.purchases.length) actions.push('create_plan');
+    const active = view.invoicePlans.filter(row => !row.closed);
+    if (active.some(row => row.usedCents < row.grossCents)) actions.push('record_invoice');
+    if (active.some(row => row.trigger === 'manual' && !row.manualAt)) actions.push('confirm_condition');
+    if (active.some(row => row.side === 'supplier' && row.usedCents < row.grossCents)) actions.push('chase_invoice');
+    if (active.some(row => !row.usedCents)) actions.push('close_plan');
+    if (active.some(row => row.allocations.some(a => a.status === 'recorded'))) actions.push('open_correction');
+    if (active.some(row => row.allocations.some(a => a.status === 'correction_pending'))) actions.push('resolve_correction');
+    if (view.purchases.length) actions.push('reconcile_supplier');
+    if (view.latePayments.length || view.receipts.some(row => !row.counted && !row.reconciled)) actions.push('review_payment_case', 'resolve_payment_case');
+  }
+  return <main className="mx-auto max-w-6xl space-y-5 p-4 text-slate-800 md:p-6">
+    <h1 className="text-2xl font-semibold">票款与对账</h1>
+    <form className="flex flex-wrap items-end gap-2" onSubmit={event => { event.preventDefault(); void load('', query); }}>
+      <label className="grid gap-1 text-sm">订单、客户邮箱、采购单或发票号<input className={field} value={query} onChange={e => setQuery(e.target.value)}/></label>
+      <button className={button} disabled={busy}>查找</button>
+      {view && <button type="button" className={button} disabled={busy} onClick={() => void load(view.orderId)}>刷新原单</button>}
+    </form>
+    {error && <p role="alert" className="text-red-700">{error}</p>}
+    {message && <p role="status" className="text-emerald-800">{message}</p>}
+    {busy && <p role="status">正在核对账务记录…</p>}
+    {loaded && !view && (list.length ? <div className="overflow-x-auto"><table className="w-full text-left text-sm">
+      <thead><tr><th>客户订单</th><th>履约状态</th><th>订单金额</th><th>应收</th></tr></thead><tbody>{list.map(row =>
+        <tr key={row.id} className="border-t"><td className="py-2"><button className="font-medium underline" onClick={() => void load(row.id)}>{row.id}</button></td>
+          <td>{orderLabel(row.status)}</td><td>{money(Math.round(row.amount * 100))}</td><td>{arLabel[row.receivableStatus ?? ''] ?? '另按订单核对'}</td></tr>)}</tbody></table></div>
+      : <p>未找到对应票款记录。</p>)}
+    {view && <><section className="space-y-2 rounded border border-slate-200 p-4">
+      <h2 className={heading}>客户订单 {view.orderId}</h2>
+      <p>{view.customerEmail} · {orderLabel(view.status)} · 订单金额 {money(view.principalCents)}</p>
+      <p>已核销或平台确认 {money(view.settlementCents)} · 已核验可归属 {money(view.verifiedCents)}
+        {view.receivable && ' · 应收余额 ' + money(view.receivable.outstandingCents)}</p>
+      {view.receivable && <p>账期 {view.receivable.terms} 天 · 起算 {dateLabel(view.receivable.termStartedAt)} · 到期 {dateLabel(view.receivable.dueAt)}</p>}
+      <p>平台接单 {dateLabel(view.acceptedAt)} · 客户已签收 {dateLabel(view.shipmentDates.delivered)}</p>
+      {view.authorityConflict && <p role="alert">到账来源有重叠，须由财务核对原件。</p>}
+      {view.nativePaymentId && <p>支付宝原生交易 {view.nativePaymentId}</p>}
+      {view.latePayments.map(row => <p key={row.id}>平台到账待核对 · {row.outTradeNo} · {money(row.amountCents)}</p>)}
+    </section>
+    {view.banks.length > 0 && <section aria-label="客户银行回款" className="space-y-2"><h2 className={heading}>客户银行回款</h2>
+      {view.banks.map(bank => <p key={bank.id}>{bank.bankTrace} · {bank.payer} · 到账 {money(bank.totalCents)} · 尚可分配 {money(bank.availableCents)}</p>)}
+      {view.cash.map(post => <p key={post.id}>本单核销 {money(post.amountCents)} · 释放授信 {money(post.releasedCents)} · {post.id}</p>)}</section>}
+    {view.purchases.length > 0 && <section aria-label="采购付款与来票" className="space-y-3"><h2 className={heading}>采购付款与来票</h2>
+      {view.purchases.map(po => <article key={po.id} className="space-y-1 rounded border border-slate-200 p-3 text-sm">
+        <h3 className="font-semibold">{po.supplier ?? '供方须核对'} · {po.id}</h3>
+        <p>收款方 {po.payees.join('、')} · 原采购 {money(po.originalCents)} · 已登记付款 {money(po.paidCents)} · 余款 {money(po.dueCents ?? undefined)}</p>
+        <p>有效来票 {money(po.invoicedCents)} · 待收票 {money(po.pendingInvoiceCents ?? undefined)} · {po.reconciled ? '已记录本版对账结果' : '待对账'}</p>
+        {po.payments.map(row => <p key={row.id}>实际付款凭据 {row.reference} · {money(row.amountCents)}</p>)}
+      </article>)}</section>}
+    {view.invoicePlans.length > 0 && <section aria-label="发票安排与原件" className="space-y-2"><h2 className={heading}>发票安排与原件</h2>
+      {view.invoicePlans.map(plan => <article key={plan.id} className="space-y-1 rounded border border-slate-200 p-3 text-sm">
+        <h3 className="font-semibold">{plan.side === 'customer' ? '客户开票' : '供应商来票'} · {plan.reference}{plan.closed && ' · 已关闭'}</h3>
+        <p>{plan.issuer} 开给 {plan.recipient} · 安排 {money(plan.grossCents)} · 已回填 {money(plan.usedCents)} · {triggerLabels[plan.trigger]}</p>
+        <p>经办人 {plan.ownerId}{plan.lastFollowup && ' · 下次追票 ' + dateLabel(String(plan.lastFollowup.operation.nextReviewAt))}</p>
+        {plan.allocations.map(doc => <p key={doc.id}>票号 {doc.number} · {invoiceStateLabels[doc.status]} · 票面 {money(doc.grossCents)} · 本项 {money(doc.amountCents)}</p>)}
+      </article>)}</section>}
+    {actions.length > 0 && !action && <section className="space-y-2"><h2 className={heading}>办理事项</h2><div className="flex flex-wrap gap-2">
+      {actions.map(key => <button key={key} className={button} disabled={busy} onClick={() => { setError(''); setMessage(''); setAction(key); }}>{actionLabels[key]}</button>)}</div></section>}
+    {action && !pending && <FinanceForm key={view.version + action} view={view} action={action} busy={busy} onError={setError}
+      onCancel={() => setAction(null)} onPreview={input => send(input)}/>}
+    {pending && <FinancePreview preview={pending.preview} busy={busy} onBack={() => setPending(null)} onConfirm={() => {
+      const current = pending;
+      void begin(async token => { await send(current.input, { token, hash: current.preview.actionHash }); });
+    }}/>}
+    {view.events.length > 0 && <section className="space-y-2"><h2 className={heading}>办理记录</h2><ol className="space-y-2 text-sm">{view.events.map(event =>
+      <li key={event.id} className="border-t pt-2"><strong>{actionLabels[event.action as FinanceInput['action']] ?? event.action}</strong> · {dateLabel(event.occurredAt)} · {event.actorId}
+        <p>{String(event.operation.description ?? '')} · {String(event.operation.reference ?? '')}</p></li>)}</ol></section>}</>}
+    {dialog}
+  </main>;
+}

@@ -10,7 +10,7 @@ type AlipayPayableOrder = {
   status?: string | null;
 };
 
-export type AlipayPaymentStatus = 'pending' | 'processing' | 'paid' | 'expired' | 'closed' | 'failed';
+export type AlipayPaymentStatus = 'pending' | 'processing' | 'paid' | 'expired' | 'closed' | 'failed' | 'reconciliation';
 
 export type AlipayPaymentSummary = {
   provider: 'alipay';
@@ -74,10 +74,13 @@ export function getAlipayPaymentSummary(
 
   const attemptStatus = attempt?.status?.trim() || null;
   const normalizedAttemptStatus = attemptStatus?.toUpperCase() || '';
-  const paidAt = toIsoString(order.paidAt || attempt?.paidAt);
+  const pendingReview = normalizedAttemptStatus.endsWith('_RECONCILIATION_REQUIRED');
+  const paidAt = toIsoString(order.paidAt || (pendingReview ? null : attempt?.paidAt));
   let status: AlipayPaymentStatus;
 
-  if (paidAt || PAID_ATTEMPT_STATUSES.has(normalizedAttemptStatus)) {
+  if (pendingReview && !order.paidAt) {
+    status = 'reconciliation';
+  } else if (paidAt || PAID_ATTEMPT_STATUSES.has(normalizedAttemptStatus)) {
     status = 'paid';
   } else if (isInactiveOrderStatus(order.status) || CLOSED_ATTEMPT_STATUSES.has(normalizedAttemptStatus)) {
     status = 'closed';

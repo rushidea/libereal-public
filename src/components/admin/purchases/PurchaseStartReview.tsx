@@ -151,6 +151,8 @@ export default function PurchaseStartReview({ review, permissions, busy, request
         {' · '}已核对原额 {money(pending.preview.snapshot.operation.bank.receiptTotalCents)}</p>}
       {'action' in pending.preview.snapshot.operation && pending.preview.snapshot.operation.action === 'record_customer_receipt' && <p>本单实收分摊 {money(pending.preview.snapshot.operation.amountCents)}
         {' · '}该笔到账此前已分摊 {money(pending.preview.snapshot.operation.allocatedBeforeCents)}</p>}
+      {'accounting' in pending.preview.snapshot.operation && <p>本次释放授信 {money(pending.preview.snapshot.operation.accounting.releaseCents)}
+        {' · '}本单剩余应收 {money(pending.preview.snapshot.operation.accounting.remainingCents)}</p>}
       <p>{pending.preview.snapshot.operation.description}</p>
       <details><summary>查看完整依据与版本</summary><pre className="overflow-auto whitespace-pre-wrap break-all">{JSON.stringify(pending.preview.snapshot, null, 2)}</pre></details>
       <div className="flex gap-2"><button type="button" disabled={busy} className={primary} onClick={async () => {

@@ -14,6 +14,12 @@ const STATUS_CONFIG: Record<AlipayPaymentStatus, {
     className: uiSurfaces.badgeWarning,
     icon: Clock3,
   },
+  reconciliation: {
+    label: '到账待核对',
+    description: '已收到平台交易通知，财务正在核对这笔款项的归属。',
+    className: uiSurfaces.badgeWarning,
+    icon: AlertCircle,
+  },
   processing: {
     label: '付款确认中',
     description: '支付宝通知正在处理，请稍后刷新订单。',
