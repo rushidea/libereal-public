@@ -3,6 +3,8 @@
 import type { Prisma } from '@prisma/client';
 import { describe, expect, it, vi } from 'vitest';
 import type { SaleEvidence } from '@/lib/after-sale-records';
+import { allocateAfterSaleTransfer } from '@/lib/after-sale-transfers';
+import { afterSalePaymentUses } from '@/lib/after-sale-payment-source';
 import { actualRefunded, refundStep } from '@/lib/after-sale-refunds';
 import type { AfterSaleWorkspace, SaleCase } from '@/lib/after-sale-workspace';
 
@@ -13,7 +15,7 @@ vi.mock('@/lib/finance-workspace', () => ({
   }),
 }));
 
-const tx = {} as Prisma.TransactionClient;
+const tx = { afterSaleEvent: { findMany: async () => [] } } as unknown as Prisma.TransactionClient;
 const orderId = 'office-logic-only';
 const itemId = 'office-folder-logic-only';
 const permissionAt = new Date('2026-11-20T01:00:00.000Z');
@@ -41,7 +43,7 @@ function preview(row: SaleCase, action: string, input: Record<string, unknown>, 
     order: { id: orderId, status: 'completed', total: 200, email: 'office@example.invalid', customerId: 'synthetic-member',
       organizationId: null, ownerScope: 'personal', acceptance: null, termsVersion: 'original-terms', pointsRefundedCash: 23 },
     lines: [{ id: itemId, name: '合成文件夹', catalogNumber: 'OFFICE-A4', brand: null, quantity: 2, unitPrice: 100 }],
-    cases: [row], deliveries: [], shortfalls: [],
+    cases: [row], deliveries: [], shortfalls: [], replacements: [], resendShipments: [],
   };
   return refundStep(tx, view, row, action, input, proof);
 }
@@ -104,4 +106,62 @@ describe('售后退款规则仅计算预览，不连接数据库', () => {
     });
     expect(partial.events).toHaveLength(5);
   });
+
+  it('保留实退额度，未决指令有书证结束后才可核准改付剩余款',async()=>{
+    const partial=event('actual-first-part','refund_result',{result:'paid',amountCents:2500,approvalId:approved.id,referenceNo:'FIRST-REAL-RECEIPT'});
+    const pending={...event('unresolved-instruction','refund_result',{
+      result:'pending',amountCents:0,approvalId:approved.id,referenceNo:'OLD-INSTRUCTION'}),sha256:'b'.repeat(64)};
+    const row=item('refund_approved',[decision,prepared,approved,partial,pending]);
+    const stopped={result:'stopped',confirmStopped:true,referenceNo:'ORIGINAL-END-OF-INSTRUCTION',note:'合成规则检查'};
+    await expect(preview(row,'stop_refund',stopped)).rejects.toThrow('所有已登记的未决指令');
+    expect(await preview(row,'stop_refund',{...stopped,pendingResultIds:[pending.id]})).toMatchObject({
+      customerState:'refund_followup',operation:{approvalId:approved.id,stoppedCents:3500,paidCents:2500,pendingResultIds:[pending.id]},
+    });
+    const revised=event('signed-new-destination','agreement',{...agreement,amountCents:3500,destination:'新书证核实去向'});
+    const stop=event('checked-termination','stop_refund',{approvalId:approved.id,stoppedCents:3500});
+    const awaiting=item('awaiting_refund',[...row.events,stop,revised]);
+    expect(await preview(awaiting,'prepare_refund',{note:'新的准备',historyReview:'原已退及停止保留'})).toMatchObject({
+      customerState:'refund_prepared',operation:{destination:'新书证核实去向',amountCents:3500,position:{recordedCents:2500}},
+    });
+    await expect(preview(awaiting,'refund_result',receipt)).rejects.toThrow('先取得本版退款批准');
+    const preparedAgain=event('prepare-remaining','prepare_refund',{agreementId:revised.id,historicCheck:'复核已退与新账户'});
+    const reapproved=event('approve-remaining','approve_refund',{...agreement,destination:'新书证核实去向',amountCents:3500,agreementId:revised.id});
+    const final=item('refund_approved',[...awaiting.events,preparedAgain,reapproved]);
+    expect(await preview(final,'refund_result',{...receipt,referenceNo:'ONLY-THE-NEW-PART',destination:'新书证核实去向',amountCents:3500})).toMatchObject({
+      customerState:'awaiting_close',operation:{approvalId:reapproved.id,previouslyRecordedCents:2500,previouslyRecordedInApprovalCents:0},
+    });
+    expect(actualRefunded(final)).toBe(2500);
+  });
+
+  it.each(['customer_refund','supplier_return'] as const)('同一 %s 实际回单按原件和总额安全分摊',async direction=>{
+    const terms={direction,method:'bank',party:'合成同一主体',destination:'同一个核实去向',referenceNo:'SYNTHETIC-TRANSFER'};
+    const data={transferTotalCents:8000,allocationReference:'原件行对应明细 A'};
+    const first=await allocateAfterSaleTransfer(tx,terms,data,evidence,3000);
+    expect(first).toMatchObject({allocatedBeforeCents:0,unallocatedAfterCents:5000});
+    const firstRow={...event('first-record',direction==='customer_refund'?'refund_result':'supplier',
+      {result:'paid',outcome:'financial_result',amountCents:3000,referenceNo:terms.referenceNo,transfer:first}),occurredAt:new Date(evidence.occurredAt)};
+    const sharedTx={afterSaleEvent:{findMany:async()=>[firstRow]}} as unknown as Prisma.TransactionClient;
+    expect(await allocateAfterSaleTransfer(sharedTx,terms,{...data,allocationReference:'原件行对应明细 B'},evidence,4000))
+      .toMatchObject({allocatedBeforeCents:3000,unallocatedAfterCents:1000});
+    await expect(allocateAfterSaleTransfer(sharedTx,terms,data,evidence,100)).rejects.toThrow('分摊依据已登记');
+    await expect(allocateAfterSaleTransfer(sharedTx,terms,{...data,allocationReference:'相邻明细'},evidence,5001)).rejects.toThrow('真实交易总额');
+    await expect(allocateAfterSaleTransfer(sharedTx,{...terms,referenceNo:'SAME-PAPER-ALIAS'},{...data,allocationReference:'明细 C'},evidence,5000))
+      .rejects.toThrow('已有记录');
+    await expect(allocateAfterSaleTransfer(sharedTx,{...terms,destination:'另一个账户'},{...data,allocationReference:'明细 D'},evidence,1000))
+      .rejects.toThrow('已有记录');
+  });
+
+  it('从同一原到账的具名结果计算实际退款，待办和失败回执没有实退金额', async()=>{
+    const checked=event('verified-payment','review_refund_source',{originalPayment:{paymentId:'original-alipay',amountCents:4000}});
+    const paid=event('paid-original-payment','refund_result',{sourcePaymentId:'original-alipay',amountCents:4000,result:'paid'});
+    const unrelated=event('not-original','refund_result',{sourcePaymentId:'different',amountCents:4000,result:'paid'});
+    const pending=event('payment-pending','refund_result',{sourcePaymentId:'original-alipay',amountCents:4000,result:'pending'});
+    const buffer={afterSaleEvent:{findMany:async()=>[checked,unrelated,pending]}} as unknown as Prisma.TransactionClient;
+    expect((await afterSalePaymentUses(buffer,orderId)).get('original-alipay')).toMatchObject({
+      reviewId:checked.id,receivedCents:4000,paidCents:0});
+    const finished={afterSaleEvent:{findMany:async()=>[checked,unrelated,pending,paid]}} as unknown as Prisma.TransactionClient;
+    expect((await afterSalePaymentUses(finished,orderId)).get('original-alipay')).toMatchObject({
+      reviewId:checked.id,receivedCents:4000,paidCents:4000});
+  });
+
 });

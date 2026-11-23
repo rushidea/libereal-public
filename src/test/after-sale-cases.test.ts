@@ -115,7 +115,7 @@ async function registerSupplierOrder() {
 
 type Leg = 'supplier_to_customer' | 'supplier_to_libereal' | 'libereal_to_customer';
 
-function dispatch(purchaseOrderId: string, reference: string, route: Leg, source: { resendApprovalId?: string; sourceReceiptId?: string } = {}) {
+function dispatch(purchaseOrderId: string, reference: string, route: Leg, source: { resendApprovalId?: string; resendShortfallId?: string; sourceReceiptId?: string; afterSaleApprovalId?: string } = {}) {
   const input = { ...proof(reference), requestId: reference, route, trackingNumber: reference,
     carrier: '合成承运人', lines: [{ purchaseOrderId, orderItemId: itemId, quantity: 1, ...source }] };
   return prisma.$transaction(tx => dispatchParcel(tx, orderId, input, operator));
@@ -176,6 +176,172 @@ beforeEach(async () => {
 afterEach(() => vi.useRealTimers());
 
 describe('售后沿用原订单和短失事实', () => {
+  async function signedOriginalPair() {
+    await acceptOrder();
+    const purchaseOrderId=await registerSupplierOrder();
+    const first=await dispatch(purchaseOrderId,'OFFICE-ORIGINAL-FIRST','supplier_to_customer');
+    const second=await dispatch(purchaseOrderId,'OFFICE-ORIGINAL-SECOND','supplier_to_customer');
+    await parcelEvent(first.id,'OFFICE-FIRST-SIGNATURE','customer_delivery',[{parcelLineId:first.lines[0].id,quantity:1}]);
+    await parcelEvent(second.id,'OFFICE-SECOND-SIGNATURE','customer_delivery',[{parcelLineId:second.lines[0].id,quantity:1}]);
+    return {purchaseOrderId,first,second};
+  }
+
+  it.each(['supplier_to_customer','supplier_to_libereal'] as const)('免退质量换货从真实供货到实际签收（%s）',async route=>{
+    const {purchaseOrderId,first}=await signedOriginalPair();
+    const firstId=first.lines[0].id;
+    const originalMoney=await prisma.accountReceivable.findUniqueOrThrow({where:{orderId}});
+    const open=await record(saleInput('open','open-quality-case',{orderItemId:itemId,quantity:1,issue:'quality',channel:'email',originalParcelLineId:firstId}));
+    const caseId=open.caseId!;
+    await record(saleInput('claim','own-quality-case',{},caseId));
+    await expect(preview(saleInput('agreement','bad-early-quality-decision',{remedy:'exchange',customerDecision:'免退换货',returnRequirement:'waived'},caseId)))
+      .rejects.toThrow('技术意见');
+    await record(saleInput('technical','actual-brand-conclusion',{authority:'brand',party:'合成办公品牌',contact:'具名产品顾问'},caseId));
+    await record(saleInput('agreement','customer-free-exchange-no-return',{remedy:'exchange',customerDecision:'合成原件指明原包裹、原货、免费换货且免退',returnRequirement:'waived'},caseId));
+    const approve=saleInput('approve_exchange','supplier-free-exchange-contract',{supplier:'合成办公供方',freeOfCharge:true,returnRequirement:'waived'},caseId);
+    await expect(preview({...approve,data:{...approve.data,returnRequirement:'required'}},procurement)).rejects.toThrow('与客户一致');
+    const intended=await preview(approve,procurement);
+    await expect(confirm(approve,intended.actionHash,procurement,'purchases.write')).rejects.toThrow('权限');
+    const accepted=await confirm(approve,intended.actionHash,procurement);
+    const id=accepted.eventId!;
+    let customer=await dispatch(purchaseOrderId,'OFFICE-EXCHANGE-DISPATCH',route,{afterSaleApprovalId:id});
+    expect(customer.lines[0].afterSaleApprovalId).toBe(id);
+    if(route==='supplier_to_libereal'){
+      await parcelEvent(customer.id,'OFFICE-EXCHANGE-AT-WAREHOUSE','warehouse_receipt',
+        [{parcelLineId:customer.lines[0].id,quantity:1,batchNumber:'OFFICE-EXCHANGE-LOT'}]);
+      const stock=await prisma.fulfillmentReceipt.findFirstOrThrow({where:{parcelLineId:customer.lines[0].id}});
+      customer=await dispatch(purchaseOrderId,'OFFICE-EXCHANGE-FORWARD','libereal_to_customer',{sourceReceiptId:stock.id});
+      expect(customer.lines[0].afterSaleApprovalId).toBe(id);
+    }
+    const received=(parcelLineId:string)=>saleInput('physical','approved-exchange-delivered',{result:'delivery',quantity:1,parcelLineId},caseId);
+    await expect(preview(received(firstId))).rejects.toThrow('补件');
+    await expect(preview(received(customer.lines[0].id))).rejects.toThrow('客户实际签收');
+    await parcelEvent(customer.id,'OFFICE-EXCHANGE-CUSTOMER-SIGNATURE','customer_delivery',[{parcelLineId:customer.lines[0].id,quantity:1}]);
+    expect((await record(received(customer.lines[0].id))).snapshot).toMatchObject({nextState:'awaiting_close',
+      operation:{afterSaleApprovalId:id,parcelLineId:customer.lines[0].id}});
+    expect(await prisma.order.findUniqueOrThrow({where:{id:orderId}})).toMatchObject({status:'completed'});
+    expect(await prisma.orderItem.findUniqueOrThrow({where:{id:itemId}})).toMatchObject({shippedQty:2});
+    expect(await prisma.shipmentItem.count({where:{orderItemId:itemId}})).toBe(2);
+    expect(await prisma.accountReceivable.findUniqueOrThrow({where:{orderId}})).toEqual(originalMoney);
+  });
+
+  it('仅用原指定包裹的真实已退商品另议退款，晚录旧决定留痕但不生效',async()=>{
+    const {first,second}=await signedOriginalPair();
+    const open=await record(saleInput('open','open-pinned-return',{orderItemId:itemId,quantity:1,issue:'return',channel:'email',originalParcelLineId:first.lines[0].id}));
+    await record(saleInput('claim','claim-pinned-return',{},open.caseId!));
+    const old=proof('original-older-message');
+    const earlier=await record(saleInput('agreement','written-return-choice',{remedy:'return',customerDecision:'客户同意退回第一包对应商品'},open.caseId!));
+    for(const parcel of [second,first]) await parcelEvent(parcel.id,'ACTUAL-RETURN-'+parcel.id,'confirm_shortfall',
+      [{parcelLineId:parcel.lines[0].id,quantity:1,outcome:'return'}], {
+        supplierReference:'OFFICE-IGINAL-ACTUAL-RETURN-SUPPLIER',supplierSha256:pricingContentHash('OFFICE-IGINAL-ACTUAL-RETURN-SUPPLIER'),
+        customerReference:'OFFICE-ORIGINAL-ACTUAL-RETURN-CUSTOMER',customerSha256:pricingContentHash('OFFICE-ORIGINAL-ACTUAL-RETURN-CUSTOMER'),
+      });
+    const result=async (parcelLineId:string)=>saleInput('physical','attribute-return-'+parcelLineId,{result:'return',quantity:1,parcelLineId,
+      resolutionId:(await prisma.fulfillmentLineResolution.findFirstOrThrow({where:{parcelLineId,kind:'return'}})).id},open.caseId!);
+    await expect(preview(await result(second.lines[0].id))).rejects.toThrow('本案指定');
+    const returned=await record(await result(first.lines[0].id));
+    const newTerms={remedy:'refund',amountCents:3000,recipient:'合成客户',destination:'核实合成账号',method:'bank',
+      customerDecision:'客户书面同意仅按原退回的一件核对退款',revisesAgreementId:earlier.eventId};
+    expect((await record(saleInput('agreement','new-terms-after-actual-return',newTerms,open.caseId!))).snapshot).toMatchObject({
+      nextState:'awaiting_refund',operation:{refundQuantity:1,originalReturns:[returned.eventId]}});
+    const backfill=await record(saleInput('agreement','late-earlier-irrelevant-message',{...old,remedy:'keep',customerDecision:'旧来函请暂留商品'},open.caseId!));
+    expect(backfill.snapshot).toMatchObject({nextState:'awaiting_refund',operation:{historical:true}});
+    expect(await prisma.afterSaleEvent.count({where:{caseId:open.caseId!,action:'physical'}})).toBe(1);
+    expect(await prisma.afterSaleEvent.count({where:{caseId:open.caseId!,action:'refund_result'}})).toBe(0);
+  });
+
+  it('一份批准下同一货号的两条短失各用实际归属，旧运单缺项时可具名补核',async()=>{
+    await acceptOrder();
+    const purchaseOrderId=await registerSupplierOrder();
+    const terms={
+      supplierReference:'SUPPLIER-TWO-SEPARATE-LOSS-LINES',supplierSha256:pricingContentHash('SUPPLIER-TWO-SEPARATE-LOSS-LINES'),
+      customerReference:'CUSTOMER-TWO-SEPARATE-LOSS-LINES',customerSha256:pricingContentHash('CUSTOMER-TWO-SEPARATE-LOSS-LINES'),description,
+    };
+    for(const tag of ['A','B']){
+      const sent=await dispatch(purchaseOrderId,'OFFICE-SEPARATE-PARCEL-'+tag,'supplier_to_libereal');
+      await parcelEvent(sent.id,'OFFICE-REAL-LOSS-'+tag,'confirm_shortfall',[{parcelLineId:sent.lines[0].id,quantity:1,outcome:'loss'}],terms);
+    }
+    const losses=(await readWorkspace()).shortfalls;
+    await purchaseAction(purchaseOrderId,{action:'report_change',requestId:'two-confirmed-real-losses',changeKind:'other',reference:'OFFICE-TWO-LOSSES',description});
+    const approved=await purchaseAction(purchaseOrderId,{action:'resolve_change',requestId:'approve-one-document-two-goods-sources',
+      outcome:'shortfall',confirmsFullIncidentScope:true,...terms,
+      dispositions:losses.map((loss,index)=>({orderItemId:itemId,quantity:1,outcome:'cancel',shortfallId:loss.resolutionId,
+        shortfallDecision:'free_resend',supplierDocumentRow:index+1,customerDocumentRow:index+1}))});
+    const approvalId=approved.fulfillment.freeResends[0].approvalId;
+    expect(approved.fulfillment.freeResends).toHaveLength(2);
+    await expect(dispatch(purchaseOrderId,'OFFICE-FREE-AMBIGUOUS-BAD','supplier_to_customer',{resendApprovalId:approvalId})).rejects.toThrow('实际短失');
+    const second=await dispatch(purchaseOrderId,'OFFICE-SECOND-ASSIGNED-RESEND','supplier_to_customer',{
+      resendApprovalId:approvalId,resendShortfallId:losses[1].resolutionId});
+    // This is the pre-change dispatch shape, with the original verified movement intact.
+    const event=second.events.find(item=>item.kind==='dispatch')!;
+    const historical=JSON.parse(event.details);
+    delete historical.lines[0].resendShortfallId;
+    await prisma.fulfillmentEvent.update({where:{id:event.id},data:{details:JSON.stringify(historical)}});
+    await parcelEvent(second.id,'OFFICE-SECOND-RESEND-SIGNED','customer_delivery',[{parcelLineId:second.lines[0].id,quantity:1}]);
+    const cases=[];
+    for(const loss of losses){
+      const opened=await record(saleInput('open','open-real-loss-'+loss.resolutionId,{orderItemId:itemId,quantity:1,issue:'shortage',
+        channel:'fulfillment',shortfallId:loss.resolutionId,occurredAt:loss.occurredAt,reference:loss.reference,sha256:loss.sha256,documentRow:loss.documentRow}));
+      await record(saleInput('claim','own-real-loss-'+loss.resolutionId,{},opened.caseId!));
+      cases.push(opened.caseId!);
+    }
+    const delivery=(caseId:string)=>saleInput('physical','link-signed-piece-'+caseId,{result:'delivery',quantity:1,parcelLineId:second.lines[0].id,
+      resendApprovalId:approvalId},caseId);
+    await expect(preview(delivery(cases[1]))).rejects.toThrow('归行');
+    const verify=(caseId:string)=>saleInput('attribute_resend','assign-real-piece-'+caseId,
+      {parcelLineId:second.lines[0].id,approvalId,quantity:1},caseId);
+    await record(verify(cases[1]),procurement);
+    await expect(preview(verify(cases[0]),procurement)).rejects.toThrow('尚未核对的实际件数');
+    await expect(preview(delivery(cases[0]))).rejects.toThrow('归行');
+    expect((await record(delivery(cases[1]))).snapshot).toMatchObject({nextState:'awaiting_close'});
+    const first=await dispatch(purchaseOrderId,'OFFICE-FIRST-FINALLY-SENT','supplier_to_customer',{
+      resendApprovalId:approvalId,resendShortfallId:losses[0].resolutionId});
+    expect(first.lines[0].quantity).toBe(1);
+    expect((await readWorkspace()).shortfalls.map(loss=>loss.approved[0].dispatched)).toEqual([1,1]);
+  });
+
+  it('用已单独批准的真实有偿补采购和客户签收接续旧短失',async()=>{
+    await acceptOrder();
+    const purchaseOrderId=await registerSupplierOrder();
+    const original=await dispatch(purchaseOrderId,'OFFICE-PARCEL-PRECEDING-PAID-REPLACEMENT','supplier_to_customer');
+    const docs={
+      supplierReference:'SUPPLIER-PAID-REPLACEMENT-DECISION',supplierSha256:pricingContentHash('SUPPLIER-PAID-REPLACEMENT-DECISION'),
+      customerReference:'CUSTOMER-PAID-REPLACEMENT-DECISION',customerSha256:pricingContentHash('CUSTOMER-PAID-REPLACEMENT-DECISION'),description,
+    };
+    await parcelEvent(original.id,'OFFICE-SOURCE-LOSS','confirm_shortfall',[{parcelLineId:original.lines[0].id,quantity:1,outcome:'loss'}],docs);
+    const loss=(await readWorkspace()).shortfalls[0];
+    await purchaseAction(purchaseOrderId,{action:'report_change',requestId:'case-new-purchase-reported',changeKind:'other',reference:loss.reference,description});
+    const current=(await prisma.$transaction(tx=>purchaseWorkspace(tx,orderId))).orders.find(row=>row.id===purchaseOrderId)!;
+    const terms={...current.lines[0].terms,unitPriceCents:1600,linePayableCents:1600,sourceReference:'REPLACEMENT-OFFICE-NEW-QUOTE',
+      sourceSha256:pricingContentHash('REPLACEMENT-OFFICE-NEW-QUOTE'),settlementReference:'REPLACEMENT-OFFICE-NEW-SETTLEMENT',
+      settlementSha256:pricingContentHash('REPLACEMENT-OFFICE-NEW-SETTLEMENT')};
+    const prepared=await purchaseAction(purchaseOrderId,{action:'resolve_change',requestId:'case-new-purchase-agreed',
+      outcome:'shortfall',confirmsFullIncidentScope:true,...docs,dispositions:[{orderItemId:itemId,quantity:1,outcome:'replace',
+        shortfallId:loss.resolutionId,shortfallDecision:'new_purchase',replacement:{name:'合成采购替换件',brand:'合成办公品牌',
+          catalogNumber:'OFFICE-PAID-REPLACEMENT',spec:'A4',unit:'件',terms}}]});
+    const replacement=prepared.orders.find(row=>row.lines.some(line=>line.fromPurchaseOrderId===purchaseOrderId))!;
+    const opened=await record(saleInput('open','open-proved-paid-replacement-case',{orderItemId:itemId,quantity:1,issue:'shortage',
+      channel:'fulfillment',shortfallId:loss.resolutionId,occurredAt:loss.occurredAt,reference:loss.reference,sha256:loss.sha256,documentRow:loss.documentRow}));
+    await record(saleInput('claim','claim-proved-paid-replacement-case',{},opened.caseId!));
+    const agreed=saleInput('agreement','link-customer-confirmed-paid-replacement',{remedy:'resend',customerDecision:'书面确认由独立采购行补发',
+      replacementPurchaseOrderId:replacement.id},opened.caseId!);
+    await expect(preview(agreed)).rejects.toThrow('已有实际批准');
+    await purchaseAction(replacement.id,{action:'approve',requestId:'approve-case-new-purchase-separately'});
+    const placed=proof('OFFICE-NEW-REPLACEMENT-ORDER');
+    await purchaseAction(replacement.id,{action:'register_order',requestId:'place-case-new-replacement',reference:placed.reference,
+      referenceSha256:placed.sha256,occurredAt:placed.occurredAt});
+    const decision=await record(agreed);
+    expect(decision.snapshot).toMatchObject({operation:{replacement:{purchaseOrderId:replacement.id,shortfallId:loss.resolutionId}}});
+    const shipped=await dispatch(replacement.id,'OFFICE-PAID-REPLACEMENT-WAYBILL','supplier_to_customer');
+    await parcelEvent(shipped.id,'OFFICE-PAID-REPLACEMENT-SIGNATURE','customer_delivery',[{parcelLineId:shipped.lines[0].id,quantity:1}]);
+    const physical=(parcelLineId:string)=>saleInput('physical','verify-actual-paid-replacement',{result:'delivery',quantity:1,parcelLineId},opened.caseId!);
+    await expect(preview(physical(original.lines[0].id))).rejects.toThrow('归行');
+    const result=await record(physical(shipped.lines[0].id));
+    expect(result.snapshot).toMatchObject({nextState:'awaiting_close',operation:{replacement:{purchaseOrderId:replacement.id}}});
+    const after=await prisma.$transaction(tx=>purchaseWorkspace(tx,orderId));
+    expect(after.orders.find(row=>row.id===purchaseOrderId)).toMatchObject({totalCents:2750,paidCents:0});
+    expect(after.orders.find(row=>row.id===replacement.id)).toMatchObject({totalCents:1600,paidCents:0});
+  });
+
   it('绑定旧短失的一件、实际补发签收及仍独立跟进的供方记录', async () => {
     const { purchaseOrderId, original, approval, report } = await legacyShortfall();
     const before = await prisma.accountReceivable.findUniqueOrThrow({ where: { orderId } });
@@ -207,6 +373,10 @@ describe('售后沿用原订单和短失事实', () => {
     }, caseId);
     await expect(preview(physical('try-original-inbound-waybill', original.lines[0].id))).rejects.toThrow('对客包裹');
 
+    const duplicateSource = { ...proof('SAME-APPROVAL-TWICE-IN-ONE-PACKAGE'), requestId:'same-origin-twice', route:'supplier_to_customer',
+      lines:[{ purchaseOrderId,orderItemId:itemId,quantity:1,resendApprovalId:approval.approvalId },
+        { purchaseOrderId,orderItemId:itemId,quantity:1,resendApprovalId:approval.approvalId,resendShortfallId:report.shortfallId }] };
+    await expect(prisma.$transaction(tx=>dispatchParcel(tx,orderId,duplicateSource,operator))).rejects.toThrow('重复消耗');
     const replacement = await dispatch(purchaseOrderId, 'OFFICE-REPLACEMENT-INBOUND', 'supplier_to_libereal', { resendApprovalId: approval.approvalId });
     await parcelEvent(replacement.id, 'OFFICE-ACTUAL-WAREHOUSE-RECEIPT', 'warehouse_receipt',
       [{ parcelLineId: replacement.lines[0].id, quantity: 1, batchNumber: 'OFFICE-SPECIFIC-REPLACEMENT-LOT' }]);

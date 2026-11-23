@@ -78,7 +78,7 @@ function makeWorkspace(status?: Purchase['status'], lineChanges: Partial<Line> =
     eligibility: { eligible: true, reason: null, basis: { acceptanceId: 'test-acceptance', receivableId: 'test-receivable',
       reserveId: 'test-credit-reserve', amount: 250, mode: 'credit', payment, planEvidenceId: null } },
     lines: [line], orders: purchase ? [purchase] : [], activities: [], customerRemaining:[{orderItemId,quantity:2}],
-    fulfillment: { version, targets: [], delivered: [], historicalDelivered: [], customerReceived: [], supplierReceived: [], warehouseReceived: [], warehouseTransit: [], supplierDispatched: [], incidentSources: [], dispatchHolds: [], unlinkedDispatchShortfalls: [], reviewedDispatchShortfalls: [], shortfalls: [], freeResends: [], parcelLinesWithPriorHoldTransfer: [], replacementsWithPriorHoldTransfer: [], parcelLinesWithUnverifiedStockSource: [], replacementsWithUnverifiedStockSource: [], inconsistent: [], ledger: [] },
+    fulfillment: { version, targets: [], delivered: [], historicalDelivered: [], customerReceived: [], supplierReceived: [], warehouseReceived: [], warehouseTransit: [], supplierDispatched: [], incidentSources: [], dispatchHolds: [], unlinkedDispatchShortfalls: [], reviewedDispatchShortfalls: [], shortfalls: [], freeResends: [], resendShipments: [], parcelLinesWithPriorHoldTransfer: [], replacementsWithPriorHoldTransfer: [], parcelLinesWithUnverifiedStockSource: [], replacementsWithUnverifiedStockSource: [], inconsistent: [], ledger: [] },
   };
 }
 
@@ -341,12 +341,12 @@ describe('supplier purchasing page', () => {
       originalContract:true,quantity:2,available:0,reference:'TEST-ORIGINAL-LOST-WAYBILL',occurredAt:authorizedAt,independentlyReplaced:0,
       contractSource:{purchaseOrderId:purchaseId,orderItemId,parcelLineId:'TEST-CONTRACT-PARCEL-LINE',reference:'TEST-FIRST-CONTRACT-SHIPMENT'}}];
     workspace.fulfillment.freeResends = [{approvalId,purchaseOrderId:purchaseId,orderItemId,shortfallId,authorizedAt,kind:'free_resend',
-      quantity:2,dispatched:1,redirected:0,available:1,originalHoldAlreadyMoved:true,revisesResendApprovalId:undefined}];
+      quantity:2,dispatched:1,redirected:0,available:1,pendingAttribution:false,originalHoldAlreadyMoved:true,revisesResendApprovalId:undefined}];
     const posts = mockWorkspace(workspace,['purchases.read','purchases.approve'],body=>{
       const result = preview(body,workspace);
       const operation = {...result.preview.snapshot.operation,dispositions:[{orderItemId,quantity:1,outcome:'cancel',shortfallId,
         shortfallDecision:'change_contract',revisesResendApprovalId:approvalId,supplierDocumentRow:2,customerDocumentRow:12,contractSource:workspace.fulfillment.shortfalls[0].contractSource,
-        priorResend:{authorized:2,dispatched:1,redirected:0,available:1}}],
+        priorResend:{authorized:2,dispatched:1,redirected:0,available:1,pendingAttribution:false}}],
         decisionDocuments:[{role:'supplier',sha256:'e'.repeat(64),row:2,balances:[{...covered,usedBefore:1,using:1,remaining:0}]}],
       };
       return body.stage === 'confirm' ? Response.json({workspace})
