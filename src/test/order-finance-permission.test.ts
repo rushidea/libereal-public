@@ -224,6 +224,17 @@ describe('order completion and financial permissions', () => {
     expect(await prisma.accountReceivable.findUnique({ where: { orderId: 'o_credit' } })).toMatchObject({ status: 'open' });
 
     allowExcept(null);
+    const unknownReservation = await adminOrderPATCH(patch('http://localhost/api/admin/orders/o_credit', { status: 'cancelled' }), {
+      params: Promise.resolve({ id: 'o_credit' }),
+    });
+    expect(unknownReservation.status).toBe(409);
+    const receivable = await prisma.accountReceivable.findUniqueOrThrow({ where: { orderId: 'o_credit' } });
+    expect(receivable.status).toBe('open');
+    expect(await prisma.creditTransaction.count({ where: { orderId: 'o_credit', type: 'release' } })).toBe(0);
+    expect(await prisma.creditAccount.findUnique({ where: { userId: receivable.userId } })).toMatchObject({ usedAmount: 800 });
+    await prisma.creditTransaction.create({ data: {
+      orderId: 'o_credit', userId: receivable.userId, type: 'reserve', amount: 800, balanceAfter: 800, actorId: 'admin_test_id',
+    } });
     const allowedCancel = await adminOrderPATCH(patch('http://localhost/api/admin/orders/o_credit', { status: 'cancelled' }), {
       params: Promise.resolve({ id: 'o_credit' }),
     });

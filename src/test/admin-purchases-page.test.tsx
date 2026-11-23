@@ -51,7 +51,7 @@ function makeWorkspace(status?: Purchase['status'], lineChanges: Partial<Line> =
   const purchase: Purchase | null = status ? {
     id: purchaseId, status, version, revision: 4, contentHash: 'd'.repeat(64),
     approvedHash: status === 'draft' || status === 'on_hold' ? null : 'd'.repeat(64),
-    totalCents: 8642, paidCents: 0, lines: [line], ledger: [], orderedBefore: status === 'ordered',
+    totalCents: 8642, paidCents: 0, lines: [line], ledger: [], payments: [], orderedBefore: status === 'ordered',
     openIncidentId: open?.id ?? null, incident: open, incidents: open ? [open] : [], incidentHistory:open ? [open] : [],
     incidentSources:[{orderItemId,quantity:line.source.quantity,source:{kind:'unshipped'},reference:'TEST-ORDER-REFERENCED'}],
     orderReceipt: null, leadTimeApproved: false,
@@ -97,6 +97,7 @@ function preview(body: RequestBody, workspace: Workspace) {
         eligibility: workspace.eligibility,
         operation: { action, reference, description, conditionReference, amountCents, changeKind,
           outcome, supplierReference, customerReference, revisedTerms, occurredAt, referenceSha256,
+          ...(action === 'record_payment' ? { paymentEvidence: { payee: body.payee, bankTrace: body.bankTrace, occurredAt } } : {}),
           ...(action === 'resolve_change' ? {incidentProgress:{
             handled: body.coordinationLines ?? body.affectedLines ?? [{orderItemId,quantity:2}],outstanding:[],
           }} : {}) },
@@ -843,10 +844,14 @@ describe('supplier purchasing page', () => {
     fill('本次实际支付金额（元）', '12.34');
     fill('本次付款条件已满足的依据', 'TEST-SUPPLIER-DEPOSIT-DUE');
     fill('实际付款流水或银行凭证编号', 'TEST-SUPPLIER-BANK-TRACE');
+    fill('银行付款流水号', 'TEST-SUPPLIER-ACTUAL-BANK-NO');
+    fill('银行凭证所列收款方', '合成供方收款账户');
+    fill('银行实际付款时间', '2026-11-20T08:31');
+    fill('银行付款凭证摘要', 'f'.repeat(64));
     fireEvent.click(screen.getByRole('button', { name: '查看完整预览' }));
 
     const panel = await screen.findByRole('region', { name: '操作预览' });
-    expect(panel).toHaveTextContent(/本次实际付款.*12\.34.*收款方 合成供方收款账户.*TEST-SUPPLIER-DEPOSIT-DUE/);
+    expect(panel).toHaveTextContent(/本次实际付款.*12\.34.*TEST-SUPPLIER-DEPOSIT-DUE.*收款方 合成供方收款账户/);
     expect(panel).toHaveTextContent('TEST-SUPPLIER-BANK-TRACE');
     expect(panel).toHaveTextContent(version);
     expect(posts).toEqual([expect.objectContaining({

@@ -10,5 +10,6 @@ describe('original receivable and actual receipts', () => {
     expect(receivableOutstanding(50, 'overdue', receipts, 100)).toBe(30);
     expect(receivableOutstanding(100, 'overdue', receipts, 100)).toBe(30);
     expect(receivableOutstanding(50, 'paid', receipts, 100)).toBe(0);
+    expect(receivableOutstanding(120.5, 'open', [], 0)).toBe(120.5);
   });
 });

@@ -6,6 +6,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import { NextRequest } from 'next/server';
 import { GET, POST } from '@/app/api/admin/purchases/route';
 import { GET as financeGET, POST as financePOST } from '@/app/api/admin/finance/route';
+import { POST as alipayNotify } from '@/app/api/payments/alipay/notify/route';
 import { ADMIN_ROLE_DEFINITIONS, type AdminRoleKey } from '@/lib/admin-permissions';
 import { releaseOrderReceivableOnCancellation, reserveOrderCredit } from '@/lib/customer-credit';
 import { resetEphemeralStoreForTests } from '@/lib/ephemeral-store';
@@ -17,6 +18,12 @@ import { createMfaKeyRing, encryptMfaSecret } from '@/lib/security/mfa-crypto';
 import { generateTotpSecret, totpCodeAt } from '@/lib/security/mfa-totp';
 import { completeSecurityStepUp, startSecurityStepUp, type SecurityStepUpAction } from '@/lib/security/security-step-up';
 import { clearAllTables, closeTestDb, getTestDb, seedUser } from './db-helpers';
+import { supplierPaymentProof } from './supplier-payment-proof';
+
+vi.mock('@/lib/alipay', async importOriginal => ({
+  ...await importOriginal<typeof import('@/lib/alipay')>(),
+  getAlipaySdk: () => ({ config: { appId: '9021000000000000', sellerId: '2088000000000000' }, sdk: { checkNotifySign: () => true } }),
+}));
 
 const { auth } = vi.hoisted(() => ({ auth: vi.fn() }));
 vi.mock('@/lib/auth', () => ({ auth }));
@@ -77,12 +84,13 @@ async function currentPurchase(target = orderId) {
   const result = await expectJson(await readPurchases(target), 200);
   const [purchase] = result.workspace.orders;
   expect(purchase).toBeDefined();
-  return purchase as { id: string; version: string; status: string; totalCents: number; paidCents: number };
+  return purchase as { id: string; version: string; status: string; totalCents: number; paidCents: number; lines: Array<{ terms: { payee: string | null } }> };
 }
 
 async function previewAction(request: ActionRequest, target = orderId): Promise<Previewed> {
   const purchase = await currentPurchase(target);
-  const input = { ...request, orderId: target, purchaseOrderId: purchase.id, version: purchase.version };
+  const evidence = request.action === 'record_payment' ? supplierPaymentProof(request.reference ?? request.requestId, purchase.lines[0].terms.payee) : {};
+  const input = { ...evidence, ...request, orderId: target, purchaseOrderId: purchase.id, version: purchase.version };
   const result = await expectJson(await post({ ...input, stage: 'preview' }), 200);
   expect(result.preview).toMatchObject({ actionHash: expect.stringMatching(/^[a-f0-9]{64}$/) });
   expect(result.preview.snapshot).toMatchObject({
@@ -800,6 +808,7 @@ describe('admin purchase endpoint', () => {
       conditionReference: 'TEST-DEPOSIT-CONDITION', amountCents: 3100,
     } as const;
     const payment = await previewAction(request);
+    const matchingReceipt = await previewAction({ ...request, requestId: 'test-payment-different-request' });
     await expectJson(await confirm({ ...payment, amountCents: 3101 }, await grant(staff.finance)), 409);
     expect(activity('record_payment')).toEqual([]);
 
@@ -808,8 +817,9 @@ describe('admin purchase endpoint', () => {
     await expectJson(await confirm(payment, oneUse), 403);
     await expectJson(await confirm(payment, await grant(staff.finance)), 200);
 
-    const matchingReceipt = await previewAction({ ...request, requestId: 'test-payment-different-request' });
     await expectJson(await confirm(matchingReceipt, await grant(staff.finance)), 409);
+    await expectJson(await post({ ...payment, version: (await currentPurchase()).version, actionHash: undefined,
+      requestId: 'renamed-payment-receipt', reference: 'alternate name of original voucher', stage: 'preview' }), 409);
     expect(activity('record_payment')).toEqual([{ actorId: staff.finance, amountCents: 3100 }]);
     expect(await currentPurchase()).toMatchObject({ totalCents: 7346, paidCents: 3100, status: 'ordered' });
 
@@ -867,9 +877,9 @@ describe('admin purchase endpoint', () => {
     async function record(action: string, data: object, id = orderId) {
       return (await finish(await financePreview(action, data, id))).workspace;
     }
-    async function bank(trace: string, total: number, id = orderId) {
+    async function bank(trace: string, total: number, id = orderId, occurredAt = new Date().toISOString()) {
       const view = await record('verify_bank_receipt', { ...paper('bank-' + trace), documentKind: 'single_receipt', payer: 'Office buyer',
-        bankTrace: trace, receiptTotalCents: total, receivingAccount: 'Office settlement account', occurredAt: new Date().toISOString() }, id);
+        bankTrace: trace, receiptTotalCents: total, receivingAccount: 'Office settlement account', occurredAt }, id);
       return view.banks.find((entry: { bankTrace: string }) => entry.bankTrace === trace).id as string;
     }
     function allocation(id: string, amount: number, ref: string) {
@@ -912,6 +922,68 @@ describe('admin purchase endpoint', () => {
       expect(await prisma.creditAccount.findUniqueOrThrow({ where: { userId: buyer } })).toMatchObject({ usedAmount: 0 });
       expect(await prisma.customerCashPosting.count()).toBe(4);
       expect(await prisma.creditTransaction.count({ where: { type: 'release' } })).toBe(4);
+    });
+
+    it('retains a backdated bank payment date while the other overdue order still controls credit and the tier review uses today', async () => {
+      const other = 'office-later-overdue-order';
+      await seedAcceptedOrder(other, 'office-later-overdue-line');
+      const recordedToday = Date.now();
+      const originalPaidAt = new Date(recordedToday - 3 * 365 * 86400000);
+      await prisma.accountReceivable.update({ where: { orderId: other },
+        data: { status: 'overdue', dueAt: new Date(recordedToday - 100 * 86400000) } });
+      await prisma.creditAccount.update({ where: { userId: buyer }, data: { status: 'overdue_hold', statusSource: 'system' } });
+      await prisma.user.update({ where: { id: buyer }, data: { tier: 'synthetic-previous-tier' } });
+      await prisma.order.create({ data: { id: 'office-recent-settled-order', customerId: buyer, email: email(buyer),
+        subtotal: 1500, total: 1500, status: 'completed', paidAt: new Date(recordedToday - 14 * 86400000) } });
+
+      signIn(staff.accountant);
+      const receipt = await bank('OLD-OFFICE-TRANSFER', 25000, orderId, originalPaidAt.toISOString());
+      await record('record_customer_receipt', allocation(receipt, 25000, 'office-old-order-allocation'));
+      expect(await prisma.order.findUnique({ where: { id: orderId }, select: { paidAt: true } })).toEqual({ paidAt: originalPaidAt });
+      expect(await prisma.accountReceivable.findUnique({ where: { orderId } })).toMatchObject({ status: 'paid', paidAt: originalPaidAt });
+      expect(await prisma.creditAccount.findUnique({ where: { userId: buyer } }))
+        .toMatchObject({ status: 'overdue_hold', statusSource: 'system', usedAmount: 250 });
+      const review = await prisma.userTierHistory.findFirstOrThrow({ where: { userId: buyer } });
+      expect(review.rollingSpend).toBe(1500);
+      expect(review.calculationTo.getTime()).toBeGreaterThanOrEqual(recordedToday);
+    });
+
+    it('stores the original bank receipt before historical acceptance and enforces the same posting proof in both workspaces', async () => {
+      const id = 'office-bank-with-unverified-legacy-acceptance';
+      const legacy = await prisma.order.create({ data: { id, customerId: buyer, email: email(buyer), subtotal: 125, total: 125,
+        status: 'confirmed', paymentMethod: 'bank_transfer',
+        orderItems: { create: { id: 'office-legacy-receipt-line', position: 0, name: 'Office supplies', quantity: 1, unitPrice: 125 } } } });
+      await prisma.$transaction(tx => reserveOrderCredit(tx, id, staff.merchant));
+      signIn(staff.accountant);
+      const sourceId = await bank('OFFICE-WRITTEN-RECEIPT', 12500, id);
+      const data = allocation(sourceId, 12500, 'office-legacy-allocation');
+      const finance = (await expectJson(await financeRead(id), 200)).workspace;
+      expect(finance).toMatchObject({ acceptanceId: null, banks: [{ id: sourceId, availableCents: 12500 }] });
+      await expectJson(await financePost({ orderId: id, requestId: randomUUID(), action: 'record_customer_receipt',
+        version: finance.version, data, stage: 'preview' }), 409);
+      signIn(staff.operator);
+      const prior = await expectJson(await readPurchases(id), 200);
+      const allowPurchaseRead = getTestDb().prepare('INSERT INTO AdminRolePermission (roleId,permissionId) VALUES (?,?)');
+      allowPurchaseRead.run(staffRole[staff.accountant], 'purchases.read');
+      allowPurchaseRead.run(staffRole[staff.merchant], 'purchases.read');
+      signIn(staff.accountant);
+      const purchaseInput = { orderId: id, requestId: 'legacy-purchase-allocation', action: 'record_customer_receipt',
+        version: prior.workspace.startReview.version, ...data };
+      const blocked = await expectJson(await post({ ...purchaseInput, stage: 'preview' }), 409);
+      expect(blocked.error).toContain('平台接单依据');
+      expect(await prisma.customerCashPosting.count({ where: { orderId: id } })).toBe(0);
+
+      signIn(staff.merchant);
+      const verify = { ...paper('original-office-acceptance'), action: 'verify_acceptance', orderId: id,
+        requestId: 'written-legacy-acceptance-proof', version: prior.workspace.startReview.version,
+        occurredAt: legacy.createdAt.toISOString(), originalActor: staff.merchant, authorityReference: 'Office archive of merchant acceptance' };
+      const check = await expectJson(await post({ ...verify, stage: 'preview' }), 200);
+      const accepted = await expectJson(await post({ ...verify, stage: 'confirm', actionHash: check.preview.actionHash, stepUpToken: await grant(staff.merchant) }), 200);
+      signIn(staff.accountant);
+      await expectJson(await post({ ...purchaseInput, version: accepted.workspace.startReview.version, stage: 'preview' }), 200);
+      const confirmed = await record('record_customer_receipt', data, id);
+      expect(confirmed).toMatchObject({ settlementCents: 12500, receivable: { status: 'paid', outstandingCents: 0 } });
+      expect(await prisma.customerCashPosting.count({ where: { orderId: id } })).toBe(1);
     });
 
     it('binds original invoices, parties and a cross-order correction to all affected allocations without recording cash', async () => {
@@ -961,6 +1033,62 @@ describe('admin purchase endpoint', () => {
       expect(await prisma.financeInvoice.count()).toBe(0);
     });
 
+    it('refreshes both credit and purchase eligibility on a written term change, keeping prior reminders and manual holds', async () => {
+      const reminderAt = new Date(Date.now() - 10 * 86400000);
+      const dueAt = new Date(Date.now() - 100 * 86400000);
+      await prisma.accountReceivable.update({ where: { orderId }, data: { status: 'overdue', dueAt, lastReminderAt: reminderAt, reminderCount: 2 } });
+      await prisma.creditAccount.update({ where: { userId: buyer }, data: { status: 'overdue_hold', statusSource: 'system' } });
+      signIn(staff.accountant);
+      const extension = { ...paper('office-written-credit-extension'), startedAt: new Date().toISOString(), days: 30 };
+      expect((await record('set_term', extension)).receivable).toMatchObject({ status: 'open', terms: 30 });
+      expect(await prisma.accountReceivable.findUnique({ where: { orderId } }))
+        .toMatchObject({ status: 'open', lastReminderAt: reminderAt, reminderCount: 2 });
+      expect(await prisma.creditAccount.findUnique({ where: { userId: buyer } })).toMatchObject({ status: 'active' });
+      expect(await prisma.purchaseRequirement.count({ where: { orderId } })).toBe(1);
+
+      const expired = await record('set_term', { ...paper('office-term-return-to-original'), startedAt: dueAt.toISOString(), days: 0 });
+      expect(expired.receivable.status).toBe('overdue');
+      expect(await prisma.creditAccount.findUnique({ where: { userId: buyer } })).toMatchObject({ status: 'overdue_hold' });
+      await prisma.creditAccount.update({ where: { userId: buyer }, data: { status: 'paused', statusSource: 'manual' } });
+      expect((await record('set_term', { ...extension, ...paper('office-second-written-credit-extension') })).receivable.status).toBe('open');
+      expect(await prisma.creditAccount.findUnique({ where: { userId: buyer } })).toMatchObject({ status: 'paused', statusSource: 'manual' });
+    });
+
+    it('changes only the unissued portion and preserves cross-order allocations even during correction', async () => {
+      const other = 'office-other-invoice-order';
+      await seedAcceptedOrder(other, 'office-other-invoice-item');
+      signIn(staff.accountant);
+      const setup = { side: 'customer', grossCents: 10000, trigger: 'accepted', issuer: 'Office seller', recipient: 'Office buyer' };
+      const plan = (await record('create_plan', { ...setup, ...paper('first-office-invoice-plan') })).invoicePlans[0];
+      const otherPlan = (await record('create_plan', { ...setup, ...paper('other-office-invoice-plan') }, other)).invoicePlans[0];
+      const bill = { ...paper('office-original-cross-order-invoice'), issuer: setup.issuer, recipient: setup.recipient,
+        number: 'OFFICE-ORIGINAL-CROSS-ORDER', issuedAt: new Date().toISOString(), grossCents: 6000, amountCents: 3000 };
+      const first = await record('record_invoice', { ...bill, planId: plan.id });
+      await record('record_invoice', { ...bill, planId: otherPlan.id }, other);
+      const invoiceId = first.invoicePlans[0].allocations[0].invoiceId;
+      const open = await record('open_correction', { ...paper('cross-order-correction-application'), invoiceId, occurredAt: new Date().toISOString() });
+      expect(open.invoicePlans[0]).toMatchObject({ usedCents: 3000, remainingCents: 7000, allocations: [{ status: 'correction_pending' }] });
+      const change = { ...paper('office-change-for-part-of-unissued'), planId: plan.id, trigger: 'manual', occurredAt: new Date().toISOString() };
+      await expectJson(await financePost({ orderId, action: 'amend_plan', requestId: randomUUID(), version: open.version, stage: 'preview',
+        data: { ...change, amountCents: 7001 } }), 409);
+      const changed = await record('amend_plan', { ...change, amountCents: 4000 });
+      const amended = changed.invoicePlans.find((row: { id: string }) => row.id !== plan.id);
+      expect(amended).toMatchObject({ grossCents: 4000, remainingCents: 4000, trigger: 'manual' });
+      expect(changed.invoicePlans.find((row: { id: string }) => row.id === plan.id)).toMatchObject({ grossCents: 10000, usedCents: 3000, remainingCents: 3000 });
+      await expectJson(await financePost({ orderId, action: 'amend_plan', requestId: randomUUID(), version: changed.version, stage: 'preview',
+        data: { ...change, amountCents: 1000 } }), 409);
+      const stopped = await record('close_plan', { ...paper('office-no-use-for-remaining-original-slice'), planId: plan.id, occurredAt: new Date().toISOString() });
+      expect(stopped.invoicePlans.find((row: { id: string }) => row.id === plan.id)).toMatchObject({ grossCents: 10000,
+        usedCents: 3000, remainingCents: 0, closed: true, allocations: [{ invoiceId, status: 'correction_pending' }] });
+      expect((await expectJson(await financeRead(other), 200)).workspace.invoicePlans[0])
+        .toMatchObject({ grossCents: 10000, remainingCents: 7000, allocations: [{ invoiceId, amountCents: 3000 }] });
+      await record('confirm_condition', { ...paper('office-new-condition-verified'), planId: amended.id, occurredAt: new Date().toISOString() });
+      const updated = await record('record_invoice', { ...bill, ...paper('office-new-actual-invoice'), planId: amended.id,
+        number: 'OFFICE-REVISED-PART', grossCents: 4000, amountCents: 4000, issuedAt: new Date().toISOString() });
+      expect(updated.invoicePlans.find((row: { id: string }) => row.id === amended.id)).toMatchObject({ usedCents: 4000, remainingCents: 0 });
+      expect(await prisma.financeInvoiceAllocation.count({ where: { invoiceId } })).toBe(2);
+    });
+
     it('keeps a late verified Alipay receipt pending through named evidence updates and rejects an unsupported financial closure', async () => {
       const lateOrder = 'office-alipay-mismatch';
       await prisma.order.create({ data: { id: lateOrder, email: email(buyer), customerId: buyer, subtotal: 250, total: 250,
@@ -986,6 +1114,8 @@ describe('admin purchase endpoint', () => {
         await expectJson(await financePost({ action, orderId: lateOrder, version: claimed.workspace.version,
           requestId: randomUUID(), stage: 'preview', data: alleged }), 400);
       }
+      await expectJson(await financePost({ action: 'resume_alipay_payment', orderId: lateOrder, version: claimed.workspace.version,
+        requestId: randomUUID(), stage: 'preview', data: alleged }), 409);
       const progress = await financePreview('update_payment_case', { ...paper('gateway-reply-pending-authorized-disposition'),
         sourceId: trade.id, occurredAt: new Date().toISOString(), outcome: 'awaiting_authorized_disposition' }, lateOrder);
       expect(progress.preview.snapshot.operation).toMatchObject({ claimId: claimed.eventId, ownerId: staff.accountant, source: {
@@ -1001,6 +1131,36 @@ describe('admin purchase endpoint', () => {
         status: 'rejected_amount_mismatch', tradeNo: trade.tradeNo, amount: 240,
       });
       expect(await prisma.financeEvent.count({ where: { orderId: lateOrder } })).toBe(2);
+    });
+
+    it('resumes the same signed Alipay receipt after stock recovers without a second provider callback', async () => {
+      const id = 'office-alipay-stock-held';
+      const productId = 'office-alipay-item-stock';
+      await prisma.product.create({ data: { id: productId, catalogNumber: 'SYNTHETIC-OFFICE-ITEM', name: 'Office file', brand: 'Synthetic Office',
+        price: 40, stockQuantity: 0 } });
+      await prisma.order.create({ data: { id, customerId: buyer, email: email(buyer), subtotal: 40, total: 40, status: 'unpaid', paymentMethod: 'alipay',
+        orderItems: { create: { position: 0, productId, name: 'Office file', quantity: 1, unitPrice: 40 } } } });
+      await prisma.paymentAttempt.create({ data: { orderId: id, provider: 'alipay', outTradeNo: 'LP-OFFICE-STOCK-HOLD', amount: 40, status: 'redirected' } });
+      const callback = await alipayNotify(new Request('https://example.test/api/payments/alipay/notify', { method: 'POST',
+        body: new URLSearchParams({ app_id: '9021000000000000', seller_id: '2088000000000000', sign_type: 'RSA2', sign: 'signed-fixture',
+          out_trade_no: 'LP-OFFICE-STOCK-HOLD', total_amount: '40.00', trade_no: 'OFFICE-ALIPAY-ORIGINAL', trade_status: 'TRADE_SUCCESS' }) }));
+      expect(await callback.text()).toBe('success');
+      const before = await prisma.paymentAttempt.findUniqueOrThrow({ where: { outTradeNo: 'LP-OFFICE-STOCK-HOLD' } });
+      expect(before).toMatchObject({ status: 'paid_stock_shortfall_reconciliation_required', tradeNo: 'OFFICE-ALIPAY-ORIGINAL', notifiedAt: expect.any(Date) });
+      signIn(staff.accountant);
+      const previewBefore = await financePreview('resume_alipay_payment', { ...paper('inventory-verification-for-original-callback'), sourceId: before.id }, id);
+      const signedBody = { ...previewBefore.input, stage: 'confirm', actionHash: previewBefore.preview.actionHash };
+      await expectJson(await financePost(signedBody), 403);
+      await expectJson(await financePost({ ...signedBody, stepUpToken: await grant(staff.accountant) }), 409);
+      expect(await prisma.paymentAttempt.findUnique({ where: { id: before.id } })).toEqual(before);
+      await prisma.product.update({ where: { id: productId }, data: { stockQuantity: 2 } });
+      const completed = await finish(previewBefore);
+      expect((await finish(previewBefore)).eventId).toBe(completed.eventId);
+      expect(completed.workspace).toMatchObject({ status: 'pending', nativePaymentId: before.id, settlementCents: 4000,
+        paidAt: before.notifiedAt!.toISOString(), latePayments: [] });
+      expect(await prisma.paymentAttempt.count({ where: { orderId: id } })).toBe(1);
+      expect(await prisma.orderEvent.count({ where: { orderId: id, type: 'payment_received' } })).toBe(1);
+      expect(await prisma.inventoryReservation.count({ where: { orderId: id } })).toBe(1);
     });
 
     it('chases the supplier invoice and matches it against the approved purchase and separately registered deposit', async () => {
@@ -1036,6 +1196,61 @@ describe('admin purchase endpoint', () => {
         payments: [{ reference: 'office-deposit-9', amountCents: 900 }], invoices: [{ amountCents: 7346, status: 'recorded' }] });
       expect(matched.cashCents).toBe(0);
       expect((await expectJson(await financeAttention(), 200)).orders).toEqual([]);
+    });
+
+    it('uses proved supplier payment dates for paid-in-full and can amend the unreceived supplier invoice balance', async () => {
+      await startActualSupply(orderId, 'historic-office-payment');
+      signIn(staff.finance);
+      const original = await currentPurchase();
+      vi.setSystemTime(Date.now() + 3 * 86400000);
+      const oldReceiptAt = new Date(Date.now() - 2 * 86400000).toISOString();
+      const tailReceiptAt = new Date(Date.now() - 86400000).toISOString();
+      const recorded = new Date(Date.now() - 3600000).toISOString();
+      const legacyId = 'office-old-deposit-activity';
+      const legacyReference = 'OLD-OFFICE-VOUCHER';
+      const oldOperation = { action: 'record_payment', reference: legacyReference, amountCents: 900, conditionReference: 'Office deposit due' };
+      const detail = JSON.stringify({ snapshot: { orderId, purchaseOrderId: original.id, lines: original.lines, operation: oldOperation } });
+      await prisma.purchaseActivity.create({ data: { id: legacyId, orderId, purchaseOrderId: original.id, actorId: staff.finance,
+        action: oldOperation.action, amountCents: BigInt(900), detail, createdAt: recorded } });
+      const tail = await previewAction({ action: 'record_payment', requestId: 'actual-tail-bank-voucher', amountCents: 6446,
+        ...supplierPaymentProof('TAIL-OFFICE-BANK-TRACE', procurementTerms.payee, tailReceiptAt),
+        reference: 'TAIL-OFFICE-VOUCHER', conditionReference: 'Office contract tail due' });
+      await expectJson(await confirm(tail, await grant(staff.finance)), 200);
+      signIn(staff.accountant);
+      const afterTail = (await expectJson(await financeRead(), 200)).workspace.purchases[0];
+      expect(afterTail).toMatchObject({ paidCents: 7346, dueCents: 0, paidInFullAt: null,
+        payments: [{ id: legacyId, recordedAt: recorded, occurredAt: null }, { occurredAt: tailReceiptAt, amountCents: 6446 }] });
+      const plan = (await record('create_plan', { ...paper('office-supplier-invoice-after-actual-full-payment'), purchaseOrderId: original.id,
+        side: 'supplier', trigger: 'paid', issuer: procurementTerms.supplier, recipient: 'Office seller', grossCents: 7346 })).invoicePlans[0];
+      const issuedAt = new Date(Date.parse(tailReceiptAt) + 60000).toISOString();
+      const invoice = { ...paper('office-confirmed-bank-then-supplier-invoice'), planId: plan.id, issuer: procurementTerms.supplier,
+        recipient: 'Office seller', number: 'OFFICE-SUPPLIER-PAID-FULL', issuedAt, grossCents: 3000, amountCents: 3000 };
+      const beforeReview = (await expectJson(await financeRead(), 200)).workspace;
+      await expectJson(await financePost({ orderId, action: 'record_invoice', requestId: randomUUID(), version: beforeReview.version,
+        stage: 'preview', data: invoice }), 409);
+
+      const review = { action: 'review_payment_time', requestId: 'review-original-office-deposit-time',
+        sourcePaymentId: legacyId, amountCents: 900, reference: 'OFFICE-ARCHIVE-OF-ORIGINAL-BANK-PROOF',
+        description: '核对银行原流水与合成原定金的实际日期。',
+        ...supplierPaymentProof('LEGACY-OFFICE-BANK-TRACE', procurementTerms.payee, oldReceiptAt) } as const;
+      signIn(staff.operator);
+      await expectJson(await post({ ...review, stage: 'preview', orderId, purchaseOrderId: original.id, version: original.version }), 403);
+      signIn(staff.finance);
+      const check = await previewAction(review);
+      await expectJson(await confirm(check, 'invalid-local-step-up'), 403);
+      await expectJson(await confirm(check, await grant(staff.finance)), 200);
+      expect(await prisma.purchaseActivity.findUnique({ where: { id: legacyId }, select: { detail: true } })).toEqual({ detail });
+      expect(await prisma.purchaseActivity.count({ where: { purchaseOrderId: original.id, action: 'record_payment' } })).toBe(2);
+      signIn(staff.accountant);
+      const booked = await record('record_invoice', invoice);
+      expect(booked.purchases[0]).toMatchObject({ paidCents: 7346, dueCents: 0, paidInFullAt: tailReceiptAt,
+        payments: [{ id: legacyId, recordedAt: recorded, occurredAt: oldReceiptAt, reviewedBy: staff.finance }, { occurredAt: tailReceiptAt }] });
+      const changed = await record('amend_plan', { ...paper('office-supplier-changed-remainder'), planId: plan.id,
+        amountCents: 4346, trigger: 'manual', occurredAt: new Date().toISOString() });
+      expect(changed.invoicePlans).toEqual(expect.arrayContaining([
+        expect.objectContaining({ id: plan.id, grossCents: 7346, usedCents: 3000, remainingCents: 0 }),
+        expect.objectContaining({ side: 'supplier', purchaseOrderId: original.id, trigger: 'manual', grossCents: 4346, remainingCents: 4346 }),
+      ]));
     });
   });
 });

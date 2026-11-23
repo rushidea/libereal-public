@@ -10,6 +10,7 @@ import { prisma } from '@/lib/prisma';
 import { applyPurchaseAction, previewPurchaseAction, purchaseWorkspace, savePurchaseLine } from '@/lib/purchase-orders';
 import type { PurchaseTerms } from '@/lib/purchase-terms';
 import { clearAllTables, closeTestDb, getTestDb, seedAdmin, seedUser } from './db-helpers';
+import { supplierPaymentProof } from './supplier-payment-proof';
 
 const merchant = { id: 'test-b3-merchant', email: 'merchant@example.test' };
 const operator = { id: 'test-b3-operator', email: 'warehouse@example.test' };
@@ -77,7 +78,8 @@ async function purchaseAction(purchaseOrderId: string, action: PurchaseAction, a
   return prisma.$transaction(async tx => {
     const current = (await purchaseWorkspace(tx, orderId)).orders.find(purchase => purchase.id === purchaseOrderId);
     if (!current) throw new Error('Missing synthetic purchase order');
-    const input = { ...action, orderId, purchaseOrderId, version: current.version };
+    const evidence = action.action === 'record_payment' ? supplierPaymentProof(action.reference ?? action.requestId, current.lines[0].terms.payee) : {};
+    const input = { ...evidence, ...action, orderId, purchaseOrderId, version: current.version };
     const preview = await previewPurchaseAction(tx, input, actor);
     return applyPurchaseAction(tx, { ...input, actionHash: preview.actionHash }, actor);
   });
@@ -2403,6 +2405,7 @@ describe('actual scope of a supply incident', () => {
     expect(used.ledger.filter(row=>row.action==='report_change')).toHaveLength(2);
     const payment=await prisma.$transaction(tx=>previewPurchaseAction(tx,{orderId,purchaseOrderId:id,version:used.version,
       action:'record_payment',requestId:'existing-payable-terms-preview-only',reference:'TEST-OUTSTANDING-TAIL-PREVIEW',
+      ...supplierPaymentProof('TEST-OUTSTANDING-TAIL-PREVIEW', used.lines[0].terms.payee),
       conditionReference:'TEST-ORIGINAL-APPROVED-AND-MATURED-TERM',amountCents:1850},approver));
     expect(payment.snapshot.operation).toMatchObject({action:'record_payment',amountCents:1850});
     expect((await current(id)).paidCents).toBe(900);
@@ -2482,6 +2485,7 @@ describe('actual scope of a supply incident', () => {
     const po=await current(id);
     return prisma.$transaction(tx=>previewPurchaseAction(tx,{orderId,purchaseOrderId:id,version:po.version,
       action:'record_payment',requestId:tag,reference:'TEST-TAIL-PREVIEW-ONLY',
+      ...supplierPaymentProof('TEST-TAIL-PREVIEW-ONLY', po.lines[0].terms.payee),
       conditionReference:'TEST-ORIGINAL-SIGNED-PAYABLE-CONDITION',amountCents:1850},approver));
   }
 

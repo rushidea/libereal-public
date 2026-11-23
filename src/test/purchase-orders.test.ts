@@ -16,6 +16,7 @@ import { applyPurchaseStartAction, previewPurchaseStartAction, type PurchaseStar
 import { creditLimitTerms } from '@/lib/purchase-credit-history';
 import { attestPurchaseTerms, type PurchaseTerms } from '@/lib/purchase-terms';
 import { clearAllTables, closeTestDb, getTestDb, seedAdmin, seedUser } from './db-helpers';
+import { supplierPaymentProof } from './supplier-payment-proof';
 
 const merchant = { id: 'test-merchant', email: 'merchant@example.test' };
 const buyer = { id: 'test-buyer', email: 'buyer@example.test' };
@@ -115,7 +116,8 @@ function saveLine(workspace: Workspace, lineIndex: number, input: PurchaseTerms)
 }
 
 async function previewAction(orderId: string, purchase: Workspace['orders'][number], request: ActionRequest) {
-  const input = { ...request, orderId, purchaseOrderId: purchase.id, version: purchase.version };
+  const evidence = request.action === 'record_payment' ? supplierPaymentProof(request.reference ?? request.requestId, purchase.lines[0].terms.payee) : {};
+  const input = { ...evidence, ...request, orderId, purchaseOrderId: purchase.id, version: purchase.version };
   const preview = await prisma.$transaction(tx => previewPurchaseAction(tx, input, approver));
   return { ...input, actionHash: preview.actionHash };
 }
