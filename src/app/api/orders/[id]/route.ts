@@ -18,7 +18,7 @@ import { releaseOrderInventory, reserveOrderInventory } from '@/lib/inventory';
 import { isPostDeliveryPaymentMethod, normalizeOrderPaymentMethod } from '@/data/payment-methods';
 import { getAlipayPaymentSummary } from '@/data/alipay-payment';
 import { refundOrderPointsProportionally, requirePointsRefund, POINTS_REFUND_FAILED } from '@/lib/points-checkout-service';
-import { canAccessOrganizationRecord } from '@/lib/organization-record-access';
+import { customerCanReadOrder } from '@/lib/customer-order-access';
 import { requireOrganizationPermission } from '@/lib/organization-service';
 import { emailKeyedAccess } from '@/lib/verified-email-access';
 import { writeAuditLog } from '@/lib/audit';
@@ -77,19 +77,8 @@ export async function GET(
     if (!order) {
       return NextResponse.json({ error: 'Order not found' }, { status: 404 });
     }
-    if (!isAdmin) {
-      let allowed = order.ownerScope === 'organization'
-        ? Boolean(order.organizationId) && await canAccessOrganizationRecord(user.id, order.organizationId as string)
-        : order.customerId === user.id || await emailKeyedAccess(user.id, order.email);
-      if (!allowed && order.ownerScope === 'organization' && order.organizationId && order.customerId === user.id) {
-        try {
-          await requireOrganizationPermission(user.id, order.organizationId, 'organization.orders.create');
-          allowed = true;
-        } catch {
-          allowed = false;
-        }
-      }
-      if (!allowed) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    if (!isAdmin && !await customerCanReadOrder(user.id, order)) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
 
     let inquiry = null;
