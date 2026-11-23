@@ -27,6 +27,10 @@ export default function FinancePreview({ preview, busy, onConfirm, onBack }: {
       <p>本次按新条件办理 {money(op.amountCents)} · {triggerLabels[op.trigger]} · 生效 {dateLabel(op.effectiveAt)}</p>
       {op.retroactiveReference && <p>书面追溯条款 {op.retroactiveReference}</p>}</>}
     {op.action === 'close_plan' && <p>本次止用的未开或未收金额 {money(op.stoppedCents)}</p>}
+    {op.action === 'verify_invoice_coverage' && <p>
+      {op.subject.invoiceNumber ? '原票 ' + op.subject.invoiceNumber + ' · ' + dateLabel(op.subject.issuedAt) : '原安排未开金额'}
+      {' ' + money(op.amountCents) + ' · 原书证 ' + op.subject.originalReference + ' · 原安排 ' + op.subject.planReference}
+    </p>}
     {op.action === 'record_invoice' && <><p>票号 {op.number} · {op.issuer} 开给 {op.recipient}</p>
       <p>票面 {money(op.grossCents)} · 已分 {money(op.allocatedBeforeCents)} · 本次归入 {money(op.amountCents)}</p>
       <p>开票时间 {dateLabel(op.issuedAt)} · 约定条件达成 {dateLabel(op.readyAt)}</p>
@@ -34,6 +38,10 @@ export default function FinancePreview({ preview, busy, onConfirm, onBack }: {
         {' · 书证生效 ' + dateLabel(op.invoiceAuthority.at)}</p>}
       {op.adjustedPlans?.map(row => <p key={row.planId}>同一原安排 {row.reference} · 原可用 {money(row.previousCents)} · 回填后额度 {money(row.effectiveCents)}</p>)}
     </>}
+    {(op.action === 'verify_invoice_coverage' || op.action === 'record_invoice') && op.portions && <ul>
+      {op.portions.map(part => <li key={part.invoiceScopeId}>{part.proof.reference} · {dateLabel(part.proof.occurredAt)} · {money(part.amountCents)}
+        {' · ' + part.lines.map(line => (line.name ?? line.orderItemId) + ' ' + line.quantity + ' 件').join('、')}</li>)}
+    </ul>}
     {op.action === 'verify_bank_receipt' && <><p>付款人 {op.bank.payer} · 收款账户 {op.bank.receivingAccount}</p>
       <p>流水 {op.bank.bankTrace} · 到账 {money(op.bank.receiptTotalCents)} · {dateLabel(op.bank.occurredAt)}</p></>}
     {op.action === 'record_customer_receipt' && <><p>银行流水 {op.bank.bankTrace} · 分摊编号 {op.allocationReference}</p>

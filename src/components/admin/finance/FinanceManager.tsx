@@ -92,6 +92,8 @@ export default function FinanceManager({ initialOrder }: { initialOrder: string 
       || view.purchases.some(row => row.agreedCents !== null)) actions.push('create_plan');
     const active = view.invoicePlans.filter(row => !row.closed);
     if (view.invoicePlans.some(row => row.recordable)) actions.push('record_invoice');
+    if (view.invoicePlans.some(row => row.side === 'customer' && row.invoiceScopeId
+      && (row.scheduledRemainingCents > 0 || row.allocations.some(doc => doc.status !== 'voided')))) actions.push('verify_invoice_coverage');
     if (active.some(row => row.scheduledRemainingCents > 0)) actions.push('amend_plan');
     if (active.some(row => Math.min(row.remainingCents, row.scheduledRemainingCents) > 0)) actions.push('close_plan');
     if (active.some(row => row.trigger === 'manual' && !row.manualAt)) actions.push('confirm_condition');
@@ -145,7 +147,7 @@ export default function FinanceManager({ initialOrder }: { initialOrder: string 
             {scope.occurredAt && ' · 生效 ' + dateLabel(scope.occurredAt)}</p>
           <p>{scope.lines.map(line => line.name + ' ' + line.quantity + ' 件').join('、')}</p>
           {scope.remainingCents != null && scope.remainingCents > 0 && <p>
-            {scope.change?.mode === 'increase' ? '本份增额尚可安排' : '累计范围共享额度尚可安排'} {money(scope.remainingCents)}
+            {scope.sharesCumulativeLimit ? '累计范围共享额度尚可安排' : '本份增额尚可安排'} {money(scope.remainingCents)}
           </p>}
           {amounts && <>
             <p>累计可开 {money(amounts.authorizedCents ?? undefined)} · 已开及更正中 {money(amounts.issuedCents)}
@@ -199,7 +201,13 @@ export default function FinanceManager({ initialOrder }: { initialOrder: string 
         <p>经办人 {plan.ownerId}</p>
         {!plan.closed && plan.remainingCents > 0 && plan.lastFollowup && <p>下次追票 {dateLabel(String(plan.lastFollowup.operation.nextReviewAt))}
           {' · 跟进人 ' + plan.lastFollowup.actorId}</p>}
-        {plan.allocations.map(doc => <p key={doc.id}>票号 {doc.number} · {invoiceStateLabels[doc.status]} · 票面 {money(doc.grossCents)} · 本项 {money(doc.amountCents)}</p>)}
+        {plan.coverageReview && <p>{plan.coverageReview.remaining ? '未开商品和书证已核对' : '未开金额已变化，商品和书证待复核'}
+          {' · 经办人 ' + plan.coverageReview.actorId}</p>}
+        {plan.allocations.map(doc => <div key={doc.id}>
+          <p>票号 {doc.number} · {invoiceStateLabels[doc.status]} · 票面 {money(doc.grossCents)} · 本项 {money(doc.amountCents)}</p>
+          {doc.scopePortions?.map(part => <p key={part.invoiceScopeId}>已核额度 {money(part.amountCents)}
+            {' · 书证 ' + (view.customerInvoiceScopes.find(row => row.id === part.invoiceScopeId)?.reference ?? part.invoiceScopeId)}</p>)}
+        </div>)}
       </article>)}</section>}
     {actions.length > 0 && !action && <section className="space-y-2"><h2 className={heading}>办理事项</h2><div className="flex flex-wrap gap-2">
       {actions.map(key => <button key={key} className={button} disabled={busy} onClick={() => { setError(''); setMessage(''); setAction(key); }}>{actionLabels[key]}</button>)}</div></section>}

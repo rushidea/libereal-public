@@ -10,6 +10,7 @@ export const actionLabels = {
   verify_bank_receipt: '核验银行到账原件', record_customer_receipt: '分摊银行回款', post_existing: '核销既有到账',
   verify_receivable_principal: '核对原应收金额',
   verify_customer_invoice_scope: '核对历史客户可开票范围',
+  verify_invoice_coverage: '核对原票或安排的商品归属',
   restore_term: '按平台接单日期补齐账期', set_term: '登记单独约定的账期', create_plan: '登记开票或收票安排',
   amend_plan: '变更未开或未收部分的条件',
   confirm_condition: '核验约定开票条件', chase_invoice: '记录供应商追票', close_plan: '止用剩余开票或收票安排',
@@ -67,14 +68,33 @@ export default function FinanceForm({ view, action, busy, onPreview, onCancel, o
   const eligibleLines = scopeBasis ? scopeBasis.lines.map(line => ({ ...line, unverifiedQuantity: line.quantity })) : openLines;
   const chooseLines = !scopeBasis || !restates && (eligibleLines.length > 1 || eligibleLines[0]?.unverifiedQuantity > 1);
   const [documentKind, setDocumentKind] = useState('single_receipt');
-  const plans = view.invoicePlans.filter(plan => action === 'record_invoice'
-    ? plan.recordable
+  const plans = view.invoicePlans.filter(plan => action === 'verify_invoice_coverage'
+    ? plan.side === 'customer' && plan.invoiceScopeId && (plan.scheduledRemainingCents > 0 || plan.allocations.some(row => row.status !== 'voided'))
+    : action === 'record_invoice' ? plan.recordable
     : !plan.closed && (action === 'chase_invoice' ? plan.side === 'supplier' && plan.remainingCents > 0
       : action === 'confirm_condition' ? plan.trigger === 'manual' && !plan.manualAt
       : action === 'amend_plan' ? plan.scheduledRemainingCents > 0 : Math.min(plan.remainingCents, plan.scheduledRemainingCents) > 0));
   const [planId, setPlanId] = useState(plans[0]?.id ?? '');
   const [poId, setPoId] = useState(view.purchases[0]?.id ?? '');
+  const [allocationId, setAllocationId] = useState('');
   const plan = plans.find(row => row.id === planId);
+  const allocations = plan?.allocations.filter(row => row.status !== 'voided') ?? [];
+  const reviewingInvoice = allocations.find(row => row.id === allocationId) ?? (plan?.scheduledRemainingCents === 0 ? allocations[0] : undefined);
+  const originalProof = scopes.find(row => row.id === plan?.invoiceScopeId);
+  const originalFamily = families.find(row => row.id === originalProof?.familyId);
+  const confirmedAtInvoice = new Set(originalFamily?.timeline?.filter(point => !reviewingInvoice || point.at <= reviewingInvoice.issuedAt)
+    .flatMap(point => point.confirmedEvidenceIds) ?? []);
+  const coverageChoices = scopes.flatMap(proof => {
+    if (!originalProof || originalProof.familyId !== proof.familyId) return [];
+    const reserved = plan?.coverageReview?.remaining?.find(row => row.invoiceScopeId === proof.id);
+    if (action === 'verify_invoice_coverage' ? !confirmedAtInvoice.has(proof.id) : action !== 'record_invoice' || !reserved) return [];
+    const lines = proof.lines.flatMap(line => {
+      const max = reserved ? reserved.lines.find(row => row.orderItemId === line.id)?.quantity
+        : originalProof.lines.find(row => row.id === line.id)?.quantity;
+      return max ? [{ ...line, quantity: Math.min(max, line.quantity) }] : [];
+    });
+    return lines.length ? [{ proof, lines, maxCents: reserved?.amountCents }] : [];
+  });
   const po = view.purchases.find(row => row.id === poId);
   const invoices = [...new Map(view.invoicePlans.flatMap(row => row.allocations).map(doc => [doc.invoiceId, doc])).values()]
     .filter(doc => action === 'open_correction' ? doc.status === 'recorded' : doc.status === 'correction_pending');
@@ -99,7 +119,7 @@ export default function FinanceForm({ view, action, busy, onPreview, onCancel, o
       const form = new FormData(event.currentTarget);
       for (const [key, entry] of form) {
         if (typeof entry !== 'string' || !entry.trim()) continue;
-        if (key.startsWith('invoiceQuantity:') || key.startsWith('confirmedProof:')) continue;
+        if (key.startsWith('invoiceQuantity:') || key.startsWith('confirmedProof:') || key.startsWith('coverage:')) continue;
         data[key] = key === 'confirmContinueAfterCancellation' || key === 'restateInvoiceCeiling' ? true
           : moneyFields.has(key) ? cents(entry, key === 'grossCents' && action === 'verify_customer_invoice_scope' && restates)
           : timeFields.has(key) ? new Date(entry).toISOString()
@@ -116,6 +136,14 @@ export default function FinanceForm({ view, action, busy, onPreview, onCancel, o
           data.confirmedInvoiceEvidenceIds = clarification.evidenceIds.filter(id => form.has('confirmedProof:' + id));
         }
       }
+      const portions = coverageChoices.flatMap(({ proof, lines }) => {
+        const amount = String(form.get('coverage:amount:' + proof.id) ?? '');
+        return amount ? [{ invoiceScopeId: proof.id, amountCents: cents(amount), lines: lines.flatMap(line => {
+          const quantity = Number(form.get('coverage:quantity:' + proof.id + ':' + line.id));
+          return quantity > 0 ? [{ orderItemId: line.id, quantity }] : [];
+        }) }] : [];
+      });
+      if (action === 'verify_invoice_coverage' || portions.length) data.portions = portions;
       await onPreview({ orderId: view.orderId, version: view.version, requestId: crypto.randomUUID(), action, data });
     } catch (error) { onError(error instanceof Error ? error.message : '请核对填写内容'); }
   }}>
@@ -200,7 +228,7 @@ export default function FinanceForm({ view, action, busy, onPreview, onCancel, o
           <select name="invoiceScopeId" value={scopeId} onChange={e => setScopeId(e.target.value)} className={field} required>
             {availableScopes.map(row => <option key={row.id} value={row.id}>{row.reference}{row.documentRow && ' · 第 ' + row.documentRow + ' 行'}
               {' · 生效 ' + dateLabel(row.occurredAt) + ' · ' + row.lines.map(line => line.name + ' ' + line.quantity + ' 件').join('、')
-                + (row.change?.mode === 'increase' ? ' · 本份增额可安排 ' : ' · 共享额度可安排 ') + money(row.remainingCents ?? undefined)}</option>)}
+                + (row.sharesCumulativeLimit ? ' · 共享额度可安排 ' : ' · 本份增额可安排 ') + money(row.remainingCents ?? undefined)}</option>)}
           </select></label>}
         <Text key={side + poId + scopeId} name="issuer" label="约定开票方全称" initial={side === 'supplier' ? po?.supplier ?? '' : selectedScope?.issuer}/>
         <Text key={'recipient-' + side + scopeId} name="recipient" label="约定受票方全称" initial={side === 'customer' ? selectedScope?.recipient : undefined}/>
@@ -209,10 +237,16 @@ export default function FinanceForm({ view, action, busy, onPreview, onCancel, o
           <option value="" disabled>选择书面约定</option>{Object.entries(triggerLabels).filter(([key]) => side === 'customer' || !['dispatched', 'delivered'].includes(key))
             .map(([key, label]) => <option value={key} key={key}>{label}</option>)}</select></label>
       </>}
-      {['record_invoice','amend_plan','confirm_condition','close_plan','chase_invoice'].includes(action) && <label className="grid gap-1">发票安排
-        <select name="planId" value={planId} onChange={e => setPlanId(e.target.value)} className={field} required>
+      {['record_invoice','verify_invoice_coverage','amend_plan','confirm_condition','close_plan','chase_invoice'].includes(action) && <label className="grid gap-1">发票安排
+        <select name="planId" value={planId} onChange={e => { setPlanId(e.target.value); setAllocationId(''); }} className={field} required>
           {plans.map(row => <option key={row.id} value={row.id}>{row.side === 'customer' ? '销项' : '进项'} · {row.reference}
             {action === 'record_invoice' ? ' · 按票面日期核对' : ' · 可用 ' + money(action === 'amend_plan' ? row.scheduledRemainingCents : row.remainingCents)}</option>)}</select></label>}
+      {action === 'verify_invoice_coverage' && <label className="grid gap-1">本次核对对象
+        <select name="allocationId" value={reviewingInvoice?.id ?? ''} onChange={e => setAllocationId(e.target.value)} className={field}>
+          {Boolean(plan?.scheduledRemainingCents) && <option value="">原安排未开金额 {money(plan?.scheduledRemainingCents)}</option>}
+          {allocations.map(row => <option key={row.id} value={row.id}>原票 {row.number} · 本项 {money(row.amountCents)}</option>)}
+        </select>
+      </label>}
       {action === 'amend_plan' && <>
         <Amount name="amountCents" label="本次变更条件对应的未开金额"/>
         <Time name="effectiveAt" label="书面约定生效时间（与确认时间相同可留空）" required={false}/>
@@ -227,6 +261,21 @@ export default function FinanceForm({ view, action, busy, onPreview, onCancel, o
         <Text key={'recipient' + planId} name="recipient" label="票面受票方全称" initial={plan?.recipient}/><Text name="number" label="票面号码"/>
         <Time name="issuedAt" label="票面开票时间"/><Amount name="grossCents" label="整张发票含税合计"/>
         <Amount name="amountCents" label="本次归入此项金额"/></>}
+      {(action === 'verify_invoice_coverage' || action === 'record_invoice' && plan?.coverageReview) && <div
+        key={planId + (reviewingInvoice?.id ?? '')} className="space-y-3 sm:col-span-2">
+        {action === 'verify_invoice_coverage' && <p>请按实际原件填写各书证覆盖的商品数量，金额合计须等于 {money(reviewingInvoice?.amountCents ?? plan?.scheduledRemainingCents)}。</p>}
+        {action === 'record_invoice' && plan?.coverageReview?.remaining && <p>全额开票可沿用已核未开明细。分次开票请填写本次各行实际数量和金额。</p>}
+        {!coverageChoices.length && <p>请按原件核对适用日期、商品和数量。</p>}
+        {coverageChoices.map(({ proof, lines, maxCents }) => <fieldset key={proof.id} className="space-y-2 rounded border p-3">
+          <legend>{proof.reference} · {dateLabel(proof.occurredAt)}</legend>
+          <label className="grid gap-1">归入本书证的金额（元）
+            <input name={'coverage:amount:' + proof.id} type="number" min="0.01" step="0.01" max={maxCents === undefined ? undefined : maxCents / 100} className={field}/>
+          </label>
+          {lines.map(line => <label key={line.id} className="grid gap-1">{line.name ?? line.id} · 本次实际数量
+            <input name={'coverage:quantity:' + proof.id + ':' + line.id} type="number" min="0" max={line.quantity} step="1" className={field}/>
+          </label>)}
+        </fieldset>)}
+      </div>}
       {['chase_invoice','amend_plan','confirm_condition','close_plan','open_correction','resolve_correction','review_payment_case','update_payment_case'].includes(action)
         && <Time name="occurredAt" label="实际办理时间"/>}
       {action === 'chase_invoice' && <Time name="nextReviewAt" label="约定下次跟进时间"/>}
