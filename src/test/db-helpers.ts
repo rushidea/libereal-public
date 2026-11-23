@@ -891,6 +891,9 @@ export function getTestDb(): Database.Database {
   if (!_db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='CustomerCashPosting'").get()) {
     _db.exec(readFileSync(resolve('prisma/migrations/20261123030000_finance_settlement/migration.sql'), 'utf8'));
   }
+  if (!_db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='AfterSaleCase'").get()) {
+    _db.exec(readFileSync(resolve('prisma/migrations/20261123040000_after_sales/migration.sql'), 'utf8'));
+  }
   return _db;
 }
 
@@ -1005,6 +1008,8 @@ export function seedAdmin(db: Database.Database, id = 'admin_test_id', email = '
 export function clearAllTables(db: Database.Database) {
   // 清表顺序：先子表后父表（外键依赖）
   db.exec(`
+    DELETE FROM AfterSaleEvent;
+    DELETE FROM AfterSaleCase;
     DELETE FROM FinanceEvent;
     DELETE FROM FinanceInvoiceAllocation;
     DELETE FROM FinanceInvoice;
