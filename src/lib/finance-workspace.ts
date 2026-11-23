@@ -4,7 +4,7 @@ import { receivableOutstandingCents } from '@/lib/receivable-balance';
 import { confirmedCustomerDelivery, customerShipmentRows } from '@/lib/fulfillment-accounting';
 import { jsonObject } from '@/lib/order-catalog-repricing';
 import { pricingContentHash } from '@/lib/pricing-adjustment-approval';
-import { purchaseObject, purchaseOperation } from '@/lib/purchase-activity';
+import { purchaseObject } from '@/lib/purchase-activity';
 import { purchaseWorkspace } from '@/lib/purchase-orders';
 import { loadPurchaseOrderSource } from '@/lib/purchase-source';
 
@@ -45,6 +45,13 @@ export function invoiceStatus(events: Array<{ action: string; detail: string }>)
   return purchaseObject(jsonObject(event.detail).operation).outcome === 'voided' ? 'voided' : 'recorded';
 }
 
+function remainingInvoicePlanCents(grossCents: number, usedCents: number, history: FinanceEventView[]) {
+  if (history.some(row => row.action === 'close_plan')) return 0;
+  const transferredCents = history.reduce((sum, row) =>
+    row.action === 'amend_plan' ? sum + Number(row.operation.amountCents) : sum, 0);
+  return Math.max(0, grossCents - usedCents - transferredCents);
+}
+
 export async function financeAttention(tx: Db, now: Date) {
   const [checks, plans] = await Promise.all([
     tx.financeEvent.findMany({ where: { action: 'reconcile_supplier' },
@@ -52,8 +59,8 @@ export async function financeAttention(tx: Db, now: Date) {
     tx.financeInvoicePlan.findMany({
       where: { side: 'supplier', events: { some: { action: 'chase_invoice' }, none: { action: 'close_plan' } } },
       select: { orderId: true, grossCents: true,
-        events: { where: { action: 'chase_invoice' }, select: { detail: true },
-          orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], take: 1 },
+        events: { where: { action: { in: ['chase_invoice', 'amend_plan'] } }, select: eventSelect,
+          orderBy: [{ createdAt: 'asc' }, { id: 'asc' }] },
         allocations: { select: { amountCents: true, invoice: { select: { events: {
           where: { action: { in: ['open_correction', 'resolve_correction'] } }, select: { action: true, detail: true },
           orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
@@ -76,10 +83,11 @@ export async function financeAttention(tx: Db, now: Date) {
     if (check.outcome === 'followup') add(check.orderId, 'supplierDifferences');
   }
   for (const plan of plans) {
-    const { nextReviewAt } = purchaseObject(jsonObject(plan.events[0]?.detail).operation);
+    const events = plan.events.map(eventView);
+    const nextReviewAt = events.findLast(row => row.action === 'chase_invoice')?.operation.nextReviewAt;
     if (typeof nextReviewAt !== 'string' || !(Date.parse(nextReviewAt) <= now.getTime())) continue;
     const received = plan.allocations.reduce((total, row) => invoiceStatus(row.invoice.events) === 'voided' ? total : total + row.amountCents, BigInt(0));
-    if (received < plan.grossCents) add(plan.orderId, 'invoiceFollowups');
+    if (remainingInvoicePlanCents(Number(plan.grossCents), Number(received), events) > 0) add(plan.orderId, 'invoiceFollowups');
   }
   return byOrder;
 }
@@ -123,6 +131,7 @@ export async function financeWorkspace(tx: Db, orderId: string) {
     return { id: plan.id, side: plan.side, purchaseOrderId: plan.purchaseOrderId, partyKey: plan.partyKey,
       issuer: plan.issuer, recipient: plan.recipient, grossCents: Number(plan.grossCents), trigger: plan.trigger,
       ownerId: plan.ownerId, reference: plan.reference, sha256: plan.sha256, usedCents, allocations,
+      remainingCents: remainingInvoicePlanCents(Number(plan.grossCents), usedCents, history),
       closed: history.some(row => row.action === 'close_plan'),
       manualAt: history.findLast(row => row.action === 'confirm_condition')?.operation.occurredAt as string | undefined ?? null,
       lastFollowup: history.findLast(row => row.action === 'chase_invoice') ?? null };
@@ -130,10 +139,7 @@ export async function financeWorkspace(tx: Db, orderId: string) {
   const purchases = purchase.orders.filter(po => po.orderedBefore || po.paidCents > 0).map(po => {
     const suppliers = [...new Set(po.lines.map(line => line.terms.supplier).filter((name): name is string => Boolean(name)))];
     const payees = [...new Set(po.lines.map(line => line.terms.payee).filter((name): name is string => Boolean(name)))];
-    const payments = po.ledger.filter(row => row.action === 'record_payment').map(row => ({
-      id: row.id, actorId: row.actorId, reference: String(purchaseOperation(row.detail).reference ?? ''),
-      amountCents: row.amountCents ?? 0, recordedAt: row.createdAt,
-    }));
+    const payments = po.payments;
     const agreedCents = po.dueCents === null || po.incidents.length || po.needsRemainingReview || po.needsLegacyReview
       ? null : po.remainingScope?.totalCents ?? po.totalCents;
     const invoiceRows = invoicePlans.filter(plan => plan.purchaseOrderId === po.id);
@@ -153,7 +159,8 @@ export async function financeWorkspace(tx: Db, orderId: string) {
       supplierFollowup: lastMatch?.operation.outcome === 'followup'
         ? { id: lastMatch.id, actorId: lastMatch.actorId, reference: lastMatch.operation.reference } : null,
       pendingInvoiceCents: agreedCents === null ? null : agreedCents - invoicedCents - underCorrectionCents,
-      paidInFullAt: po.dueCents === 0 && agreedCents !== null && payments.length ? lastDate(payments.map(row => row.recordedAt)) : null };
+      paidInFullAt: po.dueCents === 0 && agreedCents !== null && payments.length && payments.every(row => row.occurredAt)
+        ? lastDate(payments.map(row => row.occurredAt)) : null };
   });
   const cash = postings.map(row => ({ id: row.id, amountCents: Number(row.amountCents), releasedCents: Number(row.releasedCents),
     bankAllocationId: row.bankAllocationId, paymentAttemptId: row.paymentAttemptId, actorId: row.actorId }));
@@ -187,6 +194,7 @@ export async function financeWorkspace(tx: Db, orderId: string) {
     bankVersion: start.version, paymentPlanKnown: Boolean(start.plan), shipmentDates,
     receivable: ar && { id: ar.id, status: ar.status, originalCents: Math.round(ar.amount * 100),
       outstandingCents: receivableOutstandingCents(ar.amount, ar.status, postings, order.total),
+      needsPrincipalReview: start.principal <= 0 && ar.amount > 0,
       needsTermReview: Boolean(ar.termStartedAt && start.acceptance && ar.termStartedAt.toISOString() !== start.acceptance.at
         && !events.some(row => row.action === 'set_term' || row.action === 'restore_term')),
       terms: ar.paymentTermDaysSnapshot, termStartedAt: ar.termStartedAt?.toISOString() ?? null, dueAt: ar.dueAt?.toISOString() ?? null },

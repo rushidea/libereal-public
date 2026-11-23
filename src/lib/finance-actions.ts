@@ -1,5 +1,7 @@
 import type { Prisma } from '@prisma/client';
+import { applyStockHeldAlipayPayment, previewStockHeldAlipayPayment } from '@/lib/alipay-order-settlement';
 import { customerCashProjection, postVerifiedCustomerCash } from '@/lib/customer-cash';
+import { refreshCreditRestrictions } from '@/lib/customer-credit';
 import { financeIdentity, financeWorkspace, invoiceStatus, invoiceTriggers, type FinanceWorkspace, type InvoiceTrigger } from '@/lib/finance-workspace';
 import { jsonObject } from '@/lib/order-catalog-repricing';
 import { pricingContentHash } from '@/lib/pricing-adjustment-approval';
@@ -11,8 +13,8 @@ import { documentSha256, positiveCents, PurchaseError, purchaseTimestamp, requir
 
 type Db = Prisma.TransactionClient;
 export const financeActions = ['verify_bank_receipt', 'record_customer_receipt', 'post_existing', 'restore_term', 'set_term',
-  'create_plan', 'confirm_condition', 'chase_invoice', 'close_plan', 'record_invoice', 'open_correction', 'resolve_correction',
-  'reconcile_supplier', 'review_payment_case', 'update_payment_case'] as const;
+  'create_plan', 'amend_plan', 'confirm_condition', 'chase_invoice', 'close_plan', 'record_invoice', 'open_correction', 'resolve_correction',
+  'reconcile_supplier', 'review_payment_case', 'update_payment_case', 'resume_alipay_payment'] as const;
 type Action = typeof financeActions[number];
 export type FinanceInput = { orderId: string; action: Action; requestId: string; version: string; data: Record<string, unknown> };
 
@@ -32,6 +34,26 @@ function planFor(view: FinanceWorkspace, id: unknown) {
   const plan = view.invoicePlans.find(row => row.id === id);
   if (!plan || plan.closed) throw new PurchaseError('请核对本单仍有效的发票安排');
   return plan;
+}
+
+function sameInvoiceScope(view: FinanceWorkspace, side: Plan['side'], purchaseOrderId: string | null) {
+  return view.invoicePlans.filter(row => row.side === side && row.purchaseOrderId === purchaseOrderId);
+}
+
+function invoiceTrigger(side: Plan['side'], value: unknown) {
+  const trigger = value as InvoiceTrigger;
+  if (!invoiceTriggers.includes(trigger) || side === 'supplier' && (trigger === 'dispatched' || trigger === 'delivered')) {
+    throw new PurchaseError('请按原书证选择开票条件，供应商的特殊交货约定可交由经办人核验', 400);
+  }
+  return trigger;
+}
+
+function invoiceScopeBalance(view: FinanceWorkspace, plan: Plan) {
+  const agreedCents = plan.side === 'customer' ? view.principalCents
+    : view.purchases.find(po => po.id === plan.purchaseOrderId)?.agreedCents;
+  if (agreedCents == null) throw new PurchaseError('须先核对当前供方合同和可收票金额');
+  const used = sameInvoiceScope(view, plan.side, plan.purchaseOrderId).reduce((sum, row) => sum + row.usedCents, 0);
+  return Math.min(plan.remainingCents, agreedCents - used);
 }
 
 export function invoiceReadyAt(view: FinanceWorkspace, plan: Plan) {
@@ -60,7 +82,7 @@ async function invoiceDocument(tx: Db, view: FinanceWorkspace, input: FinanceInp
   const identityKey = pricingContentHash({ issuer: financeIdentity(issuer), number: financeIdentity(number) });
   const grossCents = money(data.grossCents, '票面含税合计');
   const amountCents = money(data.amountCents, '本次归入金额');
-  if (amountCents > plan.grossCents - plan.usedCents) throw new PurchaseError('金额超过本项未开或未收余额');
+  if (amountCents > invoiceScopeBalance(view, plan)) throw new PurchaseError('金额超过本项未开或未收余额');
   const matches = await tx.financeInvoice.findMany({ where: { OR: [{ identityKey }, { sha256: evidence.sha256 }] },
     include: { allocations: true, events: { orderBy: [{ createdAt: 'asc' }, { id: 'asc' }] } } });
   const [doc] = matches;
@@ -84,7 +106,7 @@ async function financeOperation(tx: Db, input: FinanceInput, actor: PurchaseActo
     description: requiredText(data.description, '核对结果或业务约定') };
   if (action === 'verify_bank_receipt' || action === 'record_customer_receipt') {
     const order = await loadPurchaseOrderSource(tx, orderId);
-    if (!view.acceptanceId || ['cancelled', 'closed'].includes(order.status)) throw new PurchaseError('须先核清平台接单及该笔资金的归属');
+    if (view.archived || ['cancelled', 'closed'].includes(order.status)) throw new PurchaseError('请核对仍可办理的原订单及回单归属');
     if (action === 'verify_bank_receipt') return previewBankReceipt(tx, order, data, evidence);
     if (view.authorityConflict || view.nativePaymentId || view.paidAt || !view.paymentPlanKnown) throw new PurchaseError('请先核对本单的付款条件和已有到账来源');
     const allocation = await previewBankAllocation(tx, order, await readPurchaseActivities(tx, orderId), data, evidence,
@@ -98,14 +120,14 @@ async function financeOperation(tx: Db, input: FinanceInput, actor: PurchaseActo
     if ((!bank && !native) || view.authorityConflict || view.cash.some(row => row.bankAllocationId === id || row.paymentAttemptId === id)) {
       throw new PurchaseError('所选到账记录尚未核验、已有冲突或已经核销');
     }
-    if (!native && !view.acceptanceId) throw new PurchaseError('原订单缺少平台接单依据');
     return { ...evidence, action, source: native ? { paymentAttemptId: id } : { bankAllocationId: id },
       amountCents: bank?.amountCents ?? view.principalCents,
-      accounting: await customerCashProjection(tx, await loadPurchaseOrderSource(tx, orderId), bank?.amountCents ?? view.principalCents) };
+      accounting: await customerCashProjection(tx, await loadPurchaseOrderSource(tx, orderId), bank?.amountCents ?? view.principalCents, native ? 'alipay' : 'bank') };
   }
   if (action === 'restore_term' || action === 'set_term') {
     const ar = view.receivable;
-    if (!ar || !['open', 'overdue'].includes(ar.status) || !view.acceptedAt) throw new PurchaseError('本单缺少平台接单凭据或有效应收');
+    if (!ar || ar.outstandingCents <= 0 || !['open', 'overdue'].includes(ar.status) || !view.acceptedAt || view.archived
+      || ['closed', 'cancelled'].includes(view.status)) throw new PurchaseError('本单缺少平台接单凭据或有效应收');
     const original = action === 'restore_term';
     if (original && (ar.termStartedAt || ar.dueAt)) throw new PurchaseError('已有账期，请根据书面约定办理变更');
     const startedAt = original ? view.acceptedAt : purchaseTimestamp(data.startedAt, '约定的起算时间');
@@ -114,7 +136,7 @@ async function financeOperation(tx: Db, input: FinanceInput, actor: PurchaseActo
     const due = new Date(Date.parse(startedAt) + days * 86400000);
     if (!Number.isFinite(due.getTime())) throw new PurchaseError('到期日无效', 400);
     return { ...evidence, action, receivableId: ar.id, acceptanceId: view.acceptanceId, before: ar,
-      startedAt, days, dueAt: due.toISOString() };
+      startedAt, days, dueAt: due.toISOString(), receivableStatus: due.getTime() < Date.now() ? 'overdue' as const : 'open' as const };
   }
   if (action === 'create_plan') {
     if (data.side !== 'customer' && data.side !== 'supplier') throw new PurchaseError('请选择客户开票或供应商来票', 400);
@@ -129,28 +151,35 @@ async function financeOperation(tx: Db, input: FinanceInput, actor: PurchaseActo
     if (financeIdentity(issuer) === financeIdentity(recipient) || po?.supplier && financeIdentity(issuer) !== financeIdentity(po.supplier)) {
       throw new PurchaseError('请核对原始书证中的购销双方');
     }
-    const trigger = data.trigger as InvoiceTrigger;
-    if (!invoiceTriggers.includes(trigger) || po && (trigger === 'dispatched' || trigger === 'delivered')) {
-      throw new PurchaseError('请按原书证选择开票条件，供应商的特殊交货约定可交由经办人核验', 400);
-    }
+    const trigger = invoiceTrigger(side, data.trigger);
     const grossCents = money(data.grossCents, '本次安排的含税金额');
     const agreed = po?.agreedCents ?? view.principalCents;
-    const planned = view.invoicePlans.filter(plan => !plan.closed && plan.side === side && plan.purchaseOrderId === (po?.id ?? null))
-      .reduce((sum, plan) => sum + plan.grossCents, 0);
+    const planned = sameInvoiceScope(view, side, po?.id ?? null).reduce((sum, plan) => sum + plan.usedCents + plan.remainingCents, 0);
     if (grossCents > agreed - planned) throw new PurchaseError('安排金额超过原单尚未安排的金额');
     return { ...evidence, action, side, issuer, recipient, grossCents, trigger, ownerId: actor.id, purchaseOrderId: po?.id ?? null,
       partyKey: po ? 'supplier:' + financeIdentity(issuer) : view.customerKey };
   }
   if (action === 'record_invoice') return invoiceDocument(tx, view, input, evidence);
+  if (action === 'amend_plan') {
+    const plan = planFor(view, data.planId);
+    const amountCents = money(data.amountCents, '本次变更条件对应的未开金额');
+    if (amountCents > invoiceScopeBalance(view, plan)) throw new PurchaseError('变更金额超过本单尚可办理的未开或未收余额');
+    if (view.events.some(row => row.action === 'amend_plan' && row.planId === plan.id && row.operation.sha256 === evidence.sha256)) {
+      throw new PurchaseError('这份书证已用于变更本项安排，请核对原范围');
+    }
+    return { ...evidence, action, planId: plan.id, original: plan, amountCents,
+      trigger: invoiceTrigger(plan.side, data.trigger), occurredAt: actualTime(data.occurredAt, '书面变更确认时间'), ownerId: actor.id };
+  }
   if (action === 'confirm_condition' || action === 'chase_invoice' || action === 'close_plan') {
     const plan = planFor(view, data.planId);
-    if (action === 'close_plan' && plan.usedCents > 0) throw new PurchaseError('已回填的发票须先核对实际更正结果');
-    if (action === 'chase_invoice' && (plan.side !== 'supplier' || plan.usedCents >= plan.grossCents)) throw new PurchaseError('本项没有待追的供应商发票');
+    if (action === 'close_plan' && !plan.remainingCents) throw new PurchaseError('本项没有可止用的未开或未收余额');
+    if (action === 'chase_invoice' && (plan.side !== 'supplier' || !plan.remainingCents)) throw new PurchaseError('本项没有待追的供应商发票');
     if (action === 'confirm_condition' && (plan.trigger !== 'manual' || plan.manualAt)) throw new PurchaseError('本项没有待人工核对的开票条件');
     const occurredAt = actualTime(data.occurredAt, '实际办理时间');
     const nextReviewAt = action === 'chase_invoice' ? purchaseTimestamp(data.nextReviewAt, '约定的下次跟进时间') : null;
     if (nextReviewAt && Date.parse(nextReviewAt) <= Date.parse(occurredAt)) throw new PurchaseError('下次跟进时间须晚于本次沟通');
-    return { ...evidence, action, planId: plan.id, occurredAt, nextReviewAt, ownerId: actor.id };
+    return { ...evidence, action, planId: plan.id, occurredAt, nextReviewAt, ownerId: actor.id,
+      stoppedCents: action === 'close_plan' ? plan.remainingCents : undefined };
   }
   if (action === 'open_correction' || action === 'resolve_correction') {
     const invoiceId = requiredText(data.invoiceId, '原发票记录编号');
@@ -185,6 +214,12 @@ async function financeOperation(tx: Db, input: FinanceInput, actor: PurchaseActo
       throw new PurchaseError('采购、付款和有效来票无法核对一致，请登记差异及跟进依据');
     }
     return { ...evidence, action, purchaseOrderId: po.id, matchVersion: po.matchVersion, purchase: po, outcome, ownerId: actor.id };
+  }
+  if (action === 'resume_alipay_payment') {
+    const sourceId = requiredText(data.sourceId, '库存短少的原支付宝交易');
+    if (view.verifiedCents || view.cashCents || view.authorityConflict) throw new PurchaseError('本单已有其他到账依据，请先核对交易归属');
+    const payment = await previewStockHeldAlipayPayment(tx, orderId, sourceId);
+    return { ...evidence, action, sourceId, payment, caseId: view.latePayments.find(row => row.id === sourceId)?.review?.claimId ?? null };
   }
   const sourceId = requiredText(data.sourceId, '待核对的原交易');
   const alipay = view.latePayments.find(row => row.id === sourceId);
@@ -231,6 +266,7 @@ export async function applyFinanceAction(tx: Db, input: FinanceInput, actor: Pur
   const orderId = input.orderId;
   let planId = 'planId' in op ? op.planId : null;
   let invoiceId = 'invoiceId' in op ? op.invoiceId : null;
+  let replacementPlanId: string | undefined;
   if (op.action === 'verify_bank_receipt' || op.action === 'record_customer_receipt') {
     const activityId = await addPurchaseActivity(tx, { orderId, actor, action: op.action, requestKey, referenceKey: op.receiptReferenceKey,
       amountCents: op.action === 'record_customer_receipt' ? op.amountCents : undefined, detail: { actionHash, intent: intentHash, authorization, snapshot } });
@@ -239,17 +275,27 @@ export async function applyFinanceAction(tx: Db, input: FinanceInput, actor: Pur
       await prepareOrderPurchases(tx, orderId, actor);
     }
   } else if (op.action === 'restore_term' || op.action === 'set_term') {
-    await tx.accountReceivable.update({ where: { id: op.receivableId }, data: {
-      termStartedAt: new Date(op.startedAt), dueAt: new Date(op.dueAt), paymentTermDaysSnapshot: op.days,
+    const changed = await tx.accountReceivable.update({ where: { id: op.receivableId }, data: {
+      termStartedAt: new Date(op.startedAt), dueAt: new Date(op.dueAt), paymentTermDaysSnapshot: op.days, status: op.receivableStatus,
     } });
+    await refreshCreditRestrictions(tx, changed.userId, new Date());
+    await prepareOrderPurchases(tx, orderId, actor);
   } else if (op.action === 'post_existing') {
     await postVerifiedCustomerCash(tx, orderId, op.source, actor.id);
     await prepareOrderPurchases(tx, orderId, actor);
+  } else if (op.action === 'resume_alipay_payment') {
+    await applyStockHeldAlipayPayment(tx, op.payment, actor);
   } else if (op.action === 'create_plan') {
     const plan = await tx.financeInvoicePlan.create({ data: { orderId, purchaseOrderId: op.purchaseOrderId,
       side: op.side, partyKey: op.partyKey, issuer: op.issuer, recipient: op.recipient, grossCents: BigInt(op.grossCents),
       trigger: op.trigger, ownerId: actor.id, reference: op.reference, sha256: op.sha256 } });
     planId = plan.id;
+  } else if (op.action === 'amend_plan') {
+    const { original } = op;
+    const plan = await tx.financeInvoicePlan.create({ data: { orderId, purchaseOrderId: original.purchaseOrderId,
+      side: original.side, partyKey: original.partyKey, issuer: original.issuer, recipient: original.recipient,
+      grossCents: BigInt(op.amountCents), trigger: op.trigger, ownerId: actor.id, reference: op.reference, sha256: op.sha256 } });
+    replacementPlanId = plan.id;
   } else if (op.action === 'record_invoice') {
     if (!invoiceId) {
       const doc = await tx.financeInvoice.create({ data: {
@@ -261,6 +307,7 @@ export async function applyFinanceAction(tx: Db, input: FinanceInput, actor: Pur
     await tx.financeInvoiceAllocation.create({ data: { planId: op.planId, invoiceId, amountCents: BigInt(op.amountCents) } });
   }
   const event = await tx.financeEvent.create({ data: { orderId, planId, invoiceId, actorId: actor.id,
-    action: op.action, requestKey, intentHash, approvedHash: expected, detail: JSON.stringify({ operation: op, authorization }) } });
+    action: op.action, requestKey, intentHash, approvedHash: expected,
+    detail: JSON.stringify({ operation: op, authorization, replacementPlanId }) } });
   return event.id;
 }

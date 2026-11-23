@@ -7,7 +7,9 @@ export function receivableOutstandingCents(amount: number, status: string, posti
   if (status === 'paid' || status === 'cancelled') return 0;
   const released = postings.reduce((sum, row) => sum + Number(row.releasedCents), 0);
   const received = postings.reduce((sum, row) => sum + Number(row.amountCents), 0);
-  return Math.max(0, Math.min(Math.round(amount * 100) - released, Math.round(orderTotal * 100) - received));
+  const recorded = Math.round(amount * 100) - released;
+  const face = Math.round(orderTotal * 100);
+  return Math.max(0, face > 0 ? Math.min(recorded, face - received) : recorded);
 }
 
 export function receivableOutstanding(amount: number, status: string, postings: PostedAmount[], orderTotal: number) {

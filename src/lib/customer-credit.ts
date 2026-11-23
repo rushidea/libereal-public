@@ -421,32 +421,38 @@ export async function settleOrderReceivable(tx: Tx, orderId: string, actorId?: s
   return finishCustomerReceivable(tx, receivable, paidAt);
 }
 
-export async function finishCustomerReceivable(tx: Tx, receivable: { id: string; orderId: string; userId: string; amount: number }, paidAt: Date) {
-  const { orderId } = receivable;
-  const account = await tx.creditAccount.findUniqueOrThrow({ where: { userId: receivable.userId } });
+export async function refreshCreditRestrictions(tx: Tx, userId: string, now: Date) {
+  const account = await tx.creditAccount.findUnique({ where: { userId } });
+  if (!account) return;
   const openReceivables = await tx.accountReceivable.findMany({
-    where: { ...overdueReceivableWhere(paidAt), userId: receivable.userId, id: { not: receivable.id } },
+    where: { ...overdueReceivableWhere(now), userId },
     select: { dueAt: true, amount: true, status: true, order: { select: receivableOrderBalance } },
   });
   const outstanding = openReceivables.filter(row => receivableOutstandingCents(row.amount, row.status, row.order.cashPostings, row.order.total) > 0);
   const nextStatus = creditStatusForOverdueReceivables({
     currentStatus: account.status,
     statusSource: account.statusSource,
-    maxOverdueDays: maxOverdueDaysForReceivables(outstanding, paidAt),
-    hasEligibleHold: hasEligibleCreditHold(outstanding, account.manuallyUnlockedAt, paidAt),
+    maxOverdueDays: maxOverdueDaysForReceivables(outstanding, now),
+    hasEligibleHold: hasEligibleCreditHold(outstanding, account.manuallyUnlockedAt, now),
   });
   if (nextStatus !== account.status) {
     await tx.creditAccount.update({ where: { id: account.id }, data: { status: nextStatus, statusSource: 'system' } });
   }
+}
+
+export async function finishCustomerReceivable(tx: Tx, receivable: { id: string; orderId: string; userId: string; amount: number }, paidAt: Date) {
+  const { orderId } = receivable;
+  const bookedAt = new Date();
   await tx.accountReceivable.update({ where: { id: receivable.id }, data: { status: 'paid', paidAt } });
   await tx.order.update({ where: { id: orderId }, data: { paidAt } });
+  await refreshCreditRestrictions(tx, receivable.userId, bookedAt);
   const existingPoints = await tx.pointsLog.findFirst({ where: { userId: receivable.userId, relatedId: orderId, type: 'order_credit' } });
   const earned = calculateOrderPoints(receivable.amount);
   if (!existingPoints && earned > 0) {
     await tx.user.update({ where: { id: receivable.userId }, data: { points: { increment: earned } } });
     await tx.pointsLog.create({ data: { userId: receivable.userId, delta: earned, type: 'order_credit', relatedId: orderId, reason: '订单回款积分' } });
   }
-  await recalculateUserTier(tx, receivable.userId, paidAt);
+  await recalculateUserTier(tx, receivable.userId, bookedAt);
   return tx.accountReceivable.findUniqueOrThrow({ where: { id: receivable.id } });
 }
 

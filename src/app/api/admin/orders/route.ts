@@ -146,11 +146,12 @@ export async function GET(req: NextRequest) {
         },
       }),
       query.receivableOpen
-        ? prisma.$queryRaw<Array<{ count: bigint; cents: bigint }>>`SELECT COUNT(*) AS count,
-            COALESCE(SUM(MAX(0, MIN(ROUND(r.amount * 100) - COALESCE(
-              (SELECT SUM(c.releasedCents) FROM CustomerCashPosting c WHERE c.orderId=r.orderId),0), ROUND(o.total * 100) - COALESCE(
-              (SELECT SUM(c.amountCents) FROM CustomerCashPosting c WHERE c.orderId=r.orderId),0)))),0) AS cents
-            FROM AccountReceivable r JOIN "Order" o ON o.id=r.orderId WHERE r.status IN ('open','overdue') AND o.archivedAt IS NULL`
+        ? prisma.$queryRaw<Array<{ count: bigint; cents: bigint }>>`WITH balances AS (
+            SELECT ROUND(r.amount * 100) - COALESCE((SELECT SUM(c.releasedCents) FROM CustomerCashPosting c WHERE c.orderId=r.orderId),0) AS recorded,
+              ROUND(o.total * 100) AS face, COALESCE((SELECT SUM(c.amountCents) FROM CustomerCashPosting c WHERE c.orderId=r.orderId),0) AS received
+            FROM AccountReceivable r JOIN "Order" o ON o.id=r.orderId WHERE r.status IN ('open','overdue') AND o.archivedAt IS NULL
+          )
+          SELECT COUNT(*) AS count, COALESCE(SUM(MAX(0, CASE WHEN face > 0 THEN MIN(recorded, face - received) ELSE recorded END)),0) AS cents FROM balances`
         : Promise.resolve(null),
     ]);
 

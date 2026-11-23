@@ -1,5 +1,6 @@
 import type { Prisma } from '@prisma/client';
 import { finishCustomerReceivable, isUnsettledReceivableStatus, orderCreditHeldCents } from '@/lib/customer-credit';
+import { isActivePurchaseOrder, readPurchaseAcceptance } from '@/lib/purchase-acceptance';
 import { readPurchaseActivities } from '@/lib/purchase-activity';
 import { orderReceiptEvidence } from '@/lib/purchase-receipts';
 import { loadPurchaseOrderSource, type SourceOrder } from '@/lib/purchase-source';
@@ -10,10 +11,15 @@ export type CustomerCashSource = { bankAllocationId: string } | { paymentAttempt
 
 const cents = (yuan: number) => Math.round(yuan * 100);
 
-export async function customerCashProjection(tx: Db, order: SourceOrder, amount: number) {
+export async function customerCashProjection(tx: Db, order: SourceOrder, amount: number, source: 'bank' | 'alipay' = 'bank') {
+  if (source === 'bank' && (!isActivePurchaseOrder(order)
+    || !(await readPurchaseAcceptance(tx, order, await readPurchaseActivities(tx, order.id))).proof)) {
+    throw new PurchaseError('原订单缺少有效的平台接单依据，银行回单可先核验，补齐接单依据后再核销');
+  }
   const previous = await tx.customerCashPosting.findMany({ where: { orderId: order.id } });
   const before = previous.reduce((sum, row) => sum + Number(row.amountCents), 0);
   const face = cents(order.total);
+  if (!Number.isSafeInteger(face) || face <= 0) throw new PurchaseError('原订单金额须先核对，保留已有应收和到账凭据');
   const remaining = face - before - amount;
   if (!Number.isSafeInteger(remaining) || remaining < 0) throw new PurchaseError('本次归入金额超过未核销的订单余额');
   const ar = order.receivable;
@@ -52,7 +58,7 @@ export async function postVerifiedCustomerCash(tx: Db, orderId: string, source: 
     || previous.some(row => row.bankAllocationId && !payment.receipts.some(item => item.counted && item.id === row.bankAllocationId))) {
     throw new PurchaseError('已有付款日期或不同来源的到账记录需要财务核对，不能再次核销');
   }
-  const projection = await customerCashProjection(tx, order, amount);
+  const projection = await customerCashProjection(tx, order, amount, native ? 'alipay' : 'bank');
   const released = projection.releaseCents;
   const remaining = projection.remainingCents;
   let creditTransactionId: string | null = null;

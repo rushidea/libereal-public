@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { alipayAmountToCents, getAlipaySdk, parseAlipayAmountCents } from '@/lib/alipay';
 import { writeAuditLog } from '@/lib/audit';
+import { recordAlipayOrderReceipt, recordAlipayPointsPending } from '@/lib/alipay-order-settlement';
 import { releaseOrderInventory, reserveOrderInventory } from '@/lib/inventory';
 import { settlePaymentPoints } from '@/lib/payment-concurrency';
 import { POINTS_SETTLEMENT_BUSY_ERROR } from '@/lib/points-checkout-service';
@@ -493,72 +494,12 @@ export async function POST(req: Request) {
         }
       }
       if (isPaid && firstPayment) {
-        await tx.order.update({
-          where: { id: latestAttempt.order.id },
-          data: {
-            ...(latestAttempt.order.status === 'unpaid' ? {
-              statusHistory: {
-                create: {
-                  fromStatus: 'unpaid',
-                  toStatus: 'pending',
-                  actorEmail: 'system',
-                  reason: 'alipay_paid',
-                },
-              },
-            } : {}),
-            events: {
-              create: {
-                type: 'payment_received',
-                message: pointsSettlement === 'pending' ? '支付宝支付成功，积分待处理' : '支付宝支付成功',
-                metadata: JSON.stringify({
-                  outTradeNo: latestAttempt.outTradeNo,
-                  tradeNo: data.trade_no || null,
-                  pointsSettlement,
-                  ...(pointsSettlementError ? { pointsSettlementError } : {}),
-                }),
-              },
-            },
-          },
-        });
-        await writeAuditLog({
-          action: 'payment.alipay_paid',
-          resource: 'payments',
-          targetType: 'Order',
-          targetId: latestAttempt.order.id,
-          after: { outTradeNo: latestAttempt.outTradeNo, tradeNo: data.trade_no || null, amount: latestAttempt.amount },
-        }, tx);
+        await recordAlipayOrderReceipt(tx, { orderId: latestAttempt.order.id, priorStatus: latestAttempt.order.status,
+          amount: latestAttempt.amount, outTradeNo: latestAttempt.outTradeNo, tradeNo: data.trade_no || null },
+        pointsSettlement, pointsSettlementError);
       }
       if (isPaid && pointsSettlement === 'pending') {
-        const settlement = await tx.order.findUnique({
-          where: { id: latestAttempt.order.id },
-          select: { pointsApplied: true },
-        });
-        await tx.order.update({
-          where: { id: latestAttempt.order.id },
-          data: {
-            events: {
-              create: {
-                type: 'points_settlement_pending',
-                message: '支付宝订单积分待处理',
-                metadata: JSON.stringify({
-                  outTradeNo: latestAttempt.outTradeNo,
-                  pointsSettlementError,
-                }),
-              },
-            },
-          },
-        });
-        await writeAuditLog({
-          action: 'payment.alipay_points_pending',
-          resource: 'payments',
-          targetType: 'Order',
-          targetId: latestAttempt.order.id,
-          after: {
-            outTradeNo: latestAttempt.outTradeNo,
-            pointsApplied: settlement?.pointsApplied === true,
-            reason: pointsSettlementError,
-          },
-        }, tx);
+        await recordAlipayPointsPending(tx, latestAttempt.order.id, latestAttempt.outTradeNo, pointsSettlementError);
       }
     });
   } catch (error) {

@@ -10,6 +10,7 @@ import { agreedDocumentTerms, assertSupplierDocumentScopes, missingDocumentScope
 import { decisionDocumentRow, decisionMaterialTerms, decisionTermsChanged, previewDecisionDocuments, type CustomerDecisionDocument, type DecisionDocumentInput, type DecisionEffect } from '@/lib/purchase-decision-documents';
 import { pricingContentHash } from '@/lib/pricing-adjustment-approval';
 import { loadPurchaseOrderSource, loadPurchaseLines, type PurchaseSource, type SourceOrder } from '@/lib/purchase-source';
+import { assertUnusedSupplierPayment, purchasePaymentRecords, supplierPaymentEvidence } from '@/lib/purchase-payments';
 import { creditExceptionMatches, paymentPlanAt, paymentPlanContent, paymentPlanFromReview, purchaseCreditVersion, purchaseStartReview, type PaymentPlan } from '@/lib/purchase-start';
 import { purchaseCreditAt } from '@/lib/purchase-credit-history';
 import { availableIncidentSources, clarifiedIncidentScope, incidentQuantities, incidentLink, resolveIncidentScope, supplyIncidentHistory, type IncidentLocation, type IncidentReviewResult, type SupplyIncident } from '@/lib/purchase-incidents';
@@ -35,9 +36,10 @@ type DispositionInput = DecisionDocumentInput & { orderItemId: string; quantity:
 export type PurchaseActionInput = {
   orderId: string; purchaseOrderId: string;
   action: 'approve' | 'approve_lead_time' | 'register_order' | 'record_payment' | 'report_change' | 'review_change_scope' | 'resolve_change'
-    | 'review_legacy_approval' | 'approve_remaining' | 'record_late_order_exception' | 'resolve_order_exception' | 'reapprove_purchase';
+    | 'review_legacy_approval' | 'approve_remaining' | 'record_late_order_exception' | 'resolve_order_exception' | 'reapprove_purchase' | 'review_payment_time';
   version: string; requestId: string; actionHash?: string; reference?: string; amountCents?: number; conditionReference?: string;
   occurredAt?: string; referenceSha256?: string; description?: string;
+  sourcePaymentId?: string; bankTrace?: string; payee?: string;
   changeKind?: 'delay' | 'price' | 'unavailable' | 'other';
   outcome?: 'original_terms' | 'revised_terms' | 'declined' | 'replacement' | 'shortfall';
   supplierReference?: string; supplierSha256?: string; customerReference?: string; customerSha256?: string;
@@ -234,7 +236,7 @@ export async function purchaseWorkspace(tx: Db, orderId: string) {
     const canRegisterOrder = commitment.state === 'ordinary' && !registration && !needsLegacyReview && Boolean(latestApproval)
       && (startReview.active || Boolean(cancellation)) && (header.status === 'approved' || header.status === 'on_hold');
     const revision = Number(header.revision);
-    return { ...header, revision, totalCents, contentHash, lines, ledger, paidCents, dueCents, remaining,
+    return { ...header, revision, totalCents, contentHash, lines, ledger, paidCents, dueCents, remaining, payments: purchasePaymentRecords(ledger),
       remainingScope: hasGoodsPayable ? reviewedScope ?? null : null, needsRemainingReview, payableReviewWindows, canApproveRemaining, needsLegacyReview,
       needsFundingReapproval: commitment.state === 'ordinary' && !registration && header.status === 'approved'
         && eligibility.eligible && Boolean(fundingApproval && latestApproval
@@ -874,6 +876,14 @@ function actionDetails(
     if (needsLeadApproval && !po.leadTimeApproved) throw new PurchaseError('本单订货周期超出客户约定，请先单独批准例外');
     return { action };
   }
+  if (action === 'review_payment_time') {
+    const payment = po.payments.find(row => row.id === input.sourcePaymentId && row.canReviewTime);
+    if (!payment || payment.amountCents !== input.amountCents) throw new PurchaseError('须核对原付款记录及银行凭证的原额');
+    const paymentEvidence = supplierPaymentEvidence(input, payment.payee);
+    if (Date.parse(paymentEvidence.occurredAt) > Date.parse(payment.recordedAt)) throw new PurchaseError('原实际付款时间不能晚于原付款登记');
+    return { action, sourcePaymentId: payment.id, original: payment, paymentEvidence,
+      description: requiredText(input.description, '原凭证与历史付款的核对结论') };
+  }
   if (action === 'record_payment') {
     if (view.fulfillment.unlinkedDispatchShortfalls.some(row=>row.purchaseOrderId===po.id)) {
       throw new PurchaseError('本单已核实的误发短失仍待采购接续，请核对原记录并移交具名经办人');
@@ -891,7 +901,8 @@ function actionDetails(
       if (!view.eligibility.eligible) throw new PurchaseError('订购前付款须先重新核对本单启动条件和供应商报价');
       assertApprovedTerms(po, checkedApproval(view, po, approval), Date.now());
     }
-    return { action, reference: requiredText(input.reference, '本次实际付款的流水凭证'), amountCents: input.amountCents,
+    const paymentEvidence = supplierPaymentEvidence(input, po.lines[0]?.terms.payee);
+    return { action, reference: paymentEvidence.reference, amountCents: input.amountCents, paymentEvidence,
       conditionReference: requiredText(input.conditionReference, '本次付款条件已满足的依据'),
       approvalId: approval?.id ?? null, exceptionResolutionId: po.commitmentExceptions.find(row => row.resolution === 'payable_verified')?.resolutionId ?? null,
       authorizedDueCents: po.dueCents };
@@ -1095,6 +1106,9 @@ export async function previewPurchaseAction(tx: Db, input: PurchaseActionInput, 
   const operation = details.action === 'resolve_change'
     ? await prepareCoordinationEvidence(tx, po, input, details)
     : details;
+  if (operation.action === 'record_payment' || operation.action === 'review_payment_time') {
+    await assertUnusedSupplierPayment(tx, operation.paymentEvidence);
+  }
   await assertSupplierDocumentScopes(tx, supplyEvidenceFor(po, operation), operation.action === 'reapprove_purchase'
     ? { restoredLines: operation.documentScopes } : undefined);
   const scoped = operation.action === 'register_order' ? operation.execution.lines
