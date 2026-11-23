@@ -588,6 +588,10 @@ model Order {
   researchGroup       ResearchGroup? @relation(fields: [pointsGroupId], references: [id], onDelete: SetNull)
   fulfillmentParcels FulfillmentParcel[]
 
+  cashPostings CustomerCashPosting[]
+  invoicePlans FinanceInvoicePlan[]
+  financeEvents FinanceEvent[]
+
   @@unique([inquiryId, inquiryOrderSeq])
   @@index([email])
   @@index([inquiryId])
@@ -620,6 +624,8 @@ model PaymentAttempt {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
   order       Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  cashPosting CustomerCashPosting?
 
   @@index([orderId, createdAt])
   @@index([provider, status])
@@ -759,6 +765,8 @@ model CreditTransaction {
   user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   order        Order?   @relation(fields: [orderId], references: [id], onDelete: SetNull)
 
+  cashPosting CustomerCashPosting?
+
   @@index([userId, createdAt])
   @@index([orderId])
   @@index([type])
@@ -782,8 +790,104 @@ model AccountReceivable {
   order          Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
   user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
+  cashPostings CustomerCashPosting[]
+
   @@index([userId, status])
   @@index([status, dueAt])
+}
+
+// A posting records money already verified against a bank allocation or an order-bound payment.
+model CustomerCashPosting {
+  id                  String @id @default(cuid())
+  orderId             String
+  receivableId        String?
+  bankAllocationId    String? @unique
+  paymentAttemptId    String? @unique
+  creditTransactionId String? @unique
+  amountCents         BigInt
+  releasedCents       BigInt @default(0)
+  actorId             String?
+  createdAt           DateTime @default(now())
+  order               Order @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  receivable          AccountReceivable? @relation(fields: [receivableId], references: [id], onDelete: Restrict)
+  bankAllocation      PurchaseActivity? @relation(fields: [bankAllocationId], references: [id], onDelete: Restrict)
+  paymentAttempt      PaymentAttempt? @relation(fields: [paymentAttemptId], references: [id], onDelete: Restrict)
+  creditTransaction   CreditTransaction? @relation(fields: [creditTransactionId], references: [id], onDelete: Restrict)
+
+  @@index([orderId])
+}
+
+model FinanceInvoicePlan {
+  id              String @id @default(cuid())
+  orderId         String
+  purchaseOrderId String?
+  side            String
+  partyKey        String
+  issuer          String
+  recipient       String
+  grossCents      BigInt
+  trigger         String
+  ownerId         String
+  reference       String
+  sha256          String
+  createdAt       DateTime @default(now())
+  order           Order @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  purchaseOrder   PurchaseOrder? @relation(fields: [purchaseOrderId, orderId], references: [id, orderId], onDelete: Restrict)
+  allocations     FinanceInvoiceAllocation[]
+  events          FinanceEvent[]
+
+  @@index([orderId, side])
+  @@index([purchaseOrderId])
+}
+
+model FinanceInvoice {
+  id          String @id @default(cuid())
+  side        String
+  partyKey    String
+  issuer      String
+  recipient   String
+  number      String
+  identityKey String @unique
+  reference   String
+  sha256      String @unique
+  issuedAt    DateTime
+  grossCents  BigInt
+  actorId     String
+  createdAt   DateTime @default(now())
+  allocations FinanceInvoiceAllocation[]
+  events      FinanceEvent[]
+}
+
+model FinanceInvoiceAllocation {
+  id          String @id @default(cuid())
+  planId      String
+  invoiceId   String
+  amountCents BigInt
+  plan        FinanceInvoicePlan @relation(fields: [planId], references: [id], onDelete: Restrict)
+  invoice     FinanceInvoice @relation(fields: [invoiceId], references: [id], onDelete: Restrict)
+
+  @@unique([planId, invoiceId])
+  @@index([invoiceId])
+}
+
+model FinanceEvent {
+  id           String @id @default(cuid())
+  orderId      String
+  planId       String?
+  invoiceId    String?
+  action       String
+  actorId      String
+  requestKey   String @unique
+  intentHash   String
+  approvedHash String
+  detail       String
+  createdAt    DateTime @default(now())
+  order        Order @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  plan         FinanceInvoicePlan? @relation(fields: [planId], references: [id], onDelete: Restrict)
+  invoice      FinanceInvoice? @relation(fields: [invoiceId], references: [id], onDelete: Restrict)
+
+  @@index([orderId, createdAt])
+  @@index([invoiceId])
 }
 
 model UserTierHistory {
@@ -982,6 +1086,8 @@ model PurchaseOrder {
   activities   PurchaseActivity[]
   fulfillmentParcelLines FulfillmentParcelLine[]
 
+  invoicePlans FinanceInvoicePlan[]
+
   @@unique([id, orderId])
   @@index([orderId, status])
 }
@@ -1019,6 +1125,8 @@ model PurchaseActivity {
   order           Order @relation(fields: [orderId], references: [id], onDelete: Restrict)
   purchaseOrder   PurchaseOrder? @relation(fields: [purchaseOrderId, orderId], references: [id, orderId], onDelete: Restrict)
   authorizedReplacements PurchaseReplacementLine[]
+
+  cashPosting CustomerCashPosting?
 
   @@index([orderId, createdAt])
 }
