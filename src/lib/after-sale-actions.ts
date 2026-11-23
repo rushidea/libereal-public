@@ -4,10 +4,10 @@ import { PurchaseError, requiredText } from '@/lib/purchase-terms';
 import type { FulfillmentDb as Db } from '@/lib/fulfillment-records';
 import { afterSaleChannels, afterSaleIssues, afterSaleRemedies, hasChoice } from '@/lib/after-sale-options';
 import { cents, choice, condition, quantity, salePermission, saleProof, type SaleActor, type SaleAuthorization, type SaleEvidence, type SaleInput } from '@/lib/after-sale-records';
-import { actualRefunded, refundStep, reviewRefundSource } from '@/lib/after-sale-refunds';
-import { afterSaleWorkspace, caseEvents, currentSaleAgreement, lastCaseEvent, originalSaleParcel, saleOperation, type AfterSaleWorkspace, type SaleCase } from '@/lib/after-sale-workspace';
+import { activeRefundSourceReview, actualRefunded, refundStep, releaseRefundSource, reviewRefundSource } from '@/lib/after-sale-refunds';
+import { afterSaleWorkspace, caseEvents, currentSaleAgreement, lastCaseEvent, originalSaleParcel, originalSaleParcelShares, saleOperation, type AfterSaleWorkspace, type SaleCase } from '@/lib/after-sale-workspace';
 
-import { invoiceAgreement, invoiceOutcome } from '@/lib/after-sale-invoices';
+import { invoiceAgreement, invoiceOutcome, invoiceReissue, verifyInvoiceLine } from '@/lib/after-sale-invoices';
 import { supplierAfterSale } from '@/lib/after-sale-supplier';
 import { approveAfterSaleExchange } from '@/lib/after-sale-exchanges';
 import { transferReference } from '@/lib/after-sale-transfers';
@@ -38,6 +38,65 @@ function openRow(view: AfterSaleWorkspace, data: Record<string, unknown>, eviden
     source: evidence.sha256, row: evidence.documentRow });
   return { orderItemId: line.id, quantity: units, relatedCents: data.relatedCents == null ? null : cents(data.relatedCents, true),
     issue: data.issue, channel: data.channel, report: requiredText(data.note, '售后情况'), shortfallId, originalParcelLineId: original?.id, sourceKey };
+}
+
+function originalReceipt(view: AfterSaleWorkspace, row: SaleCase, data: Record<string, unknown>, proof: SaleEvidence): Plan {
+  const parcel = view.deliveries.find(item => item.id === data.parcelLineId && item.orderItemId === row.orderItemId
+    && item.route !== 'supplier_to_libereal' && !item.afterSaleApprovalId);
+  condition(parcel && !originalSaleParcel(row), '请选择实际对客包裹行，并保留原案已经指定的整笔来源');
+  const amount = quantity(data.quantity);
+  const received = parcel.receipts.filter(item => item.at <= Date.parse(proof.occurredAt)).reduce((sum, item) => sum + item.quantity, 0);
+  const shares = originalSaleParcelShares(row);
+  const allocated = view.cases.filter(item => item.id !== row.id).flatMap(item => {
+    const decision = currentSaleAgreement(item);
+    const withoutRemedy = item.customerState === 'closed' && decision && ['keep', 'follow_up'].includes(String(saleOperation(decision).remedy))
+      && !caseEvents(item,'physical').length && !caseEvents(item,'approve_exchange').length;
+    return withoutRemedy ? [] : originalSaleParcelShares(item);
+  }).concat(shares);
+  condition(amount <= row.quantity - shares.reduce((sum, item) => sum + item.quantity, 0)
+    && amount <= received - allocated.filter(item => item.parcelLineId === parcel.id).reduce((sum, item) => sum + item.quantity, 0),
+    '本案剩余份额或这一包裹实际已签收的可关联数量不足');
+  return { operation: { parcelLineId: parcel.id, orderItemId: row.orderItemId, purchaseOrderId: parcel.purchaseOrderId,
+    quantity: amount, receivedQuantity: received, waybill: parcel.reference, note: requiredText(data.note, '原包裹与本案件数的核对依据') } };
+}
+
+function replacementPurchases(view: AfterSaleWorkspace, row: SaleCase, data: Record<string, unknown>,
+  originals: { parcelLineId: string; quantity: number }[]) {
+  const inputs = data.replacementPurchaseShares ?? (data.replacementPurchaseOrderId
+    ? [{ purchaseOrderId: data.replacementPurchaseOrderId, quantity: row.quantity }] : []);
+  condition(Array.isArray(inputs), '请选择实际采购来源及分配的件数');
+  if (!inputs.length) return [];
+  const sources = new Map<string,number>();
+  for (const part of originals) {
+    const purchase = view.deliveries.find(item => item.id === part.parcelLineId)?.purchaseOrderId;
+    if (purchase) sources.set(purchase, (sources.get(purchase) ?? 0) + part.quantity);
+  }
+  const seen = new Set<string>();
+  const replacements = inputs.map(purchaseObject).map(input => {
+    const amount = quantity(input.quantity);
+    const linked = view.replacements.find(item => item.purchaseOrderId === input.purchaseOrderId && item.orderItemId === row.orderItemId
+      && (row.shortfallId ? item.shortfallId === row.shortfallId : sources.has(item.fromPurchaseOrderId)));
+    condition(linked && !seen.has(linked.id) && amount <= linked.quantity,
+      '请选择已有实际批准且对应本案原货的独立补采购行和数量');
+    if (!row.shortfallId) {
+      const left = (sources.get(linked.fromPurchaseOrderId) ?? 0) - amount;
+      condition(left >= 0, '替代采购数量超出本案该原供方的归属份额');
+      sources.set(linked.fromPurchaseOrderId,left);
+    }
+    const promisedElsewhere = view.cases.filter(item => item.id !== row.id).flatMap(item => {
+      const effective = currentSaleAgreement(item);
+      return effective ? agreedPurchases(saleOperation(effective)) : [];
+    }).reduce((sum, entry) => entry.id === linked.id ? sum + quantity(entry.quantity ?? view.replacements.find(item => item.id === entry.id)?.quantity) : sum, 0);
+    condition(amount + promisedElsewhere <= linked.quantity, '该采购行的批准数量已归入其他售后');
+    seen.add(linked.id);
+    return { ...linked, quantity: amount };
+  });
+  condition(replacements.reduce((sum, item) => sum + item.quantity, 0) === row.quantity, '各采购份额须合计覆盖本案实际件数');
+  return replacements;
+}
+function agreedPurchases(decision: Record<string,unknown>) {
+  return Array.isArray(decision.replacements) ? decision.replacements.map(purchaseObject)
+    : decision.replacement ? [purchaseObject(decision.replacement)] : [];
 }
 
 async function agreement(tx: Db, view: AfterSaleWorkspace, row: SaleCase, data: Record<string, unknown>, proof: SaleEvidence): Promise<Plan> {
@@ -73,8 +132,8 @@ async function agreement(tx: Db, view: AfterSaleWorkspace, row: SaleCase, data: 
     operation.originalRefundStopId = priorStop.id;
     operation.previouslyRefundedCents = recorded;
   } else condition(remedy !== 'refund_withdraw' && recorded === 0, '有实际退款或未决余额，请先核对原退款指令');
-  const earlierExchange = lastCaseEvent(row,'approve_exchange');
-  condition(!earlierExchange || !view.deliveries.some(item=>item.afterSaleApprovalId===earlierExchange.id),
+  const exchangeIds = new Set(caseEvents(row,'approve_exchange').map(event => event.id));
+  condition(!view.deliveries.some(item => item.afterSaleApprovalId && exchangeIds.has(item.afterSaleApprovalId)),
     '该版已发生换货发运，请保留原决定并按实际结果核对');
   condition(!physicalResults.length || ((remedy==='refund'||remedy==='refund_withdraw') && returned>0
     && physicalResults.every(result=>result.result==='return')), '已有实物结果，须谨慎沿原实退范围办理');
@@ -85,29 +144,35 @@ async function agreement(tx: Db, view: AfterSaleWorkspace, row: SaleCase, data: 
     return { operation, customerState: 'awaiting_refund' };
   }
   const pinned = originalSaleParcel(row);
+  const originals = originalSaleParcelShares(row);
   const originalId = data.originalParcelLineId ?? pinned;
   if (originalId) {
     const original = view.deliveries.find(item=>item.id===originalId && item.orderItemId===row.orderItemId && item.route!=='supplier_to_libereal');
-    condition(original && original.quantity>=row.quantity && (!pinned || pinned===original.id), '请选择原客户书证和售后明细对应的实际包裹');
+    condition(original && original.quantity>=row.quantity && (!originals.length || originals.every(part => part.parcelLineId === original.id)
+      && originals.reduce((sum, part) => sum + part.quantity,0) === row.quantity),
+      '请选择原客户书证和售后明细对应的实际包裹');
     operation.originalParcelLineId=original.id;
+    if (!originals.length) originals.push({ parcelLineId: original.id, quantity: row.quantity, evidenceEventId: null });
   }
+  if (originals.length) operation.originalParcelShares = originals;
   if (remedy === 'resend' || remedy === 'exchange') {
     const loss = view.shortfalls.find(item => item.resolutionId === row.shortfallId);
     const approval = data.resendApprovalId ? loss?.approved.find(item => item.id === data.resendApprovalId) : null;
     if (data.resendApprovalId) condition(approval && approval.quantity >= row.quantity, '原双方书证未覆盖此短失和数量');
     operation.resendApprovalId = approval?.id ?? null;
     if (remedy === 'exchange' && !loss) {
-      const original = view.deliveries.find(item=>item.id===originalId && !item.afterSaleApprovalId);
-      condition(original && original.receipts.filter(receipt=>receipt.at<=Date.parse(proof.occurredAt))
-        .reduce((sum,receipt)=>sum+receipt.quantity,0)>=row.quantity, '换货须核对本案原包裹中已签收的商品');
+      condition(originals.reduce((sum, item) => sum + item.quantity, 0) === row.quantity
+        && originals.every(part => view.deliveries.some(item => item.id === part.parcelLineId && !item.afterSaleApprovalId
+          && item.receipts.filter(receipt=>receipt.at<=Date.parse(proof.occurredAt)).reduce((sum,receipt)=>sum+receipt.quantity,0)
+            >= originals.filter(other => other.parcelLineId === part.parcelLineId).reduce((sum,other) => sum + other.quantity,0))),
+        '换货须按件核对本案实际签收的原包裹');
       operation.returnRequirement=choice(data.returnRequirement,['required','waived'] as const,'客户和供方书证确定的退回要求');
     }
-    if (data.replacementPurchaseOrderId) {
-      const linked = view.replacements.find(item=>item.purchaseOrderId===data.replacementPurchaseOrderId && item.orderItemId===row.orderItemId
-        && item.quantity>=row.quantity && (loss ? item.shortfallId===loss.resolutionId
-          : item.fromPurchaseOrderId===view.deliveries.find(delivery=>delivery.id===originalId)?.purchaseOrderId));
-      condition(linked, '请选择已有实际批准且对应本案原货的独立补采购行');
-      operation.replacement=linked;
+    const replacements = replacementPurchases(view, row, data, originals);
+    if (replacements.length) {
+      condition(!approval, '请分别以已有免费补发批准或独立采购约定核对同一批件数');
+      operation.replacements = replacements;
+      if (replacements.length === 1) operation.replacement = replacements[0];
     }
   }
   if (remedy === 'invoice') operation.invoice=await invoiceAgreement(tx,row,data);
@@ -158,21 +223,33 @@ function physical(view: AfterSaleWorkspace, row: SaleCase, data: Record<string, 
   const done = (kind: string) => previous.filter(op => op.result === kind).reduce((sum, op) => sum + quantity(op.quantity), 0);
   condition(units <= row.quantity - done(step), '实际处理超出本售后行尚未办理的数量');
   let resolutionId: string | null = null;
+  let attributedPurchase: Record<string,unknown> | undefined;
   if (step === 'return') {
-    const originalId = originalSaleParcel(row);
+    const originalShares = originalSaleParcelShares(row);
     const possible = view.deliveries.filter(item=>item.orderItemId===row.orderItemId && !item.afterSaleApprovalId && item.receipts.length);
-    condition(originalId ? originalId===line.id : possible.length===1 && possible[0].id===line.id,
-      '退回凭据须属于本案指定的原实际包裹，分批签收时请先核对原运单');
+    const allocated = originalShares.filter(item => item.parcelLineId === line.id).reduce((sum,item) => sum + item.quantity,0);
+    const returnedFromLine = previous.filter(op => op.result === 'return' && op.parcelLineId === line.id)
+      .reduce((sum, op) => sum + quantity(op.quantity), 0);
+    condition(originalShares.length ? allocated - returnedFromLine >= units : possible.length===1 && possible[0].id===line.id,
+      '退回凭据须属于本案指定的原实际包裹，分批签收时请先核对原运单和份额');
     const result = line.returns.find(item => item.id === data.resolutionId && Date.parse(item.occurredAt) <= at);
     condition(result && result.quantity - used >= units, '须有对应实收商品的原退回凭据和足够的未引用数量');
     resolutionId = result.id;
   } else {
     const exchange = caseEvents(row,'approve_exchange').find(event=>event.id===line.afterSaleApprovalId
       && saleOperation(event).agreementId===decision?.id);
-    const replacement = purchaseObject(approved.replacement);
-    const purchased = view.replacements.find(item=>item.purchaseOrderId===line.purchaseOrderId && item.orderItemId===row.orderItemId
-      && item.id===replacement.id && item.authorizationId===replacement.authorizationId && item.commitmentId===replacement.commitmentId);
-    if (!exchange && !purchased) {
+    const purchaseShares = agreedPurchases(approved);
+    if (purchaseShares.length) {
+      const requested = purchaseShares.find(part => part.purchaseOrderId === line.purchaseOrderId);
+      const purchased = requested && view.replacements.find(item => item.purchaseOrderId === line.purchaseOrderId && item.orderItemId === row.orderItemId
+        && item.id === requested.id && item.authorizationId === requested.authorizationId && item.commitmentId === requested.commitmentId
+        && (requested.approvalId === undefined || item.approvalId === requested.approvalId));
+      const usedFromPurchase = previous.filter(part => part.result === 'delivery' && purchaseObject(part.replacement).id === purchased?.id)
+        .reduce((sum, part) => sum + quantity(part.quantity),0);
+      condition(!line.afterSaleApprovalId && !line.approvalId && purchased && quantity(requested.quantity ?? row.quantity) - usedFromPurchase >= units,
+        '请选择书面决定中已归行的独立采购补件和剩余份额');
+      attributedPurchase = { ...purchased, quantity: units };
+    } else if (!exchange) {
       const approval = loss?.approved.find(item => item.id === (approved.resendApprovalId ?? data.resendApprovalId));
       const attributed = line.resendAttributions?.filter(part=>part.shortfallId===loss?.resolutionId && part.approvalId===approval?.id)
         .reduce((sum,part)=>sum+part.quantity,0) ?? 0;
@@ -187,7 +264,7 @@ function physical(view: AfterSaleWorkspace, row: SaleCase, data: Record<string, 
   const delivered = done('delivery') + (step === 'delivery' ? units : 0);
   const complete = (remedy === 'resend' || remedy === 'exchange' && approved.returnRequirement === 'waived' || returned === row.quantity) && (remedy === 'return' || delivered === row.quantity);
   return { operation: { remedy, result: step, parcelLineId: line.id, resolutionId, quantity: units, reference: line.reference,
-    resendApprovalId: line.approvalId, afterSaleApprovalId:line.afterSaleApprovalId, replacement:approved.replacement, decisionId: decision?.id ?? null, note: requiredText(data.note, '实物回执核对说明') },
+    resendApprovalId: line.approvalId, afterSaleApprovalId:line.afterSaleApprovalId, replacement:attributedPurchase, decisionId: decision?.id ?? null, note: requiredText(data.note, '实物回执核对说明') },
     customerState: complete ? 'awaiting_close' : 'awaiting_fulfillment' };
 }
 
@@ -213,19 +290,26 @@ async function planAction(tx: Db, view: AfterSaleWorkspace, row: SaleCase, input
     ['email','koncket','handoff'] as const, '实际沟通来源') } };
   if (action === 'supplier') return supplierAfterSale(tx,view,row,data,proof);
   if (action === 'agreement') return agreement(tx,view,row,data,proof);
+  if (action === 'release_refund_source') return releaseRefundSource(tx,view,row,data,proof);
   condition(row.customerState !== 'closed','该客户事项已经办结，新增事项请另行登记并引用原单');
   if (action === 'technical') {
     condition(technicalIssue(row.issue) && ['reviewing','awaiting_technical','awaiting_customer'].includes(row.customerState),'当前事项无待核的技术意见');
     return { operation: { authority: choice(data.authority,['supplier','brand'] as const,'书面判断来源'), party: requiredText(data.party,'供应商或品牌技术部门'),
       contact: requiredText(data.contact,'出具意见的技术联系人'), note: requiredText(data.note,'技术方实际书面意见') }, customerState: 'awaiting_customer' };
   }
+  if (action === 'bind_original_parcel') return originalReceipt(view,row,data,proof);
   if (action === 'approve_exchange') return approveAfterSaleExchange(tx,view,row,data,proof);
   if (action === 'attribute_resend') return attributeResend(view,row,data,proof);
   if (action === 'review_refund_source') return reviewRefundSource(tx,view,row,data,proof);
   if (action === 'physical') return physical(view,row,data,proof);
   if (action === 'prepare_refund' || action === 'approve_refund' || action === 'refund_result' || action === 'stop_refund') return refundStep(tx,view,row,action,data,proof);
+  if (action === 'verify_invoice_line') return verifyInvoiceLine(tx,row,data,proof);
   if (action === 'invoice_outcome') return invoiceOutcome(tx,row,data,proof);
+  if (action === 'invoice_reissue') return invoiceReissue(tx,row,data,proof);
   condition(action === 'close' && row.customerState === 'awaiting_close','须先取得本案所需的实际办理结果');
+  const latestDecision = currentSaleAgreement(row);
+  condition(!latestDecision || saleOperation(latestDecision).remedy !== 'keep' || !activeRefundSourceReview(row),
+    '请先由财务核对并解除这笔未实际发出的退款预留');
   return { operation: { note: requiredText(data.note,'办结依据、客户答复和实际处理结果'), supplierState: row.supplierState }, customerState: 'closed' };
 }
 
@@ -241,6 +325,7 @@ export async function afterSaleAction(tx: Db, input: SaleInput, actor: SaleActor
     : action === 'supplier' && data.outcome === 'financial_result' ? { action, caseId, trace: transferReference(data.referenceNo) }
     : { action, orderId, caseId, source: proof.sha256, row: proof.documentRow,
       ...(action === 'open' ? { item: data.orderItemId, shortfall: data.shortfallId ?? null }
+        : action === 'bind_original_parcel' ? { parcelLineId: data.parcelLineId }
         : action === 'physical' ? { parcelLineId: data.parcelLineId, resolutionId: data.resolutionId ?? null } : {}) };
   const businessKey = pricingContentHash(natural);
   const prior = await tx.afterSaleEvent.findMany({ where: { OR: [{requestKey},{businessKey}] } });

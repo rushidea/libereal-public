@@ -5,7 +5,7 @@ import { purchaseObject } from '@/lib/purchase-activity';
 import { requiredText } from '@/lib/purchase-terms';
 import { cents, choice, condition, type SaleEvidence } from '@/lib/after-sale-records';
 import { caseEvents, currentSaleAgreement, lastCaseEvent, saleOperation, type SaleCase, type AfterSaleWorkspace } from '@/lib/after-sale-workspace';
-import { verifiedAfterSalePayment } from '@/lib/after-sale-payment-source';
+import { eligibleAfterSalePayment, verifiedAfterSalePayment } from '@/lib/after-sale-payment-source';
 import { allocateAfterSaleTransfer, transferReference } from '@/lib/after-sale-transfers';
 
 type RefundTerms = { amountCents: number; recipient: string; destination: string; method: string; currency: 'CNY'; agreementId: string };
@@ -36,8 +36,12 @@ function reserved(row: SaleCase) {
   return paid;
 }
 
+export function activeRefundSourceReview(row: SaleCase) {
+  const released = new Set(caseEvents(row, 'release_refund_source').map(event => saleOperation(event).reviewId));
+  return caseEvents(row, 'review_refund_source').findLast(event => !released.has(event.id));
+}
 function sourceOf(row: SaleCase) {
-  const reviewed = lastCaseEvent(row, 'review_refund_source');
+  const reviewed = activeRefundSourceReview(row);
   const source = purchaseObject(reviewed && saleOperation(reviewed).originalPayment);
   return typeof source.paymentId === 'string' ? source.paymentId : null;
 }
@@ -48,11 +52,12 @@ export async function refundPosition(tx: Db, view: AfterSaleWorkspace, row: Sale
   const paymentId = sourceOf(row);
   const verified = paymentId ? await verifiedAfterSalePayment(tx, view.order.id, paymentId) : null;
   const settledSource = finance.nativePaymentId;
-  const used = other.filter(item => {
+  const sameReceipt = other.filter(item => {
     const held = sourceOf(item);
     return paymentId ? (held ?? settledSource) === paymentId : !held || held === settledSource;
-  }).reduce((sum, item) => sum + reserved(item), 0);
-  const onLine = other.filter(item => item.orderItemId === row.orderItemId).reduce((sum, item) => sum + reserved(item), 0);
+  });
+  const used = sameReceipt.reduce((sum, item) => sum + reserved(item), 0);
+  const onLine = sameReceipt.filter(item => item.orderItemId === row.orderItemId).reduce((sum, item) => sum + reserved(item), 0);
   const line = view.lines.find(item => item.id === row.orderItemId)!;
   const gross = Math.round(line.unitPrice * line.quantity * 100);
   const agreement = currentSaleAgreement(row);
@@ -62,18 +67,16 @@ export async function refundPosition(tx: Db, view: AfterSaleWorkspace, row: Sale
   return { paidCents: verified?.amountCents ?? finance.settlementCents, usedCents: used, originalLineCents: gross, caseGoodsCents, lineUsedCents: onLine,
     originalAcceptance: finance.acceptanceId, authorityConflict: finance.authorityConflict, recordedCents: actualRefunded(row),
     originalPointsBasisYuan: view.order.pointsRefundedCash, originalCash: finance.cash.map(item => [item.id, item.amountCents]),
-    originalPaymentId: paymentId ?? settledSource, verifiedPayment: verified };
-}
-
-function eligibleOriginalPayment(view: AfterSaleWorkspace) {
-  return !view.order.acceptance || ['cancelled','closed'].includes(view.order.status);
+    originalPaymentId: paymentId ?? settledSource, verifiedPayment: verified,
+    sourceEligible: !verified || eligibleAfterSalePayment(verified, view.order, finance) };
 }
 
 export async function reviewRefundSource(tx: Db, view: AfterSaleWorkspace, row: SaleCase, data: Record<string, unknown>, proof: SaleEvidence) {
-  condition(row.customerState === 'awaiting_refund' && !sourceOf(row) && eligibleOriginalPayment(view),
-    '请从尚未接单或已取消的原单上核对本次客户退款所对应的实际到账');
+  condition(row.customerState === 'awaiting_refund' && !sourceOf(row), '请核对本次客户退款所对应且尚未留证的实际到账');
   const terms = refundTerms(row);
   const source = await verifiedAfterSalePayment(tx, view.order.id, requiredText(data.paymentId, '原支付宝交易'));
+  condition(eligibleAfterSalePayment(source, view.order, await financeWorkspace(tx, view.order.id)),
+    '原销货款仍按原订单办理，只能在本入口核对独立的验签到账');
   condition(terms.amountCents <= source.amountCents && data.originalTradeNo === source.tradeNo
     && (source.customer.organizationId ? data.customerKey === source.customer.organizationId : data.customerKey === source.customer.customerId)
     && proof.occurredAt >= source.arrivedAt, '原付款人、平台流水、实收金额或书证时间不符');
@@ -82,6 +85,20 @@ export async function reviewRefundSource(tx: Db, view: AfterSaleWorkspace, row: 
   const b4 = cases.find(event=>purchaseObject(jsonObject(event.detail).operation).sourceId===source.paymentId);
   return { operation: { originalPayment: source, agreementId: terms.agreementId, b4ClaimId: b4?.id ?? null,
     note: requiredText(data.note, '原支付渠道、客户及实际到账核对结果') } };
+}
+
+export async function releaseRefundSource(tx: Db, view: AfterSaleWorkspace, row: SaleCase, data: Record<string, unknown>, proof: SaleEvidence) {
+  const review = activeRefundSourceReview(row);
+  const decision = currentSaleAgreement(row);
+  condition(review && decision && saleOperation(decision).remedy === 'keep'
+    && decision.occurredAt >= review.occurredAt && Date.parse(proof.occurredAt) >= decision.occurredAt.getTime()
+    && data.reviewId === review.id && data.confirmUnsent === true, '请选择该笔原款核对和客户后来书面作出的保留原单决定');
+  condition(!caseEvents(row, 'approve_refund').length && !caseEvents(row, 'refund_result').length,
+    '已有退款批准、实际指令或回执，须按其真实结果核对未办余额');
+  const payment = await verifiedAfterSalePayment(tx, view.order.id, sourceOf(row)!);
+  condition(payment.tradeNo === purchaseObject(saleOperation(review).originalPayment).tradeNo, '原交易凭据已有变化');
+  return { operation: { reviewId: review.id, agreementId: decision.id, originalPayment: payment,
+    b4ClaimId: saleOperation(review).b4ClaimId, note: requiredText(data.note, '未批准、未发出退款指令及原单继续处理的核对结果') } };
 }
 
 export async function refundStep(tx: Db, view: AfterSaleWorkspace, row: SaleCase, action: string, data: Record<string, unknown>, evidence: SaleEvidence) {
@@ -127,7 +144,7 @@ export async function refundStep(tx: Db, view: AfterSaleWorkspace, row: SaleCase
       previouslyRecordedInApprovalCents: inApprovalCents },
       customerState: result === 'paid' && amountCents === outstandingCents ? 'awaiting_close' : 'refund_approved' };
   }
-  condition(position.verifiedPayment ? eligibleOriginalPayment(view) : !position.authorityConflict && position.originalAcceptance,
+  condition(position.verifiedPayment ? position.sourceEligible : !position.authorityConflict && position.originalAcceptance,
     '原单接单或回款归属待财务核对');
   condition(terms.amountCents <= position.paidCents - position.usedCents - position.recordedCents
     && terms.amountCents <= position.originalLineCents - position.lineUsedCents - position.recordedCents

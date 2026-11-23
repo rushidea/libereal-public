@@ -15,7 +15,7 @@ export function saleInput(orderId: string, raw: unknown): SaleInput {
     action: body.action, requestId: requiredText(body.requestId, '操作编号'), data: purchaseObject(body.data) };
 }
 export function salePermission(input: SaleInput): AdminPermissionKey {
-  if (['prepare_refund', 'approve_refund', 'refund_result', 'stop_refund', 'review_refund_source', 'invoice_outcome'].includes(input.action)) return 'finance.write';
+  if (['prepare_refund', 'approve_refund', 'refund_result', 'stop_refund', 'review_refund_source', 'release_refund_source', 'invoice_outcome', 'verify_invoice_line', 'invoice_reissue'].includes(input.action)) return 'finance.write';
   if (input.action === 'approve_exchange') return 'purchases.approve';
   if (input.action === 'attribute_resend') return 'purchases.write';
   if (input.action === 'supplier') return input.data.outcome === 'financial_result' ? 'purchases.pay' : 'purchases.write';

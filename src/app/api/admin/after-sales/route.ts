@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { Prisma } from '@prisma/client';
 import { afterSaleInvoiceChoices } from '@/lib/after-sale-invoices';
-import { verifiedAfterSalePayment } from '@/lib/after-sale-payment-source';
+import { eligibleAfterSalePayment, verifiedAfterSalePayment } from '@/lib/after-sale-payment-source';
+import { financeWorkspace } from '@/lib/finance-workspace';
 import { afterSaleAction } from '@/lib/after-sale-actions';
 import { refundPosition, refundTerms } from '@/lib/after-sale-refunds';
 import { saleInput, salePermission } from '@/lib/after-sale-records';
@@ -36,14 +37,16 @@ export async function GET(req: NextRequest) {
           .filter(row=>['awaiting_refund','refund_prepared','refund_approved','refund_followup'].includes(row.customerState))
           .map(async row=>({caseId:row.id,terms:refundTerms(row),position:await refundPosition(tx,view,row)}))) : [];
         const invoiceChoices = (await afterSaleInvoiceChoices(tx,id)).map(choice=>({
-          id:choice.id, number:choice.invoice.number, issuer:choice.invoice.issuer,
-          issuedAt:choice.invoice.issuedAt.toISOString(), amountCents:permissions.includes('finance.read')?Number(choice.amountCents):null,
+          ...choice, amountCents:permissions.includes('finance.read')?choice.amountCents:null,
+          correction:permissions.includes('finance.read')?choice.correction:null,
         }));
-        const canVerify = permissions.includes('finance.read') && (!view.order.acceptance || ['cancelled','closed'].includes(view.order.status));
-        const candidates = canVerify ? await tx.paymentAttempt.findMany({where:{orderId:id,provider:'alipay',tradeNo:{not:null}},select:{id:true}}) : [];
+        const candidates = permissions.includes('finance.read')
+          ? await tx.paymentAttempt.findMany({where:{orderId:id,provider:'alipay',tradeNo:{not:null}},select:{id:true}}) : [];
+        const finances = candidates.length ? await financeWorkspace(tx,id) : null;
         const refundSources = (await Promise.all(candidates.map(async item=>{
           try {
             const verified=await verifiedAfterSalePayment(tx,id,item.id);
+            if (!finances || !eligibleAfterSalePayment(verified,view.order,finances)) return null;
             return {id:item.id,tradeNo:verified.tradeNo,amountCents:verified.amountCents,arrivedAt:verified.arrivedAt,
               customerKey:verified.customer.organizationId??verified.customer.customerId};
           } catch(error) {if(error instanceof PurchaseError)return null;throw error;}

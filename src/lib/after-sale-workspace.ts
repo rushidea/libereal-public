@@ -5,6 +5,7 @@ import { jsonObject } from '@/lib/order-catalog-repricing';
 import { purchaseObject, purchaseOperation, readPurchaseActivities } from '@/lib/purchase-activity';
 import { readPurchaseAcceptance } from '@/lib/purchase-acceptance';
 import { purchaseShortfalls } from '@/lib/purchase-shortfalls';
+import { positiveCents } from '@/lib/purchase-terms';
 import { loadPurchaseOrderSource } from '@/lib/purchase-source';
 import { pricingContentHash } from '@/lib/pricing-adjustment-approval';
 
@@ -25,9 +26,19 @@ export function originalSaleParcel(row: SaleCase) {
   return typeof pinned === 'string' ? pinned : typeof covered === 'string' ? covered : null;
 }
 
+export function originalSaleParcelShares(row: SaleCase): { parcelLineId: string; quantity: number; evidenceEventId: string | null }[] {
+  const pinned = originalSaleParcel(row);
+  if (pinned) return [{ parcelLineId: pinned, quantity: row.quantity, evidenceEventId: null }];
+  return caseEvents(row, 'bind_original_parcel').flatMap(event => {
+    const op = saleOperation(event);
+    return typeof op.parcelLineId === 'string' && positiveCents(op.quantity)
+      ? [{ parcelLineId: op.parcelLineId, quantity: op.quantity, evidenceEventId: event.id }] : [];
+  });
+}
+
 type Parcel = Prisma.FulfillmentParcelGetPayload<{ include: typeof parcelInclude }>;
 
-type ResendShipments = Awaited<ReturnType<typeof purchaseShortfalls>>['resendShipments'];
+type ResendShipments = Awaited<ReturnType<typeof purchaseShortfalls>>['fulfillment']['resendShipments'];
 
 function deliveryFacts(parcels: Parcel[], shipments: ResendShipments) {
   const parentByReceipt = new Map(parcels.flatMap(parcel => parcel.lines.flatMap(line => line.receipts.map(receipt => [receipt.id, line.id] as const))));
@@ -53,23 +64,25 @@ function deliveryFacts(parcels: Parcel[], shipments: ResendShipments) {
 
 export async function afterSaleWorkspace(tx: Db, orderId: string) {
   const order = await loadPurchaseOrderSource(tx, orderId);
-  const [activities, cases, parcels, replacementLines] = await Promise.all([
+  const [activities, cases, parcels] = await Promise.all([
     readPurchaseActivities(tx, orderId),
     tx.afterSaleCase.findMany({ where: { orderId }, include: afterSaleCaseInclude, orderBy: [{ createdAt: 'asc' }, { id: 'asc' }] }),
     tx.fulfillmentParcel.findMany({ where: { orderId }, include: parcelInclude, orderBy: [{ dispatchedAt: 'asc' }, { id: 'asc' }] }),
-    tx.purchaseReplacementLine.findMany({ where: { orderId }, select: { id:true, purchaseOrderId:true, orderItemId:true,
-      fromPurchaseOrderId:true, authorizationId:true, quantity:true } }),
   ]);
-  const [acceptance, supply] = await Promise.all([readPurchaseAcceptance(tx, order, activities), purchaseShortfalls(tx, orderId, activities)]);
+  const [acceptance, { fulfillment: supply, replacementLineage }] = await Promise.all([readPurchaseAcceptance(tx, order, activities), purchaseShortfalls(tx, orderId, activities)]);
   const deliveries = deliveryFacts(parcels, supply.resendShipments);
-  const replacements = replacementLines.flatMap(line => {
-    const authorization = activities.find(item => item.id === line.authorizationId && item.action === 'resolve_change');
+  const replacements = replacementLineage.flatMap(line => {
     const commitment = activities.find(item => item.purchaseOrderId === line.purchaseOrderId && item.action === 'register_order');
-    const resolution = authorization && purchaseOperation(authorization.detail);
-    const disposition = Array.isArray(resolution?.dispositions) && resolution.dispositions.find(item => item.orderItemId === line.orderItemId
-      && item.outcome === 'replace' && item.quantity >= line.quantity);
-    if (!authorization || authorization.purchaseOrderId !== line.fromPurchaseOrderId || !commitment || !disposition) return [];
-    return [{ ...line, commitmentId:commitment.id, shortfallId: disposition.shortfallId ?? disposition.forwardingLossId ?? null }];
+    const op = commitment && purchaseOperation(commitment.detail);
+    const execution = purchaseObject(op?.execution);
+    const approved = activities.find(event => event.id === execution.approvalId && event.purchaseOrderId === line.purchaseOrderId);
+    const ordered = Array.isArray(execution.lines) ? execution.lines.map(purchaseObject).find(item => item.orderItemId === line.orderItemId) : null;
+    const supplier = purchaseObject(ordered?.terms).supplier;
+    const payableCents = ordered?.payableCents;
+    if (!commitment || !approved || !ordered || !positiveCents(ordered.quantity) || ordered.quantity > line.quantity
+      || typeof op?.occurredAt !== 'string' || typeof supplier !== 'string' || typeof payableCents !== 'number') return [];
+    return [{ ...line, quantity: ordered.quantity, approvalId: approved.id, commitmentId:commitment.id,
+      orderedAt: op.occurredAt, supplier, payableCents }];
   });
   const lines = order.orderItems.map(line => ({ id: line.id, name: line.name, brand: line.brand, catalogNumber: line.catalogNumber,
     quantity: line.quantity, unitPrice: line.unitPrice }));
@@ -107,7 +120,7 @@ export function afterSaleAdminView(view: AfterSaleWorkspace, permissions: readon
     cases: view.cases.map(row => ({
       id: row.id, orderItemId: row.orderItemId, quantity: row.quantity, relatedCents: row.relatedCents == null ? null : Number(row.relatedCents),
       issue: row.issue, channel: row.channel, report: row.report, reportedAt: row.reportedAt.toISOString(), reference: row.sourceReference,
-      shortfallId: row.shortfallId, originalParcelLineId: originalSaleParcel(row), agreementId: currentSaleAgreement(row)?.id ?? null, ownerId: row.ownerId, customerState: row.customerState, supplierState: row.supplierState, revision: row.revision,
+      shortfallId: row.shortfallId, originalParcelLineId: originalSaleParcel(row), originalParcelShares: originalSaleParcelShares(row), agreementId: currentSaleAgreement(row)?.id ?? null, ownerId: row.ownerId, customerState: row.customerState, supplierState: row.supplierState, revision: row.revision,
       events: row.events.map(event => {
         const hidden = ((event.action.includes('refund') || (event.action === 'agreement' && saleOperation(event).remedy === 'refund')) && !finance) || (event.action === 'supplier' && !procurement && !finance);
         return { id: event.id, action: event.action, actorId: event.actorId, occurredAt: event.occurredAt.toISOString(),

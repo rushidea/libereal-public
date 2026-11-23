@@ -282,8 +282,8 @@ async function dispatchPlan(tx: Db, orderId: string, raw: unknown, actor: Fulfil
       supplier: purchased.supplier, name: purchased.name, contractVersion: purchased.contractVersion, batchNumber: receipt?.batchNumber ?? null };
   });
   if (new Set(lines.map(dispatchSourceKey)).size !== lines.length) throw new PurchaseError('同一件数不得用不同写法重复消耗同一发运来源',400);
-  const exchange = lines.every(line => Boolean(line.afterSaleApprovalId));
-  if (!exchange && lines.some(line => line.afterSaleApprovalId)) throw new PurchaseError('售后换货与原约定交货须分别登记实际货件');
+  const originalLines = lines.filter(line => !line.afterSaleApprovalId);
+  const exchange = !originalLines.length;
   if (!(exchange ? ['confirmed','partially_shipped','shipped','completed'] : ['confirmed','partially_shipped']).includes(view.order.status)) {
     throw new PurchaseError('当前订单不能登记新的发货，请核对原接单和履约状态');
   }
@@ -302,9 +302,9 @@ async function dispatchPlan(tx: Db, orderId: string, raw: unknown, actor: Fulfil
       }
     }
   }
-  const byCustomerLine = validateShipmentItems(view.order.orderItems.map(item => ({
-    ...item, shippedQty: exchange ? 0 : item.shippedQty + (unforwarded.get(item.id) ?? 0),
-  })), lines);
+  const byCustomerLine = exchange ? [] : validateShipmentItems(view.order.orderItems.map(item => ({
+    ...item, shippedQty: item.shippedQty + (unforwarded.get(item.id) ?? 0),
+  })), originalLines);
   const recipient = input.route === 'supplier_to_libereal' ? { party: 'Libereal' }
     : { party: 'customer', email: view.order.email, deliveryAddress: view.order.addressSnapshot };
   const snapshot = { orderId, actorId: actor.id, requestId, ...input, recipient, lines };

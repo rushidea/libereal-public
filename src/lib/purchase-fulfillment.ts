@@ -46,7 +46,7 @@ export async function purchaseFulfillmentReview(tx: Db, order: SourceOrder, acti
   const delivered: Array<{ purchaseOrderId: string; orderItemId: string; quantity: number }> = [];
   const historicalDelivered: typeof delivered = [];
   const customerReceived: typeof delivered = [];
-  const shortfallReview = await purchaseShortfalls(tx,order.id,activities);
+  const { fulfillment: shortfallReview } = await purchaseShortfalls(tx,order.id,activities);
   const { supplierDispatched, supplierReceived } = shortfallReview;
   for (const row of rows) {
     const parcel = row.shipment.fulfillmentParcel;

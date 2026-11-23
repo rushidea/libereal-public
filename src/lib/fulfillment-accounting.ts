@@ -1,5 +1,5 @@
 import { dispatchHoldFacts } from '@/lib/fulfillment-holds';
-import { parcelLineBalance, type FulfillmentActor, type FulfillmentDb as Db, type FulfillmentParcelRecord } from '@/lib/fulfillment-records';
+import { parcelLineBalance, parcelProgress, type FulfillmentActor, type FulfillmentDb as Db, type FulfillmentParcelRecord } from '@/lib/fulfillment-records';
 import { jsonObject } from '@/lib/order-catalog-repricing';
 import { PurchaseError } from '@/lib/purchase-terms';
 
@@ -48,11 +48,11 @@ export async function customerShipmentRows(tx: Db, orderId: string) {
       id: true, orderItemId: true, purchaseOrderId: true, quantity: true, receivedQuantity: true, resolutions: true, afterSaleApprovalId: true,
     } } } } } } }, orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
   });
-  return rows.filter(row => !row.shipment.fulfillmentParcel?.lines.some(line => line.afterSaleApprovalId)).map(row => {
+  return rows.map(row => {
     const parcel = row.shipment.fulfillmentParcel;
     if (!parcel) return { ...row, effectiveQuantity: row.quantity, received: row.shipment.deliveredAt ? row.quantity : 0,
       sources: [], commercialPending:false, historicalAttributionId: null };
-    const lines = parcel.lines.filter(line => line.orderItemId === row.orderItemId);
+    const lines = parcel.lines.filter(line => !line.afterSaleApprovalId && line.orderItemId === row.orderItemId);
     if (lines.reduce((sum, line) => sum + line.quantity, 0) !== row.quantity) {
       throw new PurchaseError('采购包裹与客户发货行数量不一致，请核对原记录');
     }
@@ -84,11 +84,16 @@ export async function confirmedCustomerDelivery(tx: Db, orderId: string) {
 
 export async function syncCustomerParcelDelivery(tx: Db, parcel: FulfillmentParcelRecord, status: string, actor?: FulfillmentActor) {
   const { shipmentId, orderId } = parcel;
-  if (!shipmentId || (status !== 'delivered' && status !== 'shortfall')) return;
-  const receipts = parcel.lines.map(line => ({ line, evidence: customerLineReceipts(parcel,line) }));
+  if (!shipmentId) return;
+  const original = parcel.lines.filter(line => !line.afterSaleApprovalId);
+  const mixed = original.length > 0 && original.length < parcel.lines.length;
+  const lines = mixed ? original : parcel.lines;
+  const progress = mixed ? parcelProgress({ lines, events: parcel.events }) : status;
+  if (progress !== 'delivered' && progress !== 'shortfall') return;
+  const receipts = lines.map(line => ({ line, evidence: customerLineReceipts(parcel,line) }));
   const lastReceipt = receipts.reduce((last,{evidence}) => evidence.reduce((max,row) => Math.max(max,row.at),last),0);
   const verified = receipts.every(({line,evidence}) => evidence.reduce((sum,row) => sum+row.quantity,0) === line.receivedQuantity);
-  if (lastReceipt && verified && parcel.lines.some(line => parcelLineBalance(line).received > 0)) {
+  if (lastReceipt && verified && lines.some(line => parcelLineBalance(line).received > 0)) {
     await tx.shipment.updateMany({ where: { id: shipmentId, status: 'shipped' },
       data: { status: 'delivered', deliveredAt: new Date(lastReceipt) } });
   }

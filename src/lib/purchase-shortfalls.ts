@@ -55,7 +55,7 @@ export async function purchaseShortfalls(tx: Db, orderId: string, activities: Pu
       select: {id:true,kind:true,status:true,details:true,createdAt:true,reference:true,evidenceSha256:true} },
   }, orderBy: [{ dispatchedAt: 'asc' }, { id: 'asc' }] });
   const replacements = await tx.purchaseReplacementLine.findMany({ where: { orderId },
-    select: { purchaseOrderId: true, orderItemId: true, fromPurchaseOrderId: true, authorizationId: true, quantity: true } });
+    select: { id: true, purchaseOrderId: true, orderItemId: true, fromPurchaseOrderId: true, authorizationId: true, quantity: true } });
   const authorized = new Map(dispositions.map(row => [sourceKey(row.approvalId,row.orderItemId),row]));
   const resendRights = decisions.filter(row => row.kind === 'free_resend');
   const attributed = await tx.afterSaleEvent.findMany({ where: { action: 'attribute_resend', case: { orderId } },
@@ -89,12 +89,13 @@ export async function purchaseShortfalls(tx: Db, orderId: string, activities: Pu
     }
   }
   const replacementOrigins = new Map<string,StockSource | null>();
-  for (const row of replacements) {
+  const replacementLineage = replacements.flatMap(row => {
     const decision = replacementRights.get(sourceKey(row.authorizationId,row.orderItemId));
     const proved = decision?.purchaseOrderId === row.fromPurchaseOrderId && decision.quantity === row.quantity;
     replacementOrigins.set(sourceKey(row.purchaseOrderId,row.orderItemId), !proved ? null
       : decision.shortfallId ? { shortfallId: decision.shortfallId } : { purchaseLine: sourceKey(row.fromPurchaseOrderId,row.orderItemId) });
-  }
+    return proved ? [{ ...row, decisionId: decision.approvalId, shortfallId: decision.shortfallId ?? null }] : [];
+  });
   const companyParcels = parcels.flatMap(parcel => parcel.lines.flatMap(line => line.purchaseOrderId
     ? [{ parcel, line, purchaseOrderId: line.purchaseOrderId }] : []));
   const parcelLines = new Map(companyParcels.map(record => [record.line.id,record]));
@@ -294,7 +295,9 @@ export async function purchaseShortfalls(tx: Db, orderId: string, activities: Pu
     return [{...target,key:dispatchShortfallKey(reviewEventId,target),reviewEventId,reference,sha256,reviewedAt:decision.recordedAt.toISOString()}];
   }));
   const unlinkedDispatchShortfalls = unlinkedDispatchShortfallsAt(reviewedDispatchShortfalls, activities);
-  return { resendShipments, supplierDispatched: [...supplierDispatched.values()], supplierReceived, warehouseReceived, warehouseTransit, shortfalls, freeResends, incidentSources,dispatchHolds,unlinkedDispatchShortfalls,
-    reviewedDispatchShortfalls,
-    parcelLinesWithPriorHoldTransfer, replacementsWithPriorHoldTransfer, parcelLinesWithUnverifiedStockSource, replacementsWithUnverifiedStockSource };
+  return { replacementLineage, fulfillment: {
+    resendShipments, supplierDispatched: [...supplierDispatched.values()], supplierReceived, warehouseReceived, warehouseTransit,
+    shortfalls, freeResends, incidentSources, dispatchHolds, unlinkedDispatchShortfalls, reviewedDispatchShortfalls,
+    parcelLinesWithPriorHoldTransfer, replacementsWithPriorHoldTransfer, parcelLinesWithUnverifiedStockSource, replacementsWithUnverifiedStockSource,
+  } };
 }

@@ -1,7 +1,7 @@
 import { alipayAmountToCents } from '@/lib/alipay';
 import type { FulfillmentDb as Db } from '@/lib/fulfillment-records';
 import { jsonObject } from '@/lib/order-catalog-repricing';
-import { alipayReceiptWhere } from '@/lib/payment-concurrency';
+import { isAlipayReconciliationStatus, alipayReceiptWhere } from '@/lib/payment-concurrency';
 import { purchaseObject } from '@/lib/purchase-activity';
 import { condition } from '@/lib/after-sale-records';
 
@@ -31,13 +31,21 @@ export async function verifiedAfterSalePayment(tx: Db, orderId: string, paymentI
       && (!expected.reason || op.reason === expected.reason);
   });
   condition(verified.length === 1, '请选择能由唯一验签记录确认的实际原交易');
-  return { paymentId: attempt.id, orderId, tradeNo: attempt.tradeNo, outTradeNo: attempt.outTradeNo, amountCents,
+  return { paymentId: attempt.id, status: attempt.status, orderId, tradeNo: attempt.tradeNo, outTradeNo: attempt.outTradeNo, amountCents,
     arrivedAt: (attempt.paidAt ?? attempt.notifiedAt).toISOString(), auditId: verified[0].id, customer: attempt.order };
+}
+
+export function eligibleAfterSalePayment(source: Awaited<ReturnType<typeof verifiedAfterSalePayment>>,
+  order: { acceptance: unknown; status: string },
+  finance: { nativePaymentId: string | null; cash: { paymentAttemptId: string | null }[] }) {
+  if (!order.acceptance || ['cancelled','closed'].includes(order.status)) return true;
+  return isAlipayReconciliationStatus(source.status) && (source.status !== 'paid_stock_shortfall_reconciliation_required' || finance.nativePaymentId !== null)
+    && source.paymentId !== finance.nativePaymentId && !finance.cash.some(row => row.paymentAttemptId === source.paymentId);
 }
 
 export async function afterSalePaymentUses(tx: Db, orderId: string) {
   const events = await tx.afterSaleEvent.findMany({ where: {
-    action: { in: ['review_refund_source', 'refund_result', 'agreement'] }, case: { orderId },
+    action: { in: ['review_refund_source', 'release_refund_source', 'refund_result', 'agreement'] }, case: { orderId },
   }, select: { id: true, caseId: true, actorId: true, action: true, detail: true }, orderBy: [{ createdAt: 'asc' }, { id: 'asc' }] });
   const byPayment = new Map<string, { caseIds: string[]; ownerId: string; reviewId: string; paidCents: number; receivedCents: number }>();
   for (const event of events) {
@@ -50,7 +58,8 @@ export async function afterSalePaymentUses(tx: Db, orderId: string) {
     const paid = outcomes.reduce((sum, {action,op:result}) => action === 'refund_result' && result.result === 'paid' && result.sourcePaymentId === source.paymentId
       && typeof result.amountCents === 'number' ? sum + result.amountCents : sum, 0);
     const agreement=outcomes.filter(row=>row.action==='agreement'&&!row.op.historical).at(-1);
-    if (!paid && agreement?.op.remedy === 'refund_withdraw') continue;
+    const released = outcomes.some(({action, op}) => action === 'release_refund_source' && op.reviewId === event.id);
+    if (released || !paid && agreement?.op.remedy === 'refund_withdraw') continue;
     const current = byPayment.get(source.paymentId);
     if (!current) byPayment.set(source.paymentId, { caseIds: [event.caseId], ownerId: event.actorId, reviewId: event.id,
       paidCents: paid, receivedCents: source.amountCents });

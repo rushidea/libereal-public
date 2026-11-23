@@ -3,7 +3,7 @@ import { financeIdentity } from '@/lib/finance-workspace';
 import { purchaseWorkspace } from '@/lib/purchase-orders';
 import { requiredText } from '@/lib/purchase-terms';
 import { cents, choice, condition, type SaleEvidence } from '@/lib/after-sale-records';
-import { type SaleCase, type AfterSaleWorkspace, originalSaleParcel, caseEvents, saleOperation } from '@/lib/after-sale-workspace';
+import { type SaleCase, type AfterSaleWorkspace, originalSaleParcel, originalSaleParcelShares, caseEvents, saleOperation } from '@/lib/after-sale-workspace';
 import { allocateAfterSaleTransfer } from '@/lib/after-sale-transfers';
 
 export async function supplierAfterSale(tx: Db, view: AfterSaleWorkspace, row: SaleCase, data: Record<string, unknown>, proof: SaleEvidence) {
@@ -11,9 +11,10 @@ export async function supplierAfterSale(tx: Db, view: AfterSaleWorkspace, row: S
   const purchasing = await purchaseWorkspace(tx, view.order.id);
   const sources = purchasing.orders.filter(po => po.orderReceipt?.lines.some(line => line.orderItemId === row.orderItemId));
   const loss = view.shortfalls.find(item => item.resolutionId === row.shortfallId);
-  const pinned = originalSaleParcel(row);
-  const original = view.deliveries.find(item => item.id === (pinned ?? data.originalParcelLineId) && item.orderItemId===row.orderItemId);
-  condition(!data.originalParcelLineId || original?.id===data.originalParcelLineId, '请核对本案指定的原实际包裹');
+  const shares = originalSaleParcelShares(row);
+  const selected = data.originalParcelLineId ?? (shares.length === 1 ? shares[0].parcelLineId : originalSaleParcel(row));
+  const original = view.deliveries.find(item => item.id === selected && item.orderItemId===row.orderItemId);
+  condition(!selected || original && (!shares.length || shares.some(part => part.parcelLineId === original.id)), '请核对本案指定的原实际包裹');
   const affectedPurchase = loss?.purchaseOrderId ?? original?.purchaseOrderId;
   const note = requiredText(data.note, '供应商独立处理凭据及结果');
   if (outcome === 'no_claim' && !data.purchaseOrderId) {

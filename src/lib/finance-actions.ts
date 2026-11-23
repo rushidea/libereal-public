@@ -274,9 +274,28 @@ async function invoiceDocument(tx: Db, view: FinanceWorkspace, input: FinanceInp
   if (doc?.allocations.some(row => row.planId === plan.id)) throw new PurchaseError('本发票已归入该项安排');
   const allocatedBeforeCents = doc?.allocations.reduce((sum, row) => sum + Number(row.amountCents), 0) ?? 0;
   if (allocatedBeforeCents + amountCents > grossCents) throw new PurchaseError('分配金额超过这张发票可用的票面金额');
+  const correctionId = data.correctionEventId === undefined ? null : requiredText(data.correctionEventId, '原票实际红冲回执记录号');
+  let replaces: { invoiceId: string; number: string; correctionEventId: string } | undefined;
+  if (correctionId) {
+    const correction = await tx.financeEvent.findFirst({ where: { id: correctionId, action: 'resolve_correction' },
+      include: { invoice: { include: { events: { orderBy: [{ createdAt: 'asc' }, { id: 'asc' }] } } } } });
+    const detail = correction && jsonObject(correction.detail);
+    const original = correction?.invoice;
+    const op = purchaseObject(detail?.operation);
+    const authorized = purchaseObject(detail?.authorization);
+    const affected = Array.isArray(op.affected) ? op.affected : [];
+    if (plan.side !== 'customer' || original?.side !== plan.side || !correction?.approvedHash || authorized.permission !== 'finance.write'
+      || authorized.action !== 'admin_sensitive' || !affected.some(part => part.orderId === input.orderId)
+      || op.outcome !== 'voided' || invoiceStatus(original.events) !== 'voided'
+      || financeIdentity(original.issuer) !== financeIdentity(issuer) || financeIdentity(original.recipient) !== financeIdentity(recipient)
+      || typeof op.occurredAt !== 'string' || issuedAt < op.occurredAt || original.id === doc?.id) {
+      throw new PurchaseError('替代票须对应本单已红冲的原票、真实回执、双方主体与签发日期');
+    }
+    replaces = { invoiceId: original.id, number: original.number, correctionEventId: correction.id };
+  }
   return { ...evidence, action: 'record_invoice' as const, planId: plan.id, invoiceId: doc?.id ?? null, side: plan.side,
     partyKey: plan.partyKey, issuer, recipient, identityKey, number, issuedAt, readyAt, grossCents, amountCents, allocatedBeforeCents,
-    invoiceScopeId: sourceScope?.id ?? null, invoiceAuthority: authority, adjustedPlans, portions, reviewedReservationId };
+    invoiceScopeId: sourceScope?.id ?? null, invoiceAuthority: authority, adjustedPlans, portions, reviewedReservationId, replaces };
 }
 
 type Evidence = { reference: string; sha256: string; description: string };
