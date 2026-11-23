@@ -1,7 +1,7 @@
 import { Prisma } from '@prisma/client';
 import { isAlipayReconciliationStatus } from '@/lib/payment-concurrency';
 import { receivableOutstandingCents } from '@/lib/receivable-balance';
-import { invoiceTimeline } from '@/lib/finance-invoice-timeline';
+import { invoicePeriodAt, invoiceTermsPeriods, invoiceTimeline } from '@/lib/finance-invoice-timeline';
 import { invoiceCharges, invoiceCommitments, invoiceCoverageRemaining, readInvoicePortions } from '@/lib/finance-invoice-coverage';
 import { invoiceAuthorityTimeline, invoiceScopeRooms, invoicesOutsideAuthority, readInvoiceAuthorityChange } from '@/lib/finance-invoice-authority';
 import { confirmedCustomerDelivery, customerShipmentRows } from '@/lib/fulfillment-accounting';
@@ -59,7 +59,7 @@ const invoicePlanInclude = { allocations: { include: { invoice: { include: { eve
 type InvoicePlanRow = Prisma.FinanceInvoicePlanGetPayload<{ include: typeof invoicePlanInclude }>;
 
 function dateValue(value: unknown) {
-  return typeof value === 'string' && Number.isFinite(Date.parse(value)) ? value : null;
+  return typeof value === 'string' && Number.isFinite(Date.parse(value)) ? new Date(value).toISOString() : null;
 }
 
 function invoicePlanViews(plans: InvoicePlanRow[], events: FinanceEventView[], now: Date) {
@@ -95,7 +95,7 @@ function invoicePlanViews(plans: InvoicePlanRow[], events: FinanceEventView[], n
         coverageReviewId: review?.id ?? null,
         reviewedReservationId: typeof booked?.operation.reviewedReservationId === 'string' ? booked.operation.reviewedReservationId : null };
     });
-    const planReview = history.findLast(row => row.action === 'verify_invoice_coverage' && row.checkedCoverage
+    const planReviews = history.filter(row => row.action === 'verify_invoice_coverage' && row.checkedCoverage
       && row.operation.allocationId === null && row.operation.ownerId === row.actorId);
     return { id: plan.id, orderId: plan.orderId, side: plan.side, purchaseOrderId: plan.purchaseOrderId, partyKey: plan.partyKey,
       issuer: plan.issuer, recipient: plan.recipient, grossCents: Number(plan.grossCents), trigger: plan.trigger,
@@ -105,25 +105,53 @@ function invoicePlanViews(plans: InvoicePlanRow[], events: FinanceEventView[], n
       amendedFromPlanId: amendment?.planId ?? null, effectiveAt: dateValue(amendment?.operation.effectiveAt ?? amendment?.operation.occurredAt),
       closed: Boolean(close), closedAt: dateValue(close?.operation.occurredAt) ?? close?.occurredAt ?? null,
       stoppedCents: Number(close?.operation.stoppedCents ?? 0),
-      planReview,
+      amendmentRecordedAt: amendment?.occurredAt ?? null, closeRecordedAt: close?.occurredAt ?? null,
+      planReviews,
       manualAt: dateValue(history.findLast(row => row.action === 'confirm_condition')?.operation.occurredAt),
       lastFollowup: history.findLast(row => row.action === 'chase_invoice') ?? null };
   });
   const current = invoiceTimeline(invoices, now.getTime());
   const future = invoiceTimeline(invoices);
-  return invoices.map(({ planReview, ...plan }) => {
-    const scheduledRemainingCents = future.remaining.get(plan.id) ?? 0;
-    let coverageReview = null;
-    if (planReview) {
-      const { amountCents, portions, existingAllocationIds } = planReview.operation;
+  const today = now.toISOString();
+  const beforeChange = new Map<string, ReturnType<typeof invoiceTimeline>>();
+  function timelineBefore(until: string) {
+    const saved = beforeChange.get(until);
+    if (saved) return saved;
+    const timeline = invoiceTimeline(invoices, Date.parse(until) - 1);
+    beforeChange.set(until, timeline);
+    return timeline;
+  }
+  return invoices.map(({ planReviews, ...plan }) => {
+    const coveragePeriods = plan.invoiceScopeId ? invoiceTermsPeriods(plan, invoices) : [];
+    const matched = new Map(planReviews.map(review => {
+      const { coveragePeriod } = review.operation;
+      const key = typeof coveragePeriod === 'string' ? coveragePeriod
+        : invoicePeriodAt(invoiceTermsPeriods(plan, invoices, review.occurredAt), review.occurredAt)?.key;
+      return [key, review];
+    }));
+    const periods = coveragePeriods.map(period => {
+      const through = period.until && period.until <= today
+        ? timelineBefore(period.until) : current;
+      const remainingCents = period.from && period.from > today ? 0 : through.remaining.get(plan.id) ?? 0;
+      const review = matched.get(period.key);
+      if (!review) return { ...period, remainingCents, review: null };
+      const { amountCents, portions, existingAllocationIds } = review.operation;
       const parts = typeof amountCents === 'number' && readInvoicePortions(portions, amountCents);
+      // Later entries for different terms still compete in the shared invoice timeline.
+      const actual = plan.allocations.filter(row =>
+        (!period.from || row.issuedAt >= period.from) && (!period.until || row.issuedAt < period.until));
       const remaining = parts && Array.isArray(existingAllocationIds)
-        ? invoiceCoverageRemaining(planReview.id, parts, existingAllocationIds, plan.allocations) : null;
-      coverageReview = { id: planReview.id, actorId: planReview.actorId, occurredAt: planReview.occurredAt,
-        remaining: remaining && (plan.closed || remaining.reduce((sum, part) => sum + part.amountCents, 0) === scheduledRemainingCents) ? remaining : null };
-    }
-    return { ...plan, remainingCents: current.remaining.get(plan.id) ?? 0,
-      recordable: !plan.effectiveAt || Date.parse(plan.effectiveAt) <= now.getTime(), scheduledRemainingCents, coverageReview,
+        ? invoiceCoverageRemaining(review.id, parts, existingAllocationIds, actual) : null;
+      return { ...period, remainingCents, review: {
+        id: review.id, actorId: review.actorId, occurredAt: review.occurredAt,
+        remaining: remaining && remaining.reduce((sum, part) => sum + part.amountCents, 0) === remainingCents ? remaining : null,
+      } };
+    });
+    const latest = planReviews.at(-1);
+    const priorReview = latest && { id: latest.id, actorId: latest.actorId, occurredAt: latest.occurredAt, remaining: null };
+    const coverageReview = invoicePeriodAt(periods, today)?.review ?? priorReview ?? null;
+    return { ...plan, remainingCents: current.remaining.get(plan.id) ?? 0, coveragePeriods: periods, coverageReview,
+      recordable: !plan.effectiveAt || Date.parse(plan.effectiveAt) <= now.getTime(), scheduledRemainingCents: future.remaining.get(plan.id) ?? 0,
       effectiveAllocationCents: plan.amendedFromPlanId ? future.transfers.get(plan.id) ?? 0 : plan.grossCents };
   });
 }
@@ -260,7 +288,9 @@ export async function financeWorkspace(tx: Db, orderId: string) {
     const issuedCents = planned.reduce((sum, plan) => sum + plan.usedCents, 0);
     const plannedCents = planned.reduce((sum, plan) => sum + plan.usedCents + plan.scheduledRemainingCents, 0);
     if (!invoiceConflicts.length) {
-      for (const [scopeId, room] of invoiceScopeRooms(timeline, invoiceCommitments(planned))) scopeRooms.set(scopeId, room);
+      const scheduled = planned.map(plan => ({ ...plan, coverageReview: plan.coveragePeriods.at(-1)?.review
+        ?? (plan.coverageReview && { remaining: null }) }));
+      for (const [scopeId, room] of invoiceScopeRooms(timeline, invoiceCommitments(scheduled))) scopeRooms.set(scopeId, room);
     }
     return { id: root.id, authorizedCents, issuedCents, plannedCents, invoiceConflicts, timeline, evidence,
       availableCents: authorizedCents === null || invoiceConflicts.length ? null : Math.max(0, authorizedCents - plannedCents) };

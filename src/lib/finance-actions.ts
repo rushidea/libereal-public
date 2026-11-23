@@ -4,7 +4,7 @@ import { customerCashProjection, postVerifiedCustomerCash } from '@/lib/customer
 import { refreshCreditRestrictions } from '@/lib/customer-credit';
 import { invoiceAuthorityAt, invoiceAuthorityTimeline, invoiceScopeRooms, invoicesOutsideAuthority, type InvoiceAuthorityChange } from '@/lib/finance-invoice-authority';
 import { invoiceCharges, invoiceCommitments, readInvoicePortions } from '@/lib/finance-invoice-coverage';
-import { invoiceTimeline } from '@/lib/finance-invoice-timeline';
+import { invoicePeriodAt, invoiceTimeline } from '@/lib/finance-invoice-timeline';
 import { coveredCustomerInvoiceLines, customerInvoiceScopeVersion, financeIdentity, financeWorkspace, invoiceStatus, invoiceTriggers,
   type FinanceWorkspace, type InvoiceTrigger } from '@/lib/finance-workspace';
 import { jsonObject } from '@/lib/order-catalog-repricing';
@@ -123,22 +123,32 @@ function reviewedInvoiceCoverage(view: FinanceWorkspace, data: FinanceInput['dat
   if (!family) throw new PurchaseError('请先核对可追溯的原开票范围及书证');
   const allocation = data.allocationId == null ? null : plan.allocations.find(row => row.id === data.allocationId && row.status !== 'voided');
   if (data.allocationId != null && !allocation) throw new PurchaseError('请核对所选原票分配仍属于本项安排');
-  const amountCents = allocation?.amountCents ?? plan.scheduledRemainingCents;
+  const coverageAt = !allocation && data.coverageAt != null ? actualTime(data.coverageAt, '原安排核对时间') : null;
+  const at = allocation?.issuedAt ?? coverageAt ?? new Date().toISOString();
+  const period = invoicePeriodAt(plan.coveragePeriods, at);
+  const amountCents = allocation?.amountCents ?? period?.remainingCents ?? 0;
   if (amountCents <= 0) throw new PurchaseError('本项没有待核的开票安排金额');
   const portions = checkedInvoicePortions(view, original, data.portions, amountCents);
   const plans = familyInvoicePlans(view, family);
-  const reassigned = plans.map(row => row.id !== plan.id ? row : allocation ? {
-    ...row, allocations: row.allocations.map(used => used.id === allocation.id ? { ...used, scopePortions: portions } : used),
-  } : { ...row, coverageReview: { id: 'review-preview', actorId: actor.id, occurredAt: '', remaining: portions } });
   if (allocation) {
+    const reassigned = plans.map(row => row.id !== plan.id ? row : {
+      ...row, allocations: row.allocations.map(used => used.id === allocation.id ? { ...used, scopePortions: portions } : used),
+    });
     const conflicts = invoicesOutsideAuthority(family.timeline, invoiceCharges(reassigned));
     const previouslyUnclear = new Set(family.invoiceConflicts.map(row => row.id));
     if (conflicts.some(row => row.id === allocation.id || !previouslyUnclear.has(row.id))) {
       throw new PurchaseError('本次核对的原票金额、书证日期或其他已经占用的额度仍有冲突');
     }
   } else {
-    const before = invoiceScopeRooms(family.timeline, invoiceCommitments(plans));
-    const after = invoiceScopeRooms(family.timeline, invoiceCommitments(reassigned));
+    const dated = invoiceTimeline(plans, Date.parse(at));
+    const applicable = plans.map(row => ({
+      ...row, allocations: row.allocations.filter(used => used.issuedAt <= at),
+      scheduledRemainingCents: row.id === plan.id ? amountCents : dated.remaining.get(row.id) ?? 0,
+      coverageReview: invoicePeriodAt(row.coveragePeriods, at)?.review ?? (row.coverageReview && { remaining: null }),
+    }));
+    const reassigned = applicable.map(row => row.id === plan.id ? { ...row, coverageReview: { remaining: portions } } : row);
+    const before = invoiceScopeRooms(family.timeline, invoiceCommitments(applicable), at);
+    const after = invoiceScopeRooms(family.timeline, invoiceCommitments(reassigned), at);
     if (portions.some(part => (after.get(part.invoiceScopeId)?.roomCents ?? -1) < 0)
       || [...after].some(([id, room]) => room.roomCents < 0 && (before.get(id)?.roomCents ?? 0) >= 0)) {
       throw new PurchaseError('本次核对的原安排金额超过有效书证或影响其他已占用额度');
@@ -146,6 +156,7 @@ function reviewedInvoiceCoverage(view: FinanceWorkspace, data: FinanceInput['dat
   }
   return { ...evidence, action: 'verify_invoice_coverage' as const, planId: plan.id, allocationId: allocation?.id ?? null,
     invoiceId: allocation?.invoiceId ?? null, existingAllocationIds: plan.allocations.map(row => row.id), amountCents, portions,
+    coverageAt, coveragePeriod: allocation ? null : period?.key,
     subject: { originalScopeId: original.id, originalReference: original.reference, planReference: plan.reference,
       invoiceNumber: allocation?.number ?? null, issuedAt: allocation?.issuedAt ?? null, documentReference: allocation?.reference ?? plan.reference },
     ownerId: actor.id };
@@ -223,10 +234,11 @@ async function invoiceDocument(tx: Db, view: FinanceWorkspace, input: FinanceInp
   const identityKey = pricingContentHash({ issuer: financeIdentity(issuer), number: financeIdentity(number) });
   const grossCents = money(data.grossCents, '票面含税合计');
   const amountCents = money(data.amountCents, '本次归入金额');
-  const reviewedReservationId = plan.coverageReview?.id ?? null;
+  const review = invoicePeriodAt(plan.coveragePeriods, issuedAt)?.review;
+  const reviewedReservationId = review?.id ?? null;
   let portions: ReturnType<typeof checkedInvoicePortions> | undefined;
   if (plan.coverageReview) {
-    const remaining = plan.coverageReview.remaining;
+    const remaining = review?.remaining;
     if (!sourceScope || !remaining?.length) throw new PurchaseError('原安排可用金额已有变化，请先核对本次适用的商品和书证');
     const selected = data.portions ?? (remaining.reduce((sum, part) => sum + part.amountCents, 0) === amountCents ? remaining : undefined);
     portions = checkedInvoicePortions(view, sourceScope, selected, amountCents);

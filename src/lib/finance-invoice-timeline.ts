@@ -8,6 +8,35 @@ export type DatedInvoicePlan = {
   allocations: Array<{ id: string; issuedAt: string; amountCents: number; status: string }>;
 };
 
+type TermsDates = Pick<DatedInvoicePlan, 'id' | 'amendedFromPlanId' | 'effectiveAt' | 'closedAt'> & {
+  amendmentRecordedAt: string | null;
+  closeRecordedAt: string | null;
+};
+
+/** A coverage review belongs to the terms actually in force for this arrangement. */
+export function invoiceTermsPeriods(plan: TermsDates, plans: TermsDates[], knownAt?: string) {
+  const dates = new Map<string, string[]>();
+  const add = (at: string | null, recordedAt: string | null, id: string) => {
+    if (!at || knownAt && recordedAt && recordedAt > knownAt) return;
+    dates.set(at, [...(dates.get(at) ?? []), id]);
+  };
+  add(plan.effectiveAt, plan.amendmentRecordedAt, plan.id);
+  add(plan.closedAt, plan.closeRecordedAt, 'closed');
+  for (const child of plans.filter(row => row.amendedFromPlanId === plan.id)) {
+    add(child.effectiveAt, child.amendmentRecordedAt, child.id);
+  }
+  const boundaries = [...dates.keys()].sort();
+  const revisions: Array<[string, string[]]> = [];
+  return [null, ...boundaries].map((from, index) => {
+    if (from) revisions.push([from, dates.get(from)!.sort()]);
+    return { from, until: boundaries[index] ?? null, key: JSON.stringify(revisions) };
+  });
+}
+
+export function invoicePeriodAt<Period extends { from: string | null; until: string | null }>(periods: Period[], at: string) {
+  return periods.find(period => (!period.from || period.from <= at) && (!period.until || at < period.until));
+}
+
 type Entry =
   | { kind: 'transfer'; at: number; plan: DatedInvoicePlan; from: string; depth: number }
   | { kind: 'close'; at: number; plan: DatedInvoicePlan }

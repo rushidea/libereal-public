@@ -72,8 +72,9 @@ export function invoiceCommitments(plans: ScopedPlan[]) {
   for (const row of invoiceCharges(plans)) if (row.status !== 'voided') add(row.scopeId, row.amountCents);
   for (const plan of plans) {
     if (plan.scheduledRemainingCents <= 0) continue;
-    if (plan.coverageReview?.remaining) {
-      for (const part of plan.coverageReview.remaining) add(part.invoiceScopeId, part.amountCents);
+    const parts = plan.coverageReview?.remaining;
+    if (parts?.reduce((sum, part) => sum + part.amountCents, 0) === plan.scheduledRemainingCents) {
+      for (const part of parts) add(part.invoiceScopeId, part.amountCents);
     } else {
       add(plan.coverageReview ? null : plan.invoiceScopeId, plan.scheduledRemainingCents);
     }
