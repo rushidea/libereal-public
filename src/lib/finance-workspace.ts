@@ -2,6 +2,7 @@ import { Prisma } from '@prisma/client';
 import { isAlipayReconciliationStatus } from '@/lib/payment-concurrency';
 import { receivableOutstandingCents } from '@/lib/receivable-balance';
 import { invoiceTimeline } from '@/lib/finance-invoice-timeline';
+import { invoiceCharges, invoiceCommitments, invoiceCoverageRemaining, readInvoicePortions } from '@/lib/finance-invoice-coverage';
 import { invoiceAuthorityTimeline, invoiceScopeRooms, invoicesOutsideAuthority, readInvoiceAuthorityChange } from '@/lib/finance-invoice-authority';
 import { confirmedCustomerDelivery, customerShipmentRows } from '@/lib/fulfillment-accounting';
 import { jsonObject } from '@/lib/order-catalog-repricing';
@@ -28,8 +29,10 @@ const eventSelect = {
 type EventRow = Prisma.FinanceEventGetPayload<{ select: typeof eventSelect }>;
 function eventView(row: EventRow) {
   const detail = jsonObject(row.detail);
+  const authorization = purchaseObject(detail.authorization);
   return { id: row.id, action: row.action, planId: row.planId, invoiceId: row.invoiceId, actorId: row.actorId,
     occurredAt: row.createdAt.toISOString(), operation: purchaseObject(detail.operation),
+    checkedCoverage: Boolean(row.approvedHash && authorization.permission === 'finance.write' && authorization.action === 'admin_sensitive'),
     replacementPlanId: typeof detail.replacementPlanId === 'string' ? detail.replacementPlanId : null };
 }
 
@@ -80,10 +83,20 @@ function invoicePlanViews(plans: InvoicePlanRow[], events: FinanceEventView[], n
     const close = history.findLast(row => row.action === 'close_plan');
     const allocations = plan.allocations.map(allocation => {
       const doc = allocation.invoice;
+      const amountCents = Number(allocation.amountCents);
+      const booked = history.find(row => row.action === 'record_invoice' && row.checkedCoverage && row.invoiceId === doc.id);
+      const review = history.findLast(row => row.action === 'verify_invoice_coverage' && row.checkedCoverage
+        && row.invoiceId === doc.id && row.operation.allocationId === allocation.id && row.operation.ownerId === row.actorId);
+      const bookedPortions = readInvoicePortions(booked?.operation.portions, amountCents);
       return { id: allocation.id, invoiceId: doc.id, number: doc.number, amountCents: Number(allocation.amountCents),
         grossCents: Number(doc.grossCents), reference: doc.reference, sha256: doc.sha256,
-        issuedAt: doc.issuedAt.toISOString(), issuer: doc.issuer, recipient: doc.recipient, status: invoiceStatus(doc.events) };
+        issuedAt: doc.issuedAt.toISOString(), issuer: doc.issuer, recipient: doc.recipient, status: invoiceStatus(doc.events),
+        scopePortions: readInvoicePortions(review?.operation.portions, amountCents) ?? bookedPortions,
+        coverageReviewId: review?.id ?? null,
+        reviewedReservationId: typeof booked?.operation.reviewedReservationId === 'string' ? booked.operation.reviewedReservationId : null };
     });
+    const planReview = history.findLast(row => row.action === 'verify_invoice_coverage' && row.checkedCoverage
+      && row.operation.allocationId === null && row.operation.ownerId === row.actorId);
     return { id: plan.id, orderId: plan.orderId, side: plan.side, purchaseOrderId: plan.purchaseOrderId, partyKey: plan.partyKey,
       issuer: plan.issuer, recipient: plan.recipient, grossCents: Number(plan.grossCents), trigger: plan.trigger,
       ownerId: plan.ownerId, reference: plan.reference, sha256: plan.sha256, allocations,
@@ -92,15 +105,27 @@ function invoicePlanViews(plans: InvoicePlanRow[], events: FinanceEventView[], n
       amendedFromPlanId: amendment?.planId ?? null, effectiveAt: dateValue(amendment?.operation.effectiveAt ?? amendment?.operation.occurredAt),
       closed: Boolean(close), closedAt: dateValue(close?.operation.occurredAt) ?? close?.occurredAt ?? null,
       stoppedCents: Number(close?.operation.stoppedCents ?? 0),
+      planReview,
       manualAt: dateValue(history.findLast(row => row.action === 'confirm_condition')?.operation.occurredAt),
       lastFollowup: history.findLast(row => row.action === 'chase_invoice') ?? null };
   });
   const current = invoiceTimeline(invoices, now.getTime());
   const future = invoiceTimeline(invoices);
-  return invoices.map(plan => ({ ...plan, remainingCents: current.remaining.get(plan.id) ?? 0,
-    recordable: !plan.effectiveAt || Date.parse(plan.effectiveAt) <= now.getTime(),
-    scheduledRemainingCents: future.remaining.get(plan.id) ?? 0, effectiveAllocationCents: plan.amendedFromPlanId
-      ? future.transfers.get(plan.id) ?? 0 : plan.grossCents }));
+  return invoices.map(({ planReview, ...plan }) => {
+    const scheduledRemainingCents = future.remaining.get(plan.id) ?? 0;
+    let coverageReview = null;
+    if (planReview) {
+      const { amountCents, portions, existingAllocationIds } = planReview.operation;
+      const parts = typeof amountCents === 'number' && readInvoicePortions(portions, amountCents);
+      const remaining = parts && Array.isArray(existingAllocationIds)
+        ? invoiceCoverageRemaining(planReview.id, parts, existingAllocationIds, plan.allocations) : null;
+      coverageReview = { id: planReview.id, actorId: planReview.actorId, occurredAt: planReview.occurredAt,
+        remaining: remaining && (plan.closed || remaining.reduce((sum, part) => sum + part.amountCents, 0) === scheduledRemainingCents) ? remaining : null };
+    }
+    return { ...plan, remainingCents: current.remaining.get(plan.id) ?? 0,
+      recordable: !plan.effectiveAt || Date.parse(plan.effectiveAt) <= now.getTime(), scheduledRemainingCents, coverageReview,
+      effectiveAllocationCents: plan.amendedFromPlanId ? future.transfers.get(plan.id) ?? 0 : plan.grossCents };
+  });
 }
 
 export async function financeAttention(tx: Db, now: Date) {
@@ -231,17 +256,11 @@ export async function financeWorkspace(tx: Db, orderId: string) {
     const planned = invoicePlans.filter(plan => plan.invoiceScopeId && scopeIds.has(plan.invoiceScopeId));
     const timeline = invoiceAuthorityTimeline(evidence);
     const authorizedCents = timeline.at(-1)!.authorizedCents;
-    const invoiceConflicts = invoicesOutsideAuthority(timeline, planned.flatMap(plan =>
-      plan.allocations.map(allocation => ({ ...allocation, scopeId: plan.invoiceScopeId }))));
+    const invoiceConflicts = invoicesOutsideAuthority(timeline, invoiceCharges(planned));
     const issuedCents = planned.reduce((sum, plan) => sum + plan.usedCents, 0);
     const plannedCents = planned.reduce((sum, plan) => sum + plan.usedCents + plan.scheduledRemainingCents, 0);
     if (!invoiceConflicts.length) {
-      const commitments = new Map<string, number>();
-      for (const plan of planned) {
-        const id = plan.invoiceScopeId!;
-        commitments.set(id, (commitments.get(id) ?? 0) + plan.usedCents + plan.scheduledRemainingCents);
-      }
-      for (const [scopeId, room] of invoiceScopeRooms(timeline, commitments)) scopeRooms.set(scopeId, room);
+      for (const [scopeId, room] of invoiceScopeRooms(timeline, invoiceCommitments(planned))) scopeRooms.set(scopeId, room);
     }
     return { id: root.id, authorizedCents, issuedCents, plannedCents, invoiceConflicts, timeline, evidence,
       availableCents: authorizedCents === null || invoiceConflicts.length ? null : Math.max(0, authorizedCents - plannedCents) };
@@ -249,6 +268,7 @@ export async function financeWorkspace(tx: Db, orderId: string) {
   const customerInvoiceScopes = customerInvoiceReviewsFound.filter(row => row.change?.mode !== 'clarify').map(evidence => {
     const room = scopeRooms.get(evidence.id);
     return { ...evidence, authorizedCents: room?.authorizedCents ?? null, roomCents: room?.roomCents ?? null,
+      sharesCumulativeLimit: room?.sharesCumulativeLimit ?? false,
       remainingCents: room ? Math.max(0, room.roomCents) : null };
   });
   const verifiedQuantities = new Map<string, number>();
