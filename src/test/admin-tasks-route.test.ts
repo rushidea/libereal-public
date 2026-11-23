@@ -33,7 +33,7 @@ describe('admin task routes', () => {
   });
 
   it('retries a failed task and writes an audit entry', async () => {
-    const task = await enqueueBackgroundTask('sms.send', {});
+    const task = await enqueueBackgroundTask('search.index_update', {});
     await prisma.backgroundTask.update({ where: { id: task.id }, data: { status: 'failed', attempts: 3, lastError: 'send failed' } });
     const response = await PATCH(new NextRequest('http://localhost:3000/api/admin/tasks', {
       method: 'PATCH',
@@ -102,4 +102,27 @@ describe('admin task routes', () => {
     expect(requireAdmin).toHaveBeenCalledWith('inquiries.write');
     expect(await prisma.quote.count()).toBe(0);
   });
+  it('records the actual delivery review without re-sending and binds the evidence to the shown version', async () => {
+    const task = await prisma.backgroundTask.create({ data: { type: 'sms.send', status: 'awaiting_human',
+      payload: '{"phone":"private-number"}', lastError: 'legacy uncertain', attempts: 1 } });
+    const get = async () => (await (await GET(new NextRequest('http://localhost/api/admin/tasks'))).json()).tasks[0];
+    const patch = (data: unknown) => PATCH(new NextRequest('http://localhost/api/admin/tasks', {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }));
+    const original = await get();
+    expect(JSON.stringify(original)).not.toContain('private-number');
+    expect((await patch({ id: task.id, action: 'retry' })).status).toBe(409);
+    const review = { id: task.id, action: 'record_delivery_review', version: original.deliveryVersion,
+      outcome: 'partial', reference: 'local admin delivery log', sha256: 'a'.repeat(64) };
+    expect((await patch(review)).status).toBe(200);
+    expect((await patch(review)).status).toBe(200);
+    const second = await get();
+    expect(second.status).toBe('awaiting_human');
+    expect(second.deliveryVersion).not.toBe(original.deliveryVersion);
+    expect((await patch({ ...review, outcome: 'all_accepted' })).status).toBe(409);
+    expect((await patch({ ...review, outcome: 'none_accepted', version: second.deliveryVersion, sha256: 'b'.repeat(64) })).status).toBe(200);
+    expect((await get()).status).toBe('delivery_reviewed');
+    expect(await prisma.auditLog.count({ where: { action: 'task.delivery_reviewed', targetId: task.id } })).toBe(2);
+    expect((await prisma.backgroundTask.findUniqueOrThrow({ where: { id: task.id } })).attempts).toBe(1);
+  });
+
 });

@@ -6,6 +6,8 @@ import { PATCH as legacyOrderPATCH } from '@/app/api/orders/[id]/route';
 import { PATCH as creditPATCH } from '@/app/api/admin/users/[id]/credit/route';
 import { reserveOrderCredit } from '@/lib/customer-credit';
 import { prisma } from '@/lib/prisma';
+import { discoverOrderPurchaseWork, runOrderPurchaseContinuationOnce } from '@/lib/purchase-continuation-worker';
+import { PURCHASE_CONTINUATION, PURCHASE_READY, purchaseContinuationKey } from '@/lib/purchase-continuation-state';
 import { pricingContentHash } from '@/lib/pricing-adjustment-approval';
 import { verifyAndPriceItems } from '@/lib/pricing';
 import { prepareSupplierQuoteReview, recordSupplierQuoteReply } from '@/lib/supplier-quote-review';
@@ -1755,5 +1757,48 @@ describe('recorded customer acceptance and per-order funding', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe('order purchase continuation', () => {
+  it('settles the eligible order, resumes its waiting neighbour after a documented decision and retains one original line', async () => {
+    const waiting = await seedOrder('office-clip-order-waiting', { status: 'confirmed' });
+    await prisma.$transaction(tx => reserveOrderCredit(tx, waiting.id, merchant.id));
+    expect(await discoverOrderPurchaseWork()).toBe(1);
+    expect(await runOrderPurchaseContinuationOnce()).toMatchObject({ status: 'awaiting_human' });
+    const other = await seedOrder('office-box-order-active');
+    await acceptAsMerchant(other.id);
+    expect(await discoverOrderPurchaseWork()).toBe(0);
+    expect(await runOrderPurchaseContinuationOnce()).toMatchObject({ status: 'succeeded' });
+    const where = (orderId: string) => ({ dedupeKey: purchaseContinuationKey(orderId) });
+    const old = await prisma.backgroundTask.findUniqueOrThrow({ where: where(waiting.id) });
+    const ready = await prisma.backgroundTask.findUniqueOrThrow({ where: where(other.id) });
+    expect(old.status).toBe('awaiting_human');
+    expect(JSON.parse(ready.result!)).toMatchObject({ orderId: other.id, orderItemIds: [other.orderItems[0].id] });
+    const record = await startReview(waiting.id, { ...reviewEvidence, action: 'verify_acceptance', requestId: 'office-archive',
+      originalActor: merchant.id, authorityReference: 'OFFICE-ARCHIVED-ACCEPTANCE', occurredAt: waiting.createdAt.toISOString() });
+    await applyStart(record.input);
+    expect(await runOrderPurchaseContinuationOnce(new Date(Date.now() + 16 * 60_000))).toMatchObject({ id: old.id, status: 'succeeded' });
+    const current = await prisma.backgroundTask.findUniqueOrThrow({ where: where(waiting.id) });
+    expect(JSON.parse(current.result!)).toMatchObject({ ownerId: approver.id, orderItemIds: [waiting.orderItems[0].id], outcome: 'prepared' });
+    expect(await prisma.purchaseRequirement.findUniqueOrThrow({ where: { orderItemId: waiting.orderItems[0].id } })).toMatchObject({ ownerId: approver.id, purchaseOrderId: null });
+    expect(await prisma.purchaseActivity.count({ where: { orderId: waiting.id, action: 'prepare', actorId: 'system:purchase-preparation' } })).toBe(1);
+    expect(await runOrderPurchaseContinuationOnce(new Date(Date.now() + 24 * 3_600_000))).toBeNull();
+    expect(await prisma.backgroundTask.findUniqueOrThrow({ where: where(other.id) })).toEqual(ready);
+    expect(await prisma.purchaseOrder.count()).toBe(0);
+  });
+
+  it('isolates a malformed source without touching a different order or the supplier wait', async () => {
+    const damaged = await prisma.backgroundTask.create({ data: { type: PURCHASE_CONTINUATION, status: PURCHASE_READY,
+      dedupeKey: purchaseContinuationKey('damaged'), payload: JSON.stringify({ orderId: 'other', version: null }), runAt: new Date(0), maxAttempts: 1 } });
+    const human = await prisma.backgroundTask.create({ data: { type: 'inquiry.supplier_written_quote', payload: '{}', status: 'awaiting_human' } });
+    const order = await seedOrder('office-paper-other-order');
+    await acceptAsMerchant(order.id);
+    expect(await runOrderPurchaseContinuationOnce()).toMatchObject({ id: damaged.id, status: 'attempt_failed' });
+    expect(await runOrderPurchaseContinuationOnce()).toMatchObject({ status: 'succeeded' });
+    expect(await prisma.backgroundTask.findUniqueOrThrow({ where: { id: human.id } })).toEqual(human);
+    expect(await prisma.backgroundTask.findUniqueOrThrow({ where: { id: damaged.id } })).toMatchObject({ status: 'failed', attempts: 1 });
+    expect(await prisma.auditLog.count({ where: { targetId: damaged.id, action: 'purchase.continuation_failed' } })).toBe(1);
+    expect(await prisma.purchaseActivity.count({ where: { orderId: order.id, action: 'prepare' } })).toBe(1);
   });
 });
