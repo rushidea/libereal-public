@@ -16,6 +16,7 @@ export const statuses = { draft:'待独立批准',approved:'采购已批准',ord
 export const actionNames = { approve:'批准采购单',approve_lead_time:'单独批准超长订货周期',register_order:'登记供应商订购结果',record_payment:'登记实际付款',
   review_payment_time:'补核原银行付款时间',
   record_payment_exception:'登记待核对付款凭证',review_payment_exception:'记录付款差异处理结果',
+  approve_payment_attribution:'批准暂停期间付款的归属',correct_payment_attribution:'更正已记付款归属',
   report_change:'登记供货变化',review_change_scope:'核对供货事项范围',resolve_change:'回填协调结果',prepare:'准备采购',save_line:'保存采购资料',
   review_legacy_approval:'复核旧采购批准',approve_remaining:'核准原单剩余应付',record_late_order_exception:'登记实际订购异常',
   resolve_order_exception:'核对订购异常处理结果',

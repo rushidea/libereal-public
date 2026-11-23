@@ -17,13 +17,15 @@ export default function FinancePreview({ preview, busy, onConfirm, onBack }: {
     {op.action === 'create_plan' && <><p>{op.side === 'customer' ? '客户开票' : '供应商来票'} · {op.issuer} 开给 {op.recipient}</p>
       <p>含税金额 {money(op.grossCents)} · 办理条件 {triggerLabels[op.trigger]} {op.purchaseOrderId && ' · ' + op.purchaseOrderId}</p></>}
     {op.action === 'amend_plan' && <><p>原安排 {money(op.original.grossCents)} · 已占用 {money(op.original.usedCents)}
-      {' · 原条件剩余 ' + money(op.original.remainingCents - op.amountCents)}</p>
+      {' · 生效后原条件尚余 ' + money(op.retainedCents)}</p>
       <p>本次按新条件办理 {money(op.amountCents)} · {triggerLabels[op.trigger]} · 生效 {dateLabel(op.effectiveAt)}</p>
       {op.retroactiveReference && <p>书面追溯条款 {op.retroactiveReference}</p>}</>}
     {op.action === 'close_plan' && <p>本次止用的未开或未收金额 {money(op.stoppedCents)}</p>}
     {op.action === 'record_invoice' && <><p>票号 {op.number} · {op.issuer} 开给 {op.recipient}</p>
       <p>票面 {money(op.grossCents)} · 已分 {money(op.allocatedBeforeCents)} · 本次归入 {money(op.amountCents)}</p>
-      <p>开票时间 {dateLabel(op.issuedAt)} · 约定条件达成 {dateLabel(op.readyAt)}</p></>}
+      <p>开票时间 {dateLabel(op.issuedAt)} · 约定条件达成 {dateLabel(op.readyAt)}</p>
+      {op.adjustedPlans?.map(row => <p key={row.planId}>同一原安排 {row.reference} · 原可用 {money(row.previousCents)} · 回填后额度 {money(row.effectiveCents)}</p>)}
+    </>}
     {op.action === 'verify_bank_receipt' && <><p>付款人 {op.bank.payer} · 收款账户 {op.bank.receivingAccount}</p>
       <p>流水 {op.bank.bankTrace} · 到账 {money(op.bank.receiptTotalCents)} · {dateLabel(op.bank.occurredAt)}</p></>}
     {op.action === 'record_customer_receipt' && <><p>银行流水 {op.bank.bankTrace} · 分摊编号 {op.allocationReference}</p>
@@ -31,10 +33,15 @@ export default function FinancePreview({ preview, busy, onConfirm, onBack }: {
     {'accounting' in op && <p>本次核销 {money(op.accounting.amountCents)} · 本单余款 {money(op.accounting.remainingCents)} · 本次释放授信 {money(op.accounting.releaseCents)}</p>}
     {'accounting' in op && op.accounting.creditReservationUnverified && <p>原授信预占凭据待核对。本次仅核销应收。</p>}
     {op.action === 'verify_receivable_principal' && <p>原应收 {op.receivableId} · 原书证金额 {money(op.amountCents)} · 订单面额 {money(op.orderFaceCents)}</p>}
+    {op.action === 'verify_customer_invoice_scope' && <>
+      <p>{op.issuer} 开给 {op.recipient} · 书证可开含税金额 {money(op.grossCents)} · 原接单记录 {op.acceptanceId}</p>
+      <ul>{op.lines.map(line => <li key={line.id}>{line.name} · {line.quantity} 件</li>)}</ul>
+    </>}
     {(op.action === 'restore_term' || op.action === 'set_term') && <p>原到期 {dateLabel(op.before.dueAt)} · 起算 {dateLabel(op.startedAt)} · {op.days} 天 · 到期 {dateLabel(op.dueAt)}</p>}
     {op.action === 'resume_alipay_payment' && <>
       <p>原支付宝流水 {op.payment.tradeNo} · {money(op.payment.amountCents)} · 平台回执时间 {dateLabel(op.payment.receivedAt)}</p>
       {op.payment.providerPaidAt && <p>支付宝原付款时间 {dateLabel(op.payment.providerPaidAt)}</p>}
+      {op.payment.cancellationRequest && <p>本次一并核对原取消或移除申请 {op.payment.cancellationRequest.id} · {dateLabel(op.payment.cancellationRequest.recordedAt)}</p>}
       <p>确认时核对原订单可售库存及付款状态。</p>
       <ul>{op.payment.lines.map(row => <li key={row.id}>{row.name} · {row.quantity} 件</li>)}</ul>
     </>}

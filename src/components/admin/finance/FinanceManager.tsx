@@ -83,9 +83,15 @@ export default function FinanceManager({ initialOrder }: { initialOrder: string 
       if (!view.receivable.termStartedAt && !view.receivable.dueAt) actions.push('restore_term');
       actions.push('set_term');
     }
-    if (view.acceptanceId || view.purchases.length) actions.push('create_plan');
+    const invoiceScopeMissing = view.acceptanceId && !view.archived && !['closed', 'cancelled'].includes(view.status)
+      && view.principalCents <= 0 && !view.customerInvoiceScope;
+    if (invoiceScopeMissing) actions.push('verify_customer_invoice_scope');
+    if (view.acceptanceId && !invoiceScopeMissing && !['closed', 'cancelled'].includes(view.status)
+      || view.purchases.some(row => row.agreedCents !== null)) actions.push('create_plan');
     const active = view.invoicePlans.filter(row => !row.closed);
-    if (active.some(row => row.remainingCents > 0)) actions.push('record_invoice', 'amend_plan', 'close_plan');
+    if (view.invoicePlans.some(row => row.recordable)) actions.push('record_invoice');
+    if (active.some(row => row.scheduledRemainingCents > 0)) actions.push('amend_plan');
+    if (active.some(row => Math.min(row.remainingCents, row.scheduledRemainingCents) > 0)) actions.push('close_plan');
     if (active.some(row => row.trigger === 'manual' && !row.manualAt)) actions.push('confirm_condition');
     if (active.some(row => row.side === 'supplier' && row.remainingCents > 0)) actions.push('chase_invoice');
     if (view.invoicePlans.some(row => row.allocations.some(a => a.status === 'recorded'))) actions.push('open_correction');
@@ -126,10 +132,13 @@ export default function FinanceManager({ initialOrder }: { initialOrder: string 
       {view.receivable && <p>账期 {view.receivable.terms} 天 · 起算 {dateLabel(view.receivable.termStartedAt)} · 到期 {dateLabel(view.receivable.dueAt)}</p>}
       {view.receivable?.needsPrincipalReview && <p>保留原应收余额。订单面额待财务核对后再核销。</p>}
       {view.postingPrincipal?.reviewId && <p>原应收金额已核对 {money(view.postingPrincipal.cents)} · 核对记录 {view.postingPrincipal.reviewId}</p>}
+      {view.customerInvoiceScope && <p>历史客户可开票范围 {money(view.customerInvoiceScope.grossCents)} · {view.customerInvoiceScope.issuer} 开给 {view.customerInvoiceScope.recipient}
+        {' · 原书证 ' + view.customerInvoiceScope.reference}</p>}
       {view.receivable?.needsTermReview && <p>旧账期的起算日期与平台接单日期不同，请核对本单书面约定。</p>}
       <p>平台接单 {dateLabel(view.acceptedAt)} · 客户已签收 {dateLabel(view.shipmentDates.delivered)}</p>
       {view.authorityConflict && <p role="alert">到账来源有重叠，须由财务核对原件。</p>}
       {view.nativePaymentId && <p>支付宝原生交易 {view.nativePaymentId}</p>}
+      {view.cancellationRequest && <p>取消或移除申请已记录 · {dateLabel(view.cancellationRequest.recordedAt)} · 等待财务核对原到账和处理意愿。</p>}
       {view.latePayments.map(row => <div key={row.id} className="text-sm">
         <p>平台到账待核对 · {row.outTradeNo} · {money(row.amountCents)}{row.tradeNo && ' · 支付宝流水 ' + row.tradeNo}</p>
         {row.review && <p>跟进负责人 {row.review.ownerId} · {paymentCaseProgressLabels[String(row.review.lastRecord.operation.outcome)] ?? '已领取待核对'}</p>}
@@ -147,6 +156,8 @@ export default function FinanceManager({ initialOrder }: { initialOrder: string 
         {po.supplierFollowup && <p>供方差异待跟进 · 经办人 {po.supplierFollowup.actorId} · {String(po.supplierFollowup.reference)}</p>}
         {po.paymentExceptions.filter(row => row.pending).map(row => <p key={row.id}>付款待核对 {money(row.original.amountCents)}
           {' · 原流水 ' + row.original.paymentEvidence.bankTrace + ' · 负责人 ' + row.ownerId} · {row.followup?.operation.description ?? row.original.description}</p>)}
+        {po.paymentCorrections.map(row => <p key={row.id}>已记实付等额归属更正 {money(row.operation.amountCents)}
+          {' · 原采购单 ' + row.operation.source.purchaseOrderId + ' · 目标采购单 ' + row.targetPurchaseOrderId + ' · 原流水 ' + row.operation.paymentEvidence.bankTrace}</p>)}
         {po.payments.map(row => <p key={row.id}>付款凭据 {row.reference} · {money(row.amountCents)} · 实际付款 {dateLabel(row.occurredAt)}
           {' · 原登记 ' + dateLabel(row.recordedAt)}{row.reviewedBy && ' · 补核人 ' + row.reviewedBy}</p>)}
       </article>)}</section>}
@@ -156,6 +167,7 @@ export default function FinanceManager({ initialOrder }: { initialOrder: string 
         <p>{plan.issuer} 开给 {plan.recipient} · 原安排 {money(plan.grossCents)} · 已占用 {money(plan.usedCents)}
           {' · 尚可办理 ' + money(plan.remainingCents)} · {triggerLabels[plan.trigger]}</p>
         {plan.effectiveAt && <p>约定生效 {dateLabel(plan.effectiveAt)}</p>}
+        {plan.amendedFromPlanId && plan.effectiveAllocationCents !== plan.grossCents && <p>结合原安排的实际票面，本版可用的总额度 {money(plan.effectiveAllocationCents)}</p>}
         <p>经办人 {plan.ownerId}</p>
         {!plan.closed && plan.remainingCents > 0 && plan.lastFollowup && <p>下次追票 {dateLabel(String(plan.lastFollowup.operation.nextReviewAt))}
           {' · 跟进人 ' + plan.lastFollowup.actorId}</p>}

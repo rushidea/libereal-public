@@ -150,7 +150,9 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
       });
       const data = await response.json().catch(() => ({})) as { error?: string };
       if (!response.ok) {
-        window.alert(data.error === 'PAID_ORDER_REFUND_REQUIRED'
+        window.alert(data.error === 'ALIPAY_RECEIPT_PENDING_REVIEW'
+          ? '已记录取消申请。支付宝到账正由财务核对。'
+          : data.error === 'PAID_ORDER_REFUND_REQUIRED'
           ? '已付款订单需要退款审核，暂时不能自助取消。'
           : data.error === 'POINTS_REFUND_FAILED'
             ? '积分没有退回，订单没有取消。请稍后重试。'

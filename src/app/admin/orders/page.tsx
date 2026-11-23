@@ -180,6 +180,7 @@ function orderActionErrorMessage(data: { error?: string; requiredPermission?: st
   const messages: Record<string, string> = {
     ALIPAY_PAYMENT_REQUIRED: '支付宝订单尚未付款，不能确认订单。',
     PAID_ORDER_REFUND_REQUIRED: '支付宝订单已经付款，取消或关闭前需要先办理退款。',
+    ALIPAY_RECEIPT_PENDING_REVIEW: '已记录本次请求。原支付宝到账等待财务核对，订单状态保留。',
     ORDER_ITEMS_LOCKED: '支付宝订单已经发起付款，不能再改商品。',
     INVALID_ORDER_AMOUNT: '订单金额无效，请检查商品价格和数量。',
     PAYMENT_METHOD_LOCKED: '该订单已经产生支付记录，付款方式不能修改。',
@@ -209,6 +210,7 @@ function withdrawOrderErrorMessage(error: unknown, orderId: unknown): string {
   const target = typeof orderId === 'string' && orderId ? `订单 ${orderId}` : '所选订单';
   const messages: Record<string, string> = {
     PAID_ORDER_REFUND_REQUIRED: `${target}已经付款，需要先办理退款。本次没有改动任何订单。`,
+    ALIPAY_RECEIPT_PENDING_REVIEW: `已记录${target}的移除请求。请在票款页面核对原支付宝到账。`,
     ORDER_DELETE_BLOCKED: `${target}已发货或已完成，不能移除。请保留订单记录。本次没有改动任何订单。`,
     ORDER_NOT_FOUND: '有订单不存在或已被处理，请刷新后重试。本次没有改动任何订单。',
     POINTS_REFUND_FAILED: '积分未能退回，订单未移除。请刷新后重试。',

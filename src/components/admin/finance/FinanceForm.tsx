@@ -9,6 +9,7 @@ import { button, cents, field, money, primary } from '@/components/admin/purchas
 export const actionLabels = {
   verify_bank_receipt: '核验银行到账原件', record_customer_receipt: '分摊银行回款', post_existing: '核销既有到账',
   verify_receivable_principal: '核对原应收金额',
+  verify_customer_invoice_scope: '核对历史客户可开票范围',
   restore_term: '按平台接单日期补齐账期', set_term: '登记单独约定的账期', create_plan: '登记开票或收票安排',
   amend_plan: '变更未开或未收部分的条件',
   confirm_condition: '核验约定开票条件', chase_invoice: '记录供应商追票', close_plan: '止用剩余开票或收票安排',
@@ -44,12 +45,14 @@ export default function FinanceForm({ view, action, busy, onPreview, onCancel, o
   view: FinanceWorkspace; action: FinanceInput['action']; busy: boolean;
   onPreview: (input: FinanceInput) => Promise<void>; onCancel: () => void; onError: (message: string) => void;
 }) {
-  const [side, setSide] = useState('customer');
+  const customerCanPlan = view.acceptanceId && (view.principalCents > 0 || view.customerInvoiceScope);
+  const [side, setSide] = useState(customerCanPlan ? 'customer' : 'supplier');
   const [documentKind, setDocumentKind] = useState('single_receipt');
-  const plans = view.invoicePlans.filter(plan => !plan.closed && (
-    action === 'chase_invoice' ? plan.side === 'supplier' && plan.remainingCents > 0
-    : action === 'confirm_condition' ? plan.trigger === 'manual' && !plan.manualAt
-    : plan.remainingCents > 0));
+  const plans = view.invoicePlans.filter(plan => action === 'record_invoice'
+    ? plan.recordable
+    : !plan.closed && (action === 'chase_invoice' ? plan.side === 'supplier' && plan.remainingCents > 0
+      : action === 'confirm_condition' ? plan.trigger === 'manual' && !plan.manualAt
+      : action === 'amend_plan' ? plan.scheduledRemainingCents > 0 : Math.min(plan.remainingCents, plan.scheduledRemainingCents) > 0));
   const [planId, setPlanId] = useState(plans[0]?.id ?? '');
   const [poId, setPoId] = useState(view.purchases[0]?.id ?? '');
   const plan = plans.find(row => row.id === planId);
@@ -74,11 +77,14 @@ export default function FinanceForm({ view, action, busy, onPreview, onCancel, o
     event.preventDefault();
     try {
       const data: Record<string, unknown> = {};
-      for (const [key, entry] of new FormData(event.currentTarget)) {
+      const form = new FormData(event.currentTarget);
+      for (const [key, entry] of form) {
         if (typeof entry !== 'string' || !entry.trim()) continue;
-        data[key] = moneyFields.has(key) ? cents(entry) : timeFields.has(key) ? new Date(entry).toISOString()
+        if (key === 'invoiceLineIds') continue;
+        data[key] = key === 'confirmContinueAfterCancellation' ? true : moneyFields.has(key) ? cents(entry) : timeFields.has(key) ? new Date(entry).toISOString()
           : key === 'days' || key === 'statementRow' ? Number(entry) : entry.trim();
       }
+      if (action === 'verify_customer_invoice_scope') data.invoiceLineIds = form.getAll('invoiceLineIds');
       await onPreview({ orderId: view.orderId, version: view.version, requestId: crypto.randomUUID(), action, data });
     } catch (error) { onError(error instanceof Error ? error.message : '请核对填写内容'); }
   }}>
@@ -87,6 +93,16 @@ export default function FinanceForm({ view, action, busy, onPreview, onCancel, o
       {action === 'verify_receivable_principal' && <>
         <Amount name="amountCents" label="原凭证记载的应收金额"/>
         <Time name="occurredAt" label="原书证确认应收时间"/>
+      </>}
+      {action === 'verify_customer_invoice_scope' && <>
+        <Text name="issuer" label="原书证开票方全称"/><Text name="recipient" label="原书证受票方全称"/>
+        <Amount name="grossCents" label="原书证可开的含税金额"/>
+        <Time name="occurredAt" label="原书证载明的实际确认时间"/>
+        <fieldset className="space-y-1 sm:col-span-2"><legend>原书证覆盖的实际订单行</legend>
+          {view.originalInvoiceLines.map(line => <label key={line.id} className="flex items-center gap-2">
+            <input name="invoiceLineIds" type="checkbox" value={line.id}/>{line.name} · {line.quantity} 件
+          </label>)}
+        </fieldset>
       </>}
       {action === 'verify_bank_receipt' && <>
         <label className="grid gap-1">银行原件类型<select name="documentKind" className={field} value={documentKind} onChange={e => setDocumentKind(e.target.value)}>
@@ -109,17 +125,20 @@ export default function FinanceForm({ view, action, busy, onPreview, onCancel, o
         <label className="grid gap-1">约定天数<input className={field} name="days" type="number" step="1" min="0" required/></label></>}
       {action === 'create_plan' && <>
         <label className="grid gap-1">发票方向<select name="side" className={field} value={side} onChange={e => setSide(e.target.value)}>
-          <option value="customer">Libereal 给客户开票</option><option value="supplier">向供应商收票</option></select></label>
+          {customerCanPlan && <option value="customer">Libereal 给客户开票</option>}
+          {view.purchases.some(row => row.agreedCents !== null) && <option value="supplier">向供应商收票</option>}</select></label>
         {side === 'supplier' && poSelect}
-        <Text key={side + poId} name="issuer" label="约定开票方全称" initial={side === 'supplier' ? po?.supplier ?? '' : ''}/>
-        <Text name="recipient" label="约定受票方全称"/><Amount name="grossCents" label="本项安排含税金额"/>
+        <Text key={side + poId} name="issuer" label="约定开票方全称" initial={side === 'supplier' ? po?.supplier ?? '' : view.customerInvoiceScope?.issuer}/>
+        <Text key={'recipient-' + side} name="recipient" label="约定受票方全称" initial={side === 'customer' ? view.customerInvoiceScope?.recipient : undefined}/>
+        <Amount name="grossCents" label="本项安排含税金额"/>
         <label className="grid gap-1">约定开票节点<select name="trigger" required className={field} defaultValue="">
           <option value="" disabled>选择书面约定</option>{Object.entries(triggerLabels).filter(([key]) => side === 'customer' || !['dispatched', 'delivered'].includes(key))
             .map(([key, label]) => <option value={key} key={key}>{label}</option>)}</select></label>
       </>}
       {['record_invoice','amend_plan','confirm_condition','close_plan','chase_invoice'].includes(action) && <label className="grid gap-1">发票安排
         <select name="planId" value={planId} onChange={e => setPlanId(e.target.value)} className={field} required>
-          {plans.map(row => <option key={row.id} value={row.id}>{row.side === 'customer' ? '销项' : '进项'} · {row.reference} · 余 {money(row.remainingCents)}</option>)}</select></label>}
+          {plans.map(row => <option key={row.id} value={row.id}>{row.side === 'customer' ? '销项' : '进项'} · {row.reference}
+            {action === 'record_invoice' ? ' · 按票面日期核对' : ' · 可用 ' + money(action === 'amend_plan' ? row.scheduledRemainingCents : row.remainingCents)}</option>)}</select></label>}
       {action === 'amend_plan' && <>
         <Amount name="amountCents" label="本次变更条件对应的未开金额"/>
         <Time name="effectiveAt" label="书面约定生效时间（与确认时间相同可留空）" required={false}/>
@@ -145,6 +164,10 @@ export default function FinanceForm({ view, action, busy, onPreview, onCancel, o
         <option value="" disabled>请选择</option><option value="matched">本次核对一致</option><option value="followup">有差异，继续跟进</option></select></label></>}
       {(action === 'review_payment_case' || action === 'update_payment_case' || action === 'resume_alipay_payment') && <label className="grid gap-1">待核对的交易<select name="sourceId" className={field} required>
         {sources.map(row => <option key={row.id} value={row.id}>{row.label}</option>)}</select></label>}
+      {action === 'resume_alipay_payment' && view.cancellationRequest && <label className="flex items-start gap-2 sm:col-span-2">
+        <input type="checkbox" required name="confirmContinueAfterCancellation"/>
+        已凭书面依据核对取消或移除申请的处理结果，原单可继续办理。
+      </label>}
       {action === 'update_payment_case' && <label className="grid gap-1">当前进展<select className={field} name="outcome" defaultValue="" required>
         <option value="" disabled>按已有书证选择</option>
         {Object.entries(paymentCaseProgressLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
