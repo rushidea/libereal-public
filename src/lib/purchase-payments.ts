@@ -135,14 +135,17 @@ export async function readSupplierPaymentIssues(tx: Prisma.TransactionClient, or
     const isRouting = (outcome: PaymentIssueOutcome) => outcome === 'outside_purchase' || outcome === 'assign_purchase';
     const route = reviewHistory.findLast(row => isRouting(row.operation.outcome));
     const activePurchaseOrderId = route ? route.operation.target?.purchaseOrderId ?? null : original.purchaseOrderId;
-    const followup = reviewHistory.findLast(row => row.purchaseOrderId === (activePurchaseOrderId ?? original.purchaseOrderId)
+    const activeReviews = reviewHistory.filter(row => row.purchaseOrderId === (activePurchaseOrderId ?? original.purchaseOrderId)
       && row.ordinal > (route?.ordinal ?? original.ordinal) && !isRouting(row.operation.outcome));
+    const followup = activeReviews.at(-1);
+    const noEffectiveApproval = reviewHistory.findLast(row => row.purchaseOrderId === activePurchaseOrderId
+      && row.operation.outcome === 'no_effective_approval');
     const posting = rows.find(row => row.action === 'record_payment' || row.action === 'review_payment_time' || row.action === 'correct_payment_attribution'
       || row.action === 'review_payment_exception' && purchaseOperation(jsonObject(row.detail)).outcome === 'confirmed_current');
     const appliedPaymentId = posting && (posting.action === 'review_payment_time' || posting.action === 'review_payment_exception')
       ? purchaseOperation(jsonObject(posting.detail)).sourcePaymentId as string | undefined : posting?.id;
     const approval = rows.findLast(row => row.action === 'approve_payment_attribution' && row.purchaseOrderId === activePurchaseOrderId
-      && row.ordinal > (route?.ordinal ?? original.ordinal));
+      && row.ordinal > (route?.ordinal ?? original.ordinal) && (!noEffectiveApproval || row.ordinal > noEffectiveApproval.ordinal));
     const publicReview = (row: typeof reviewHistory[number]) => ({
       id: row.id, actorId: row.actorId, purchaseOrderId: row.purchaseOrderId, recordedAt: row.recordedAt, operation: row.operation,
     });
@@ -151,6 +154,7 @@ export async function readSupplierPaymentIssues(tx: Prisma.TransactionClient, or
       currentOwnerId: followup?.actorId ?? route?.actorId ?? original.actorId,
       original: purchaseOperation(jsonObject(original.detail)) as OriginalPaymentIssue,
       activePurchaseOrderId, review: latest ? publicReview(latest) : null, followup: followup ? publicReview(followup) : null, reviewHistory: reviewHistory.map(publicReview),
+      noEffectiveApprovalId: noEffectiveApproval?.id ?? null,
       postingId: posting?.id ?? null, appliedPaymentId: appliedPaymentId ?? null,
       postedToPurchaseOrderId: posting?.purchaseOrderId ?? null, attributionApprovalId: approval?.id ?? null }];
   });
@@ -184,8 +188,9 @@ export function supplierPaymentExceptions(purchaseOrderId: string, issues: Await
     const current = row.activePurchaseOrderId === purchaseOrderId;
     const awaitingTarget = !incoming && row.activePurchaseOrderId === null && !row.postingId;
     const canRoute = !row.postingId && (current || awaitingTarget);
-    const pending = !row.postingId && current && row.followup?.operation.outcome !== 'no_effective_approval';
-    return [{ ...row, incoming, pending, canRoute, awaitingTarget, attributionApprovalId: current ? row.attributionApprovalId : null }];
+    const canReviewAttribution = !row.postingId && current;
+    const pending = canReviewAttribution && (row.followup?.operation.outcome !== 'no_effective_approval' || Boolean(row.attributionApprovalId));
+    return [{ ...row, incoming, pending, canRoute, canReviewAttribution, awaitingTarget, attributionApprovalId: current ? row.attributionApprovalId : null }];
   });
 }
 

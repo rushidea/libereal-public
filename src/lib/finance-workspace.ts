@@ -2,6 +2,7 @@ import { Prisma } from '@prisma/client';
 import { isAlipayReconciliationStatus } from '@/lib/payment-concurrency';
 import { receivableOutstandingCents } from '@/lib/receivable-balance';
 import { invoiceTimeline } from '@/lib/finance-invoice-timeline';
+import { invoiceAuthorityTimeline, invoicesOutsideAuthority, readInvoiceAuthorityChange } from '@/lib/finance-invoice-authority';
 import { confirmedCustomerDelivery, customerShipmentRows } from '@/lib/fulfillment-accounting';
 import { jsonObject } from '@/lib/order-catalog-repricing';
 import { alipayCancellationRequest } from '@/lib/order-payment-review';
@@ -184,10 +185,10 @@ function customerInvoiceReviews(events: EventRow[], orderId: string, customerKey
     const op = purchaseObject(detail.operation);
     const authorization = purchaseObject(detail.authorization);
     const { grossCents, issuer, recipient, reference, sha256, lineIds, occurredAt } = op;
-    const change = purchaseObject(op.scopeChange);
-    const adjustment = typeof change.deltaCents === 'number' && Number.isSafeInteger(change.deltaCents) ? change.deltaCents : null;
-    const familyId = typeof change.familyId === 'string' ? change.familyId : event.id;
-    if (typeof grossCents !== 'number' || !Number.isSafeInteger(grossCents) || grossCents < 0 || grossCents === 0 && (adjustment === null || adjustment >= 0)
+    const recordedChange = purchaseObject(op.scopeChange);
+    const familyId = typeof recordedChange.familyId === 'string' ? recordedChange.familyId : event.id;
+    const change = familyId === event.id ? null : readInvoiceAuthorityChange(recordedChange) ?? { mode: 'unknown' as const };
+    if (typeof grossCents !== 'number' || !Number.isSafeInteger(grossCents) || grossCents < 0 || grossCents === 0 && familyId === event.id
       || typeof issuer !== 'string' || typeof recipient !== 'string' || typeof reference !== 'string' || typeof sha256 !== 'string'
       || typeof occurredAt !== 'string' || !dateValue(occurredAt) || authorization.permission !== 'finance.write'
       || authorization.action !== 'admin_sensitive' || op.ownerId !== event.actorId) return [];
@@ -196,7 +197,7 @@ function customerInvoiceReviews(events: EventRow[], orderId: string, customerKey
     })) : null);
     const lines = coveredCustomerInvoiceLines(originalLines, scopeLines);
     if (!lines || op.scopeVersion !== customerInvoiceScopeVersion(orderId, customerKey, acceptanceId, lines)) return [];
-    return [{ id: event.id, familyId, adjustment, actorId: event.actorId, grossCents, issuer, recipient, occurredAt, reference, sha256,
+    return [{ id: event.id, familyId, change, actorId: event.actorId, grossCents, issuer, recipient, occurredAt, reference, sha256,
       documentRow: typeof op.documentRow === 'number' ? op.documentRow : null, lines }];
   });
 }
@@ -225,13 +226,17 @@ export async function financeWorkspace(tx: Db, orderId: string) {
   const customerInvoiceReviewsFound = customerInvoiceReviews(financeEvents, orderId, customerKey, start.acceptance?.id ?? null, originalInvoiceLines);
   const customerInvoiceScopes = customerInvoiceReviewsFound.filter(row => row.grossCents > 0);
   const customerInvoiceFamilies = customerInvoiceScopes.filter(row => row.familyId === row.id).map(root => {
-    const related = customerInvoiceReviewsFound.filter(row => row.familyId === root.id);
-    const scopeIds = new Set(related.map(row => row.id));
+    const evidence = customerInvoiceReviewsFound.filter(row => row.familyId === root.id);
+    const scopeIds = new Set(evidence.map(row => row.id));
     const planned = invoicePlans.filter(plan => plan.invoiceScopeId && scopeIds.has(plan.invoiceScopeId));
-    const authorizedCents = related.reduce((sum, row) => sum + (row.adjustment ?? row.grossCents), 0);
+    const timeline = invoiceAuthorityTimeline(evidence);
+    const authorizedCents = timeline.at(-1)!.authorizedCents;
+    const invoiceConflicts = invoicesOutsideAuthority(timeline, planned.flatMap(plan =>
+      plan.allocations.map(allocation => ({ ...allocation, scopeId: plan.invoiceScopeId }))));
     const issuedCents = planned.reduce((sum, plan) => sum + plan.usedCents, 0);
     const plannedCents = planned.reduce((sum, plan) => sum + plan.usedCents + plan.scheduledRemainingCents, 0);
-    return { id: root.id, authorizedCents, issuedCents, plannedCents, availableCents: Math.max(0, authorizedCents - plannedCents) };
+    return { id: root.id, authorizedCents, issuedCents, plannedCents, invoiceConflicts, timeline, evidence,
+      availableCents: authorizedCents === null || invoiceConflicts.length ? null : Math.max(0, authorizedCents - plannedCents) };
   });
   const verifiedQuantities = new Map<string, number>();
   for (const scope of customerInvoiceScopes.filter(row => row.familyId === row.id)) {

@@ -854,9 +854,9 @@ function reapprovePurchase(view: Workspace, po: PO, input: PurchaseActionInput) 
     description: requiredText(input.description, '本次重新批准的后续动作与旧款归属') };
 }
 
-function pendingPaymentIssue(po: PO, input: PurchaseActionInput) {
+function pendingPaymentIssue(po: PO, input: PurchaseActionInput, forAttributionReview = false) {
   if (input.paymentIssueId === undefined) return undefined;
-  const issue = po.paymentExceptions.find(row => row.id === input.paymentIssueId && row.pending);
+  const issue = po.paymentExceptions.find(row => row.id === input.paymentIssueId && (row.pending || forAttributionReview && row.canReviewAttribution));
   if (!issue) throw new PurchaseError('该笔原付款已处理，或尚未核实归属本采购单');
   return issue;
 }
@@ -912,7 +912,7 @@ function supplierAttributionBasis(view: Workspace, po: PO, issue: PendingSupplie
   const { amountCents, paymentEvidence } = issue.original;
   const holdsAtPayment = supplierPaymentHolds(view, po, Date.parse(paymentEvidence.occurredAt));
   const current = supplierPaymentApprovalAt(view, po, Date.now());
-  if (!paymentHeld(holdsAtPayment) || !current || po.contractDueCents === null || po.needsRemainingReview
+  if (!(paymentHeld(holdsAtPayment) || issue.noEffectiveApprovalId) || !current || po.contractDueCents === null || po.needsRemainingReview
     || !current.original.lines.every(row => row.terms.payee === paymentEvidence.payee)) {
     throw new PurchaseError('须先核清该笔暂停、真实处理结果及本单仍有效的付款条件');
   }
@@ -927,6 +927,7 @@ function supplierAttributionBasis(view: Workspace, po: PO, issue: PendingSupplie
     throw new PurchaseError('原款超过现核准的可归属应付金额');
   }
   return { issueId: issue.id, purchaseOrderId: po.id, amountCents, paymentEvidence, holdsAtPayment, relatedResolutions, dispatchReviews,
+    ...(issue.noEffectiveApprovalId ? { noEffectiveApprovalId: issue.noEffectiveApprovalId } : {}),
     currentApprovalId: current.approval.id, contentHash: po.contentHash, dueCents: po.contractDueCents, alreadyBookedId: existing?.id ?? null };
 }
 
@@ -937,6 +938,21 @@ function reviewedSupplierAttribution(view: Workspace, po: PO, issue: PendingSupp
   const basis = supplierAttributionBasis(view, po, issue);
   if (detail.basisHash !== pricingContentHash(basis)) throw new PurchaseError('暂停处理结果或可归属余额已变化，请重新批准该笔归属');
   return { approval, basis };
+}
+
+function bookedAttributionApproval(po: PO, paymentId: string) {
+  const posting = po.ledger.find(row => row.id === paymentId && (row.action === 'record_payment' || row.action === 'correct_payment_attribution'));
+  if (!posting) return null;
+  const book = purchaseOperation(posting.detail);
+  const approval = po.ledger.find(row => row.id === book.attributionApprovalId && row.action === 'approve_payment_attribution');
+  if (!approval || approval.actorId === posting.actorId || Date.parse(approval.createdAt) > Date.parse(posting.createdAt)
+    || purchaseObject(approval.detail.authorization).permission !== 'purchases.approve') return null;
+  const approvalOperation = purchaseOperation(approval.detail);
+  const basis = purchaseObject(approvalOperation.basis);
+  if (basis.purchaseOrderId !== po.id || basis.issueId !== book.paymentIssueId || basis.amountCents !== book.amountCents
+    || pricingContentHash(basis.paymentEvidence) !== pricingContentHash(book.paymentEvidence)
+    || approvalOperation.basisHash !== pricingContentHash(basis)) return null;
+  return approval.id;
 }
 
 function originalSupplierPayment(view: Workspace, po: PO, issue: PendingSupplierPayment, input: PurchaseActionInput, actor: PurchaseActor) {
@@ -975,7 +991,7 @@ async function reviewSupplierPaymentIssue(tx: Db, view: Workspace, po: PO, input
   const issue = po.paymentExceptions.find(row => row.id === input.paymentIssueId && row.canRoute);
   const routes = outcome === 'outside_purchase' || outcome === 'assign_purchase';
   if (!issue || !routes && outcome !== 'awaiting_disposition' && outcome !== 'no_effective_approval' && outcome !== 'confirmed_current') conflict();
-  if (!issue.pending && !routes && !(issue.awaitingTarget && outcome === 'awaiting_disposition')) {
+  if (!issue.pending && !routes && outcome !== 'awaiting_disposition') {
     throw new PurchaseError('这笔转账仍待确认归属，请按实际书证补充进展或指定目标');
   }
   const referenceSha256 = documentSha256(input.referenceSha256, '付款差异处理结果书证摘要');
@@ -1011,11 +1027,12 @@ async function reviewSupplierPaymentIssue(tx: Db, view: Workspace, po: PO, input
       !== pricingContentHash({ ...issue.original.paymentEvidence, reference: undefined })) {
       throw new PurchaseError('须核对本单仍有效的同一笔银行实付；未绑定原凭证的付款请先补核原记录');
     }
-    const historical = supplierPaymentApprovalAt(view, po, Date.parse(existing.paymentEvidence.occurredAt));
-    const reviewed = !historical && reviewedSupplierAttribution(view, po, issue, actor);
-    if (!historical && !reviewed) throw new PurchaseError('付款当日的原批准或暂停处理授权待核对');
+    const alreadyApproved = bookedAttributionApproval(po, existing.id);
+    const historical = alreadyApproved ? null : supplierPaymentApprovalAt(view, po, Date.parse(existing.paymentEvidence.occurredAt));
+    const reviewed = !alreadyApproved && !historical && reviewedSupplierAttribution(view, po, issue, actor);
+    if (!alreadyApproved && !historical && !reviewed) throw new PurchaseError('付款当日的原批准或暂停处理授权待核对');
     confirmation = { sourcePaymentId: existing.id, approvalId: historical?.approval.id ?? null,
-      attributionApprovalId: reviewed ? reviewed.approval.id : null };
+      attributionApprovalId: alreadyApproved ?? (reviewed ? reviewed.approval.id : null) };
   }
   return { action: 'review_payment_exception' as const, paymentIssueId: issue.id, outcome, original: issue.original,
     ...confirmation,
@@ -1114,7 +1131,7 @@ function actionDetails(
       description: requiredText(input.description, '原凭证与历史付款的核对结论') };
   }
   if (action === 'approve_payment_attribution') {
-    const issue = pendingPaymentIssue(po, input);
+    const issue = pendingPaymentIssue(po, input, true);
     if (!issue || issue.ownerId === actor.id || issue.currentOwnerId === actor.id) throw new PurchaseError('须由另一位有采购批准权限的人员核对原转账');
     const basis = supplierAttributionBasis(view, po, issue);
     return { action, paymentIssueId: issue.id, basis, basisHash: pricingContentHash(basis),
