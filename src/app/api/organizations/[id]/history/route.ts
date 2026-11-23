@@ -1,4 +1,4 @@
-import { receivableCashAmounts, receivableView } from '@/lib/receivable-balance';
+import { receivableCashAmounts, receivablePrincipal, receivablePrincipalEvents, receivableView } from '@/lib/receivable-balance';
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { requireActiveSession } from '@/lib/session';
@@ -36,8 +36,9 @@ export async function GET(_request: Request, { params }: RouteParams) {
           ...ORGANIZATION_ORDER_REVIEW_INCLUDE,
           researchGroup: { select: { id: true, name: true } },
           cashPostings: { select: receivableCashAmounts },
+          financeEvents: receivablePrincipalEvents,
           receivable: {
-            select: { id: true, amount: true, status: true, dueAt: true, paidAt: true },
+            select: { id: true, userId: true, amount: true, status: true, dueAt: true, paidAt: true },
           },
         },
       }),
@@ -62,24 +63,28 @@ export async function GET(_request: Request, { params }: RouteParams) {
       expiredInquiryIds.has(inquiry.id) ? { ...inquiry, status: QUOTE_EXPIRED_INQUIRY_STATUS } : inquiry
     ));
     const canReviewOrders = hasOrganizationPermission(membership, 'organization.orders.review');
-    const payables = orders.flatMap((order) => {
-        const receivable = order.receivable;
-        if (!receivable) return [];
-        const view = receivableView(receivable, order);
-        const overdueDays = view.amount > 0 ? overdueDaysFromDueAt(receivable.dueAt, now) : -1;
-        return {
-          orderId: order.id,
-          ...view,
-          overdueDays,
-          trigger: overdueDays >= CREDIT_REVIEW_POLICY.holdAfterDays
-            ? 'order_hold'
-            : overdueDays >= CREDIT_REVIEW_POLICY.limitedAfterDays
-              ? 'credit_limited'
-              : overdueDays >= CREDIT_REVIEW_POLICY.reminderAfterDays
-                ? 'reminder'
-                : 'normal',
-        };
-      });
+    const receivables = new Map(orders.flatMap((order) => {
+      const receivable = order.receivable;
+      const principal = receivable && receivablePrincipal(order, receivable, order.financeEvents);
+      if (!receivable || !principal) return [];
+      const { id, amount, status, dueAt, paidAt } = receivable;
+      return [[order.id, receivableView({ id, amount, status, dueAt, paidAt }, { ...order, total: principal.cents / 100 })] as const];
+    }));
+    const payables = Array.from(receivables, ([orderId, view]) => {
+      const overdueDays = view.amount > 0 ? overdueDaysFromDueAt(view.dueAt, now) : -1;
+      return {
+        orderId,
+        ...view,
+        overdueDays,
+        trigger: overdueDays >= CREDIT_REVIEW_POLICY.holdAfterDays
+          ? 'order_hold'
+          : overdueDays >= CREDIT_REVIEW_POLICY.limitedAfterDays
+            ? 'credit_limited'
+            : overdueDays >= CREDIT_REVIEW_POLICY.reminderAfterDays
+              ? 'reminder'
+              : 'normal',
+      };
+    });
     const openPayables = payables.filter((payable) => payable.amount > 0 && ['open', 'overdue'].includes(payable.status));
     const maxOverdueDays = openPayables.reduce((max, payable) => Math.max(max, payable.overdueDays), -1);
     return NextResponse.json({
@@ -102,7 +107,7 @@ export async function GET(_request: Request, { params }: RouteParams) {
           pointsPersonal: order.pointsPersonal, pointsGroup: order.pointsGroup, pointsGroupId: order.pointsGroupId,
           pointsDiscount: order.pointsDiscount, pointsRefundedPersonal: order.pointsRefundedPersonal,
           pointsRefundedGroup: order.pointsRefundedGroup, createdAt: order.createdAt, archivedAt: order.archivedAt,
-          researchGroup: order.researchGroup, receivable: order.receivable ? receivableView(order.receivable, order) : null,
+          researchGroup: order.researchGroup, receivable: receivables.get(order.id) ?? null,
           organizationReview: organizationReviewState(order, creatorId),
           canCancel, canReview: canCancel && Boolean(creatorId && creatorId !== user.id),
         };

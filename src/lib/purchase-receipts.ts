@@ -1,4 +1,5 @@
 import type { Prisma } from '@prisma/client';
+import { bankDocumentScope, bankTraceKey, sameBankDocumentRow } from '@/lib/bank-document';
 import { jsonObject } from '@/lib/order-catalog-repricing';
 import { pricingContentHash } from '@/lib/pricing-adjustment-approval';
 import { purchaseOperation, type PurchaseActivity } from '@/lib/purchase-activity';
@@ -18,10 +19,6 @@ function ownerKey(order: Debtor) {
   const group = order.ownerScope === 'organization' && order.organizationId;
   const buyer = order.ownerScope === 'personal' && order.customerId;
   return group ? `organization:${group}` : buyer ? `customer:${buyer}` : `order:${order.id}`;
-}
-
-function bankTraceKey(value: string) {
-  return value.normalize('NFKC').trim().replace(/\s+/g, '').toUpperCase();
 }
 
 async function nativePaymentReferences(tx: Db, references: string[]) {
@@ -72,12 +69,11 @@ export async function previewBankReceipt(tx: Db, order: Debtor, input: BankInput
   const bankTrace = bankTraceKey(originalTrace);
   const receivingAccount = requiredText(input.receivingAccount, '实际收款账户的档案标识');
   const payer = requiredText(input.payer, '银行原件所列的付款人');
-  const { documentKind, receiptTotalCents } = input;
-  if ((documentKind !== 'single_receipt' && documentKind !== 'statement') || !positiveCents(receiptTotalCents)) {
+  const { receiptTotalCents } = input;
+  if (!positiveCents(receiptTotalCents)) {
     throw new PurchaseError('请核对银行回单或对账单及实际到账原额', 400);
   }
-  const statementRow = documentKind === 'single_receipt' ? 1 : input.statementRow;
-  if (!positiveCents(statementRow)) throw new PurchaseError('请填写对账单原件中该笔交易的行序号', 400);
+  const { documentKind, statementRow } = bankDocumentScope(input.documentKind, input.statementRow);
   const occurredAt = purchaseTimestamp(input.occurredAt, '实际到账时间');
   if (Date.parse(occurredAt) > Date.now()) throw new PurchaseError('实际到账时间不能晚于核验时间');
   if ((await nativePaymentReferences(tx, [originalTrace, bankTrace])).has(bankTrace)) {
@@ -89,8 +85,7 @@ export async function previewBankReceipt(tx: Db, order: Debtor, input: BankInput
         OR json_extract(detail,'$.snapshot.operation.bank.bankTrace')=${bankTrace})`;
   for (const row of existing) {
     const bank = purchaseOperation(jsonObject(row.detail)).bank as BankReceipt;
-    if (bank.bankTrace === bankTrace || (bank.sha256 === evidence.sha256
-      && (bank.documentKind !== documentKind || bank.statementRow === statementRow))) {
+    if (bank.bankTrace === bankTrace || sameBankDocumentRow(bank, { sha256: evidence.sha256, documentKind, statementRow })) {
       throw new PurchaseError('原件中这笔银行到账已经核验，请使用既有到账记录分摊');
     }
   }

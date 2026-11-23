@@ -1,4 +1,4 @@
-import { receivableOrderBalance, receivableOutstandingCents } from '@/lib/receivable-balance';
+import { collectibleReceivableCents, receivableOrderBalance } from '@/lib/receivable-balance';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import {
@@ -51,7 +51,7 @@ async function handle(req: NextRequest) {
           } }),
         ]);
         const outstanding = rows.map(row => ({ ...row,
-          balance: receivableOutstandingCents(row.amount, row.status, row.order.cashPostings, row.order.total),
+          balance: collectibleReceivableCents(row, row.order),
         })).filter(row => row.balance > 0);
         const maxOverdueDays = maxOverdueDaysForReceivables(outstanding, now);
         let newRestriction: string | null = null;

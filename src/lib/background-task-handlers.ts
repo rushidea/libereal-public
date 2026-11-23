@@ -1,5 +1,5 @@
 import { CREDIT_REVIEW_POLICY, overdueDaysFromDueAt, overdueReceivableWhere, receivableReminderKey } from '@/lib/customer-credit';
-import { receivableOrderBalance, receivableOutstandingCents } from '@/lib/receivable-balance';
+import { collectibleReceivableCents, receivableOrderBalance } from '@/lib/receivable-balance';
 import type { BackgroundTask } from '@prisma/client';
 import { sendAliyunSmsTemplate } from '@/lib/aliyun-sms';
 import { parseTaskPayload } from '@/lib/background-tasks';
@@ -59,7 +59,7 @@ async function sendOrderReminder(task: BackgroundTask): Promise<unknown> {
       || payload.reminderAt && payload.reminderAt !== receivable.lastReminderAt.toISOString()
       || payload.dueAt && payload.dueAt !== receivable.dueAt.toISOString()) return null;
     const overdueDays = overdueDaysFromDueAt(receivable.dueAt, now);
-    const balance = receivableOutstandingCents(receivable.amount, receivable.status, receivable.order.cashPostings, receivable.order.total);
+    const balance = collectibleReceivableCents(receivable, receivable.order);
     if (balance <= 0 || overdueDays < CREDIT_REVIEW_POLICY.reminderAfterDays) return null;
     return { receivable, overdueDays, amount: (balance / 100).toFixed(2) };
   });

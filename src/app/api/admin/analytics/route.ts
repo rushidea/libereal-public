@@ -1,4 +1,4 @@
-import { receivableOrderBalance, receivableOutstandingCents } from '@/lib/receivable-balance';
+import { collectibleReceivableCents, receivableOrderBalance, receivableOutstandingCents } from '@/lib/receivable-balance';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { requireAdmin, getAdminPermissions } from '@/lib/session';
@@ -298,10 +298,9 @@ export async function GET(_req: NextRequest) {
     ];
     const openReceivables = await prisma.accountReceivable.findMany({
       where: { status: { in: ['open', 'overdue'] }, order: { archivedAt: null } },
-      select: { order: { select: receivableOrderBalance }, amount: true, status: true, dueAt: true },
+      select: { order: { select: receivableOrderBalance }, id: true, userId: true, amount: true, status: true, dueAt: true },
     });
-    const outstanding = openReceivables.map(row => ({ dueAt: row.dueAt,
-      cents: receivableOutstandingCents(row.amount, row.status, row.order.cashPostings, row.order.total) })).filter(row => row.cents > 0);
+    const outstanding = openReceivables.map(row => ({ dueAt: row.dueAt, cents: collectibleReceivableCents(row, row.order) })).filter(row => row.cents > 0);
     const receivableOverdueCount = outstanding.filter(row => row.dueAt && row.dueAt < now).length;
     const receivableAging = agingBuckets.map((bucket) => {
       const matched = outstanding.filter(bucket.test);
@@ -312,6 +311,10 @@ export async function GET(_req: NextRequest) {
         count: matched.length,
       };
     });
+    const pending = openReceivables.filter(row => row.order.total <= 0 && !collectibleReceivableCents(row, row.order))
+      .map(row => receivableOutstandingCents(row.amount, row.status, row.order.cashPostings, row.order.total)).filter(cents => cents > 0);
+    if (pending.length) receivableAging.push({ key: 'principal-review', label: '原应收待核对',
+      amount: pending.reduce((sum, cents) => sum + cents, 0) / 100, count: pending.length });
     const receivableAgingTotal = receivableAging.reduce((s, b) => s + b.amount, 0);
 
     // 最近动态：审计 + 订单事件合并，按时间倒序（无 audit.read 权限时为 [])

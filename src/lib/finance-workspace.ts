@@ -26,7 +26,8 @@ type EventRow = Prisma.FinanceEventGetPayload<{ select: typeof eventSelect }>;
 function eventView(row: EventRow) {
   const detail = jsonObject(row.detail);
   return { id: row.id, action: row.action, planId: row.planId, invoiceId: row.invoiceId, actorId: row.actorId,
-    occurredAt: row.createdAt.toISOString(), operation: purchaseObject(detail.operation) };
+    occurredAt: row.createdAt.toISOString(), operation: purchaseObject(detail.operation),
+    replacementPlanId: typeof detail.replacementPlanId === 'string' ? detail.replacementPlanId : null };
 }
 
 type FinanceEventView = ReturnType<typeof eventView>;
@@ -121,6 +122,9 @@ export async function financeWorkspace(tx: Db, orderId: string) {
     delivered: signed ? lastDate(movement.map(row => row.shipment.deliveredAt)) : null };
   const invoicePlans = plans.map(plan => {
     const history = events.filter(row => row.planId === plan.id);
+    const amendment = events.find(row => row.action === 'amend_plan' && row.replacementPlanId === plan.id);
+    const amendedAt = amendment?.operation.effectiveAt ?? amendment?.operation.occurredAt;
+    const effectiveAt = typeof amendedAt === 'string' && Number.isFinite(Date.parse(amendedAt)) ? amendedAt : null;
     const allocations = plan.allocations.map(allocation => {
       const doc = allocation.invoice;
       return { id: allocation.id, invoiceId: doc.id, number: doc.number, amountCents: Number(allocation.amountCents),
@@ -132,15 +136,17 @@ export async function financeWorkspace(tx: Db, orderId: string) {
       issuer: plan.issuer, recipient: plan.recipient, grossCents: Number(plan.grossCents), trigger: plan.trigger,
       ownerId: plan.ownerId, reference: plan.reference, sha256: plan.sha256, usedCents, allocations,
       remainingCents: remainingInvoicePlanCents(Number(plan.grossCents), usedCents, history),
+      amendedFromPlanId: amendment?.planId ?? null, effectiveAt,
       closed: history.some(row => row.action === 'close_plan'),
       manualAt: history.findLast(row => row.action === 'confirm_condition')?.operation.occurredAt as string | undefined ?? null,
       lastFollowup: history.findLast(row => row.action === 'chase_invoice') ?? null };
   });
-  const purchases = purchase.orders.filter(po => po.orderedBefore || po.paidCents > 0).map(po => {
+  const purchases = purchase.orders.filter(po => po.orderedBefore || po.paidCents > 0 || po.paymentExceptions.length > 0).map(po => {
     const suppliers = [...new Set(po.lines.map(line => line.terms.supplier).filter((name): name is string => Boolean(name)))];
     const payees = [...new Set(po.lines.map(line => line.terms.payee).filter((name): name is string => Boolean(name)))];
     const payments = po.payments;
-    const agreedCents = po.dueCents === null || po.incidents.length || po.needsRemainingReview || po.needsLegacyReview
+    const agreedCents = (!po.orderedBefore && po.paidCents === 0) || po.dueCents === null || po.incidents.length || po.needsRemainingReview || po.needsLegacyReview
+      || po.paymentExceptions.some(row => row.pending)
       ? null : po.remainingScope?.totalCents ?? po.totalCents;
     const invoiceRows = invoicePlans.filter(plan => plan.purchaseOrderId === po.id);
     const invoiceAllocations = invoiceRows.flatMap(plan => plan.allocations);
@@ -148,7 +154,7 @@ export async function financeWorkspace(tx: Db, orderId: string) {
     const underCorrectionCents = invoiceAllocations.reduce((sum, row) => sum + (row.status === 'correction_pending' ? row.amountCents : 0), 0);
     const scope = { id: po.id, revision: po.revision, contentHash: po.contentHash, supplier: suppliers.length === 1 ? suppliers[0] : null,
       payees, orderedAt: po.orderReceipt?.occurredAt ?? null, originalCents: po.totalCents, agreedCents,
-      paidCents: po.paidCents, dueCents: po.dueCents, payments, invoicedCents, underCorrectionCents,
+      paidCents: po.paidCents, dueCents: po.dueCents, payments, paymentExceptions: po.paymentExceptions, invoicedCents, underCorrectionCents,
       invoices: invoiceAllocations.map(row => ({
         id: row.invoiceId, allocationId: row.id, amountCents: row.amountCents, sha256: row.sha256, status: row.status,
       })) };
@@ -186,15 +192,16 @@ export async function financeWorkspace(tx: Db, orderId: string) {
     counted: row.counted, reconciled: row.reconciled, occurredAt: typeof row.occurredAt === 'string' ? row.occurredAt : null,
     review: row.counted || row.reconciled ? null : paymentCaseReview(events, row.id) }));
   const state = { orderId, status: order.status, archived: Boolean(order.archivedAt), customerKey, customerEmail: order.email,
-    principalCents: start.principal, acceptedAt: start.acceptance?.at ?? null, acceptanceId: start.acceptance?.id ?? null,
+    principalCents: start.principal, postingPrincipal: start.postingPrincipal, postingOutstandingCents: start.postingOutstandingCents,
+    acceptedAt: start.acceptance?.at ?? null, acceptanceId: start.acceptance?.id ?? null,
     acceptanceEvidenceHash: start.acceptance ? pricingContentHash({ orderId, acceptance: start.acceptance, termsVersion: start.termsVersion }) : null,
     receipts, banks, cash, cashCents, nativePaymentId: native, latePayments: late, authorityConflict,
     paidAt: order.paidAt?.toISOString() ?? null,
     verifiedCents: start.payment.receivedCents, settlementCents: native && !authorityConflict ? start.principal : cashCents,
     bankVersion: start.version, paymentPlanKnown: Boolean(start.plan), shipmentDates,
     receivable: ar && { id: ar.id, status: ar.status, originalCents: Math.round(ar.amount * 100),
-      outstandingCents: receivableOutstandingCents(ar.amount, ar.status, postings, order.total),
-      needsPrincipalReview: start.principal <= 0 && ar.amount > 0,
+      outstandingCents: receivableOutstandingCents(ar.amount, ar.status, postings, start.postingPrincipal ? start.postingPrincipal.cents / 100 : order.total),
+      needsPrincipalReview: !start.postingPrincipal && ar.amount > 0 && ['open', 'overdue'].includes(ar.status),
       needsTermReview: Boolean(ar.termStartedAt && start.acceptance && ar.termStartedAt.toISOString() !== start.acceptance.at
         && !events.some(row => row.action === 'set_term' || row.action === 'restore_term')),
       terms: ar.paymentTermDaysSnapshot, termStartedAt: ar.termStartedAt?.toISOString() ?? null, dueAt: ar.dueAt?.toISOString() ?? null },

@@ -5,6 +5,7 @@ import { refreshCreditRestrictions } from '@/lib/customer-credit';
 import { financeIdentity, financeWorkspace, invoiceStatus, invoiceTriggers, type FinanceWorkspace, type InvoiceTrigger } from '@/lib/finance-workspace';
 import { jsonObject } from '@/lib/order-catalog-repricing';
 import { pricingContentHash } from '@/lib/pricing-adjustment-approval';
+import { isActivePurchaseOrder } from '@/lib/purchase-acceptance';
 import { addPurchaseActivity, purchaseObject, readPurchaseActivities, type PurchaseActor, type PurchaseAuthorization } from '@/lib/purchase-activity';
 import { prepareOrderPurchases } from '@/lib/purchase-orders';
 import { previewBankAllocation, previewBankReceipt } from '@/lib/purchase-receipts';
@@ -12,7 +13,7 @@ import { loadPurchaseOrderSource } from '@/lib/purchase-source';
 import { documentSha256, positiveCents, PurchaseError, purchaseTimestamp, requiredText } from '@/lib/purchase-terms';
 
 type Db = Prisma.TransactionClient;
-export const financeActions = ['verify_bank_receipt', 'record_customer_receipt', 'post_existing', 'restore_term', 'set_term',
+export const financeActions = ['verify_bank_receipt', 'record_customer_receipt', 'post_existing', 'verify_receivable_principal', 'restore_term', 'set_term',
   'create_plan', 'amend_plan', 'confirm_condition', 'chase_invoice', 'close_plan', 'record_invoice', 'open_correction', 'resolve_correction',
   'reconcile_supplier', 'review_payment_case', 'update_payment_case', 'resume_alipay_payment'] as const;
 type Action = typeof financeActions[number];
@@ -58,12 +59,14 @@ function invoiceScopeBalance(view: FinanceWorkspace, plan: Plan) {
 
 export function invoiceReadyAt(view: FinanceWorkspace, plan: Plan) {
   const po = view.purchases.find(row => row.id === plan.purchaseOrderId);
-  if (plan.trigger === 'manual') return plan.manualAt;
-  if (plan.trigger === 'accepted') return po ? po.orderedAt : view.acceptedAt;
-  if (plan.trigger === 'paid') return po ? po.paidInFullAt
+  let businessAt: string | null = null;
+  if (plan.trigger === 'manual') businessAt = plan.manualAt;
+  if (plan.trigger === 'accepted') businessAt = po ? po.orderedAt : view.acceptedAt;
+  if (plan.trigger === 'paid') businessAt = po ? po.paidInFullAt
     : view.settlementCents === view.principalCents && !view.authorityConflict ? view.paidAt : null;
-  if (!po && (plan.trigger === 'dispatched' || plan.trigger === 'delivered')) return view.shipmentDates[plan.trigger];
-  return null;
+  if (!po && (plan.trigger === 'dispatched' || plan.trigger === 'delivered')) businessAt = view.shipmentDates[plan.trigger];
+  if (!businessAt || !Number.isFinite(Date.parse(businessAt)) || plan.amendedFromPlanId && !plan.effectiveAt) return null;
+  return plan.effectiveAt && Date.parse(businessAt) < Date.parse(plan.effectiveAt) ? plan.effectiveAt : businessAt;
 }
 
 async function invoiceDocument(tx: Db, view: FinanceWorkspace, input: FinanceInput, evidence: Evidence) {
@@ -109,9 +112,25 @@ async function financeOperation(tx: Db, input: FinanceInput, actor: PurchaseActo
     if (view.archived || ['cancelled', 'closed'].includes(order.status)) throw new PurchaseError('请核对仍可办理的原订单及回单归属');
     if (action === 'verify_bank_receipt') return previewBankReceipt(tx, order, data, evidence);
     if (view.authorityConflict || view.nativePaymentId || view.paidAt || !view.paymentPlanKnown) throw new PurchaseError('请先核对本单的付款条件和已有到账来源');
+    if (view.postingOutstandingCents === null) throw new PurchaseError('原订单金额待财务核对，可先保留银行回单');
     const allocation = await previewBankAllocation(tx, order, await readPurchaseActivities(tx, orderId), data, evidence,
-      view.principalCents - view.verifiedCents);
+      view.postingOutstandingCents);
     return { ...allocation, accounting: await customerCashProjection(tx, order, allocation.amountCents) };
+  }
+  if (action === 'verify_receivable_principal') {
+    const order = await loadPurchaseOrderSource(tx, orderId);
+    const ar = order.receivable;
+    if (!view.receivable?.needsPrincipalReview || !isActivePurchaseOrder(order) || !view.acceptanceId || !ar
+      || order.customerId !== ar.userId || order.paidAt || ar.paidAt) {
+      throw new PurchaseError('须核对已接单的原客户、未结应收及历史面额差异');
+    }
+    const amountCents = money(data.amountCents, '原凭证记载的应收金额');
+    if (amountCents !== view.receivable.originalCents || view.cashCents > amountCents || view.verifiedCents > amountCents) {
+      throw new PurchaseError('原凭证金额或已有到账与原账面不符，请留下原应收继续核对');
+    }
+    return { ...evidence, action, amountCents, orderId, orderFaceCents: view.principalCents, receivableId: ar.id,
+      debtorId: ar.userId, acceptanceId: view.acceptanceId, ownerId: actor.id,
+      occurredAt: actualTime(data.occurredAt, '原书证确认应收时间') };
   }
   if (action === 'post_existing') {
     const id = requiredText(data.sourceId, '待核销的既有到账记录');
@@ -167,8 +186,15 @@ async function financeOperation(tx: Db, input: FinanceInput, actor: PurchaseActo
     if (view.events.some(row => row.action === 'amend_plan' && row.planId === plan.id && row.operation.sha256 === evidence.sha256)) {
       throw new PurchaseError('这份书证已用于变更本项安排，请核对原范围');
     }
+    const occurredAt = actualTime(data.occurredAt, '书面变更确认时间');
+    const effectiveAt = data.effectiveAt == null ? occurredAt : purchaseTimestamp(data.effectiveAt, '书面约定生效时间');
+    if (plan.amendedFromPlanId && (!plan.effectiveAt || Date.parse(effectiveAt) < Date.parse(plan.effectiveAt))) {
+      throw new PurchaseError('本次变更不得早于所选安排原来明确生效的时间，请核对前一份书证');
+    }
+    const retroactiveReference = Date.parse(effectiveAt) < Date.parse(occurredAt)
+      ? requiredText(data.retroactiveReference, '原书面约定中明确追溯生效的条款') : null;
     return { ...evidence, action, planId: plan.id, original: plan, amountCents,
-      trigger: invoiceTrigger(plan.side, data.trigger), occurredAt: actualTime(data.occurredAt, '书面变更确认时间'), ownerId: actor.id };
+      trigger: invoiceTrigger(plan.side, data.trigger), occurredAt, effectiveAt, retroactiveReference, ownerId: actor.id };
   }
   if (action === 'confirm_condition' || action === 'chase_invoice' || action === 'close_plan') {
     const plan = planFor(view, data.planId);
@@ -217,7 +243,6 @@ async function financeOperation(tx: Db, input: FinanceInput, actor: PurchaseActo
   }
   if (action === 'resume_alipay_payment') {
     const sourceId = requiredText(data.sourceId, '库存短少的原支付宝交易');
-    if (view.verifiedCents || view.cashCents || view.authorityConflict) throw new PurchaseError('本单已有其他到账依据，请先核对交易归属');
     const payment = await previewStockHeldAlipayPayment(tx, orderId, sourceId);
     return { ...evidence, action, sourceId, payment, caseId: view.latePayments.find(row => row.id === sourceId)?.review?.claimId ?? null };
   }
@@ -309,5 +334,6 @@ export async function applyFinanceAction(tx: Db, input: FinanceInput, actor: Pur
   const event = await tx.financeEvent.create({ data: { orderId, planId, invoiceId, actorId: actor.id,
     action: op.action, requestKey, intentHash, approvedHash: expected,
     detail: JSON.stringify({ operation: op, authorization, replacementPlanId }) } });
+  if (op.action === 'verify_receivable_principal') await refreshCreditRestrictions(tx, op.debtorId, new Date());
   return event.id;
 }

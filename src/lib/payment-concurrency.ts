@@ -8,12 +8,16 @@ export function isAlipayReconciliationStatus(status: string | null | undefined) 
   return value.endsWith('_reconciliation_required') || legacyAlipayReconciliationStatuses.includes(value);
 }
 
-export const alipayReconciliationCount = {
-  select: { paymentAttempts: { where: {
-    provider: 'alipay',
-    OR: [{ status: { endsWith: '_reconciliation_required' } }, { status: { in: legacyAlipayReconciliationStatuses } }],
-  } satisfies Prisma.PaymentAttemptWhereInput } },
-} as const;
+const alipayReconciliationWhere = {
+  provider: 'alipay',
+  OR: [{ status: { endsWith: '_reconciliation_required' } }, { status: { in: legacyAlipayReconciliationStatuses } }],
+} satisfies Prisma.PaymentAttemptWhereInput;
+
+export const alipayReconciliationCount = { select: { paymentAttempts: { where: alipayReconciliationWhere } } } as const;
+export const alipayReceiptWhere = {
+  provider: 'alipay',
+  OR: [...alipayReconciliationWhere.OR, { status: { in: ['paid', 'TRADE_SUCCESS', 'TRADE_FINISHED'] } }],
+} satisfies Prisma.PaymentAttemptWhereInput;
 
 /**
  * Shared payment-attempt concurrency rules.

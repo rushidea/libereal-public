@@ -9,6 +9,7 @@ import { addPurchaseActivity, findPurchaseActivityByRequest, readPurchaseActivit
 import { loadPurchaseOrderSource, type SourceOrder } from '@/lib/purchase-source';
 import { orderReceiptEvidence, previewBankAllocation, previewBankReceipt } from '@/lib/purchase-receipts';
 import { creditLimitTerms, type PurchaseCreditEvidence } from '@/lib/purchase-credit-history';
+import { readReceivablePrincipal } from '@/lib/receivable-balance';
 import { documentSha256, positiveCents, PurchaseError, purchaseTimestamp, requiredText } from '@/lib/purchase-terms';
 
 type Db = Prisma.TransactionClient;
@@ -114,6 +115,8 @@ export async function purchaseStartReview(tx: Db, order: SourceOrder, activities
   const plan = paymentPlanAt(order, activities, termsVersion);
   const { payment, bankReceipts } = await orderReceiptEvidence(tx, order, activities, principal);
   const outstandingCents = Math.max(0, principal - payment.receivedCents);
+  const postingPrincipal = await readReceivablePrincipal(tx, order, order.receivable);
+  const postingOutstandingCents = postingPrincipal ? Math.max(0, postingPrincipal.cents - payment.receivedCents) : null;
   const creditState = outstandingCents > 0 && plan?.mode !== 'prepay' ? await creditEvidence(tx, order, outstandingCents) : null;
   const credit = creditState?.credit ?? null;
   const creditVersion = credit && purchaseCreditVersion(order.id, termsVersion, accepted.proof, plan,
@@ -122,6 +125,7 @@ export async function purchaseStartReview(tx: Db, order: SourceOrder, activities
   const overCredit = Boolean(credit && credit.occupiedCents > credit.limitCents);
   const start = !active ? '原客户订单尚未由 Libereal 接受，或已关闭'
     : !accepted.proof ? '平台接单依据或已接受的订单内容需要人工核对'
+    : principal <= 0 && Boolean(order.receivable && order.receivable.amount > 0) ? '原采购面额与账面应收须分别核对'
     : (!Number.isSafeInteger(principal) || principal < 0) || !plan ? '需核实本单约定的付款条件'
     : payment.receivedCents < plan.requiredPrepayCents ? '需核实本单约定的付款条件与实际收款记录'
     : outstandingCents > 0 && !credit ? '需核实本单应收、授信占用及余额'
@@ -139,7 +143,7 @@ export async function purchaseStartReview(tx: Db, order: SourceOrder, activities
     history: order.statusHistory.filter(row => row.toStatus === 'confirmed' && row.fromStatus === 'pending').map(row => ({
       id: row.id, actorId: row.actorId, actorEmail: row.actorEmail, recordedAt: row.createdAt.toISOString(),
     })),
-    active, principal, plan, payment, bankReceipts, outstandingCents, credit, creditVersion, overCredit,
+    active, principal, plan, payment, bankReceipts, outstandingCents, postingPrincipal, postingOutstandingCents, credit, creditVersion, overCredit,
     creditExceptionRequired: active && accepted.proof !== null && overCredit && !eligible
       && plan !== null && payment.receivedCents >= plan.requiredPrepayCents,
   };
@@ -180,7 +184,8 @@ async function previewOperation(tx: Db, order: SourceOrder, activities: Purchase
   if (input.action === 'verify_bank_receipt') return previewBankReceipt(tx, order, input, evidence);
   if (input.action === 'record_customer_receipt') {
     if (!state.plan) throw new PurchaseError('请先核对本单付款条件');
-    const allocation = await previewBankAllocation(tx, order, activities, input, evidence, state.outstandingCents);
+    if (state.postingOutstandingCents === null) throw new PurchaseError('原订单金额待财务核对，可先保留银行回单');
+    const allocation = await previewBankAllocation(tx, order, activities, input, evidence, state.postingOutstandingCents);
     if (order.paidAt || state.payment.paymentAttemptId) throw new PurchaseError('本单已有全额付款记录，请核对原始账务');
     return { ...allocation, accounting: await customerCashProjection(tx, order, allocation.amountCents) };
   }

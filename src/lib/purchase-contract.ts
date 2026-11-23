@@ -21,7 +21,8 @@ type ArchiveSnapshot = {
   lines: ContractLine[];
   operation: {
     action?: string; occurredAt?: string; previousStatus?: PurchaseStatus; incidentId?: string; outcome?: string;
-    reference?: string; amountCents?: number; conditionReference?: string;
+    reference?: string; amountCents?: number; conditionReference?: string; approvalId?: string | null;
+    paymentIssueId?: string; paymentEvidence?: { occurredAt: string };
     dispositions?: Array<{ orderItemId: string; quantity: number; forwardingLossId?: string; shortfallId?: string; shortfallDecision?: ShortfallDecision }>;
     scope?: RemainingScope;
     legacyApprovalId?: string;
@@ -57,8 +58,18 @@ export function dispositionSummary(ledger: PurchaseActivity[]) {
 }
 
 export function remainingApproval(ledger: PurchaseActivity[], dispositionIds: string[]) {
-  return ledger.findLast(row => row.action === 'approve_remaining'
-    && pricingContentHash(purchaseSnapshot(row)?.operation.scope?.dispositionIds ?? []) === pricingContentHash(dispositionIds));
+  const key = pricingContentHash(dispositionIds);
+  const approval = ledger.findLast(row => row.action === 'approve_remaining'
+    && pricingContentHash(purchaseSnapshot(row)?.operation.scope?.dispositionIds ?? []) === key);
+  const considered = purchaseSnapshot(approval)?.operation.scope?.payments;
+  if (!approval || !considered) return approval;
+  const newlyAttributed = ledger.some(row => {
+    if (row.action !== 'record_payment' || considered.some(payment => payment.id === row.id)) return false;
+    const payment = purchaseSnapshot(row)?.operation;
+    return payment?.paymentIssueId && payment.paymentEvidence
+      && Date.parse(payment.paymentEvidence.occurredAt) < Date.parse(approval.createdAt);
+  });
+  return newlyAttributed ? undefined : approval;
 }
 
 export function approvalAt(ledger: PurchaseActivity[], at: number) {

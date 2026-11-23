@@ -49,6 +49,7 @@ export async function GET(req: NextRequest) {
 const purchasePermissions = {
   approve: 'purchases.approve', approve_lead_time: 'purchases.approve', register_order: 'purchases.write',
   record_payment: 'purchases.pay', review_payment_time: 'purchases.pay', report_change: 'purchases.write', review_change_scope: 'purchases.read', resolve_change: 'purchases.read',
+  record_payment_exception: 'purchases.pay', review_payment_exception: 'purchases.pay',
   review_legacy_approval: 'purchases.approve', approve_remaining: 'purchases.approve', record_late_order_exception: 'purchases.approve',
   reapprove_purchase: 'purchases.approve', resolve_order_exception: 'purchases.approve',
 } as const satisfies Record<PurchaseActionInput['action'], AdminPermissionKey>;
@@ -117,6 +118,9 @@ export async function POST(req: NextRequest) {
       ...base, purchaseOrderId: requiredText(body.purchaseOrderId, '采购单号'), action: body.action,
       reference: body.reference, referenceSha256: body.referenceSha256, occurredAt: body.occurredAt,
       sourcePaymentId: body.sourcePaymentId, bankTrace: body.bankTrace, payee: body.payee,
+      paymentDocumentKind: body.paymentDocumentKind, paymentStatementRow: body.paymentStatementRow,
+      paymentIssueId: body.paymentIssueId, paymentIssueOutcome: body.paymentIssueOutcome,
+      paymentIssueTargetPurchaseOrderId: body.paymentIssueTargetPurchaseOrderId,
       amountCents: body.amountCents, conditionReference: body.conditionReference, changeKind: body.changeKind,
       description: body.description, outcome: body.outcome, supplierReference: body.supplierReference,
       supplierSha256: body.supplierSha256, customerReference: body.customerReference, customerSha256: body.customerSha256,

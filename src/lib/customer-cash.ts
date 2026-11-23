@@ -5,6 +5,7 @@ import { readPurchaseActivities } from '@/lib/purchase-activity';
 import { orderReceiptEvidence } from '@/lib/purchase-receipts';
 import { loadPurchaseOrderSource, type SourceOrder } from '@/lib/purchase-source';
 import { PurchaseError } from '@/lib/purchase-terms';
+import { readReceivablePrincipal } from '@/lib/receivable-balance';
 
 type Db = Prisma.TransactionClient;
 export type CustomerCashSource = { bankAllocationId: string } | { paymentAttemptId: string };
@@ -18,19 +19,21 @@ export async function customerCashProjection(tx: Db, order: SourceOrder, amount:
   }
   const previous = await tx.customerCashPosting.findMany({ where: { orderId: order.id } });
   const before = previous.reduce((sum, row) => sum + Number(row.amountCents), 0);
-  const face = cents(order.total);
-  if (!Number.isSafeInteger(face) || face <= 0) throw new PurchaseError('原订单金额须先核对，保留已有应收和到账凭据');
+  const proof = await readReceivablePrincipal(tx, order, source === 'bank' ? order.receivable : null);
+  if (!proof) throw new PurchaseError('原订单金额须先核对，保留已有应收和到账凭据');
+  const face = proof.cents;
   const remaining = face - before - amount;
   if (!Number.isSafeInteger(remaining) || remaining < 0) throw new PurchaseError('本次归入金额超过未核销的订单余额');
   const ar = order.receivable;
   if (ar && !isUnsettledReceivableStatus(ar.status)) throw new PurchaseError('原应收已经结清或关闭，请核对原始账务');
-  const held = ar ? await orderCreditHeldCents(tx, order) : 0;
+  const creditReservationUnverified = Boolean(ar && proof.reviewId && !order.creditTransactions.length);
+  const held = ar && !creditReservationUnverified ? await orderCreditHeldCents(tx, order) : 0;
   const account = ar ? await tx.creditAccount.findUnique({ where: { userId: ar.userId } }) : null;
-  if (held === null || ar && (ar.userId !== order.customerId || !account || cents(account.usedAmount) < held
+  if (held === null || ar && (ar.userId !== order.customerId || !account && !creditReservationUnverified || account && cents(account.usedAmount) < held
     || held > cents(ar.amount) || held > face - before)) throw new PurchaseError('应收或已占授信与原单不符，请核对原始账务');
   const released = Math.min(amount, Math.max(0, held - remaining));
   return { amountCents: amount, postedBeforeCents: before, remainingCents: remaining, receivableId: ar?.id ?? null,
-    releaseCents: released, orderCreditAfterCents: held - released, accountId: account?.id ?? null,
+    releaseCents: released, orderCreditAfterCents: creditReservationUnverified ? null : held - released, creditReservationUnverified, accountId: account?.id ?? null,
     accountUsedBefore: account?.usedAmount ?? null, accountUsedAfter: account ? (cents(account.usedAmount) - released) / 100 : null };
 }
 

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { cronUnauthorizedResponse, isCronRequestAuthorized } from '@/lib/cron-auth';
-import { closeStalePendingOrders, reconcilePendingAlipayOrderPoints } from '@/lib/order-auto-close';
+import { closeStalePendingOrders, reconcilePendingAlipayOrderPoints, reconcileStockHeldAlipayPayments } from '@/lib/order-auto-close';
 
 export const dynamic = 'force-dynamic';
 
@@ -13,9 +13,10 @@ async function handle(req: NextRequest) {
   if (!isCronRequestAuthorized(req)) return cronUnauthorizedResponse();
 
   try {
+    const stockReceipts = await reconcileStockHeldAlipayPayments(100);
     const reconciliation = await reconcilePendingAlipayOrderPoints(100);
     const result = await closeStalePendingOrders(new Date(), 100);
-    return NextResponse.json({ ok: true, ...reconciliation, ...result });
+    return NextResponse.json({ ok: true, ...stockReceipts, ...reconciliation, ...result });
   } catch (err) {
     console.error('[cron/auto-close] error:', err instanceof Error ? err.message : err);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });

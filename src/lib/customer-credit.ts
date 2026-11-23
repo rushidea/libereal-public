@@ -6,7 +6,7 @@ import { getTierByRollingSpend, DEFAULT_TIER, TIERS } from '@/lib/discount';
 import { isPostDeliveryPaymentMethod } from '@/data/payment-methods';
 import { formatCreditDateForInput, type CustomerCreditSummary } from '@/lib/credit-summary';
 import { INACTIVE_ORDER_STATUSES } from '@/lib/order-domain';
-import { receivableOrderBalance, receivableOutstandingCents } from '@/lib/receivable-balance';
+import { collectibleReceivableCents, receivableOrderBalance } from '@/lib/receivable-balance';
 
 type Tx = Prisma.TransactionClient;
 type CreditReader = Tx | typeof prisma;
@@ -426,9 +426,9 @@ export async function refreshCreditRestrictions(tx: Tx, userId: string, now: Dat
   if (!account) return;
   const openReceivables = await tx.accountReceivable.findMany({
     where: { ...overdueReceivableWhere(now), userId },
-    select: { dueAt: true, amount: true, status: true, order: { select: receivableOrderBalance } },
+    select: { id: true, userId: true, dueAt: true, amount: true, status: true, order: { select: receivableOrderBalance } },
   });
-  const outstanding = openReceivables.filter(row => receivableOutstandingCents(row.amount, row.status, row.order.cashPostings, row.order.total) > 0);
+  const outstanding = openReceivables.filter(row => collectibleReceivableCents(row, row.order) > 0);
   const nextStatus = creditStatusForOverdueReceivables({
     currentStatus: account.status,
     statusSource: account.statusSource,
