@@ -33,6 +33,7 @@ export default function FinancePreview({ preview, busy, onConfirm, onBack }: {
       {' ' + money(op.amountCents) + ' · 原书证 ' + op.subject.originalReference + ' · 原安排 ' + op.subject.planReference}
     </p>}
     {op.action === 'record_invoice' && <><p>票号 {op.number} · {op.issuer} 开给 {op.recipient}</p>
+      {op.replaces&&<p>替代原票 {op.replaces.number} · 红冲回执 {op.replaces.correctionEventId}</p>}
       <p>票面 {money(op.grossCents)} · 已分 {money(op.allocatedBeforeCents)} · 本次归入 {money(op.amountCents)}</p>
       <p>开票时间 {dateLabel(op.issuedAt)} · 约定条件达成 {dateLabel(op.readyAt)}</p>
       {op.invoiceAuthority && <p>票面日期适用的累计额度 {money(op.invoiceAuthority.authorizedCents ?? undefined)}

@@ -15,7 +15,7 @@ type Confirmation = {input:FormInput;hash:string;snapshot:Record<string,unknown>
 const date = (value:string) => new Date(value).toLocaleString('zh-CN',{hour12:false});
 const displayFields:Record<string,string>={quantity:'实际数量',decision:'客户决定',note:'办理说明',report:'问题说明',result:'处理结果',
   remedy:'处理方式',recipient:'收款人',destination:'收款去向',method:'收付渠道',referenceNo:'回执流水',amountCents:'本次金额',approvedCents:'已批准金额',
-  originalNumber:'原票号',purchaseOrderId:'原采购单',party:'出具意见的单位',contact:'技术联系人',supplier:'供应商',owner:'接手人',
+  originalNumber:'原票号',number:'替代票号',waybill:'实际原运单',lineLimitCents:'本商品可核票面金额',purchaseOrderId:'原采购单',party:'出具意见的单位',contact:'技术联系人',supplier:'供应商',owner:'接手人',
   previousOwner:'原经办人',preparedId:'退款准备记录',approvalId:'独立批准',agreementId:'客户书面决定',financeEventId:'票款回执',shortfallId:'原履约记录',
   relatedCents:'关联金额',parcelLineId:'原包裹行',reference:'原运单',historyReview:'既有结算复核',historicCheck:'既有结算复核',outcome:'供方结果',
   totalCents:'同笔实际交易总额',allocatedBeforeCents:'原已分摊',unallocatedAfterCents:'本次后尚未分摊',allocationReference:'本行分摊书证',
@@ -27,6 +27,9 @@ function permitted(row:Case, rights:string[], view:Desk):AfterSaleAction[] {
   const finance=rights.includes('finance.read')&&rights.includes('finance.write');
   if(ops&&row.customerState!=='closed') out.push('claim');
   if(!row.ownerId)return out;
+  const effective=row.events.find(event=>event.id===row.agreementId)?.operation;
+  const released=new Set(row.events.filter(event=>event.action==='release_refund_source').map(event=>event.operation?.reviewId));
+  const held=row.events.some(event=>event.action==='review_refund_source'&&!released.has(event.id));
   if(ops) {
     out.push('add_evidence');
     if(!row.shortfallId&&row.customerState!=='closed')out.push('link_shortfall');
@@ -34,21 +37,27 @@ function permitted(row:Case, rights:string[], view:Desk):AfterSaleAction[] {
     if(['reviewing','awaiting_customer','awaiting_technical','awaiting_fulfillment','awaiting_refund','refund_prepared','refund_followup','awaiting_invoice','awaiting_close'].includes(row.customerState)
       || row.agreementId)out.push('agreement');
     if(row.customerState==='awaiting_fulfillment')out.push('physical');
-    if(row.customerState==='awaiting_close')out.push('close');
+    if(row.customerState==='awaiting_close'&&!(effective?.remedy==='keep'&&held))out.push('close');
+    if(row.customerState!=='closed'&&!row.originalParcelLineId
+      && (row.originalParcelShares??[]).reduce((sum,part)=>sum+part.quantity,0)<row.quantity
+      && view.deliveries.some(line=>line.orderItemId===row.orderItemId&&!line.afterSaleApprovalId&&line.receipts.length))out.push('bind_original_parcel');
   }
   if(buy || rights.includes('purchases.pay')&&rights.includes('purchases.read'))out.push('supplier');
   if(buy&&['quality','technical'].includes(row.issue)&&['reviewing','awaiting_technical','awaiting_customer'].includes(row.customerState)&&!out.includes('technical'))out.push('technical');
-  const effective=row.events.find(event=>event.id===row.agreementId)?.operation;
+  const exchangeQty=row.events.filter(event=>event.action==='approve_exchange'&&event.operation?.agreementId===row.agreementId)
+    .reduce((sum,event)=>sum+Number(event.operation?.quantity??0),0);
   if(rights.includes('purchases.read')&&rights.includes('purchases.approve')&&row.customerState==='awaiting_fulfillment'
-    && effective?.remedy==='exchange'&&effective.returnRequirement&&!row.events.some(event=>event.action==='approve_exchange'
-      && event.operation?.agreementId===row.agreementId))out.push('approve_exchange');
+    && effective?.remedy==='exchange'&&effective.returnRequirement&&!effective.replacements&&exchangeQty<row.quantity)out.push('approve_exchange');
   if(buy&&row.shortfallId&&row.customerState!=='closed'&&view.deliveries.some(line=>line.attributionRequired&&line.orderItemId===row.orderItemId
     && view.shortfalls.find(loss=>loss.resolutionId===row.shortfallId)?.approved.some(approval=>approval.id===line.approvalId)))out.push('attribute_resend');
   if(finance) {
     if(row.customerState==='awaiting_invoice')out.push('invoice_outcome');
+    if(row.customerState==='awaiting_invoice_reissue')out.push('invoice_reissue');
+    if((row.issue==='invoice'||effective?.remedy==='invoice')&&row.customerState!=='closed'&&view.invoiceChoices?.length)out.push('verify_invoice_line');
     if(['awaiting_refund','refund_prepared'].includes(row.customerState))out.push('prepare_refund');
     if(row.customerState==='refund_prepared')out.push('approve_refund');
-    if(row.customerState==='awaiting_refund'&&view.refundSources?.length&&!row.events.some(event=>event.action==='review_refund_source'))out.push('review_refund_source');
+    if(row.customerState==='awaiting_refund'&&view.refundSources?.length&&!held)out.push('review_refund_source');
+    if(held&&effective?.remedy==='keep'&&!row.events.some(event=>event.action==='approve_refund'||event.action==='refund_result'))out.push('release_refund_source');
     if(row.customerState==='refund_approved')out.push('refund_result','stop_refund');
   }
   return out;
@@ -142,6 +151,9 @@ export default function AfterSalesManager({initialOrder,initialLoss=''}:{initial
       {view.cases.map(row=><section key={row.id} className="space-y-2 rounded border p-4"><h2 className="font-semibold">{issueName(row.issue)} · {view.lines.find(l=>l.id===row.orderItemId)?.name} × {row.quantity}</h2>
         <p className="text-sm">{row.report}</p><p className="text-sm">客户侧 {afterSaleLabel(row.customerState)} · 供应商侧 {afterSaleLabel(row.supplierState)} · 经办 {row.ownerId??'待接手'}</p>
         <p className="text-sm">原凭据 {row.reference} · {date(row.reportedAt)}{row.relatedCents!=null&&' · 关联 '+money(row.relatedCents)}</p>
+        {(row.originalParcelShares??[]).map(part=><p key={part.evidenceEventId??part.parcelLineId} className="text-sm">
+          原包裹 {view.deliveries.find(line=>line.id===part.parcelLineId)?.reference??part.parcelLineId} · 本案 {part.quantity} 件
+        </p>)}
         {row.events.some(event=>event.action==='approve_exchange')&&<Link className="text-sm underline"
           href={'/admin/orders?orderId='+encodeURIComponent(view.order.id)}>打开原单物流，登记已准售后换货</Link>}
         <details><summary className="cursor-pointer text-sm">办理记录（{row.events.length}）</summary>{row.events.map(event=><div className="my-2 border-l-2 pl-3 text-sm" key={event.id}>

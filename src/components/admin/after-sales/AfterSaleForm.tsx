@@ -4,13 +4,14 @@ import { useState, type FormEvent } from 'react';
 import DocumentDigestField from '@/components/admin/purchases/DocumentDigestField';
 import { button, field, primary, money } from '@/components/admin/purchases/PurchaseLineForm';
 import { afterSaleActions, afterSaleChannels, afterSaleIssues, afterSaleRemedies, hasChoice, type AfterSaleAction } from '@/lib/after-sale-options';
+import type { afterSaleInvoiceChoices } from '@/lib/after-sale-invoices';
 import type { afterSaleAdminView } from '@/lib/after-sale-workspace';
 import type { refundTerms, refundPosition } from '@/lib/after-sale-refunds';
 
 export type Desk = ReturnType<typeof afterSaleAdminView> & {
   refundDrafts: Array<{caseId:string;terms:ReturnType<typeof refundTerms>;position:Awaited<ReturnType<typeof refundPosition>>}>;
   refundSources?: Array<{id:string;tradeNo:string;amountCents:number;arrivedAt:string;customerKey:string|null}>;
-  invoiceChoices?: Array<{id:string;number:string;issuer:string;issuedAt:string;amountCents:number|null}>;
+  invoiceChoices?: Array<Omit<Awaited<ReturnType<typeof afterSaleInvoiceChoices>>[number],'amountCents'> & {amountCents:number|null}>;
 };
 type Case = Desk['cases'][number];
 export type FormInput = { orderId:string;caseId?:string;action:AfterSaleAction;requestId:string;data:Record<string,unknown> };
@@ -48,7 +49,18 @@ export default function AfterSaleForm({view,current,action,chosenLoss,busy,onPre
   const actualLines=view.deliveries.filter(l=>l.orderItemId===lineId && l.route!=='supplier_to_libereal');
   const selectedParcel=actualLines.find(l=>l.id===parcelId);
   const originalChoices=Object.fromEntries(actualLines.filter(l=>!l.afterSaleApprovalId).map(l=>[l.id,l.reference+' · '+l.quantity+' 件']));
-  const originalOnly=actualLines.filter(line=>!current?.originalParcelLineId||line.id===current.originalParcelLineId);
+  const originalShares=current?.originalParcelShares ?? [];
+  const originalOnly=actualLines.filter(line=>!originalShares.length || originalShares.some(part=>part.parcelLineId===line.id));
+  const assigned=Object.fromEntries(Object.entries(originalChoices).filter(([id])=>originalShares.some(part=>part.parcelLineId===id)));
+  const paidReplacements=(view.replacements ?? []).filter(row=>row.orderItemId===lineId&&(!linked||row.shortfallId===linked.resolutionId));
+  const currentCorrection=current?.events.findLast(event=>event.action==='invoice_outcome'&&event.operation?.agreementId===current.agreementId);
+  const releaseIds=new Set(current?.events.filter(event=>event.action==='release_refund_source').map(event=>event.operation?.reviewId));
+  const activeReview=current?.events.findLast(event=>event.action==='review_refund_source'&&!releaseIds.has(event.id));
+  const decisionInvoice=current?.events.find(event=>event.id===current.agreementId)?.operation?.invoice as {allocationId?:string;invoiceId?:string}|undefined;
+  const receipt=action==='invoice_outcome' ? view.invoiceChoices?.find(row=>row.id===decisionInvoice?.allocationId)?.correction : null;
+  const invoiceOptions=Object.fromEntries((view.invoiceChoices??[])
+    .filter(row=>action!=='invoice_reissue'||row.invoiceId!==decisionInvoice?.invoiceId)
+    .map(row=>[row.id,row.number+' · '+row.issuer+' · '+(row.amountCents==null?'':money(row.amountCents)+' · ')+new Date(row.issuedAt).toLocaleDateString('zh-CN')]));
   const payment=(view.refundSources??[]).find(item=>item.id===selectedPayment);
   const approvalId=current?.events.findLast(event=>event.action==='approve_refund')?.id;
   const results=new Map(current?.events.filter(event=>event.action==='refund_result' && event.operation?.approvalId===approvalId
@@ -59,15 +71,26 @@ export default function AfterSaleForm({view,current,action,chosenLoss,busy,onPre
     try {
       const record=Object.fromEntries(new FormData(event.currentTarget).entries());
       const data:Record<string,unknown>={};
-      for(const [k,v] of Object.entries(record)) if(typeof v==='string'&&v.trim()) data[k]=v.trim();
+      for(const [k,v] of Object.entries(record)) if(!k.startsWith('replacement:')&&typeof v==='string'&&v.trim()) data[k]=v.trim();
       for(const key of ['quantity','documentRow']) if(data[key]!=null) data[key]=Number(data[key]);
-      for(const key of ['relatedCents','amountCents','transferTotalCents']) if(typeof data[key]==='string') data[key]=inYuan(data[key]);
+      for(const key of ['relatedCents','amountCents','transferTotalCents','replacementAmountCents']) if(typeof data[key]==='string') data[key]=inYuan(data[key]);
       if(record.reviseAgreement&&current?.agreementId)data.revisesAgreementId=current.agreementId;
       if(action==='stop_refund') Object.assign(data,{confirmStopped:record.confirmStopped==='on',
         pendingResultIds:new FormData(event.currentTarget).getAll('pendingResultIds')});
       if(action==='approve_exchange') data.freeOfCharge=record.freeOfCharge==='on';
+      if(action==='release_refund_source') Object.assign(data,{reviewId:activeReview?.id,confirmUnsent:record.confirmUnsent==='on'});
+      if(action==='invoice_reissue'&&record.confirmReplacementEvidence==='on') Object.assign(data,{
+        confirmReplacementEvidence:true,financeEventId:currentCorrection?.operation?.financeEventId});
+      if(action==='agreement'&&['exchange','resend'].includes(remedy)) {
+        const replacementPurchaseShares=paidReplacements.flatMap(item=>{
+          const qty=Number(record['replacement:'+item.purchaseOrderId]);
+          return qty>0?[{purchaseOrderId:item.purchaseOrderId,quantity:qty}]:[];
+        });
+        if(replacementPurchaseShares.length)data.replacementPurchaseShares=replacementPurchaseShares;
+      }
       if(action==='attribute_resend') data.approvalId=selectedParcel?.approvalId;
       if(original) Object.assign(data,{occurredAt:original.occurredAt,reference:original.reference,sha256:original.sha256,documentRow:original.documentRow});
+      else if(receipt) Object.assign(data,{financeEventId:receipt.id,occurredAt:receipt.occurredAt,reference:receipt.reference,sha256:receipt.sha256});
       else if(typeof data.occurredAt==='string') data.occurredAt=new Date(data.occurredAt).toISOString();
       if(action==='open'&&original) Object.assign(data,{channel:'fulfillment',issue:original.kind==='return'?'return':'shortage',orderItemId:original.orderItemId});
       await onPreview({orderId:view.order.id,caseId:current?.id,action,requestId:crypto.randomUUID(),data});
@@ -91,23 +114,35 @@ export default function AfterSaleForm({view,current,action,chosenLoss,busy,onPre
         .filter(([key])=>current?.customerState==='refund_followup'?['refund','refund_withdraw'].includes(key):key!=='refund_withdraw'))} onChange={setRemedy}/><Input name="customerDecision" label="客户确认的条件、范围和费用责任"/>
         {current?.agreementId&&<label className="flex items-center gap-2 text-sm"><input type="checkbox" name="reviseAgreement"/>这份较新的决定明确修订当前版本</label>}
         {remedy==='refund'&&<><Input name="amountCents" label={current?.customerState==='refund_followup'?'重新约定的未付退款金额（元）':'约定退款金额（元）'}/><Input name="recipient" label="核实的退款收款人"/><Input name="destination" label="收款去向标识"/><Select name="method" label="约定退款渠道" options={methodLabels}/></>}
-        {['exchange','return'].includes(remedy)&&Object.keys(originalChoices).length>0&&<Select name="originalParcelLineId" label="客户决定所指的原包裹"
+        {['exchange','return'].includes(remedy)&&!originalShares.length&&Object.keys(originalChoices).length>0&&<Select name="originalParcelLineId" label="客户决定所指的原包裹"
           initial={current?.originalParcelLineId??undefined} options={originalChoices} required={remedy==='exchange'&&!linked}/>}
         {remedy==='exchange'&&!linked&&<Select name="returnRequirement" label="书证约定的退回要求" options={{required:'先核对原件实际退回',waived:'双方书面同意免退换货'}}/>}
         {['resend','exchange'].includes(remedy)&&Object.keys(approved).length>0&&<Select name="resendApprovalId" label="已有补发批准" options={approved} required={false}/>}
-        {['resend','exchange'].includes(remedy)&&Boolean(view.replacements?.length)&&<Select name="replacementPurchaseOrderId" label="已有独立有偿补采（如适用）"
-          options={Object.fromEntries(view.replacements.filter(row=>row.orderItemId===lineId&&(!linked||row.shortfallId===linked.resolutionId))
-            .map(row=>[row.purchaseOrderId,row.purchaseOrderId+' · '+row.quantity+' 件']))} required={false}/>}
-        {remedy==='invoice'&&<><Select name="invoiceAllocationId" label="实际受影响的原票分摊" options={Object.fromEntries((view.invoiceChoices??[])
-          .map(row=>[row.id,row.number+' · '+row.issuer+' · '+row.id]))}/><Input name="amountCents" label="书面决定涉及发票金额（元）"/>
-          <Select name="invoiceOutcome" label="书面决定要求的实际更正结果" options={{retained:'书面确认原票继续有效',voided:'原票红冲或作废'}}/></>}</>}
+        {['resend','exchange'].includes(remedy)&&paidReplacements.length>0&&<fieldset className="space-y-2 sm:col-span-2">
+          <legend>已经独立订购的补件份额（如适用）</legend>
+          {paidReplacements.map(row=><Input key={row.id} name={'replacement:'+row.purchaseOrderId}
+            label={String(row.supplier)+' · '+row.purchaseOrderId+' · 本案件数，最多 '+row.quantity+' 件'} type="number" required={false}/>)}
+        </fieldset>}
+        {remedy==='invoice'&&<><Select name="invoiceAllocationId" label="实际受影响的原票分摊" options={invoiceOptions}/>
+          <Input name="amountCents" label="书面决定涉及发票金额（元）"/>
+          <Select name="invoiceOutcome" label="书面决定要求的实际更正结果" options={{retained:'书面确认原票继续有效',voided:'只办理原票红冲或作废',
+            reissue:'红冲并实际重开'}} onChange={setOutcome}/>
+          {outcome==='reissue'&&<Input name="replacementAmountCents" label="本商品书面约定的重开金额（元）"/>}</>}</>}
+      {action==='bind_original_parcel'&&<>
+        <Select name="parcelLineId" label="本次核对的实际原包裹行" options={Object.fromEntries(actualLines
+          .filter(line=>!line.afterSaleApprovalId&&line.receipts.length).map(line=>[line.id,originalChoices[line.id]]))}/>
+        <Input name="quantity" label="本案在该包裹中的实际件数" type="number"/>
+      </>}
       {action==='physical'&&<><Select name="result" label="实物结果" options={physicalLabels} required={false} onChange={setPhysical}/>
         {physical&&<><Select key={physical} name="parcelLineId" label="对客包裹明细" options={Object.fromEntries((physical==='return'?originalOnly:actualLines)
           .map(l=>[l.id,l.reference+' · '+l.quantity+' 件']))} onChange={setParcel}/>
           <Input name="quantity" label="本次核对件数" type="number"/>
           {physical==='return'&&<Select name="resolutionId" label="已登记的退回" options={Object.fromEntries((selectedParcel?.returns??[]).map(a=>[a.id,a.id+' · '+a.quantity+' 件']))}/>}
           {physical==='delivery'&&Object.keys(approved).length>0&&<Select name="resendApprovalId" label="原采购补发批准" options={approved} required={false}/>}</>}</>}
-      {action==='approve_exchange'&&<><Input name="supplier" label="原采购记录所列供货主体"/>
+      {action==='approve_exchange'&&<><Select name="parcelLineId" label="本次换件对应的原包裹" options={assigned}
+        initial={Object.keys(assigned).length===1?Object.keys(assigned)[0]:undefined}/>
+        <Input name="quantity" label="本次批准的件数" type="number" value={originalShares.length===1?originalShares[0].quantity:undefined}/>
+        <Input name="supplier" label="原采购记录所列供货主体"/>
         <Select name="returnRequirement" label="供方书面承诺中的退回条件" options={{required:'原货实际退回',waived:'确认对本批货免退'}}/>
         <label className="flex items-center gap-2 text-sm"><input type="checkbox" name="freeOfCharge" required/>确认原供方书面承诺本批换货免费</label></>}
       {action==='attribute_resend'&&<><Select name="parcelLineId" label="实际补件对客包裹" options={Object.fromEntries(actualLines
@@ -116,11 +151,22 @@ export default function AfterSaleForm({view,current,action,chosenLoss,busy,onPre
       {action==='supplier'&&<><Select name="outcome" label="供应商侧结果" options={{following:'继续跟进',no_claim:'经核实无需追偿',resolved:'已有书面处理结果',financial_result:'核实了实际退款或抵扣'}} onChange={setOutcome}/>
         <Input name="purchaseOrderId" label="对应采购单号" required={outcome!=='no_claim'} value={linked?.purchaseOrderId??originalOnly.find(row=>row.id===current?.originalParcelLineId)?.purchaseOrderId??undefined}/><Input name="supplier" label="供应商主体" required={outcome!=='no_claim'}/>
         {!linked&&!current?.originalParcelLineId&&Object.keys(originalChoices).length>0&&<Select name="originalParcelLineId"
-          label="本案实际对应的供方原包裹" options={originalChoices} required={false}/>}
+          label="本案实际对应的供方原包裹" options={originalShares.length?assigned:originalChoices} required={false}/>}
         {outcome==='financial_result'&&<><Input name="amountCents" label="供应商实际处理金额（元）"/><Input name="method" label="供方处理方式"/><Input name="referenceNo" label="供方回执流水"/><Input name="destination" label="实际收款去向或抵扣出处"/>
           <Input name="transferTotalCents" label="同笔真实交易总额（元，全部归本行可留空）" required={false}/>
           <Input name="allocationReference" label="本行分摊依据（分摊时填写）" required={false}/></>}</>}
-      {action==='invoice_outcome'&&<Input name="financeEventId" label="已办完的票据更正记录号"/>}
+      {action==='invoice_outcome'&&(receipt?<p>实际更正回执 {receipt.reference} · 办理订单 {receipt.orderId} · 记录 {receipt.id}</p>
+        :<Input name="financeEventId" label="已办完的票据更正记录号"/>)}
+      {action==='verify_invoice_line'&&<><Select name="invoiceAllocationId" label="须凭原件核对的发票分摊" options={invoiceOptions}/>
+        <Input name="amountCents" label="这张票归入本商品的全部金额（元）"/></>}
+      {action==='invoice_reissue'&&<>
+        <Select name="invoiceAllocationId" label="财务已实际登记的替代票分摊" options={invoiceOptions}/>
+        <p className="text-sm">原红冲回执 {String(currentCorrection?.operation?.financeEventId??'')}</p>
+        <label className="flex items-center gap-2 text-sm sm:col-span-2"><input name="confirmReplacementEvidence" type="checkbox"/>
+          若开票时未关联原红冲，凭补充书证核实原票、红冲回执及替代票的对应关系</label></>}
+      {action==='release_refund_source'&&<label className="flex items-center gap-2 text-sm sm:col-span-2">
+        <input name="confirmUnsent" type="checkbox" required/>核实这笔款未获退款批准、未发出指令，且客户后来书面要求保留原单
+      </label>}
       {action==='review_refund_source'&&<>
         <Select name="paymentId" label="可核实的原平台到账" options={Object.fromEntries((view.refundSources??[])
           .map(row=>[row.id,row.tradeNo+' · '+money(row.amountCents)+' · '+new Date(row.arrivedAt).toLocaleString('zh-CN')]))} onChange={setSelectedPayment}/>
@@ -144,6 +190,7 @@ export default function AfterSaleForm({view,current,action,chosenLoss,busy,onPre
       <p>已核实订单实收 {money(draft.position.paidCents)}，其他售后占用 {money(draft.position.usedCents)}，本案已实际退款 {money(draft.position.recordedCents)}</p></section>}
     <label className="grid gap-1 text-sm">{action==='open'?'实际问题和客户要求':'办理说明'}<textarea className={field} name="note" rows={2} maxLength={2000} required/></label>
     {original?<p className="break-all rounded bg-slate-50 p-2 text-sm">原履约凭据 {original.reference} · 第 {original.documentRow} 行 · {original.occurredAt}<br/>{original.sha256}</p>
+      :receipt?<p className="break-all rounded bg-slate-50 p-2 text-sm">原票回执 {receipt.reference} · {new Date(receipt.occurredAt).toLocaleString('zh-CN')}<br/>{receipt.sha256}</p>
       :<div className="grid gap-3 sm:grid-cols-2"><Input name="occurredAt" label="凭据实际发生时间" type="datetime-local"/><Input name="reference" label="凭据名称或档案出处"/>
         <Input name="documentRow" label="凭据行号" type="number" value={1}/><DocumentDigestField name="sha256" label="原件 SHA-256" required/></div>}
     {error&&<p role="alert" className="text-red-700">{error}</p>}

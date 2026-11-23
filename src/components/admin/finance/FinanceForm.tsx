@@ -285,7 +285,8 @@ export default function FinanceForm({ view, action, initialPlanId, busy, onPrevi
       {action === 'record_invoice' && <><Text key={'issuer' + planId} name="issuer" label="票面开票方全称" initial={plan?.issuer}/>
         <Text key={'recipient' + planId} name="recipient" label="票面受票方全称" initial={plan?.recipient}/><Text name="number" label="票面号码"/>
         <Time name="issuedAt" label="票面开票时间" value={invoiceDate} onChange={setInvoiceDate}/><Amount name="grossCents" label="整张发票含税合计"/>
-        <Amount name="amountCents" label="本次归入此项金额"/></>}
+        <Amount name="amountCents" label="本次归入此项金额"/>
+        {plan?.side==='customer'&&<Text name="correctionEventId" label="重开时填写原票实际红冲回执记录号" required={false}/>}</>}
       {(action === 'verify_invoice_coverage' || action === 'record_invoice' && plan?.coverageReview) && <div
         key={planId + (reviewingInvoice?.id ?? period?.key ?? '')} className="space-y-3 sm:col-span-2">
         {action === 'verify_invoice_coverage' && <p>请按实际原件填写各书证覆盖的商品数量，金额合计须等于 {money(reviewingInvoice?.amountCents
