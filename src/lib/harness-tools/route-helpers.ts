@@ -56,6 +56,7 @@ export async function handleHarnessInquiryPost<T>(
     tool: string;
     requiredScope: HarnessToolScope;
     allowEmptyBody?: boolean;
+    allowBodyFields?: ReadonlySet<string>;
     run: (
       inquiryId: string,
       body: Record<string, unknown>,
@@ -86,7 +87,7 @@ export async function handleHarnessInquiryPost<T>(
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
       return harnessError(400, 'validation_error', 'INVALID_BODY', '请求体必须为 JSON 对象');
     }
-    const untrusted = rejectUntrustedAuthFields(parsed);
+    const untrusted = rejectUntrustedAuthFields(parsed, { allowFields: options.allowBodyFields });
     if (untrusted) return untrusted;
     body = parsed as Record<string, unknown>;
   } else if (!options.allowEmptyBody) {

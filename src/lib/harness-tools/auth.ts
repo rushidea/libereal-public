@@ -7,6 +7,7 @@ export const HARNESS_TOOL_SCOPES = [
   'inquiry.read',
   'inquiry.quote.preview',
   'inquiry.supplier_review.prepare',
+  'inquiry.lease',
 ] as const;
 
 export type HarnessToolScope = (typeof HARNESS_TOOL_SCOPES)[number];
@@ -17,6 +18,8 @@ export type HarnessErrorClass =
   | 'not_found'
   | 'version_conflict'
   | 'idempotency_conflict'
+  | 'lease_conflict'
+  | 'stale_lease'
   | 'missing_info'
   | 'awaiting_human'
   | 'validation_error'
@@ -26,6 +29,8 @@ export type HarnessErrorClass =
 export const HARNESS_HEADER_TOKEN = 'x-libereal-harness-token';
 export const HARNESS_HEADER_CLIENT_ID = 'x-libereal-harness-client-id';
 export const HARNESS_HEADER_ENV = 'x-libereal-harness-env';
+export const HARNESS_HEADER_LEASE_TOKEN = 'x-libereal-harness-lease-token';
+export const HARNESS_HEADER_FENCE_TOKEN = 'x-libereal-harness-fence-token';
 
 const UNTRUSTED_AUTHORIZATION_FIELDS = new Set([
   'approved',
@@ -40,6 +45,8 @@ const UNTRUSTED_AUTHORIZATION_FIELDS = new Set([
   'force',
   'mfaVerified',
   'stepUpToken',
+  'leaseToken',
+  'fenceToken',
 ]);
 
 export interface HarnessClientConfig {
@@ -194,26 +201,33 @@ export function harnessSuccess(
   );
 }
 
-export function findUntrustedAuthField(value: unknown, depth = 0): string | null {
+export function findUntrustedAuthField(
+  value: unknown,
+  depth = 0,
+  allowFields?: ReadonlySet<string>,
+): string | null {
   if (depth > 6 || !value || typeof value !== 'object') return null;
   if (Array.isArray(value)) {
     for (const item of value) {
-      const nested = findUntrustedAuthField(item, depth + 1);
+      const nested = findUntrustedAuthField(item, depth + 1, allowFields);
       if (nested) return nested;
     }
     return null;
   }
   const obj = value as Record<string, unknown>;
   for (const key of Object.keys(obj)) {
-    if (UNTRUSTED_AUTHORIZATION_FIELDS.has(key)) return key;
-    const nested = findUntrustedAuthField(obj[key], depth + 1);
+    if (UNTRUSTED_AUTHORIZATION_FIELDS.has(key) && !allowFields?.has(key)) return key;
+    const nested = findUntrustedAuthField(obj[key], depth + 1, allowFields);
     if (nested) return nested;
   }
   return null;
 }
 
-export function rejectUntrustedAuthFields(body: unknown): NextResponse | null {
-  const offendingField = findUntrustedAuthField(body);
+export function rejectUntrustedAuthFields(
+  body: unknown,
+  options?: { allowFields?: ReadonlySet<string> },
+): NextResponse | null {
+  const offendingField = findUntrustedAuthField(body, 0, options?.allowFields);
   if (!offendingField) return null;
   return harnessError(
     400,
@@ -320,5 +334,62 @@ export function authorizeHarnessRequest(
       environment: config.environment,
       scopes: client.scopes,
     },
+  };
+}
+
+export interface HarnessLeaseHeader {
+  leaseToken: string;
+  fenceToken: number;
+}
+
+const LEASE_TOKEN_RE = /^\S{1,128}$/;
+const FENCE_TOKEN_RE = /^[1-9]\d{0,9}$/;
+
+export function extractHarnessLeaseHeaders(req: {
+  headers: { get(name: string): string | null };
+}):
+  | { provided: false }
+  | { provided: true; ok: false; response: NextResponse }
+  | { provided: true; ok: true; lease: HarnessLeaseHeader } {
+  const rawToken = req.headers.get(HARNESS_HEADER_LEASE_TOKEN);
+  const rawFence = req.headers.get(HARNESS_HEADER_FENCE_TOKEN);
+
+  if (rawToken === null && rawFence === null) {
+    return { provided: false };
+  }
+
+  const leaseToken = rawToken?.trim() ?? '';
+  const fenceStr = rawFence?.trim() ?? '';
+  if (!LEASE_TOKEN_RE.test(leaseToken) || !FENCE_TOKEN_RE.test(fenceStr)) {
+    return {
+      provided: true,
+      ok: false,
+      response: harnessError(
+        400,
+        'validation_error',
+        'INVALID_LEASE_HEADERS',
+        '租约请求头格式无效，须同时提供合法的 leaseToken 与正整数 fenceToken',
+      ),
+    };
+  }
+
+  const fenceToken = Number(fenceStr);
+  if (!Number.isSafeInteger(fenceToken) || fenceToken <= 0) {
+    return {
+      provided: true,
+      ok: false,
+      response: harnessError(
+        400,
+        'validation_error',
+        'INVALID_LEASE_HEADERS',
+        'fenceToken 必须为有效的正整数',
+      ),
+    };
+  }
+
+  return {
+    provided: true,
+    ok: true,
+    lease: { leaseToken, fenceToken },
   };
 }

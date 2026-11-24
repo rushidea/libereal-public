@@ -1,7 +1,11 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { NextRequest } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { sha256Hex } from '@/lib/harness-tools/auth';
+import {
+  HARNESS_HEADER_FENCE_TOKEN,
+  HARNESS_HEADER_LEASE_TOKEN,
+  sha256Hex,
+} from '@/lib/harness-tools/auth';
 import { verifyAndPriceItems } from '@/lib/pricing';
 import { GET as getContext } from '@/app/api/internal/harness/inquiries/[id]/context/route';
 import { GET as getFeedback } from '@/app/api/internal/harness/inquiries/[id]/feedback/route';
@@ -9,6 +13,8 @@ import { GET as getSupplierEvidence } from '@/app/api/internal/harness/inquiries
 import { GET as getStatus } from '@/app/api/internal/harness/inquiries/[id]/status/route';
 import { POST as postQuotePreview } from '@/app/api/internal/harness/inquiries/[id]/quote-preview/route';
 import { POST as postSupplierReview } from '@/app/api/internal/harness/inquiries/[id]/supplier-review/route';
+import { POST as postLeaseClaim } from '@/app/api/internal/harness/inquiries/[id]/lease/claim/route';
+import { POST as postLeaseRelease } from '@/app/api/internal/harness/inquiries/[id]/lease/release/route';
 import { clearAllTables, closeTestDb, getTestDb } from './db-helpers';
 
 const TEST_ENV = 'local-test';
@@ -30,7 +36,12 @@ function makeConfig(pilotInquiryIds?: string[]) {
       {
         clientId: PILOT_CLIENT_ID,
         tokenSha256: sha256Hex(PILOT_TOKEN),
-        scopes: ['inquiry.read', 'inquiry.quote.preview', 'inquiry.supplier_review.prepare'],
+        scopes: [
+          'inquiry.read',
+          'inquiry.quote.preview',
+          'inquiry.supplier_review.prepare',
+          'inquiry.lease',
+        ],
       },
       {
         clientId: READONLY_CLIENT_ID,
@@ -60,6 +71,7 @@ function makeRequest(
     token?: string | null;
     clientId?: string | null;
     env?: string | null;
+    leaseHeaders?: { leaseToken: string; fenceToken: number };
     body?: unknown;
   } = {},
 ) {
@@ -67,6 +79,10 @@ function makeRequest(
   if (options.token !== null) headers.set('x-libereal-harness-token', options.token ?? PILOT_TOKEN);
   if (options.clientId !== null) headers.set('x-libereal-harness-client-id', options.clientId ?? PILOT_CLIENT_ID);
   if (options.env !== null) headers.set('x-libereal-harness-env', options.env ?? TEST_ENV);
+  if (options.leaseHeaders) {
+    headers.set(HARNESS_HEADER_LEASE_TOKEN, options.leaseHeaders.leaseToken);
+    headers.set(HARNESS_HEADER_FENCE_TOKEN, String(options.leaseHeaders.fenceToken));
+  }
   if (options.body !== undefined) headers.set('content-type', 'application/json');
 
   return new NextRequest(`http://localhost:3000${path}`, {
@@ -568,5 +584,285 @@ describe('M2 harness scoped inquiry/quote/feedback tool APIs', () => {
     );
     expect(byItemId.get(inquiry.inquiryItems[0].id)).toBe('QUOTE_REQUIRED');
     expect(byItemId.get(inquiry.inquiryItems[1].id)).toBe('CATALOG_ITEM_UNMATCHED');
+  });
+
+  it('enforces inquiry lease conflicts, expiry reclamation, stale-writer fencing, and safe cancellation', async () => {
+    const { inquiry } = await seedSyntheticInquiryFixtures();
+    const highValueItem = inquiry.inquiryItems[1];
+    process.env.LIBEREAL_HARNESS_TOOLS_CONFIG = makeConfig([inquiry.id]);
+    const params = Promise.resolve({ id: inquiry.id });
+
+    // Body smuggling leaseToken/fenceToken must be rejected upfront (400)
+    const smuggleRes = await postSupplierReview(
+      makeRequest(`/api/internal/harness/inquiries/${inquiry.id}/supplier-review`, {
+        method: 'POST',
+        body: {
+          inquiryItemId: highValueItem.id,
+          expectedInquiryVersion: 'a'.repeat(64),
+          idempotencyKey: 'm4-smuggle-lease-01',
+          leaseToken: 'forged-token',
+          fenceToken: 1,
+        },
+      }),
+      { params },
+    );
+    expect(smuggleRes.status).toBe(400);
+    expect((await smuggleRes.json()).code).toBe('UNTRUSTED_AUTHORIZATION_FIELD');
+
+    const ctxRes = await getContext(
+      makeRequest(`/api/internal/harness/inquiries/${inquiry.id}/context`),
+      { params },
+    );
+    const initialVersion = (await ctxRes.json()).inquiryVersion as string;
+
+    // 1. Writer 1 claims a short lease (500ms) -> fenceToken=1
+    const claim1Res = await postLeaseClaim(
+      makeRequest(`/api/internal/harness/inquiries/${inquiry.id}/lease/claim`, {
+        method: 'POST',
+        body: {
+          ownerId: 'writer-1',
+          threadId: 'thread-lease-test',
+          leaseDurationMs: 500,
+        },
+      }),
+      { params },
+    );
+    expect(claim1Res.status).toBe(200);
+    const claim1 = await claim1Res.json();
+    expect(claim1.data.fenceToken).toBe(1);
+    expect(claim1.data.reclaimedExpiredLease).toBe(false);
+    const leaseToken1 = claim1.data.leaseToken as string;
+    expect(typeof leaseToken1).toBe('string');
+
+    // 2. Concurrent Writer 2 claim while active returns 409 lease_conflict
+    const conflictClaimRes = await postLeaseClaim(
+      makeRequest(`/api/internal/harness/inquiries/${inquiry.id}/lease/claim`, {
+        method: 'POST',
+        body: {
+          ownerId: 'writer-2',
+          threadId: 'thread-lease-test',
+          leaseDurationMs: 60_000,
+        },
+      }),
+      { params },
+    );
+    expect(conflictClaimRes.status).toBe(409);
+    const conflictClaim = await conflictClaimRes.json();
+    expect(conflictClaim.errorClass).toBe('lease_conflict');
+    expect(conflictClaim.code).toBe('LEASE_HELD_BY_OTHER_OWNER');
+
+    // Unleased write while lease active returns 409 ACTIVE_LEASE_REQUIRED
+    const unleasedRes = await postSupplierReview(
+      makeRequest(`/api/internal/harness/inquiries/${inquiry.id}/supplier-review`, {
+        method: 'POST',
+        body: {
+          inquiryItemId: highValueItem.id,
+          expectedInquiryVersion: initialVersion,
+          idempotencyKey: 'm4-unleased-write-01',
+        },
+      }),
+      { params },
+    );
+    expect(unleasedRes.status).toBe(409);
+    expect((await unleasedRes.json()).code).toBe('ACTIVE_LEASE_REQUIRED');
+
+    // Wait for Writer 1 lease to expire, then Writer 2 reclaims -> fenceToken=2
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    const claim2Res = await postLeaseClaim(
+      makeRequest(`/api/internal/harness/inquiries/${inquiry.id}/lease/claim`, {
+        method: 'POST',
+        body: {
+          ownerId: 'writer-2',
+          threadId: 'thread-lease-test',
+          leaseDurationMs: 60_000,
+        },
+      }),
+      { params },
+    );
+    expect(claim2Res.status).toBe(200);
+    const claim2 = await claim2Res.json();
+    expect(claim2.data.fenceToken).toBe(2);
+    expect(claim2.data.reclaimedExpiredLease).toBe(true);
+    const leaseToken2 = claim2.data.leaseToken as string;
+    expect(leaseToken2).not.toBe(leaseToken1);
+
+    // 3. Stale Writer 1 write with old (leaseToken1, fenceToken=1) rejected 409 with 0 DB writes
+    const staleWriteRes = await postSupplierReview(
+      makeRequest(`/api/internal/harness/inquiries/${inquiry.id}/supplier-review`, {
+        method: 'POST',
+        leaseHeaders: { leaseToken: leaseToken1, fenceToken: 1 },
+        body: {
+          inquiryItemId: highValueItem.id,
+          expectedInquiryVersion: initialVersion,
+          idempotencyKey: 'm4-stale-writer-01',
+        },
+      }),
+      { params },
+    );
+    expect(staleWriteRes.status).toBe(409);
+    const staleWriteJson = await staleWriteRes.json();
+    expect(staleWriteJson.errorClass).toBe('stale_lease');
+    expect(staleWriteJson.code).toBe('STALE_WRITER_LEASE_REJECTED');
+    expect(
+      await prisma.backgroundTask.count({ where: { type: 'inquiry.supplier_written_quote' } }),
+    ).toBe(0);
+
+    // 4. Active Writer 2 write succeeds (201)
+    const activeWriteRes = await postSupplierReview(
+      makeRequest(`/api/internal/harness/inquiries/${inquiry.id}/supplier-review`, {
+        method: 'POST',
+        leaseHeaders: { leaseToken: leaseToken2, fenceToken: 2 },
+        body: {
+          inquiryItemId: highValueItem.id,
+          expectedInquiryVersion: initialVersion,
+          idempotencyKey: 'm4-active-writer-02',
+        },
+      }),
+      { params },
+    );
+    expect(activeWriteRes.status).toBe(201);
+    expect(
+      await prisma.backgroundTask.count({ where: { type: 'inquiry.supplier_written_quote' } }),
+    ).toBe(1);
+
+    // 5. Writer 2 cancels lease -> committed supplier review preserved, subsequent write rejected
+    const cancelRes = await postLeaseRelease(
+      makeRequest(`/api/internal/harness/inquiries/${inquiry.id}/lease/release`, {
+        method: 'POST',
+        body: {
+          leaseToken: leaseToken2,
+          fenceToken: 2,
+          action: 'cancel',
+          reason: 'run aborted cleanly',
+        },
+      }),
+      { params },
+    );
+    expect(cancelRes.status).toBe(200);
+    const cancelJson = await cancelRes.json();
+    expect(cancelJson.data.status).toBe('cancelled');
+    expect(
+      await prisma.backgroundTask.count({ where: { type: 'inquiry.supplier_written_quote' } }),
+    ).toBe(1);
+
+    const postCancelWriteRes = await postSupplierReview(
+      makeRequest(`/api/internal/harness/inquiries/${inquiry.id}/supplier-review`, {
+        method: 'POST',
+        leaseHeaders: { leaseToken: leaseToken2, fenceToken: 2 },
+        body: {
+          inquiryItemId: highValueItem.id,
+          expectedInquiryVersion: initialVersion,
+          idempotencyKey: 'm4-post-cancel-write',
+        },
+      }),
+      { params },
+    );
+    expect(postCancelWriteRes.status).toBe(409);
+    expect((await postCancelWriteRes.json()).code).toBe('STALE_WRITER_LEASE_REJECTED');
+  });
+
+  it('surfaces quote-email unknown/partial delivery tasks and redacted activeLease in status endpoint', async () => {
+    const { inquiry, normalProduct } = await seedSyntheticInquiryFixtures();
+    const quote = await prisma.quote.create({
+      data: {
+        inquiryId: inquiry.id,
+        version: 1,
+        status: 'sent',
+        subtotal: 800,
+        currency: 'CNY',
+        sentAt: new Date(),
+        validUntil: new Date(Date.now() + 7 * 86400_000),
+        items: {
+          create: [
+            {
+              inquiryItemId: inquiry.inquiryItems[0].id,
+              position: 0,
+              productId: normalProduct.id,
+              catalogNumber: normalProduct.catalogNumber,
+              name: normalProduct.name,
+              unitPrice: 800,
+              quantity: 1,
+              lineTotal: 800,
+              leadTime: '3-5天',
+              available: true,
+            },
+          ],
+        },
+      },
+    });
+
+    await prisma.inquiryFeedback.updateMany({
+      where: { inquiryId: inquiry.id },
+      data: { handlingStatus: 'resolved', handledAt: new Date() },
+    });
+
+    const deliveryTask = await prisma.backgroundTask.create({
+      data: {
+        type: 'email.send',
+        status: 'awaiting_human',
+        dedupeKey: `quote-email:${quote.id}`,
+        payload: JSON.stringify({
+          kind: 'quote',
+          to: inquiry.email,
+          subject: 'LIBEREAL · 报价通知',
+        }),
+        lastError: 'SMTP socket timeout after DATA',
+        result: JSON.stringify({ outcome: 'unknown' }),
+      },
+    });
+
+    process.env.LIBEREAL_HARNESS_TOOLS_CONFIG = makeConfig([inquiry.id]);
+    const params = Promise.resolve({ id: inquiry.id });
+
+    const claimRes = await postLeaseClaim(
+      makeRequest(`/api/internal/harness/inquiries/${inquiry.id}/lease/claim`, {
+        method: 'POST',
+        body: { ownerId: 'status-reader', threadId: 'thread-status-delivery' },
+      }),
+      { params },
+    );
+    const claimJson = await claimRes.json();
+    const secretLeaseToken = claimJson.data.leaseToken as string;
+
+    const statusRes = await getStatus(
+      makeRequest(`/api/internal/harness/inquiries/${inquiry.id}/status`),
+      { params },
+    );
+    expect(statusRes.status).toBe(200);
+    const rawBody = await statusRes.text();
+    expect(rawBody.includes(secretLeaseToken)).toBe(false);
+
+    const statusJson = JSON.parse(rawBody);
+    expect(statusJson.data.waitingOnHuman).toBe(true);
+    expect(statusJson.data.reasons).toContain('存在待核对投递回执');
+    expect(statusJson.data.deliveryTasks).toHaveLength(1);
+    expect(statusJson.data.deliveryTasks[0]).toMatchObject({
+      id: deliveryTask.id,
+      type: 'email.send',
+      status: 'awaiting_human',
+      dedupeKey: `quote-email:${quote.id}`,
+      outcome: 'unknown',
+      reviewable: true,
+    });
+    expect(statusJson.data.activeLease).toMatchObject({
+      ownerId: 'status-reader',
+      threadId: 'thread-status-delivery',
+      fenceToken: 1,
+      status: 'running',
+      expired: false,
+    });
+
+    // Partial outcome also remains reviewable
+    await prisma.backgroundTask.update({
+      where: { id: deliveryTask.id },
+      data: { result: JSON.stringify({ outcome: 'partial' }) },
+    });
+    const partialRes = await getStatus(
+      makeRequest(`/api/internal/harness/inquiries/${inquiry.id}/status`),
+      { params },
+    );
+    const partialJson = await partialRes.json();
+    expect(partialJson.data.deliveryTasks[0].outcome).toBe('partial');
+    expect(partialJson.data.deliveryTasks[0].reviewable).toBe(true);
   });
 });

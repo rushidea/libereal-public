@@ -33,7 +33,8 @@ import {
   supplierQuoteReviewView,
 } from '@/lib/supplier-quote-review';
 import { deliveryReviewable, isDeliveryTask } from '@/lib/task-delivery-review';
-import type { HarnessErrorClass, HarnessPrincipal } from './auth';
+import type { HarnessErrorClass, HarnessLeaseHeader, HarnessPrincipal } from './auth';
+import { assertActiveLeaseForWrite, readInquiryLeaseSummary } from './lease-service';
 
 type Db = Prisma.TransactionClient | typeof prisma;
 
@@ -360,7 +361,10 @@ function taskReferencesInquiry(payload: string, inquiryId: string): boolean {
   return false;
 }
 
-export async function getInquiryHumanActionsAndReceiptsForHarness(inquiryId: string) {
+export async function getInquiryHumanActionsAndReceiptsForHarness(
+  inquiryId: string,
+  environment?: string,
+) {
   const inquiry = await prisma.inquiry.findUnique({
     where: { id: inquiryId },
     select: {
@@ -373,7 +377,6 @@ export async function getInquiryHumanActionsAndReceiptsForHarness(inquiryId: str
         select: { id: true, metadata: true },
       },
       quotes: {
-        where: { status: 'draft' },
         orderBy: { version: 'desc' },
         include: { items: { orderBy: { position: 'asc' } } },
       },
@@ -394,7 +397,12 @@ export async function getInquiryHumanActionsAndReceiptsForHarness(inquiryId: str
   }
 
   const reviewIds = collectSupplierReviewIds(inquiry.inquiryItems);
-  const [supplierReviewRows, mailHeaderRows, deliveryCandidateRows, inquiryVersion] =
+  const quoteEmailDedupeKeys = new Set(
+    inquiry.quotes.map((quote) => `quote-email:${quote.id}`),
+  );
+  const draftQuotes = inquiry.quotes.filter((quote) => quote.status === 'draft');
+
+  const [supplierReviewRows, mailHeaderRows, deliveryCandidateRows, activeLease, inquiryVersion] =
     await Promise.all([
       reviewIds.length
         ? prisma.backgroundTask.findMany({
@@ -413,11 +421,17 @@ export async function getInquiryHumanActionsAndReceiptsForHarness(inquiryId: str
       prisma.backgroundTask.findMany({
         where: {
           type: { in: ['email.send', 'sms.send', 'order.reminder'] },
-          payload: { contains: inquiryId },
+          OR: [
+            { payload: { contains: inquiryId } },
+            ...(quoteEmailDedupeKeys.size
+              ? [{ dedupeKey: { in: [...quoteEmailDedupeKeys] } }]
+              : []),
+          ],
         },
         orderBy: { createdAt: 'desc' },
         take: 50,
       }),
+      environment ? readInquiryLeaseSummary(prisma, environment, inquiryId) : Promise.resolve(null),
       computeInquiryVersion(prisma, inquiryId),
     ]);
 
@@ -443,7 +457,7 @@ export async function getInquiryHumanActionsAndReceiptsForHarness(inquiryId: str
       updatedAt: task.updatedAt.toISOString(),
     }));
 
-  const draftQuotesAwaitingPublish = inquiry.quotes.map((quote) => ({
+  const draftQuotesAwaitingPublish = draftQuotes.map((quote) => ({
     id: quote.id,
     version: quote.version,
     contentHash: quoteContentHash(quote),
@@ -451,14 +465,25 @@ export async function getInquiryHumanActionsAndReceiptsForHarness(inquiryId: str
   }));
 
   const deliveryTasks = deliveryCandidateRows
-    .filter((task) => isDeliveryTask(task) && taskReferencesInquiry(task.payload, inquiryId))
+    .filter(
+      (task) =>
+        isDeliveryTask(task) &&
+        (taskReferencesInquiry(task.payload, inquiryId) ||
+          (task.dedupeKey !== null && quoteEmailDedupeKeys.has(task.dedupeKey))),
+    )
     .map((task) => ({
       id: task.id,
       type: task.type,
       status: task.status,
-      outcome: typeof jsonObject(task.result).outcome === 'string'
-        ? (jsonObject(task.result).outcome as string)
-        : null,
+      dedupeKey: task.dedupeKey ?? null,
+      attempts: task.attempts,
+      lastError: task.lastError ? task.lastError.slice(0, 300) : null,
+      outcome:
+        typeof jsonObject(task.result).outcome === 'string'
+          ? (jsonObject(task.result).outcome as string)
+          : deliveryReviewable(task)
+            ? 'unknown'
+            : null,
       reviewable: deliveryReviewable(task),
       updatedAt: task.updatedAt.toISOString(),
     }));
@@ -501,6 +526,7 @@ export async function getInquiryHumanActionsAndReceiptsForHarness(inquiryId: str
       supplierMailHeaderTasks,
       draftQuotesAwaitingPublish,
       deliveryTasks,
+      activeLease,
     },
   };
 }
@@ -783,6 +809,7 @@ export async function prepareSupplierQuoteReviewForHarness(
   inquiryId: string,
   input: PrepareSupplierReviewInput,
   principal: HarnessPrincipal,
+  leaseHeader?: HarnessLeaseHeader | null,
 ) {
   const inquiryItemId = typeof input.inquiryItemId === 'string' ? input.inquiryItemId.trim() : '';
   if (!inquiryItemId || inquiryItemId.length > 160) {
@@ -844,6 +871,8 @@ export async function prepareSupplierQuoteReviewForHarness(
 
   try {
     return await prisma.$transaction(async (tx) => {
+      await assertActiveLeaseForWrite(tx, inquiryId, principal, leaseHeader);
+
       const existingReceipt = await tx.backgroundTask.findUnique({ where: { dedupeKey } });
       if (existingReceipt) {
         const currentVersion = await computeInquiryVersion(tx, inquiryId);

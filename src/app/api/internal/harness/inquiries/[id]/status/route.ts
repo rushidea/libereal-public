@@ -9,6 +9,7 @@ export async function GET(
   return handleHarnessInquiryGet(req, context, {
     tool: 'get_inquiry_human_actions',
     requiredScope: 'inquiry.read',
-    run: (inquiryId) => getInquiryHumanActionsAndReceiptsForHarness(inquiryId),
+    run: (inquiryId, principal) =>
+      getInquiryHumanActionsAndReceiptsForHarness(inquiryId, principal.environment),
   });
 }
