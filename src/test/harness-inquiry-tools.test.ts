@@ -471,4 +471,102 @@ describe('M2 harness scoped inquiry/quote/feedback tool APIs', () => {
     expect(statusJson.data.supplierQuoteTasks[0].id).toBe(reviewId);
     expect(statusJson.data.supplierQuoteTasks[0].outboundSent).toBe(false);
   });
+
+  it('classifies matched inquiry-mode DB items as QUOTE_REQUIRED and unmatched SKUs as CATALOG_ITEM_UNMATCHED', async () => {
+    const brand = await prisma.brand.create({
+      data: {
+        name: 'InquiryClassifyBrand',
+        slug: 'inquiry-classify-brand',
+        isActive: true,
+        defaultDiscountRate: 0.9,
+        supplierQuoteRequiredAbove: 10_000,
+      },
+    });
+
+    const inquiryOnlyProduct = await prisma.product.create({
+      data: {
+        catalogNumber: 'SYNTH-INQ-CLASSIFY',
+        name: 'Synthetic Inquiry-Only Product',
+        brand: brand.name,
+        brandRecordId: brand.id,
+        price: 0,
+        originalPrice: 500,
+        pricingMode: 'inquiry',
+        inStock: false,
+        leadTime: '待确认',
+      },
+    });
+
+    const customer = await prisma.user.create({
+      data: {
+        email: 'inquiry-classify@example.invalid',
+        name: 'Classify Customer',
+        role: 'customer',
+        tier: 'standard',
+      },
+    });
+
+    const inquiry = await prisma.inquiry.create({
+      data: {
+        userId: customer.id,
+        name: customer.name!,
+        email: customer.email,
+        phone: '13800000099',
+        institution: 'Classify Lab',
+        status: 'pending_quote',
+        hasUnresolvedPricing: true,
+        inquiryItems: {
+          create: [
+            {
+              position: 0,
+              productId: inquiryOnlyProduct.id,
+              catalogNumber: inquiryOnlyProduct.catalogNumber,
+              name: inquiryOnlyProduct.name,
+              quantity: 1,
+              metadata: JSON.stringify({ brand: brand.name }),
+            },
+            {
+              position: 1,
+              productId: null,
+              catalogNumber: 'UNKNOWN-SKU-404',
+              name: 'Unmatched Synthetic SKU',
+              quantity: 2,
+            },
+          ],
+        },
+      },
+      include: { inquiryItems: { orderBy: { position: 'asc' } } },
+    });
+
+    process.env.LIBEREAL_HARNESS_TOOLS_CONFIG = makeConfig([inquiry.id]);
+    const params = Promise.resolve({ id: inquiry.id });
+
+    const res = await postQuotePreview(
+      makeRequest(`/api/internal/harness/inquiries/${inquiry.id}/quote-preview`, {
+        method: 'POST',
+        body: {},
+      }),
+      { params },
+    );
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.ok).toBe(true);
+    expect(body.data.readyToDraft).toBe(false);
+    expect(body.data.pricedSubtotal).toBe(0);
+    expect(body.data.lines).toHaveLength(2);
+    expect(body.data.lines[0].unitPrice).toBeNull();
+    expect(body.data.lines[0].lineTotal).toBeNull();
+    expect(body.data.lines[1].unitPrice).toBeNull();
+    expect(body.data.lines[1].lineTotal).toBeNull();
+
+    const byItemId = new Map<string, string>(
+      (body.data.missingInfo as Array<{ inquiryItemId: string; code: string }>).map((item) => [
+        item.inquiryItemId,
+        item.code,
+      ]),
+    );
+    expect(byItemId.get(inquiry.inquiryItems[0].id)).toBe('QUOTE_REQUIRED');
+    expect(byItemId.get(inquiry.inquiryItems[1].id)).toBe('CATALOG_ITEM_UNMATCHED');
+  });
 });

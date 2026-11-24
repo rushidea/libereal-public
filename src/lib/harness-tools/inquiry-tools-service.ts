@@ -651,6 +651,17 @@ export async function previewInquiryQuoteForHarness(
         code: SUPPLIER_WRITTEN_QUOTE_REQUIRED,
         message: '该销售包装须先人工发函并核验供应商书面回复，再继续报价',
       });
+    } else if (
+      priced.quoteRequired &&
+      typeof snapshot.productId === 'string' &&
+      snapshot.productId.length > 0
+    ) {
+      missingInfo.push({
+        inquiryItemId: sourceItem.id,
+        catalogNumber: priced.catalogNumber,
+        code: 'QUOTE_REQUIRED',
+        message: '该商品为询价模式或缺少目录价，不能自动核算',
+      });
     } else if (priced.source === 'fallback') {
       missingInfo.push({
         inquiryItemId: sourceItem.id,
