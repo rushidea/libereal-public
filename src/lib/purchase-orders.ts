@@ -328,14 +328,30 @@ export async function applyPurchaseShipment(tx: Db, input: ShipmentAttributionIn
 
 type PurchaseStart = Awaited<ReturnType<typeof purchaseStartReview>>;
 
+async function eligiblePurchaseLineSources(tx: Db, order: SourceOrder, eligible: boolean) {
+  if (!eligible || !canPrepareOrder(order)) return [];
+  const demand = remainingDemand(order);
+  return (await loadPurchaseLines(tx, order)).flatMap(original => {
+    const quantity = demand.get(original.orderItemId) ?? 0;
+    return quantity ? [outstandingSource(original, quantity)] : [];
+  });
+}
+
+export async function previewPurchaseDraftRequirements(tx: Db, view: Workspace) {
+  if (!view.canPrepare) return [];
+  const order = await loadPurchaseOrderSource(tx, view.orderId);
+  const prepared = new Set(view.lines.map(line => line.orderItemId));
+  return (await eligiblePurchaseLineSources(tx, order, view.eligibility.eligible))
+    .filter(source => !prepared.has(source.orderItemId))
+    .map(source => ({
+      orderItemId: source.orderItemId, quantity: source.quantity,
+      missingTerms: missingPurchaseTerms(initialPurchaseTerms(source), source),
+    }));
+}
+
 async function prepareEligibleLines(tx: Db, order: SourceOrder, start: PurchaseStart, actor: PurchaseActor,
   ownerId: string, taskId?: string) {
-  if (!start.eligibility.eligible || !canPrepareOrder(order)) return;
-  const demand = remainingDemand(order);
-  for (const original of await loadPurchaseLines(tx, order)) {
-    const quantity = demand.get(original.orderItemId) ?? 0;
-    if (!quantity) continue;
-    const source = outstandingSource(original, quantity);
+  for (const source of await eligiblePurchaseLineSources(tx, order, start.eligibility.eligible)) {
     const stamp = now();
     const count = await tx.$executeRaw`INSERT INTO PurchaseRequirement
       (orderItemId,orderId,ownerId,source,terms,revision,createdAt,updatedAt)
@@ -910,6 +926,76 @@ function paymentHeld(holds: ReturnType<typeof supplierPaymentHolds>) {
   return Boolean(holds.dispatches.length || holds.shortfalls.length || holds.incidents.length);
 }
 
+function assertSupplierPaymentPreparation(view: Workspace, po: PO, amountCents: number | undefined, at: number) {
+  if (po.paymentExceptions.some(row => row.pending)) throw new PurchaseError('本采购单另有实际付款待核对，请先处理原付款差异');
+  const holds = supplierPaymentHolds(view, po, at);
+  const ongoing = paymentHeld(holds);
+  if (po.approvedHash !== po.contentHash || !['approved', 'ordered', ...(ongoing ? ['on_hold'] : [])].includes(po.status)) conflict();
+  if (po.needsLegacyReview) throw new PurchaseError('请先核对原批准、供货和已付款书证');
+  if (!positiveCents(amountCents) || po.dueCents === null || amountCents > Math.min(po.dueCents, po.totalCents - po.paidCents)) {
+    throw new PurchaseError('付款金额须大于零且不得超过本采购单未付合计');
+  }
+  const approval = po.ledger.findLast(isPurchaseApproval);
+  if (!po.orderedBefore && !ongoing) {
+    if (!view.eligibility.eligible) throw new PurchaseError('订购前付款须先重新核对本单启动条件和供应商报价');
+    assertApprovedTerms(po, checkedApproval(view, po, approval), at);
+  }
+  return { approval, amountCents };
+}
+
+function assertFreshPurchaseSource(
+  view: Workspace, po: PO, scoped: IncidentQuantity[] | undefined,
+  currentLines: Awaited<ReturnType<typeof loadPurchaseLines>>, remaining: Map<string, number>, validateDemand: boolean,
+) {
+  for (const line of po.lines) {
+    const effective = scoped?.find(row => row.orderItemId === line.orderItemId);
+    if (scoped && !effective) continue;
+    const fresh = currentLines.find(row => row.orderItemId === line.orderItemId);
+    const expectedVersion = line.source.customerLineVersion ?? pricingContentHash(line.source);
+    if (!fresh || pricingContentHash(fresh) !== expectedVersion) conflict();
+    const replacementQuantity = activeReplacementQuantity(view, line.orderItemId);
+    const pending = line.fromPurchaseOrderId ? replacementQuantity : (effective?.quantity ?? line.source.quantity) + replacementQuantity;
+    if (validateDemand && pending > (remaining.get(line.orderItemId) ?? 0)) {
+      throw new PurchaseError('采购数量超过本客户订单行未发货数量');
+    }
+  }
+}
+
+export async function readSupplierPaymentPreparationSource(tx: Db, view: Workspace) {
+  if (!view.orders.some(po => !po.orderedBefore && po.status === 'approved')) return null;
+  const order = await loadPurchaseOrderSource(tx, view.orderId);
+  return { lines: await loadPurchaseLines(tx, order), remaining: remainingDemand(order) };
+}
+
+export function previewSupplierPaymentPreparation(
+  view: Workspace, po: PO, amountCents: number,
+  source: Awaited<ReturnType<typeof readSupplierPaymentPreparationSource>>,
+) {
+  const at = Date.now();
+  const holds = supplierPaymentHolds(view, po, at);
+  const blockers = [];
+  try {
+    const { approval } = assertSupplierPaymentPreparation(view, po, amountCents, at);
+    if (paymentHeld(holds)) blockers.push('SUPPLIER_PAYMENT_ON_HOLD');
+    else if (!approval || supplierPaymentApprovalAt(view, po, at)?.approval.id !== approval.id) {
+      blockers.push('SUPPLIER_PAYMENT_APPROVAL_REQUIRED');
+    } else if (!po.orderedBefore) {
+      if (!source) conflict();
+      assertFreshPurchaseSource(view, po, po.remainingScope?.lines, source.lines, source.remaining, true);
+    }
+  } catch (error) {
+    if (!(error instanceof PurchaseError)) throw error;
+    blockers.push(po.dueCents !== null && amountCents > Math.min(po.dueCents, po.totalCents - po.paidCents)
+      ? 'AMOUNT_EXCEEDS_PURCHASE_BALANCE' : 'SUPPLIER_PAYMENT_PRECONDITIONS_UNMET');
+  }
+  return { blockers, dueCents: po.dueCents };
+}
+
+export function previewSupplyChangeScope(view: Workspace, po: PO, kind: NonNullable<PurchaseActionInput['changeKind']>, affectedLines: IncidentQuantity[]) {
+  if (!po.lines.length) return null;
+  return readIncidentScope(view, po, affectedLines, kind);
+}
+
 function supplierPaymentApprovalAt(view: Workspace, po: PO, at: number) {
   if (paymentHeld(supplierPaymentHolds(view, po, at))) return null;
   const approval = approvalAt(po.ledger, at);
@@ -1218,19 +1304,7 @@ function actionDetails(
     const issue = pendingPaymentIssue(po, input);
     if (issue?.original.sourcePaymentId) throw new PurchaseError('原付款已记账，请在原付款上补核银行凭证与实际日期');
     if (issue) return originalSupplierPayment(view, po, issue, input, actor);
-    if (po.paymentExceptions.some(row => row.pending)) throw new PurchaseError('本采购单另有实际付款待核对，请先处理原付款差异');
-    const holds = supplierPaymentHolds(view, po, Date.now());
-    const ongoing = paymentHeld(holds);
-    if (po.approvedHash !== po.contentHash || !['approved', 'ordered', ...(ongoing ? ['on_hold'] : [])].includes(po.status)) conflict();
-    if (po.needsLegacyReview) throw new PurchaseError('请先核对原批准、供货和已付款书证');
-    if (!positiveCents(input.amountCents) || po.dueCents === null || input.amountCents > Math.min(po.dueCents, po.totalCents - po.paidCents)) {
-      throw new PurchaseError('付款金额须大于零且不得超过本采购单未付合计');
-    }
-    const approval = po.ledger.findLast(isPurchaseApproval);
-    if (!po.orderedBefore && !ongoing) {
-      if (!view.eligibility.eligible) throw new PurchaseError('订购前付款须先重新核对本单启动条件和供应商报价');
-      assertApprovedTerms(po, checkedApproval(view, po, approval), Date.now());
-    }
+    const { approval, amountCents } = assertSupplierPaymentPreparation(view, po, input.amountCents, Date.now());
     const paymentEvidence = supplierPaymentEvidence(input, po.lines[0]?.terms.payee);
     const at = Date.parse(paymentEvidence.occurredAt);
     const paidDuringHold = supplierPaymentHolds(view, po, at);
@@ -1240,8 +1314,8 @@ function actionDetails(
     if (!historical || historical.approval.id !== approval?.id) {
       throw new PurchaseError('付款发生时没有本次适用的有效批准，请登记待核对付款凭证');
     }
-    assertPreviouslyUnbooked(po, input.amountCents, paymentEvidence);
-    return { action, reference: paymentEvidence.reference, amountCents: input.amountCents, paymentEvidence,
+    assertPreviouslyUnbooked(po, amountCents, paymentEvidence);
+    return { action, reference: paymentEvidence.reference, amountCents, paymentEvidence,
       conditionReference: requiredText(input.conditionReference, '本次付款条件已满足的依据'),
       approvalId: historical.approval.id, exceptionResolutionId: historical.exceptionResolutionId,
       authorizedDueCents: po.dueCents };
@@ -1466,20 +1540,7 @@ export async function previewPurchaseAction(tx: Db, input: PurchaseActionInput, 
     : operation.action === 'approve_remaining' ? operation.scope.lines
     : operation.action === 'reapprove_purchase' ? operation.execution.lines
     : operation.action === 'record_payment' ? po.remainingScope?.lines : undefined;
-  if (validateSource) {
-    for (const line of po.lines) {
-      const effective = scoped?.find(row => row.orderItemId === line.orderItemId);
-      if (scoped && !effective) continue;
-      const fresh = currentLines.find(row => row.orderItemId === line.orderItemId);
-      const expectedVersion = line.source.customerLineVersion ?? pricingContentHash(line.source);
-      if (!fresh || pricingContentHash(fresh) !== expectedVersion) conflict();
-      const replacementQuantity = activeReplacementQuantity(view, line.orderItemId);
-      const pending = line.fromPurchaseOrderId ? replacementQuantity : (effective?.quantity ?? line.source.quantity) + replacementQuantity;
-      if (validateDemand && pending > (remaining.get(line.orderItemId) ?? 0)) {
-        throw new PurchaseError('采购数量超过本客户订单行未发货数量');
-      }
-    }
-  }
+  if (validateSource) assertFreshPurchaseSource(view, po, scoped, currentLines, remaining, validateDemand);
   const demand = validateDemand || input.action === 'resolve_change' ? [...remaining].map(([orderItemId, unshipped]) => ({
     orderItemId, unshipped, activeReplacements: activeReplacementQuantity(view, orderItemId), attributed: attributedQuantity(view, po.id, orderItemId),
     supplierDispatched: supplierDispatchQuantity(view, po.id, orderItemId),

@@ -157,6 +157,34 @@ async function accountForOrderItem(tx: Tx, productId: string, variantId: string 
   return accountFor(tx, productId, null);
 }
 
+/** Read the same accounts and fallback stock as full-order reservation, without creating accounts. */
+export async function previewOrderInventoryReservation(
+  tx: Tx,
+  items: Array<{ id: string; productId: string | null; metadata: string | null; quantity: number }>,
+) {
+  const buckets = new Map<string, { available: number; quantity: number }>();
+  for (const item of items) {
+    if (!item.productId) continue;
+    const productId = item.productId;
+    const reservation = await tx.inventoryReservation.findUnique({ where: { orderItemId: item.id }, select: { id: true } });
+    if (reservation) continue;
+    const variantId = variantIdFromItemMetadata(item.metadata);
+    const variant = variantId ? await tx.inventoryAccount.findFirst({ where: { productId, variantId } }) : null;
+    const account = variant ?? await tx.inventoryAccount.findFirst({ where: { productId, variantId: null } });
+    const key = account?.id ?? `product:${productId}`;
+    let bucket = buckets.get(key);
+    if (!bucket) {
+      const available = account?.availableQuantity ?? (await tx.product.findUniqueOrThrow({
+        where: { id: productId }, select: { stockQuantity: true },
+      })).stockQuantity;
+      bucket = { available, quantity: 0 };
+      buckets.set(key, bucket);
+    }
+    bucket.quantity += item.quantity;
+  }
+  return [...buckets.values()];
+}
+
 export async function reserveOrderInventory(
   tx: Tx,
   orderId: string,

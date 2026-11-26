@@ -9,6 +9,14 @@ export const HARNESS_TOOL_SCOPES = [
   'inquiry.supplier_review.prepare',
   'inquiry.lease',
   'events.read',
+  'pricing.read',
+  'pricing.impact.preview',
+  'order.read',
+  'order.approval.preview',
+  'purchase.read',
+  'purchase.prepare.preview',
+  'purchase.payment.preview',
+  'purchase.supply_change.preview',
 ] as const;
 
 export type HarnessToolScope = (typeof HARNESS_TOOL_SCOPES)[number];
@@ -54,6 +62,8 @@ export interface HarnessClientConfig {
   clientId: string;
   tokenSha256: string;
   scopes: HarnessToolScope[];
+  pilotPricingInquiryIds?: string[];
+  pilotOrderIds?: string[];
   expiresAt?: string;
   revoked?: boolean;
 }
@@ -75,6 +85,11 @@ const SCOPE_SET = new Set<string>(HARNESS_TOOL_SCOPES);
 const CLIENT_ID_RE = /^[A-Za-z0-9._-]{1,128}$/;
 const ENV_NAME_RE = /^[A-Za-z0-9._-]{1,64}$/;
 const SHA256_HEX_RE = /^[a-f0-9]{64}$/;
+const OBJECT_ID_RE = /^[A-Za-z0-9._-]{1,160}$/;
+
+function isPilotObjectList(input: unknown): input is string[] {
+  return Array.isArray(input) && input.every(id => typeof id === 'string' && OBJECT_ID_RE.test(id));
+}
 
 export function sha256Hex(value: string): string {
   return createHash('sha256').update(value, 'utf8').digest('hex');
@@ -119,10 +134,15 @@ function parseHarnessToolsConfig(raw: unknown): HarnessToolsConfig | null {
     if (client.revoked !== undefined && typeof client.revoked !== 'boolean') {
       return null;
     }
+    const { pilotPricingInquiryIds, pilotOrderIds } = client;
+    if (pilotPricingInquiryIds !== undefined && !isPilotObjectList(pilotPricingInquiryIds)) return null;
+    if (pilotOrderIds !== undefined && !isPilotObjectList(pilotOrderIds)) return null;
     clients.push({
       clientId: client.clientId,
       tokenSha256: client.tokenSha256,
       scopes: [...new Set(client.scopes as HarnessToolScope[])],
+      ...(pilotPricingInquiryIds !== undefined ? { pilotPricingInquiryIds } : {}),
+      ...(pilotOrderIds !== undefined ? { pilotOrderIds } : {}),
       ...(client.expiresAt !== undefined ? { expiresAt: client.expiresAt } : {}),
       ...(client.revoked !== undefined ? { revoked: client.revoked } : {}),
     });
@@ -246,7 +266,7 @@ export type HarnessAuthResult =
 
 type HarnessRequest = { headers: { get(name: string): string | null } };
 type HarnessEventAuthResult =
-  | { ok: true; principal: HarnessPrincipal; pilotInquiryIds?: string[] }
+  | { ok: true; principal: HarnessPrincipal; pilotInquiryIds?: string[]; pilotPricingInquiryIds?: string[]; pilotOrderIds?: string[] }
   | { ok: false; response: NextResponse };
 
 function authorizeHarnessPrincipal(
@@ -326,7 +346,29 @@ function authorizeHarnessPrincipal(
       scopes: client.scopes,
     },
     pilotInquiryIds: config.pilotInquiryIds,
+    pilotPricingInquiryIds: client.pilotPricingInquiryIds,
+    pilotOrderIds: client.pilotOrderIds,
   };
+}
+
+export type HarnessBusinessScope = Extract<HarnessToolScope, `pricing.${string}` | `order.${string}` | `purchase.${string}`>;
+
+export function authorizeHarnessBusinessObject(
+  req: HarnessRequest,
+  scope: HarnessBusinessScope,
+  objectId: string,
+) {
+  const auth = authorizeHarnessPrincipal(req, scope);
+  if (!auth.ok) return auth;
+  if (!OBJECT_ID_RE.test(objectId)) {
+    return { ok: false, response: harnessError(400, 'validation_error', 'INVALID_OBJECT_ID', '业务单据编号无效') } as const;
+  }
+  const pricing = scope.startsWith('pricing.');
+  const allowed = pricing ? auth.pilotPricingInquiryIds : auth.pilotOrderIds;
+  if (!allowed?.includes(objectId) || (pricing && auth.pilotInquiryIds && !auth.pilotInquiryIds.includes(objectId))) {
+    return { ok: false, response: harnessError(403, 'forbidden', 'PILOT_SCOPE_FORBIDDEN', '该单据不在此服务身份允许范围内') } as const;
+  }
+  return auth;
 }
 
 export function authorizeHarnessEventRequest(req: HarnessRequest): HarnessEventAuthResult {

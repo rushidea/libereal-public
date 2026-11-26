@@ -230,6 +230,24 @@ function planRecord(
   };
 }
 
+/** The machine preview addresses one exact catalog record and never freezes an approval plan. */
+export function previewCatalogRecordPrice(
+  product: LoadedProduct,
+  variantId: string | null,
+  price: number,
+) {
+  const record = variantId ? product.variants.find(variant => variant.id === variantId) : product;
+  if (!record) return null;
+  const planned = planRecord(product, record, variantId, {
+    brand: product.brand, scope: 'catalog', priceField: 'price', mode: 'set',
+    direction: 'increase', amount: price, includeVariants: Boolean(variantId), reason: 'machine_preview',
+  });
+  return { currentPrice: record.price, nextPrice: planned.change?.nextPrice ?? record.price,
+    floored: planned.change?.floored ?? false, changed: planned.change !== undefined };
+}
+
+export const catalogRecordPriceSelect = productSelect;
+
 function findByCatalog(product: LoadedProduct, token: string): { record: PricedRecord; variantId: string | null } | null {
   const key = normalizeCatalogNumber(token);
   if (!key) return null;

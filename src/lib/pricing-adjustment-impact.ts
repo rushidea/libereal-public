@@ -26,11 +26,24 @@ export async function brandDiscountImpactProducts(brandId: string, brand: string
   `);
 }
 
-/** Potential repricing work only. This never changes quotes or locked order prices. */
-export async function findPricingQuoteImpact(
-  changes: Array<{ productId: string; catalogNumber: string; brand?: string }>,
-  db: Prisma.TransactionClient = prisma,
-): Promise<PricingQuoteImpact> {
+type ImpactChange = { productId: string; catalogNumber: string; brand?: string };
+type ImpactScope = { inquiryId: string; orderIds: readonly string[] };
+
+/** Potential repricing targets. This never changes quotes or locked order prices. */
+export async function findPricingQuoteImpactTargets(
+  changes: ImpactChange[],
+  db: Prisma.TransactionClient,
+  scope?: ImpactScope,
+) {
+  const allowedQuote = scope ? Prisma.sql`AND q.inquiryId = ${scope.inquiryId}` : Prisma.empty;
+  const allowedQuoteLine = scope ? Prisma.sql`AND (
+    json_extract(CASE WHEN json_valid(qi.metadata) THEN qi.metadata ELSE '{}' END, '$.repricingOrderId') IS NULL
+    OR json_extract(CASE WHEN json_valid(qi.metadata) THEN qi.metadata ELSE '{}' END, '$.repricingOrderId')
+      IN (SELECT value FROM json_each(${JSON.stringify(scope.orderIds)}))
+  )` : Prisma.empty;
+  const allowedOrder = !scope ? Prisma.empty : scope.orderIds.length
+    ? Prisma.sql`AND o.inquiryId = ${scope.inquiryId} AND o.id IN (SELECT value FROM json_each(${JSON.stringify(scope.orderIds)}))`
+    : Prisma.sql`AND 1 = 0`;
   const quoteIds = new Set<string>();
   const pendingOrderIds = new Set<string>();
   // Bound SQLite parameters even for large imported catalogues.
@@ -56,11 +69,14 @@ export async function findPricingQuoteImpact(
       JOIN Inquiry i ON i.id = q.inquiryId
       WHERE q.status IN ('draft', 'sent', 'accepted', 'expired') AND i.archivedAt IS NULL
         AND i.status != 'declined'
+        ${allowedQuote}
+        ${allowedQuoteLine}
         AND NOT EXISTS (SELECT 1 FROM Quote newer WHERE newer.inquiryId = q.inquiryId AND newer.version > q.version)
         AND (qi.quantity > qi.orderedQty OR EXISTS (
           SELECT 1 FROM "Order" o JOIN OrderItem oi ON oi.orderId = o.id
           WHERE o.inquiryId = q.inquiryId AND o.status IN ('pending', 'unpaid')
             AND o.archivedAt IS NULL
+            ${allowedOrder}
             AND (oi.productId = qi.productId OR (oi.productId IS NULL
               AND LOWER(TRIM(oi.catalogNumber)) = LOWER(TRIM(qi.catalogNumber))))
         ))
@@ -71,6 +87,7 @@ export async function findPricingQuoteImpact(
       SELECT DISTINCT o.id FROM "Order" o
       JOIN OrderItem oi ON oi.orderId = o.id
       WHERE o.status IN ('pending', 'unpaid') AND o.archivedAt IS NULL AND o.inquiryId IS NOT NULL
+        ${allowedOrder}
         AND EXISTS (SELECT 1 FROM Inquiry i WHERE i.id = o.inquiryId AND i.archivedAt IS NULL AND i.status != 'declined')
         AND (oi.productId IN (${Prisma.join(products)})
           OR (oi.productId IS NULL AND (${orderCatalogs})))
@@ -86,8 +103,16 @@ export async function findPricingQuoteImpact(
     if (latest && ['draft', 'sent', 'accepted', 'expired'].includes(latest.status)) quoteIds.add(latest.id);
     else pendingOrderIds.delete(orderId);
   }
+  return { quoteIds: [...quoteIds].sort(), pendingOrderIds: [...pendingOrderIds].sort() };
+}
+
+export async function findPricingQuoteImpact(
+  changes: ImpactChange[],
+  db: Prisma.TransactionClient = prisma,
+): Promise<PricingQuoteImpact> {
+  const targets = await findPricingQuoteImpactTargets(changes, db);
   const contents = [];
-  for (const quoteId of [...quoteIds].sort()) {
+  for (const quoteId of targets.quoteIds) {
     const quote = await db.quote.findUnique({ where: { id: quoteId }, include: {
       items: { orderBy: { position: 'asc' } },
       inquiry: { include: { orders: { where: { status: { in: ['pending', 'unpaid'] }, archivedAt: null },
@@ -99,5 +124,5 @@ export async function findPricingQuoteImpact(
     }) : null;
     contents.push({ quote, customer });
   }
-  return { quoteIds: [...quoteIds].sort(), pendingOrderIds: [...pendingOrderIds].sort(), contents };
+  return { ...targets, contents };
 }
