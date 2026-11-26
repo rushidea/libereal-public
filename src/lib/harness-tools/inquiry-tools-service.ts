@@ -1,4 +1,4 @@
-import type { Prisma } from '@prisma/client';
+import type { BackgroundTask, Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { writeAuditLog } from '@/lib/audit';
 import { isUniqueConstraintError } from '@/lib/checkout-idempotency';
@@ -32,7 +32,7 @@ import {
   supplierQuoteErrorMessage,
   supplierQuoteReviewView,
 } from '@/lib/supplier-quote-review';
-import { deliveryReviewable, isDeliveryTask } from '@/lib/task-delivery-review';
+import { deliveryReviewable } from '@/lib/task-delivery-review';
 import type { HarnessErrorClass, HarnessLeaseHeader, HarnessPrincipal } from './auth';
 import { assertActiveLeaseForWrite, readInquiryLeaseSummary } from './lease-service';
 
@@ -340,26 +340,10 @@ export async function getSupplierQuoteEvidenceForHarness(inquiryId: string) {
   };
 }
 
-function taskReferencesInquiry(payload: string, inquiryId: string): boolean {
-  const obj = jsonObject(payload);
-  if (obj.inquiryId === inquiryId) return true;
-  if (obj.scope && typeof obj.scope === 'object' && !Array.isArray(obj.scope)) {
-    if ((obj.scope as Record<string, unknown>).inquiryId === inquiryId) return true;
-  }
-  const source = obj.source;
-  if (source && typeof source === 'object' && !Array.isArray(source)) {
-    const sourceScope = (source as Record<string, unknown>).scope;
-    if (
-      sourceScope &&
-      typeof sourceScope === 'object' &&
-      !Array.isArray(sourceScope) &&
-      (sourceScope as Record<string, unknown>).inquiryId === inquiryId
-    ) {
-      return true;
-    }
-  }
-  return false;
-}
+type InquiryDeliveryTaskRow = Pick<
+  BackgroundTask,
+  'id' | 'type' | 'status' | 'dedupeKey' | 'attempts' | 'lastError' | 'result' | 'updatedAt'
+>;
 
 export async function getInquiryHumanActionsAndReceiptsForHarness(
   inquiryId: string,
@@ -397,12 +381,9 @@ export async function getInquiryHumanActionsAndReceiptsForHarness(
   }
 
   const reviewIds = collectSupplierReviewIds(inquiry.inquiryItems);
-  const quoteEmailDedupeKeys = new Set(
-    inquiry.quotes.map((quote) => `quote-email:${quote.id}`),
-  );
   const draftQuotes = inquiry.quotes.filter((quote) => quote.status === 'draft');
 
-  const [supplierReviewRows, mailHeaderRows, deliveryCandidateRows, activeLease, inquiryVersion] =
+  const [supplierReviewRows, mailHeaderRows, deliveryRows, activeLease, inquiryVersion] =
     await Promise.all([
       reviewIds.length
         ? prisma.backgroundTask.findMany({
@@ -418,19 +399,18 @@ export async function getInquiryHumanActionsAndReceiptsForHarness(
         orderBy: { createdAt: 'desc' },
         take: 50,
       }),
-      prisma.backgroundTask.findMany({
-        where: {
-          type: { in: ['email.send', 'sms.send', 'order.reminder'] },
-          OR: [
-            { payload: { contains: inquiryId } },
-            ...(quoteEmailDedupeKeys.size
-              ? [{ dedupeKey: { in: [...quoteEmailDedupeKeys] } }]
-              : []),
-          ],
-        },
-        orderBy: { createdAt: 'desc' },
-        take: 50,
-      }),
+      prisma.$queryRaw<InquiryDeliveryTaskRow[]>`
+        SELECT id, type, status, dedupeKey, attempts, lastError, result, updatedAt
+        FROM BackgroundTask
+        WHERE type IN ('email.send', 'sms.send', 'order.reminder')
+          AND (
+            dedupeKey IN (SELECT 'quote-email:' || id FROM Quote WHERE inquiryId = ${inquiryId})
+            OR json_extract(CASE WHEN json_valid(payload) THEN payload END, '$.inquiryId') = ${inquiryId}
+            OR json_extract(CASE WHEN json_valid(payload) THEN payload END, '$.scope.inquiryId') = ${inquiryId}
+            OR json_extract(CASE WHEN json_valid(payload) THEN payload END, '$.source.scope.inquiryId') = ${inquiryId}
+          )
+        ORDER BY createdAt DESC, id DESC
+      `,
       environment ? readInquiryLeaseSummary(prisma, environment, inquiryId) : Promise.resolve(null),
       computeInquiryVersion(prisma, inquiryId),
     ]);
@@ -464,29 +444,21 @@ export async function getInquiryHumanActionsAndReceiptsForHarness(
     subtotal: quote.subtotal,
   }));
 
-  const deliveryTasks = deliveryCandidateRows
-    .filter(
-      (task) =>
-        isDeliveryTask(task) &&
-        (taskReferencesInquiry(task.payload, inquiryId) ||
-          (task.dedupeKey !== null && quoteEmailDedupeKeys.has(task.dedupeKey))),
-    )
-    .map((task) => ({
+  const deliveryTasks = deliveryRows.map((task) => {
+    const outcome = jsonObject(task.result).outcome;
+    const reviewable = deliveryReviewable(task);
+    return {
       id: task.id,
       type: task.type,
       status: task.status,
       dedupeKey: task.dedupeKey ?? null,
       attempts: task.attempts,
       lastError: task.lastError ? task.lastError.slice(0, 300) : null,
-      outcome:
-        typeof jsonObject(task.result).outcome === 'string'
-          ? (jsonObject(task.result).outcome as string)
-          : deliveryReviewable(task)
-            ? 'unknown'
-            : null,
-      reviewable: deliveryReviewable(task),
+      outcome: typeof outcome === 'string' ? outcome : reviewable ? 'unknown' : null,
+      reviewable,
       updatedAt: task.updatedAt.toISOString(),
-    }));
+    };
+  });
 
   const reasons: string[] = [];
   if (inquiry.feedbacks.length > 0) {

@@ -615,14 +615,14 @@ describe('M2 harness scoped inquiry/quote/feedback tool APIs', () => {
     );
     const initialVersion = (await ctxRes.json()).inquiryVersion as string;
 
-    // 1. Writer 1 claims a short lease (500ms) -> fenceToken=1
+    // 1. Writer 1 claims a lease -> fenceToken=1
     const claim1Res = await postLeaseClaim(
       makeRequest(`/api/internal/harness/inquiries/${inquiry.id}/lease/claim`, {
         method: 'POST',
         body: {
           ownerId: 'writer-1',
           threadId: 'thread-lease-test',
-          leaseDurationMs: 500,
+          leaseDurationMs: 60_000,
         },
       }),
       { params },
@@ -666,8 +666,33 @@ describe('M2 harness scoped inquiry/quote/feedback tool APIs', () => {
     expect(unleasedRes.status).toBe(409);
     expect((await unleasedRes.json()).code).toBe('ACTIVE_LEASE_REQUIRED');
 
-    // Wait for Writer 1 lease to expire, then Writer 2 reclaims -> fenceToken=2
-    await new Promise((resolve) => setTimeout(resolve, 600));
+    // Expire Writer 1's lease before any takeover.
+    const leaseBeforeExpiry = await prisma.backgroundTask.findUniqueOrThrow({
+      where: { id: claim1.data.taskId },
+    });
+    await prisma.backgroundTask.update({
+      where: { id: leaseBeforeExpiry.id },
+      data: {
+        payload: JSON.stringify({ ...JSON.parse(leaseBeforeExpiry.payload), leaseExpiresAt: '2000-01-01T00:00:00.000Z' }),
+      },
+    });
+    const expiredReleaseRequest = () => makeRequest(`/api/internal/harness/inquiries/${inquiry.id}/lease/release`, {
+      method: 'POST',
+      body: { leaseToken: leaseToken1, fenceToken: 1, action: 'complete' },
+    });
+    const expiredReleaseRes = await postLeaseRelease(expiredReleaseRequest(), { params });
+    expect(expiredReleaseRes.status).toBe(409);
+    expect((await expiredReleaseRes.json()).code).toBe('LEASE_NOT_HELD');
+    expect(await prisma.backgroundTask.findUnique({ where: { id: leaseBeforeExpiry.id } })).toMatchObject({
+      status: 'running',
+      attempts: 1,
+      lockedBy: leaseBeforeExpiry.lockedBy,
+      completedAt: null,
+      result: null,
+    });
+    expect(await prisma.auditLog.count({ where: { action: 'harness.lease.completed', targetId: inquiry.id } })).toBe(0);
+
+    // Writer 2 reclaims the original lease row -> fenceToken=2.
     const claim2Res = await postLeaseClaim(
       makeRequest(`/api/internal/harness/inquiries/${inquiry.id}/lease/claim`, {
         method: 'POST',
@@ -685,6 +710,9 @@ describe('M2 harness scoped inquiry/quote/feedback tool APIs', () => {
     expect(claim2.data.reclaimedExpiredLease).toBe(true);
     const leaseToken2 = claim2.data.leaseToken as string;
     expect(leaseToken2).not.toBe(leaseToken1);
+    const supersededReleaseRes = await postLeaseRelease(expiredReleaseRequest(), { params });
+    expect(supersededReleaseRes.status).toBe(409);
+    expect((await supersededReleaseRes.json()).code).toBe('LEASE_NOT_HELD');
 
     // 3. Stale Writer 1 write with old (leaseToken1, fenceToken=1) rejected 409 with 0 DB writes
     const staleWriteRes = await postSupplierReview(
@@ -761,6 +789,56 @@ describe('M2 harness scoped inquiry/quote/feedback tool APIs', () => {
     expect((await postCancelWriteRes.json()).code).toBe('STALE_WRITER_LEASE_REJECTED');
   });
 
+  it.each(['expired', 'succeeded'])('requires a valid lease header for writes after the lease has %s', async (state) => {
+    const { inquiry } = await seedSyntheticInquiryFixtures();
+    process.env.LIBEREAL_HARNESS_TOOLS_CONFIG = makeConfig([inquiry.id]);
+    const params = Promise.resolve({ id: inquiry.id });
+    const path = `/api/internal/harness/inquiries/${inquiry.id}`;
+    const claimRes = await postLeaseClaim(
+      makeRequest(`${path}/lease/claim`, {
+        method: 'POST',
+        body: { ownerId: 'writer-leaving', threadId: 'thread-lease-header-test' },
+      }),
+      { params },
+    );
+    expect(claimRes.status).toBe(200);
+    const claim = await claimRes.json();
+    if (state === 'expired') {
+      const lease = await prisma.backgroundTask.findUniqueOrThrow({ where: { id: claim.data.taskId } });
+      await prisma.backgroundTask.update({
+        where: { id: lease.id },
+        data: {
+          payload: JSON.stringify({ ...JSON.parse(lease.payload), leaseExpiresAt: '2000-01-01T00:00:00.000Z' }),
+        },
+      });
+    } else {
+      const releaseRes = await postLeaseRelease(
+        makeRequest(`${path}/lease/release`, {
+          method: 'POST',
+          body: { leaseToken: claim.data.leaseToken, fenceToken: claim.data.fenceToken, action: 'complete' },
+        }),
+        { params },
+      );
+      expect(releaseRes.status).toBe(200);
+      expect((await releaseRes.json()).data.status).toBe('succeeded');
+    }
+
+    const writeRes = await postSupplierReview(
+      makeRequest(`${path}/supplier-review`, {
+        method: 'POST',
+        body: {
+          inquiryItemId: inquiry.inquiryItems[1].id,
+          expectedInquiryVersion: claim.inquiryVersion,
+          idempotencyKey: 'm4-missing-retired-lease-header',
+        },
+      }),
+      { params },
+    );
+    expect(writeRes.status).toBe(409);
+    expect((await writeRes.json()).code).toBe('ACTIVE_LEASE_REQUIRED');
+    expect(await prisma.backgroundTask.count({ where: { type: 'inquiry.supplier_written_quote' } })).toBe(0);
+  });
+
   it('surfaces quote-email unknown/partial delivery tasks and redacted activeLease in status endpoint', async () => {
     const { inquiry, normalProduct } = await seedSyntheticInquiryFixtures();
     const quote = await prisma.quote.create({
@@ -808,7 +886,20 @@ describe('M2 harness scoped inquiry/quote/feedback tool APIs', () => {
         }),
         lastError: 'SMTP socket timeout after DATA',
         result: JSON.stringify({ outcome: 'unknown' }),
+        createdAt: new Date('2000-01-01T00:00:00.000Z'),
       },
+    });
+
+    // These tasks mention the inquiry but belong elsewhere. They must not hide the older receipt.
+    await prisma.backgroundTask.createMany({
+      data: Array.from({ length: 51 }, () => ({
+        type: 'email.send',
+        status: 'awaiting_human',
+        payload: JSON.stringify({ inquiryId: `other-${inquiry.id}`, note: inquiry.id }),
+      })),
+    });
+    await prisma.backgroundTask.create({
+      data: { type: 'sms.send', status: 'awaiting_human', payload: '{invalid-json' },
     });
 
     process.env.LIBEREAL_HARNESS_TOOLS_CONFIG = makeConfig([inquiry.id]);

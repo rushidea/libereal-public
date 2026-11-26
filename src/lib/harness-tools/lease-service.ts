@@ -342,34 +342,33 @@ export async function releaseInquiryLeaseForHarness(
     }
 
     const now = new Date();
+    const expiresMs = parseExpiresAtMs(payload);
+    const expiresAt = expiresMs === null ? null : new Date(expiresMs).toISOString();
     const nextStatus = input.action === 'cancel' ? 'cancelled' : 'succeeded';
-    const updated = await tx.backgroundTask.updateMany({
-      where: {
-        id: row.id,
-        status: 'running',
-        attempts: input.fenceToken,
-        lockedBy: row.lockedBy,
-      },
-      data: {
-        status: nextStatus,
-        lockedAt: null,
-        lockedBy: null,
-        completedAt: now,
-        result: JSON.stringify({
-          action: input.action,
-          reason: reason ?? null,
-          fenceToken: input.fenceToken,
-          finishedAt: now.toISOString(),
-        }),
-      },
+    const finishedAt = now.toISOString();
+    const result = JSON.stringify({
+      action: input.action,
+      reason: reason ?? null,
+      fenceToken: input.fenceToken,
+      finishedAt,
     });
+    // Evaluate expiry in the same SQLite statement that changes the lease state.
+    const updated = await tx.$executeRaw`
+      UPDATE BackgroundTask
+      SET status = ${nextStatus}, lockedAt = NULL, lockedBy = NULL,
+          completedAt = ${finishedAt}, updatedAt = ${finishedAt}, result = ${result}
+      WHERE id = ${row.id} AND type = ${HARNESS_INQUIRY_LEASE_TASK_TYPE}
+        AND status = 'running' AND attempts = ${input.fenceToken}
+        AND lockedBy IS ${row.lockedBy} AND payload = ${row.payload}
+        AND strftime('%Y-%m-%dT%H:%M:%fZ', 'now') < ${expiresAt}
+    `;
 
-    if (updated.count !== 1) {
+    if (updated !== 1) {
       throw new HarnessServiceError(
         409,
         'stale_lease',
         'LEASE_NOT_HELD',
-        '租约状态已变更，释放失败',
+        '租约已过期或状态已变更，释放失败',
         false,
       );
     }
@@ -451,7 +450,7 @@ export async function assertActiveLeaseForWrite(
     return;
   }
 
-  if (row && (isUnexpiredRunning || row.status === 'cancelled')) {
+  if (row) {
     throw new HarnessServiceError(
       409,
       'stale_lease',
