@@ -17,6 +17,12 @@ export const HARNESS_TOOL_SCOPES = [
   'purchase.prepare.preview',
   'purchase.payment.preview',
   'purchase.supply_change.preview',
+  'fulfillment.read',
+  'fulfillment.event.preview',
+  'finance.read',
+  'finance.action.preview',
+  'after_sale.read',
+  'after_sale.action.preview',
 ] as const;
 
 export type HarnessToolScope = (typeof HARNESS_TOOL_SCOPES)[number];
@@ -64,6 +70,7 @@ export interface HarnessClientConfig {
   scopes: HarnessToolScope[];
   pilotPricingInquiryIds?: string[];
   pilotOrderIds?: string[];
+  pilotAfterSaleCaseIds?: string[];
   expiresAt?: string;
   revoked?: boolean;
 }
@@ -134,15 +141,17 @@ function parseHarnessToolsConfig(raw: unknown): HarnessToolsConfig | null {
     if (client.revoked !== undefined && typeof client.revoked !== 'boolean') {
       return null;
     }
-    const { pilotPricingInquiryIds, pilotOrderIds } = client;
+    const { pilotPricingInquiryIds, pilotOrderIds, pilotAfterSaleCaseIds } = client;
     if (pilotPricingInquiryIds !== undefined && !isPilotObjectList(pilotPricingInquiryIds)) return null;
     if (pilotOrderIds !== undefined && !isPilotObjectList(pilotOrderIds)) return null;
+    if (pilotAfterSaleCaseIds !== undefined && !isPilotObjectList(pilotAfterSaleCaseIds)) return null;
     clients.push({
       clientId: client.clientId,
       tokenSha256: client.tokenSha256,
       scopes: [...new Set(client.scopes as HarnessToolScope[])],
       ...(pilotPricingInquiryIds !== undefined ? { pilotPricingInquiryIds } : {}),
       ...(pilotOrderIds !== undefined ? { pilotOrderIds } : {}),
+      ...(pilotAfterSaleCaseIds !== undefined ? { pilotAfterSaleCaseIds } : {}),
       ...(client.expiresAt !== undefined ? { expiresAt: client.expiresAt } : {}),
       ...(client.revoked !== undefined ? { revoked: client.revoked } : {}),
     });
@@ -266,7 +275,7 @@ export type HarnessAuthResult =
 
 type HarnessRequest = { headers: { get(name: string): string | null } };
 type HarnessEventAuthResult =
-  | { ok: true; principal: HarnessPrincipal; pilotInquiryIds?: string[]; pilotPricingInquiryIds?: string[]; pilotOrderIds?: string[] }
+  | { ok: true; principal: HarnessPrincipal; pilotInquiryIds?: string[]; pilotPricingInquiryIds?: string[]; pilotOrderIds?: string[]; pilotAfterSaleCaseIds?: string[] }
   | { ok: false; response: NextResponse };
 
 function authorizeHarnessPrincipal(
@@ -348,10 +357,12 @@ function authorizeHarnessPrincipal(
     pilotInquiryIds: config.pilotInquiryIds,
     pilotPricingInquiryIds: client.pilotPricingInquiryIds,
     pilotOrderIds: client.pilotOrderIds,
+    pilotAfterSaleCaseIds: client.pilotAfterSaleCaseIds,
   };
 }
 
-export type HarnessBusinessScope = Extract<HarnessToolScope, `pricing.${string}` | `order.${string}` | `purchase.${string}`>;
+type BusinessDomain = 'pricing' | 'order' | 'purchase' | 'fulfillment' | 'finance' | 'after_sale';
+export type HarnessBusinessScope = Extract<HarnessToolScope, `${BusinessDomain}.${string}`>;
 
 export function authorizeHarnessBusinessObject(
   req: HarnessRequest,
@@ -364,7 +375,8 @@ export function authorizeHarnessBusinessObject(
     return { ok: false, response: harnessError(400, 'validation_error', 'INVALID_OBJECT_ID', '业务单据编号无效') } as const;
   }
   const pricing = scope.startsWith('pricing.');
-  const allowed = pricing ? auth.pilotPricingInquiryIds : auth.pilotOrderIds;
+  const allowed = pricing ? auth.pilotPricingInquiryIds
+    : scope.startsWith('after_sale.') ? auth.pilotAfterSaleCaseIds : auth.pilotOrderIds;
   if (!allowed?.includes(objectId) || (pricing && auth.pilotInquiryIds && !auth.pilotInquiryIds.includes(objectId))) {
     return { ok: false, response: harnessError(403, 'forbidden', 'PILOT_SCOPE_FORBIDDEN', '该单据不在此服务身份允许范围内') } as const;
   }

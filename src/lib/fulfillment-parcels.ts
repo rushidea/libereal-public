@@ -220,18 +220,12 @@ export async function fulfillmentWorkspace(tx: Db, orderId: string, dispatchedAt
     }))};
   });
   return { order, purchases, parcels: workspaceParcels, receipts, legacyShipments, legacyBackfill, legacyInventory, inventoryChoices, unmatched,
-    freeResends, exchangeApprovals, feedSource: configuredCarrier()?.source ?? null };
+    freeResends, exchangeApprovals, unverifiedStockLines: purchasing.fulfillment.parcelLinesWithUnverifiedStockSource, feedSource: configuredCarrier()?.source ?? null };
 }
 
-async function dispatchPlan(tx: Db, orderId: string, raw: unknown, actor: FulfillmentActor) {
-  const { requestId, ...input } = dispatchInput(raw);
-  const keys = parcelKeys('dispatch_parcel', orderId, requestId, { sha256: input.sha256, row: input.documentRow }, { orderId, ...input });
-  const previous = verifyRepeat(await tx.fulfillmentParcel.findMany({ where: { OR: [{ requestKey: keys.requestKey }, { businessKey: keys.businessKey }] }, include: parcelInclude }), keys);
-  if (previous) return { previous, snapshot: { orderId, actorId: actor.id, requestId, ...input, priorParcel: previous.id } } as const;
-  if (input.trackingNumber && await tx.fulfillmentParcel.count({ where: { orderId, route: input.route, carrier: input.carrier, trackingNumber: input.trackingNumber } })) {
-    throw new PurchaseError('本单同一运输路线已经登记该运单，请核对原包裹');
-  }
-  const view = await fulfillmentWorkspace(tx,orderId,Date.parse(input.occurredAt),Boolean(input.holdReview));
+type DispatchScope = Pick<ReturnType<typeof dispatchInput>, 'route' | 'lines' | 'occurredAt' | 'holdReview'>;
+
+function validateDispatchScope(view: Awaited<ReturnType<typeof fulfillmentWorkspace>>, input: DispatchScope) {
   if (isInactiveOrderStatus(view.order.status)) throw new PurchaseError('当前订单不能登记新的发货，请核对原接单和履约状态');
   const lines = input.lines.map(row => {
     const receipt = row.sourceReceiptId ? view.receipts.find(r => r.id === row.sourceReceiptId && r.purchaseOrderId === row.purchaseOrderId && r.orderItemId === row.orderItemId) : null;
@@ -305,6 +299,40 @@ async function dispatchPlan(tx: Db, orderId: string, raw: unknown, actor: Fulfil
   const byCustomerLine = exchange ? [] : validateShipmentItems(view.order.orderItems.map(item => ({
     ...item, shippedQty: item.shippedQty + (unforwarded.get(item.id) ?? 0),
   })), originalLines);
+  return { lines, byCustomerLine, exchange };
+}
+
+export async function previewDispatchScope(
+  tx: Db, orderId: string, view: Awaited<ReturnType<typeof fulfillmentWorkspace>>,
+  scope: {
+    route: Route; carrier: string | null; trackingNumber: string | null;
+    lines: Array<{ purchaseOrderId: string; orderItemId: string; quantity: number; sourceReceiptId: string | null }>;
+  },
+  now: Date,
+) {
+  if (scope.trackingNumber && await tx.fulfillmentParcel.count({ where: {
+    carrier: scope.carrier, trackingNumber: scope.trackingNumber,
+    OR: [{ orderId: { not: orderId } }, { orderId, route: scope.route }],
+  } })) throw new PurchaseError('运单归属或路线待核对');
+  return validateDispatchScope(view, {
+    ...scope, occurredAt: now.toISOString(), holdReview: undefined,
+    lines: scope.lines.map(line => ({
+      ...line, resendApprovalId: undefined, resendShortfallId: undefined,
+      afterSaleApprovalId: undefined, holdAssignments: undefined,
+    })),
+  });
+}
+
+async function dispatchPlan(tx: Db, orderId: string, raw: unknown, actor: FulfillmentActor) {
+  const { requestId, ...input } = dispatchInput(raw);
+  const keys = parcelKeys('dispatch_parcel', orderId, requestId, { sha256: input.sha256, row: input.documentRow }, { orderId, ...input });
+  const previous = verifyRepeat(await tx.fulfillmentParcel.findMany({ where: { OR: [{ requestKey: keys.requestKey }, { businessKey: keys.businessKey }] }, include: parcelInclude }), keys);
+  if (previous) return { previous, snapshot: { orderId, actorId: actor.id, requestId, ...input, priorParcel: previous.id } } as const;
+  if (input.trackingNumber && await tx.fulfillmentParcel.count({ where: { orderId, route: input.route, carrier: input.carrier, trackingNumber: input.trackingNumber } })) {
+    throw new PurchaseError('本单同一运输路线已经登记该运单，请核对原包裹');
+  }
+  const view = await fulfillmentWorkspace(tx,orderId,Date.parse(input.occurredAt),Boolean(input.holdReview));
+  const { lines, byCustomerLine, exchange } = validateDispatchScope(view, input);
   const recipient = input.route === 'supplier_to_libereal' ? { party: 'Libereal' }
     : { party: 'customer', email: view.order.email, deliveryAddress: view.order.addressSnapshot };
   const snapshot = { orderId, actorId: actor.id, requestId, ...input, recipient, lines };

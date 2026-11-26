@@ -3,10 +3,11 @@ import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vites
 import { GET as orderGET, PATCH as orderPATCH } from '@/app/api/admin/orders/[id]/route';
 import { afterSaleAction } from '@/lib/after-sale-actions';
 import { salePermission, type SaleInput } from '@/lib/after-sale-records';
-import { afterSaleAdminView, afterSaleCustomerView, afterSaleQueue, afterSaleWorkspace } from '@/lib/after-sale-workspace';
+import { afterSaleAdminView, afterSaleCustomerView, afterSaleQueue, afterSaleWorkspace, unambiguousOriginalSaleDelivery } from '@/lib/after-sale-workspace';
 import { saleSnapshotFor } from '@/lib/after-sale-visibility';
 import { confirmedCustomerDelivery } from '@/lib/fulfillment-accounting';
 import { dispatchParcel, recordParcelEvent } from '@/lib/fulfillment-parcels';
+import { getAfterSaleCase, previewAfterSaleActionForHarness } from '@/lib/harness-tools/business-after-sale';
 import { receiveInventoryBatch } from '@/lib/inventory';
 import { pricingContentHash } from '@/lib/pricing-adjustment-approval';
 import { prisma } from '@/lib/prisma';
@@ -594,6 +595,10 @@ describe('售后沿用原订单和短失事实', () => {
     expect(after.orders.find(row=>row.id===purchaseOrderId)).toMatchObject({totalCents:2750,paidCents:0});
     expect(after.orders.find(row=>row.id===replacement.id)).toMatchObject({totalCents:1600,paidCents:0});
     const workspaceAfter=await readWorkspace();
+    expect(workspaceAfter.deliveries).toContainEqual(expect.objectContaining({
+      id: shipped.lines[0].id, purchaseOrderId: replacement.id, receipts: [expect.any(Object)],
+    }));
+    expect(unambiguousOriginalSaleDelivery(workspaceAfter, itemId)).toBeUndefined();
     for (const rights of [['orders.read'],['orders.read','orders.write']]) {
       const details=afterSaleAdminView(workspaceAfter,rights);
       expect(details.replacements[0]).toMatchObject({purchaseOrderId:replacement.id,quantity:1,payableCents:null,supplier:null});
@@ -684,6 +689,21 @@ describe('售后沿用原订单和短失事实', () => {
     await parcelEvent(forwarded.id, 'OFFICE-ACTUAL-CUSTOMER-RECEIPT', 'customer_delivery',
       [{ parcelLineId: forwarded.lines[0].id, quantity: 1 }]);
     await expect(preview(physical('too-much-on-replacement-waybill', forwarded.lines[0].id, 2))).rejects.toThrow('尚未办理的数量');
+    const scoped = await getAfterSaleCase(caseId);
+    const intent = { action: 'resend', result: 'delivery', quantity: 1, parcelLineId: forwarded.lines[0].id,
+      resolutionId: null, resendApprovalId: approval.approvalId };
+    expect(scoped.data.replacementParcels).toMatchObject([{ parcelLineId: intent.parcelLineId }]);
+    expect(await previewAfterSaleActionForHarness(caseId, {}, { intent }, scoped.objectVersion)).toMatchObject({
+      data: { caseId, orderId, orderItemId: itemId, allowed: true, changesSupplierPayable: false,
+        projection: { receiptEventIds: [expect.any(String)], nextCustomerState: 'awaiting_close' } },
+    });
+    expect(await previewAfterSaleActionForHarness(caseId, {}, {
+      intent: { ...intent, parcelLineId: original.lines[0].id },
+    }, scoped.objectVersion)).toMatchObject({ data: { allowed: false } });
+    expect(await previewAfterSaleActionForHarness(caseId, {}, {
+      intent: { ...intent, resendApprovalId: 'wrong-resend-approval' },
+    }, scoped.objectVersion)).toMatchObject({ data: { allowed: false } });
+    expect(await prisma.afterSaleEvent.count({ where: { caseId, action: 'physical' } })).toBe(0);
     const actual = physical('settle-replacement-delivery', forwarded.lines[0].id);
     const done = await record(actual);
     expect(done.snapshot).toMatchObject({ nextState: 'awaiting_close', operation: { remedy: 'resend', result: 'delivery',

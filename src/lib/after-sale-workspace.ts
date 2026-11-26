@@ -177,6 +177,15 @@ export async function afterSaleWorkspace(tx: Db, orderId: string) {
 }
 export type AfterSaleWorkspace = Awaited<ReturnType<typeof afterSaleWorkspace>>;
 
+export function unambiguousOriginalSaleDelivery(view: AfterSaleWorkspace, orderItemId: string) {
+  const replacements = new Set(view.replacements.filter(item => item.orderItemId === orderItemId).map(item => item.purchaseOrderId));
+  const candidates = view.deliveries.filter(item => item.orderItemId === orderItemId
+    && item.route !== 'supplier_to_libereal' && !item.afterSaleApprovalId && !item.approvalId
+    && !item.attributionRequired && !item.resendAttributions?.length
+    && (!item.purchaseOrderId || !replacements.has(item.purchaseOrderId)) && item.receipts.length);
+  return candidates.length === 1 ? candidates[0] : undefined;
+}
+
 export function afterSaleAdminView(view: AfterSaleWorkspace, permissions: readonly string[]) {
   const finance = readsSaleFinance(permissions);
   const purchasing = readsSalePurchasing(permissions);

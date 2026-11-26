@@ -200,6 +200,16 @@ function customerInvoiceScopeChange(view: FinanceWorkspace, basis: FinanceWorksp
     availableCents: currentCents === null || invoiceConflicts.length ? null : Math.max(0, currentCents - family.plannedCents) } };
 }
 
+function effectiveInvoiceCoverage(plan: Plan, issuedAt: string) {
+  return invoicePeriodAt(plan.coveragePeriods, issuedAt)?.review;
+}
+
+export function invoicePreviewNeedsManualPortions(plan: Plan, amountCents: number, asOf: string) {
+  if (!plan.coverageReview) return false;
+  const remaining = effectiveInvoiceCoverage(plan, asOf)?.remaining;
+  return !remaining?.length || remaining.reduce((total, part) => total + part.amountCents, 0) !== amountCents;
+}
+
 async function invoiceDocument(tx: Db, view: FinanceWorkspace, input: FinanceInput, evidence: Evidence) {
   const data = input.data;
   const plan = planFor(view, data.planId, true);
@@ -217,7 +227,7 @@ async function invoiceDocument(tx: Db, view: FinanceWorkspace, input: FinanceInp
   const identityKey = pricingContentHash({ issuer: financeIdentity(issuer), number: financeIdentity(number) });
   const grossCents = money(data.grossCents, '票面含税合计');
   const amountCents = money(data.amountCents, '本次归入金额');
-  const review = invoicePeriodAt(plan.coveragePeriods, issuedAt)?.review;
+  const review = effectiveInvoiceCoverage(plan, issuedAt);
   const reviewedReservationId = review?.id ?? null;
   let portions: ReturnType<typeof checkedInvoicePortions> | undefined;
   if (plan.coverageReview) {
@@ -300,6 +310,21 @@ async function invoiceDocument(tx: Db, view: FinanceWorkspace, input: FinanceInp
 
 type Evidence = { reference: string; sha256: string; description: string };
 
+export function financeCustomerAllocationLimit(view: FinanceWorkspace) {
+  if (view.archived || ['cancelled', 'closed'].includes(view.status)) {
+    throw new PurchaseError('请核对仍可办理的原订单及回单归属');
+  }
+  if (view.authorityConflict || view.nativePaymentId || view.paidAt || !view.paymentPlanKnown) throw new PurchaseError('请先核对本单的付款条件和已有到账来源');
+  if (view.postingOutstandingCents === null) throw new PurchaseError('原订单金额待财务核对，可先保留银行回单');
+  return view.postingOutstandingCents;
+}
+
+export function canMatchSupplierFinance(po: FinanceWorkspace['purchases'][number]) {
+  return po.agreedCents !== null && po.invoices.some(row => row.status === 'recorded')
+    && !po.invoices.some(row => row.status === 'correction_pending')
+    && po.invoicedCents <= po.agreedCents && po.paidCents <= po.agreedCents;
+}
+
 async function financeOperation(tx: Db, input: FinanceInput, actor: PurchaseActor, view: FinanceWorkspace) {
   const { action, data, orderId } = input;
   const retained = action === 'create_plan' && data.side === 'customer' && data.reference === undefined && data.sha256 === undefined
@@ -311,10 +336,9 @@ async function financeOperation(tx: Db, input: FinanceInput, actor: PurchaseActo
     const order = await loadPurchaseOrderSource(tx, orderId);
     if (view.archived || ['cancelled', 'closed'].includes(order.status)) throw new PurchaseError('请核对仍可办理的原订单及回单归属');
     if (action === 'verify_bank_receipt') return previewBankReceipt(tx, order, data, evidence);
-    if (view.authorityConflict || view.nativePaymentId || view.paidAt || !view.paymentPlanKnown) throw new PurchaseError('请先核对本单的付款条件和已有到账来源');
-    if (view.postingOutstandingCents === null) throw new PurchaseError('原订单金额待财务核对，可先保留银行回单');
+    const outstandingCents = financeCustomerAllocationLimit(view);
     const allocation = await previewBankAllocation(tx, order, await readPurchaseActivities(tx, orderId), data, evidence,
-      view.postingOutstandingCents);
+      outstandingCents);
     return { ...allocation, accounting: await customerCashProjection(tx, order, allocation.amountCents) };
   }
   if (action === 'verify_receivable_principal') {
@@ -502,8 +526,7 @@ async function financeOperation(tx: Db, input: FinanceInput, actor: PurchaseActo
     if (!po) throw new PurchaseError('请核对本订单对应的已订购或已付款采购单');
     const outcome = data.outcome;
     if (outcome !== 'matched' && outcome !== 'followup') throw new PurchaseError('请选择核对一致或有差异待跟进');
-    if (outcome === 'matched' && (po.agreedCents === null || !po.invoices.some(row => row.status === 'recorded')
-      || po.invoices.some(row => row.status === 'correction_pending') || po.invoicedCents > po.agreedCents || po.paidCents > po.agreedCents)) {
+    if (outcome === 'matched' && !canMatchSupplierFinance(po)) {
       throw new PurchaseError('采购、付款和有效来票无法核对一致，请登记差异及跟进依据');
     }
     return { ...evidence, action, purchaseOrderId: po.id, matchVersion: po.matchVersion, purchase: po, outcome, ownerId: actor.id };

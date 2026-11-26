@@ -9,11 +9,11 @@ export function customerLineReceipts(parcel: FulfillmentParcelRecord, line: Fulf
     const detail = jsonObject(event.details);
     if (event.kind === 'link_legacy' && parcel.route === 'legacy_customer' && typeof detail.oldDelivery === 'string') {
       const at = Date.parse(detail.oldDelivery);
-      return at >= parcel.dispatchedAt.getTime() && at <= Date.now() ? [{ at, quantity: line.quantity }] : [];
+      return at >= parcel.dispatchedAt.getTime() && at <= Date.now() ? [{ at, quantity: line.quantity, eventId: event.id }] : [];
     }
     if (event.kind !== 'customer_delivery' || !Array.isArray(detail.lines) || event.occurredAt < parcel.dispatchedAt) return [];
     return detail.lines.flatMap(row => row?.parcelLineId === line.id && Number.isSafeInteger(row.quantity) && row.quantity > 0
-      ? [{ at: event.occurredAt.getTime(), quantity: row.quantity as number }] : []);
+      ? [{ at: event.occurredAt.getTime(), quantity: row.quantity as number, eventId: event.id }] : []);
   });
 }
 

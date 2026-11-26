@@ -5,7 +5,7 @@ import type { FulfillmentDb as Db } from '@/lib/fulfillment-records';
 import { afterSaleChannels, afterSaleIssues, afterSaleRemedies, hasChoice } from '@/lib/after-sale-options';
 import { cents, choice, condition, quantity, salePermission, saleProof, type SaleActor, type SaleAuthorization, type SaleEvidence, type SaleInput } from '@/lib/after-sale-records';
 import { activeRefundSourceReview, actualRefunded, refundStep, releaseRefundSource, reviewRefundSource } from '@/lib/after-sale-refunds';
-import { afterSaleCaseInclude, afterSaleWorkspace, caseEvents, currentSaleAgreement, lastCaseEvent, originalSaleParcel, originalSaleParcelShares, saleOperation, supplierProgress, type AfterSaleWorkspace, type SaleCase } from '@/lib/after-sale-workspace';
+import { afterSaleCaseInclude, afterSaleWorkspace, caseEvents, currentSaleAgreement, lastCaseEvent, originalSaleParcel, originalSaleParcelShares, saleOperation, supplierProgress, unambiguousOriginalSaleDelivery, type AfterSaleWorkspace, type SaleCase } from '@/lib/after-sale-workspace';
 
 import { invoiceAgreement, invoiceOutcome, invoiceReissue, invoiceReissueBeforeClose, reviseInvoiceReissue, verifyInvoiceLine } from '@/lib/after-sale-invoices';
 import { supplierAfterSale } from '@/lib/after-sale-supplier';
@@ -223,7 +223,8 @@ function attributeResend(view: AfterSaleWorkspace, row: SaleCase, data: Record<s
     quantity:units, reference:line.reference, note:requiredText(data.note,'书证确定的份额和经办核对结果') } };
 }
 
-function physical(view: AfterSaleWorkspace, row: SaleCase, data: Record<string, unknown>, evidence: SaleEvidence): Plan {
+export function previewAfterSalePhysical(view: AfterSaleWorkspace, row: SaleCase, data: Record<string, unknown>, at: number): Plan {
+  condition(row.ownerId, '请先由经办人接手售后');
   condition(row.customerState === 'awaiting_fulfillment', '请先核对客户或原双方书面决定');
   const decision = currentSaleAgreement(row);
   const loss = view.shortfalls.find(item => item.resolutionId === row.shortfallId);
@@ -231,7 +232,7 @@ function physical(view: AfterSaleWorkspace, row: SaleCase, data: Record<string, 
   const remedy = approved.remedy ?? (loss?.approved.length ? 'resend' : '');
   if (remedy === 'cancel') {
     condition(['cancelled','closed'].includes(view.order.status), '原订单尚无已完成的取消处理');
-    return { operation: { remedy, orderStatus: view.order.status, note: requiredText(data.note, '取消结果和票款后续') }, customerState: 'awaiting_close' };
+    return { operation: { remedy, orderStatus: view.order.status }, customerState: 'awaiting_close' };
   }
   condition(remedy === 'return' || remedy === 'exchange' || remedy === 'resend', '请核对本次实物处理方式');
   const step = choice(data.result, ['return','delivery'] as const, '实物处理结果');
@@ -239,7 +240,6 @@ function physical(view: AfterSaleWorkspace, row: SaleCase, data: Record<string, 
   const line = view.deliveries.find(item => item.id === data.parcelLineId && item.orderItemId === row.orderItemId && item.route !== 'supplier_to_libereal');
   condition(line, '请选择对应原订单行的实际对客包裹');
   const units = quantity(data.quantity);
-  const at = Date.parse(evidence.occurredAt);
   const used = view.cases.flatMap(item => caseEvents(item,'physical').map(saleOperation))
     .filter(op => op.result === step && op.parcelLineId === line.id && (step !== 'return' || op.resolutionId === data.resolutionId))
     .reduce((sum, op) => sum + quantity(op.quantity), 0);
@@ -250,11 +250,11 @@ function physical(view: AfterSaleWorkspace, row: SaleCase, data: Record<string, 
   let attributedPurchase: Record<string,unknown> | undefined;
   if (step === 'return') {
     const originalShares = originalSaleParcelShares(row);
-    const possible = view.deliveries.filter(item=>item.orderItemId===row.orderItemId && !item.afterSaleApprovalId && item.receipts.length);
+    const possible = unambiguousOriginalSaleDelivery(view, row.orderItemId);
     const allocated = originalShares.filter(item => item.parcelLineId === line.id).reduce((sum,item) => sum + item.quantity,0);
     const returnedFromLine = previous.filter(op => op.result === 'return' && op.parcelLineId === line.id)
       .reduce((sum, op) => sum + quantity(op.quantity), 0);
-    condition(originalShares.length ? allocated - returnedFromLine >= units : possible.length===1 && possible[0].id===line.id,
+    condition(originalShares.length ? allocated - returnedFromLine >= units : possible?.id === line.id,
       '退回凭据须属于本案指定的原实际包裹，分批签收时请先核对原运单和份额');
     const result = line.returns.find(item => item.id === data.resolutionId && Date.parse(item.occurredAt) <= at);
     condition(result && result.quantity - used >= units, '须有对应实收商品的原退回凭据和足够的未引用数量');
@@ -288,8 +288,14 @@ function physical(view: AfterSaleWorkspace, row: SaleCase, data: Record<string, 
   const delivered = done('delivery') + (step === 'delivery' ? units : 0);
   const complete = (remedy === 'resend' || remedy === 'exchange' && approved.returnRequirement === 'waived' || returned === row.quantity) && (remedy === 'return' || delivered === row.quantity);
   return { operation: { remedy, result: step, parcelLineId: line.id, resolutionId, quantity: units, reference: line.reference,
-    resendApprovalId: line.approvalId, afterSaleApprovalId:line.afterSaleApprovalId, replacement:attributedPurchase, decisionId: decision?.id ?? null, note: requiredText(data.note, '实物回执核对说明') },
+    resendApprovalId: line.approvalId, afterSaleApprovalId:line.afterSaleApprovalId, replacement:attributedPurchase, decisionId: decision?.id ?? null },
     customerState: complete ? 'awaiting_close' : 'awaiting_fulfillment' };
+}
+
+function physical(view: AfterSaleWorkspace, row: SaleCase, data: Record<string, unknown>, evidence: SaleEvidence): Plan {
+  const plan = previewAfterSalePhysical(view, row, data, Date.parse(evidence.occurredAt));
+  const note = requiredText(data.note, plan.operation.remedy === 'cancel' ? '取消结果和票款后续' : '实物回执核对说明');
+  return { ...plan, operation: { ...plan.operation, note } };
 }
 
 async function planAction(tx: Db, view: AfterSaleWorkspace, row: SaleCase, input: SaleInput, actor: SaleActor, proof: SaleEvidence): Promise<Plan> {

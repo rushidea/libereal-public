@@ -186,6 +186,45 @@ async function planHoldDecisions(tx: Db, orderId: string, parcel: FulfillmentPar
   return planned;
 }
 
+function validateParcelReceiptRoute(parcel: Pick<FulfillmentParcelRecord, 'route' | 'status'>, kind: EventKind) {
+  const inbound = parcel.route === 'supplier_to_libereal';
+  if ((kind === 'warehouse_receipt' && !inbound) || (kind === 'customer_delivery' && inbound)) {
+    throw new PurchaseError('收货对象与这个包裹的运输路线不同');
+  }
+  if (parcel.status === 'exception' && ['warehouse_receipt','customer_delivery','exception'].includes(kind)) {
+    throw new PurchaseError('请先核对并处理包裹的待办异常');
+  }
+  return inbound;
+}
+
+function consumeReceiptQuantity(remaining: Map<string, number>, parcelLineId: string, quantity: number) {
+  const available = remaining.get(parcelLineId) ?? 0;
+  if (quantity > available) throw new PurchaseError('实际签收数量超过该包裹行尚未签收的数量');
+  remaining.set(parcelLineId, available - quantity);
+}
+
+export function receiptKnownInventoryAccount(line: FulfillmentParcelRecord['lines'][number]) {
+  const knownAccounts = new Set(line.receipts.map(receipt => receipt.inventoryBatch.inventoryAccountId));
+  if (knownAccounts.size > 1) throw new PurchaseError('同一包裹行有不同库存归属，请凭原始记录核对');
+  return knownAccounts.values().next().value;
+}
+
+/** A quantity check only. Arrival, batch identity and physical evidence must come from staff. */
+export function previewReceiptScope(
+  parcel: Pick<FulfillmentParcelRecord, 'route' | 'status' | 'lines'>,
+  kind: 'warehouse_receipt' | 'customer_delivery',
+  proposed: Array<{ parcelLineId: string; quantity: number }>,
+) {
+  validateParcelReceiptRoute(parcel, kind);
+  const remaining = new Map(parcel.lines.map(line => [line.id, parcelLineBalance(line).pending]));
+  return proposed.map(row => {
+    const line = parcel.lines.find(item => item.id === row.parcelLineId);
+    if (!line) throw new PurchaseError('请重新核对本包裹的商品行');
+    consumeReceiptQuantity(remaining, line.id, row.quantity);
+    return { ...row, orderItemId: line.orderItemId, pendingAfter: remaining.get(line.id)! };
+  });
+}
+
 async function eventPlan(tx: Db, orderId: string, parcelId: string, raw: unknown, actor: FulfillmentActor) {
   const { requestId, ...input } = eventInput(raw);
   const keys = parcelKeys('parcel_event', orderId, requestId, { kind: input.kind, sha: input.sha256, row: input.documentRow }, { orderId, parcelId, ...input });
@@ -195,13 +234,7 @@ async function eventPlan(tx: Db, orderId: string, parcelId: string, raw: unknown
   if (prior) return { prior, parcel, snapshot: { orderId, parcelId, requestId, actorId: actor.id, ...input, priorEvent: prior.id } } as const;
   const occurred = Date.parse(input.occurredAt);
   if (parcel.dispatchedAt.getTime() > occurred) throw new PurchaseError('物流结果的发生时间早于实际发货');
-  const inbound = parcel.route === 'supplier_to_libereal';
-  if ((input.kind === 'warehouse_receipt' && !inbound) || (input.kind === 'customer_delivery' && inbound)) {
-    throw new PurchaseError('收货对象与这个包裹的运输路线不同');
-  }
-  if (parcel.status === 'exception' && ['warehouse_receipt','customer_delivery','exception'].includes(input.kind)) {
-    throw new PurchaseError('请先核对并处理包裹的待办异常');
-  }
+  const inbound = validateParcelReceiptRoute(parcel, input.kind);
   if (input.kind === 'resolve_exception' || input.kind === 'confirm_shortfall' && input.exceptionId) pendingException(parcel, input.exceptionId, occurred);
   const order = await tx.order.findUniqueOrThrow({ where: { id: orderId }, select: { status: true } });
   let disposal;
@@ -244,8 +277,7 @@ async function eventPlan(tx: Db, orderId: string, parcelId: string, raw: unknown
         previousShipped: balance.shipped, previousReceived: balance.received, returnableAt, receipt });
       continue;
     }
-    if (row.quantity > (remaining.get(line.id) ?? 0)) throw new PurchaseError('实际签收数量超过该包裹行尚未签收的数量');
-    remaining.set(line.id, remaining.get(line.id)! - row.quantity);
+    consumeReceiptQuantity(remaining, line.id, row.quantity);
     let identity = null;
     if (inbound) {
       if (!row.batchNumber) throw new PurchaseError('请填写仓库实际接收的批次标识', 400);
@@ -260,9 +292,7 @@ async function eventPlan(tx: Db, orderId: string, parcelId: string, raw: unknown
         options = await receiptInventoryOptions(tx, source, purchase.version);
         selectedIdentities.set(line.id, options);
       }
-      const knownAccounts = new Set(line.receipts.map(receipt => receipt.inventoryBatch.inventoryAccountId));
-      if (knownAccounts.size > 1) throw new PurchaseError('同一包裹行有不同库存归属，请凭原始记录核对');
-      identity = selectReceiptInventory(options, { ...row, inventoryAccountId: row.inventoryAccountId ?? null }, [...knownAccounts][0]);
+      identity = selectReceiptInventory(options, { ...row, inventoryAccountId: row.inventoryAccountId ?? null }, receiptKnownInventoryAccount(line));
       const first = lines.find(saved => saved.parcelLineId === line.id)?.inventory;
       if (first && (first.productId !== identity.productId || first.variantId !== identity.variantId || first.inventoryAccountId !== identity.inventoryAccountId)) {
         throw new PurchaseError('同一包裹行的多个批号须对应相同的具体库存账户');

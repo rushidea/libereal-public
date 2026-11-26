@@ -95,6 +95,13 @@ export async function previewBankReceipt(tx: Db, order: Debtor, input: BankInput
     receiptReferenceKey: pricingContentHash({ purpose: 'verified_bank_receipt', sha256: bank.sha256, statementRow }) };
 }
 
+export function assertBankAllocationAmount(amountCents: unknown, outstandingCents: number, availableCents?: number): asserts amountCents is number {
+  if (!positiveCents(amountCents) || amountCents > outstandingCents) throw new PurchaseError('本次分摊须大于零，且不得超过本单未收余额');
+  if (availableCents !== undefined && amountCents > availableCents) {
+    throw new PurchaseError('本次分摊超过该笔实际到账的剩余可用金额');
+  }
+}
+
 export async function previewBankAllocation(tx: Db, order: Debtor, activities: PurchaseActivity[], input: AllocationInput,
   evidence: Evidence, outstandingCents: number) {
   if (input.receiptKind === 'platform_receipt') throw new PurchaseError('平台交易须由服务端匹配所属订单，人工录入保持待核对');
@@ -105,7 +112,7 @@ export async function previewBankAllocation(tx: Db, order: Debtor, activities: P
   if (!verified) throw new PurchaseError('此银行到账尚未核验归属，或其流水须由平台核对');
   const { bank } = verified;
   const amountCents = input.amountCents;
-  if (!positiveCents(amountCents) || amountCents > outstandingCents) throw new PurchaseError('本次分摊须大于零，且不得超过本单未收余额');
+  assertBankAllocationAmount(amountCents, outstandingCents);
   const legacyAllocationId = input.legacyAllocationId ? requiredText(input.legacyAllocationId, '原人工分摊记录编号') : null;
   const legacy = legacyAllocationId && activities.find(row => row.id === legacyAllocationId && row.action === 'record_customer_receipt');
   const original = legacy ? purchaseOperation(legacy.detail) : null;
@@ -121,7 +128,7 @@ export async function previewBankAllocation(tx: Db, order: Debtor, activities: P
     SELECT amountCents,detail FROM PurchaseActivity WHERE action='record_customer_receipt'
       AND json_extract(detail,'$.snapshot.operation.bankReceiptId')=${bankReceiptId}`;
   const allocatedBeforeCents = allocations.reduce((total, row) => total + Number(row.amountCents ?? 0), 0);
-  if (allocatedBeforeCents + amountCents > bank.receiptTotalCents) throw new PurchaseError('本次分摊超过该笔实际到账的剩余可用金额');
+  assertBankAllocationAmount(amountCents, outstandingCents, bank.receiptTotalCents - allocatedBeforeCents);
   if (legacyAllocationId && allocations.some(row => purchaseOperation(jsonObject(row.detail)).legacyAllocationId === legacyAllocationId)) {
     throw new PurchaseError('此原人工分摊已经核验关联');
   }

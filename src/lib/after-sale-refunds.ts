@@ -1,8 +1,9 @@
 import { financeWorkspace } from '@/lib/finance-workspace';
 import type { FulfillmentDb as Db } from '@/lib/fulfillment-records';
 import { jsonObject } from '@/lib/order-catalog-repricing';
+import { pricingContentHash } from '@/lib/pricing-adjustment-approval';
 import { purchaseObject } from '@/lib/purchase-activity';
-import { requiredText } from '@/lib/purchase-terms';
+import { PurchaseError, requiredText } from '@/lib/purchase-terms';
 import { cents, choice, condition, type SaleEvidence } from '@/lib/after-sale-records';
 import { caseEvents, currentSaleAgreement, lastCaseEvent, saleOperation, type SaleCase, type AfterSaleWorkspace } from '@/lib/after-sale-workspace';
 import { eligibleAfterSalePayment, independentAfterSalePayment, verifiedAfterSalePayment } from '@/lib/after-sale-payment-source';
@@ -67,7 +68,7 @@ export async function refundPosition(tx: Db, view: AfterSaleWorkspace, row: Sale
   condition(independentReceipt || Number.isSafeInteger(gross) && gross >= 0, '请先核对原订单行金额');
   return { paidCents: verified?.amountCents ?? finance.settlementCents, usedCents: used, originalLineCents: gross, caseGoodsCents, lineUsedCents: onLine,
     originalAcceptance: finance.acceptanceId, authorityConflict: finance.authorityConflict, recordedCents: actualRefunded(row),
-    originalPointsBasisYuan: view.order.pointsRefundedCash, originalCash: finance.cash.map(item => [item.id, item.amountCents]),
+    originalPointsBasisYuan: view.order.pointsRefundedCash, originalCash: finance.cash.map(item => [item.id, item.amountCents] as const),
     originalPaymentId: paymentId ?? settledSource, verifiedPayment: verified, independentReceipt,
     sourceEligible: !verified || eligibleAfterSalePayment(verified, view.order, finance) };
 }
@@ -102,6 +103,98 @@ export async function releaseRefundSource(tx: Db, view: AfterSaleWorkspace, row:
     b4ClaimId: saleOperation(review).b4ClaimId, note: requiredText(data.note, '未批准、未发出退款指令及原单继续处理的核对结果') } };
 }
 
+type RefundPosition = Awaited<ReturnType<typeof refundPosition>>;
+
+function assertRefundCapacity(position: RefundPosition, amountCents: number) {
+  condition(position.verifiedPayment ? position.sourceEligible : !position.authorityConflict && position.originalAcceptance,
+    '原单接单或回款归属待财务核对');
+  condition(amountCents <= position.paidCents - position.usedCents - position.recordedCents,
+    '退款超过已核实的剩余实收款（以本笔到账为准）');
+  if (!position.independentReceipt) {
+    condition(amountCents <= position.originalLineCents - position.lineUsedCents - position.recordedCents
+      && amountCents <= position.caseGoodsCents - position.recordedCents, '退款超过原商品行范围');
+  }
+}
+
+function pendingRefundEvents(row: SaleCase, approvalId: string) {
+  const history = caseEvents(row, 'refund_result').filter(event => saleOperation(event).approvalId === approvalId)
+    .sort((a,b) => a.occurredAt.getTime() - b.occurredAt.getTime());
+  const latest = new Map(history.filter(event => typeof saleOperation(event).referenceNo === 'string')
+    .map(event => [transferReference(saleOperation(event).referenceNo), event]));
+  return { history, pending: [...latest.values()].filter(event => saleOperation(event).result === 'pending') };
+}
+
+function refundHasUnknownResult(row: SaleCase, approvalId: string) {
+  const approvals = caseEvents(row, 'approve_refund');
+  const results = caseEvents(row, 'refund_result').map(event => ({ event, operation: saleOperation(event) }));
+  const latest = new Map<string, string>();
+  for (const { operation } of results.sort((a, b) => a.event.occurredAt.getTime() - b.event.occurredAt.getTime())) {
+    const id = operation.approvalId ?? (approvals.length === 1 ? approvals[0].id : null);
+    if (!id && operation.result === 'pending') return true;
+    if (id !== approvalId) continue;
+    if (typeof operation.referenceNo === 'string' && operation.referenceNo.trim()) {
+      latest.set(transferReference(operation.referenceNo), String(operation.result));
+    } else if (operation.result === 'pending') return true;
+  }
+  return [...latest.values()].includes('pending');
+}
+
+export function previewApprovedRefund(row: SaleCase, position: RefundPosition | null, amountCents: number) {
+  const blockers: string[] = [];
+  const agreement = currentSaleAgreement(row);
+  if (!agreement || saleOperation(agreement).remedy !== 'refund') {
+    return { blockers: ['REFUND_AGREEMENT_REQUIRED'], approvalId: null, approvalRemainingCents: null };
+  }
+
+  const terms = refundTerms(row);
+  const approval = lastCaseEvent(row, 'approve_refund');
+  const detail = jsonObject(approval?.detail);
+  const approved = purchaseObject(detail.operation);
+  const auth = purchaseObject(detail.authorization);
+  const snapshot = purchaseObject(detail.snapshot);
+  const preparedPosition = purchaseObject(approved.position);
+  const prepared = caseEvents(row, 'prepare_refund').find(event => event.id === approved.preparedId);
+  const approvedCurrent = approval && row.customerState === 'refund_approved'
+    && approved.agreementId === terms.agreementId && approved.amountCents === terms.amountCents
+    && approved.recipient === terms.recipient && approved.destination === terms.destination && approved.method === terms.method
+    && prepared && saleOperation(prepared).agreementId === terms.agreementId && prepared.createdAt <= approval.createdAt
+    && auth.permission === 'finance.write' && typeof auth.verifiedAt === 'string' && Number.isFinite(Date.parse(auth.verifiedAt))
+    && typeof auth.sessionFingerprint === 'string' && /^[a-f0-9]{64}$/.test(auth.sessionFingerprint)
+    && Date.parse(auth.verifiedAt) <= Date.now() && approval.createdAt.getTime() <= Date.now()
+    && snapshot.caseId === row.id && snapshot.orderId === row.orderId
+    && snapshot.actor === approval.actorId && snapshot.action === 'approve_refund'
+    && snapshot.previousState === 'refund_prepared' && snapshot.nextState === 'refund_approved'
+    && purchaseObject(snapshot.item).id === row.orderItemId
+    && pricingContentHash(snapshot.operation) === pricingContentHash(approved)
+    && pricingContentHash(snapshot) === approval.approvedHash;
+  const remaining = approvedCurrent ? Math.max(0, terms.amountCents - refundedUnder(row, approval.id)) : null;
+  if (!approvedCurrent) blockers.push('INDEPENDENT_REFUND_APPROVAL_REQUIRED');
+  if (approvedCurrent && refundHasUnknownResult(row, approval.id)) blockers.push('REFUND_RESULT_AWAITING_RECONCILIATION');
+  if (amountCents > (remaining ?? terms.amountCents)) blockers.push('AMOUNT_EXCEEDS_REFUND_APPROVAL');
+  if (!position || position.paidCents <= 0) blockers.push('ORIGINAL_PAYMENT_NOT_VERIFIED');
+  else {
+    const reviewedPayment = purchaseObject(preparedPosition.verifiedPayment);
+    const currentCash = new Map(position.originalCash);
+    const originalCash = preparedPosition.originalCash;
+    if (approvedCurrent && (preparedPosition.originalPaymentId !== position.originalPaymentId
+      || preparedPosition.originalAcceptance !== position.originalAcceptance
+      || preparedPosition.independentReceipt !== position.independentReceipt
+      || (position.verifiedPayment && (reviewedPayment.auditId !== position.verifiedPayment.auditId
+        || reviewedPayment.amountCents !== position.verifiedPayment.amountCents))
+      || !Array.isArray(originalCash)
+      || !originalCash.every(posting => Array.isArray(posting) && currentCash.get(posting[0]) === posting[1]))) {
+      blockers.push('APPROVED_PAYMENT_SOURCE_CHANGED');
+    }
+    try {
+      assertRefundCapacity(position, amountCents);
+    } catch (error) {
+      if (!(error instanceof PurchaseError)) throw error;
+      blockers.push('REFUND_OUTSIDE_VERIFIED_PAYMENT_OR_LINE');
+    }
+  }
+  return { blockers, approvalId: approvedCurrent ? approval.id : null, approvalRemainingCents: remaining };
+}
+
 export async function refundStep(tx: Db, view: AfterSaleWorkspace, row: SaleCase, action: string, data: Record<string, unknown>, evidence: SaleEvidence) {
   const terms = refundTerms(row);
   const position = await refundPosition(tx, view, row);
@@ -116,11 +209,7 @@ export async function refundStep(tx: Db, view: AfterSaleWorkspace, row: SaleCase
     const sourcePaymentId = position.verifiedPayment?.paymentId ?? null;
     if (action === 'stop_refund') {
       const terminal = choice(data.result, ['failed','stopped'] as const, '渠道书面确认的终止结果');
-      const history = caseEvents(row, 'refund_result').filter(event => saleOperation(event).approvalId === approval.id)
-        .sort((a,b)=>a.occurredAt.getTime()-b.occurredAt.getTime());
-      const latest = new Map(history.filter(event => typeof saleOperation(event).referenceNo === 'string')
-        .map(event => [transferReference(saleOperation(event).referenceNo), event]));
-      const pending = [...latest.values()].filter(event => saleOperation(event).result === 'pending');
+      const { history, pending } = pendingRefundEvents(row, approval.id);
       const acknowledged = Array.isArray(data.pendingResultIds) ? data.pendingResultIds : [];
       condition(data.confirmStopped === true && outstandingCents > 0 && pending.length === new Set(acknowledged).size
         && pending.every(event => acknowledged.includes(event.id) && (event.sha256!==evidence.sha256 || event.documentRow!==evidence.documentRow))
@@ -145,14 +234,7 @@ export async function refundStep(tx: Db, view: AfterSaleWorkspace, row: SaleCase
       previouslyRecordedInApprovalCents: inApprovalCents },
       customerState: result === 'paid' && amountCents === outstandingCents ? 'awaiting_close' : 'refund_approved' };
   }
-  condition(position.verifiedPayment ? position.sourceEligible : !position.authorityConflict && position.originalAcceptance,
-    '原单接单或回款归属待财务核对');
-  condition(terms.amountCents <= position.paidCents - position.usedCents - position.recordedCents,
-    '退款超过已核实的剩余实收款（以本笔到账为准）');
-  if (!position.independentReceipt) {
-    condition(terms.amountCents <= position.originalLineCents - position.lineUsedCents - position.recordedCents
-      && terms.amountCents <= position.caseGoodsCents - position.recordedCents, '退款超过原商品行范围');
-  }
+  assertRefundCapacity(position, terms.amountCents);
   if (action === 'prepare_refund') {
     condition(['awaiting_refund','refund_prepared'].includes(row.customerState), '当前事项不能准备新的退款');
     const historicCheck = requiredText(data.historyReview, '财务对既有实际退款、积分处理及外部回执的核对记录');
