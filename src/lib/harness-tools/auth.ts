@@ -8,6 +8,7 @@ export const HARNESS_TOOL_SCOPES = [
   'inquiry.quote.preview',
   'inquiry.supplier_review.prepare',
   'inquiry.lease',
+  'events.read',
 ] as const;
 
 export type HarnessToolScope = (typeof HARNESS_TOOL_SCOPES)[number];
@@ -243,10 +244,15 @@ export type HarnessAuthResult =
   | { ok: true; principal: HarnessPrincipal }
   | { ok: false; response: NextResponse };
 
-export function authorizeHarnessRequest(
-  req: { headers: { get(name: string): string | null } },
-  options: { requiredScope: HarnessToolScope; inquiryId: string },
-): HarnessAuthResult {
+type HarnessRequest = { headers: { get(name: string): string | null } };
+type HarnessEventAuthResult =
+  | { ok: true; principal: HarnessPrincipal; pilotInquiryIds?: string[] }
+  | { ok: false; response: NextResponse };
+
+function authorizeHarnessPrincipal(
+  req: HarnessRequest,
+  requiredScope: HarnessToolScope,
+): HarnessEventAuthResult {
   const config = loadHarnessToolsConfig();
   if (!config || !config.enabled) {
     return {
@@ -305,25 +311,10 @@ export function authorizeHarnessRequest(
     };
   }
 
-  if (!client.scopes.includes(options.requiredScope)) {
+  if (!client.scopes.includes(requiredScope)) {
     return {
       ok: false,
-      response: harnessError(403, 'forbidden', 'SCOPE_FORBIDDEN', `缺少所需工具权限: ${options.requiredScope}`),
-    };
-  }
-
-  const inquiryId = options.inquiryId.trim();
-  if (!inquiryId || inquiryId.length > 160) {
-    return {
-      ok: false,
-      response: harnessError(400, 'validation_error', 'INVALID_INQUIRY_ID', '询价编号无效'),
-    };
-  }
-
-  if (config.pilotInquiryIds !== undefined && !config.pilotInquiryIds.includes(inquiryId)) {
-    return {
-      ok: false,
-      response: harnessError(403, 'forbidden', 'PILOT_SCOPE_FORBIDDEN', '该询价单不在当前试点允许范围内'),
+      response: harnessError(403, 'forbidden', 'SCOPE_FORBIDDEN', `缺少所需工具权限: ${requiredScope}`),
     };
   }
 
@@ -334,7 +325,37 @@ export function authorizeHarnessRequest(
       environment: config.environment,
       scopes: client.scopes,
     },
+    pilotInquiryIds: config.pilotInquiryIds,
   };
+}
+
+export function authorizeHarnessEventRequest(req: HarnessRequest): HarnessEventAuthResult {
+  return authorizeHarnessPrincipal(req, 'events.read');
+}
+
+export function authorizeHarnessRequest(
+  req: HarnessRequest,
+  options: { requiredScope: HarnessToolScope; inquiryId: string },
+): HarnessAuthResult {
+  const auth = authorizeHarnessPrincipal(req, options.requiredScope);
+  if (!auth.ok) return auth;
+
+  const inquiryId = options.inquiryId.trim();
+  if (!inquiryId || inquiryId.length > 160) {
+    return {
+      ok: false,
+      response: harnessError(400, 'validation_error', 'INVALID_INQUIRY_ID', '询价编号无效'),
+    };
+  }
+
+  if (auth.pilotInquiryIds !== undefined && !auth.pilotInquiryIds.includes(inquiryId)) {
+    return {
+      ok: false,
+      response: harnessError(403, 'forbidden', 'PILOT_SCOPE_FORBIDDEN', '该询价单不在当前试点允许范围内'),
+    };
+  }
+
+  return { ok: true, principal: auth.principal };
 }
 
 export interface HarnessLeaseHeader {
