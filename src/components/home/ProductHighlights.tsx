@@ -1,11 +1,11 @@
 'use client';
 
 import Link from 'next/link';
-import Image from 'next/image';
 import { useEffect, useState } from 'react';
 import { Package } from 'lucide-react';
 import type { Product } from '@/types/Product';
-import { getCategoryGradient, getProductImageAlt, getProductImageUrl } from '@/lib/productImage';
+import ProductImage from '@/components/ProductImage';
+import { getCategoryGradient, getProductImageAlt } from '@/lib/productImage';
 import HomeSectionHeader from '@/components/home/HomeSectionHeader';
 import Reveal from '@/components/home/Reveal';
 import { uiSurfaces } from '@/lib/ui-surfaces';
@@ -61,7 +61,6 @@ export default function ProductHighlights() {
             <p className={`col-span-full py-8 text-center ${uiSurfaces.mutedText}`}>暂无热门产品</p>
           ) : products.map((p, index) => {
             const category = p.category || '新产品';
-            const imgPath = getProductImageUrl(p);
             const imageAlt = getProductImageAlt(p);
             const tags = [
               ...(p.applications || []),
@@ -77,19 +76,17 @@ export default function ProductHighlights() {
                 <div
                   className={`relative min-h-32 w-full flex-shrink-0 overflow-hidden bg-gradient-to-br sm:aspect-[4/3] sm:min-h-0 ${getCategoryGradient(p.category)} dark:opacity-80`}
                 >
-                  {imgPath ? (
-                    <Image
-                      src={imgPath}
-                      alt={imageAlt}
-                      fill
-                      sizes="(max-width: 639px) 116px, (max-width: 1024px) 50vw, 25vw"
-                      className="object-cover object-center transition-transform duration-500 ease-out group-hover:scale-105"
-                    />
-                  ) : (
-                    <div className="absolute inset-0 flex items-center justify-center">
-                      <Package className="h-10 w-10 text-white/40" />
-                    </div>
-                  )}
+                  <ProductImage
+                    product={p}
+                    alt={imageAlt}
+                    sizes="(max-width: 639px) 116px, (max-width: 1024px) 50vw, 25vw"
+                    className="object-cover object-center transition-transform duration-500 ease-out group-hover:scale-105"
+                    fallback={(
+                      <div className="absolute inset-0 flex items-center justify-center">
+                        <Package className="h-10 w-10 text-white/40" />
+                      </div>
+                    )}
+                  />
                   <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/30 via-black/5 to-transparent" />
                   {tags.length > 0 ? (
                     <div className="absolute right-2 top-2 z-10 flex gap-1">
