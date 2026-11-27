@@ -19,6 +19,8 @@ export interface PromotionDefinition {
   template: 'addon' | 'gift' | 'same-sku-gift' | 'bundle' | 'direct-price' | 'buy-n-get-m';
   groups: PromotionGroup[];
   benefit: PromotionBenefit;
+  /** Absent for existing rules. Catalog mode is a separately gated new contract. */
+  priceBasis?: 'catalog';
   repeat: boolean;
   maxApplications: number | null;
   /** 同款买赠、买 N 免 M：quantity 为一组总件数，freeQuantity 为其中免费件数。 */
@@ -72,6 +74,9 @@ export function parsePromotionDefinition(value: unknown): PromotionDefinition {
     keys.add(group.key);
   }
   const definition = value as unknown as PromotionDefinition;
+  if (value.priceBasis !== undefined && (value.priceBasis !== 'catalog' || definition.benefit.kind !== 'percentage')) {
+    throw new Error('INVALID_PROMOTION_PRICE_BASIS');
+  }
   const qualifiers = definition.groups.filter((group) => group.role !== 'benefit');
   const benefits = definition.groups.filter((group) => group.role !== 'qualifier');
   if (!benefits.length || (definition.template !== 'direct-price' && !qualifiers.length)) {
@@ -116,6 +121,7 @@ export function parsePromotionDefinition(value: unknown): PromotionDefinition {
     groups: definition.groups.map(({ key, role, unit, quantity }) => ({ key, role, unit, quantity })),
     benefit: normalizedBenefit, repeat: definition.repeat, maxApplications: definition.maxApplications,
     partialBenefit: definition.partialBenefit,
+    ...(definition.priceBasis === 'catalog' ? { priceBasis: 'catalog' as const } : {}),
     ...(definition.freeQuantity === undefined ? {} : { freeQuantity: definition.freeQuantity }),
   };
 }

@@ -19,6 +19,7 @@ import PricingBreakdown from '@/components/order/PricingBreakdown';
 import OrganizationContextSelect from '@/components/account/OrganizationContextSelect';
 import { uiSurfaces } from '@/lib/ui-surfaces';
 import { clearCheckoutAttempt, getOrCreateCheckoutAttempt } from '@/lib/checkout-attempt';
+import { usePromotionPreview } from '@/components/promotions/usePromotionPreview';
 
 interface Address {
   id: string;
@@ -53,7 +54,10 @@ interface PaymentMethod {
 interface PricingPreviewItem {
   productId: string | null;
   catalogNumber: string | null;
-  unitPrice: number;
+  unitPrice: number | null;
+  originalUnitPrice?: number | null;
+  includedPromotionDiscount?: number;
+  priceTiers?: Array<{ unitPrice: number; quantity: number }>;
   finalUnitPrice?: number;
   quantity: number;
   lineTotal: number;
@@ -115,8 +119,13 @@ const PAYMENT_METHODS: PaymentMethod[] = ORDER_PAYMENT_METHODS.map((method) => (
 
 export default function OrderCheckoutPage() {
   const { items, removeItem, syncFromDb, syncToDb } = useCart();
-  const router = useRouter();
   const { data: session } = useSession();
+  const productItems = items.filter((item): item is ProductCartItem => !item.isQuickOrder);
+  const cartPricing = usePromotionPreview(productItems, session?.user?.id);
+  const cartPricingKey = JSON.stringify(cartPricing.serverLineTotals ?? null);
+  const cartPricingUnavailable = cartPricing.loading || cartPricing.issues.some((issue) => issue.ruleId === 'load' || issue.ruleId === 'invalid');
+  const classificationKey = JSON.stringify([productItems.map((item) => [getCartItemKey(item), item.quantity]), cartPricingKey, cartPricingUnavailable]);
+  const router = useRouter();
   const [cartReady, setCartReady] = useState(false);
   const [addresses, setAddresses] = useState<Address[]>([]);
   const [selectedAddressId, setSelectedAddressId] = useState<string | null>(null);
@@ -132,6 +141,7 @@ export default function OrderCheckoutPage() {
   const [checkoutAcceptedLegalIds, setCheckoutAcceptedLegalIds] = useState<string[]>([]);
   const [inquiryItems, setInquiryItems] = useState<InquiryProduct[]>([]);
   const [spotItems, setSpotItems] = useState<ProductCartItem[]>([]);
+  const [classifiedKey, setClassifiedKey] = useState('');
   const [pricingPreview, setPricingPreview] = useState<PricingPreview | null>(null);
   const [pricingLoading, setPricingLoading] = useState(false);
   const [pricingError, setPricingError] = useState('');
@@ -173,10 +183,12 @@ export default function OrderCheckoutPage() {
   useEffect(() => {
     const allProductItems = items.filter((i): i is ProductCartItem => !i.isQuickOrder);
     const allQuickOrderItems = items.filter(i => i.isQuickOrder) as QuickOrderItem[];
-
-    const spot = allProductItems.filter(i => isPricedProduct(i.product));
+    if (cartPricingUnavailable) { setSpotItems([]); setInquiryItems([]); setClassifiedKey(classificationKey); return; }
+    const totals = cartPricing.serverLineTotals;
+    const isSpot = (item: ProductCartItem, index: number) => totals ? totals[index] !== null : isPricedProduct(item.product);
+    const spot = allProductItems.filter(isSpot);
     const inquiry: InquiryProduct[] = [
-      ...allProductItems.filter(i => !isPricedProduct(i.product)).map(i => ({
+      ...allProductItems.filter((item, index) => !isSpot(item, index)).map(i => ({
         name: i.product.name,
         brand: i.product.brand,
         catalogNumber: i.product.catalogNumber,
@@ -195,7 +207,8 @@ export default function OrderCheckoutPage() {
     ];
     setSpotItems(spot);
     setInquiryItems(inquiry);
-  }, [items]);
+    setClassifiedKey(classificationKey);
+  }, [items, classificationKey, cartPricingKey, cartPricingUnavailable]);
 
   useEffect(() => {
     if (spotItems.length === 0) {
@@ -222,7 +235,7 @@ export default function OrderCheckoutPage() {
         price: getEffectiveProductPrice(product),
         quantity: item.quantity,
         // 换购/赠品行促销标记（服务端定价预览据此按原价计价并计算活动优惠）
-        promoMark: !item.isQuickOrder && item.addon ? { ruleId: item.addon.ruleId, price: item.addon.addonPrice } : null,
+        promoMark: !item.isQuickOrder && item.addon ? { ruleId: item.addon.ruleId, price: item.addon.addonPrice, choice: product.catalogNumber } : null,
       };
     });
 
@@ -313,12 +326,9 @@ export default function OrderCheckoutPage() {
     };
   }, [router]);
 
-  const cartSubtotal = spotItems.reduce((sum, item) => {
-    if (item.isQuickOrder) return sum;
-    const p = item as { product: import('@/types/Product').Product };
-    return sum + getEffectiveProductPrice(p.product) * item.quantity;
-  }, 0);
-  const spotSubtotal = pricingPreview?.subtotal ?? cartSubtotal;
+  const pricingConfirmed = classifiedKey === classificationKey && !cartPricingUnavailable && !pricingLoading && !pricingError
+    && (spotItems.length === 0 || pricingPreview !== null);
+  const spotSubtotal = pricingPreview?.subtotal ?? 0;
 
   const promoDiscount = pricingPreview?.promotionDiscount ?? 0;
   const isPlatformPayment = paymentMethod === 'rjmart' || paymentMethod === 'casmart';
@@ -371,6 +381,7 @@ export default function OrderCheckoutPage() {
   };
 
   const handleSubmit = async () => {
+    if (cartPricingUnavailable || classifiedKey !== classificationKey) { setError('购物车价格尚未确认，请刷新后重试'); return; }
     if (!selectedAddressId && !showNewAddress) {
       setError('请选择或添加收货地址');
       return;
@@ -411,6 +422,9 @@ export default function OrderCheckoutPage() {
 
   const createSpotOrder = async (acceptedLegalIds: string[] = []) => {
     if (submitInFlightRef.current || submitting) return;
+    if (cartPricingUnavailable || classifiedKey !== classificationKey || pricingLoading || pricingError || !pricingPreview) {
+      setError('购物车价格尚未确认，请刷新后重试'); return;
+    }
     submitInFlightRef.current = true;
     if (!selectedAddressId && !showNewAddress) {
       setError('请选择或添加收货地址');
@@ -456,7 +470,7 @@ export default function OrderCheckoutPage() {
         status: 'pending',
         // 换购/赠品行促销标记（服务端据此校验额度并按原价计价）
         promoMark: item.addon
-          ? { ruleId: item.addon.ruleId, price: item.addon.addonPrice }
+          ? { ruleId: item.addon.ruleId, price: item.addon.addonPrice, choice: item.product.catalogNumber }
           : null,
       }));
 
@@ -507,7 +521,7 @@ export default function OrderCheckoutPage() {
             return;
           }
           spotItems.forEach(item => removeItem(getCartItemKey(item)));
-          syncToDb(inquiryItems.length > 0 ? items.filter((item) => item.isQuickOrder || !isPricedProduct(item.product)) : []);
+          syncToDb(inquiryItems.length > 0 ? items.filter((item) => item.isQuickOrder || !spotItems.some((spot) => getCartItemKey(spot) === getCartItemKey(item))) : []);
           clearCheckoutAttempt('order');
           window.location.assign(paymentData.redirectUrl);
           return;
@@ -518,7 +532,7 @@ export default function OrderCheckoutPage() {
       }
 
       spotItems.forEach(item => removeItem(getCartItemKey(item)));
-      syncToDb(inquiryItems.length > 0 ? items.filter((item) => item.isQuickOrder || !isPricedProduct(item.product)) : []);
+      syncToDb(inquiryItems.length > 0 ? items.filter((item) => item.isQuickOrder || !spotItems.some((spot) => getCartItemKey(spot) === getCartItemKey(item))) : []);
       clearCheckoutAttempt('order');
       try { window.sessionStorage.removeItem('libereal:last-checkout-order-id'); } catch {}
       await new Promise(resolve => setTimeout(resolve, 600));
@@ -541,7 +555,6 @@ export default function OrderCheckoutPage() {
     await createSpotOrder(checkoutAcceptedLegalIds);
   };
 
-  const productItems = items.filter(i => !i.isQuickOrder) as Array<{ product: import('@/types/Product').Product; quantity: number }>;
   const promotionReviewRows = spotItems.map((item, index) => {
     const product = item.product;
     const previewItem = pricingPreview?.items[index];
@@ -550,7 +563,7 @@ export default function OrderCheckoutPage() {
       quantity: item.quantity,
       isAddon: Boolean(item.addon),
       addonPrice: item.addon?.addonPrice,
-      promotionDiscount: previewItem?.promotionDiscount ?? 0,
+      promotionDiscount: (previewItem?.promotionDiscount ?? 0) + (previewItem?.includedPromotionDiscount ?? 0),
       promotionLabels: previewItem?.promotionLabels ?? [],
       finalLineTotal: previewItem?.finalLineTotal,
     };
@@ -595,8 +608,8 @@ export default function OrderCheckoutPage() {
               const fallbackUnitPrice = getEffectiveProductPrice(product);
               const finalLineTotal = previewItem?.finalLineTotal ?? fallbackUnitPrice * item.quantity;
               const finalUnitPrice = previewItem?.finalUnitPrice ?? finalLineTotal / item.quantity;
-              const prePromotionUnitPrice = previewItem?.unitPrice ?? fallbackUnitPrice;
-              const promotionDiscount = previewItem?.promotionDiscount ?? 0;
+              const prePromotionUnitPrice = previewItem?.originalUnitPrice ?? previewItem?.unitPrice ?? fallbackUnitPrice;
+              const promotionDiscount = (previewItem?.promotionDiscount ?? 0) + (previewItem?.includedPromotionDiscount ?? 0);
               const promotionLabels = previewItem?.promotionLabels ?? [];
               return (
                 <div key={product.id} className="border-b border-gray-100 pb-3 last:border-b-0 last:pb-0 dark:border-slate-400/70">
@@ -618,7 +631,7 @@ export default function OrderCheckoutPage() {
                       })()}
                     </div>
                     <div className="shrink-0 text-right">
-                      {promotionDiscount > 0 && item.quantity === 1 ? (
+                      {!previewItem || !pricingConfirmed ? <p className="text-sm text-gray-600">价格待确认</p> : promotionDiscount > 0 && item.quantity === 1 ? (
                         <p className="text-brand-600 font-semibold tabular-nums">
                           <span className="mr-1 text-gray-500 line-through dark:text-slate-600">{formatPrice(prePromotionUnitPrice)}</span>
                           <span className="mr-1 text-sm font-normal text-gray-600 dark:text-slate-700">活动价</span>
@@ -629,7 +642,13 @@ export default function OrderCheckoutPage() {
                           <p className="text-brand-600 font-semibold tabular-nums">
                             {formatPrice(finalLineTotal)}
                           </p>
-                          {item.quantity > 1 && (
+                          {item.quantity > 1 && (previewItem?.priceTiers?.length ?? 0) > 1 ? (
+                            <div className="mt-0.5 text-sm text-gray-600 dark:text-slate-700 tabular-nums">
+                              {previewItem!.priceTiers!.map((tier) => (
+                                <p key={tier.unitPrice}>{formatPrice(tier.unitPrice)} × {tier.quantity}</p>
+                              ))}
+                            </div>
+                          ) : item.quantity > 1 && (
                             <p className="mt-0.5 text-sm text-gray-600 dark:text-slate-700 tabular-nums">
                               {promotionDiscount > 0 && (
                                 <span className="mr-1 text-gray-500 line-through dark:text-slate-600">
@@ -656,6 +675,8 @@ export default function OrderCheckoutPage() {
                 </div>
               );
             })}
+            {cartPricing.loading && <p className="text-sm text-gray-700 dark:text-slate-800">正在确认购物车商品价格...</p>}
+            {cartPricing.issues.filter((issue) => issue.ruleId === 'load' || issue.ruleId === 'invalid').map((issue) => <p key={issue.ruleId} role="alert" className="text-sm text-red-600 dark:text-red-700">{issue.message}</p>)}
             {pricingLoading && <p className="text-sm text-gray-700 dark:text-slate-800">正在计算会员、品牌和活动价格...</p>}
             {pricingError && <p className="text-sm text-red-600 dark:text-red-700">{pricingError}</p>}
           </div>
@@ -665,7 +686,7 @@ export default function OrderCheckoutPage() {
           <div className="mt-4 space-y-1 border-t border-gray-100 pt-4 dark:border-slate-400/70">
             <div className="flex justify-between items-center text-sm">
               <span className="text-gray-700 dark:text-slate-800">商品金额</span>
-              <span className="text-gray-900 dark:text-slate-900">{formatPrice(spotSubtotal)}</span>
+              <span className="text-gray-900 dark:text-slate-900">{pricingConfirmed ? formatPrice(spotSubtotal) : '待确认'}</span>
             </div>
             {promoDiscount > 0 && (
               <div className="flex justify-between items-center text-sm">
@@ -745,7 +766,7 @@ export default function OrderCheckoutPage() {
             )}
             <div className="flex items-center justify-between border-t border-gray-100 pt-2 dark:border-slate-400/70">
               <span className="font-semibold text-gray-700 dark:text-slate-900">应付总额</span>
-              <span className="text-xl font-bold text-brand-600">{formatPrice(total)}</span>
+              <span className="text-xl font-bold text-brand-600">{pricingConfirmed ? formatPrice(total) : '待确认'}</span>
             </div>
           </div>
         </div>
@@ -787,10 +808,7 @@ export default function OrderCheckoutPage() {
                       <p className={`mt-1 text-xs ${fulfillment.className}`}>{fulfillment.label}{fulfillment.detail ? ` · ${fulfillment.detail}` : ''}</p>
                     </div>
                     <div className="shrink-0 text-right text-xs">
-                      {row.isAddon && row.addonPrice !== undefined && (
-                        <p className="font-semibold text-brand-700">加购价 {formatPrice(row.addonPrice)} / 件</p>
-                      )}
-                      {row.finalLineTotal !== undefined && (
+                      {row.finalLineTotal !== undefined && pricingConfirmed && (
                         <p className="mt-0.5 text-gray-700 dark:text-slate-800">计入订单 {formatPrice(row.finalLineTotal)}</p>
                       )}
                     </div>
@@ -1041,7 +1059,7 @@ export default function OrderCheckoutPage() {
 
         <button
           onClick={handleSubmit}
-          disabled={submitting || pricingLoading || (spotItems.length > 0 && !pricingPreview) || (!selectedAddressId && !showNewAddress) || !paymentMethod}
+          disabled={submitting || classifiedKey !== classificationKey || cartPricingUnavailable || pricingLoading || (spotItems.length > 0 && !pricingPreview) || (!selectedAddressId && !showNewAddress) || !paymentMethod}
           className="w-full bg-brand-500 hover:bg-brand-600 disabled:bg-brand-300 text-white py-4 rounded-xl font-semibold text-base transition-colors flex items-center justify-center gap-2"
         >
           {submitting ? (

@@ -6,6 +6,8 @@ export interface BoundPromotion extends PromotionAssignment {
   version: number;
   priority?: number;
   exclusive?: boolean;
+  /** Internal alias used to prevent multiple option candidates from one static rule. */
+  legacyRuleIdentity?: string;
   definition: PromotionDefinition;
 }
 export interface PromotionPricingLine {
@@ -15,6 +17,9 @@ export interface PromotionPricingLine {
   quantity: number;
   unitPriceCents: number;
   basePriceCents: number;
+  /** Trusted real-SKU identity when a SKU has been split into source rows. */
+  sameSkuGroupKey?: string;
+  minimumUnitCents?: number | null;
 }
 export interface PromotionStatus {
   id: string;
@@ -41,7 +46,7 @@ function integer(value: number, minimum = 0) {
 }
 
 /** 商品身份与基准价格须由服务端核验。此函数只分配优惠，从不增添购物车商品。 */
-export function calculateBoundPromotions(lines: PromotionPricingLine[], campaigns: BoundPromotion[], now = new Date()): PromotionCalculation {
+export function calculateBoundPromotions(lines: PromotionPricingLine[], campaigns: BoundPromotion[], now = new Date(), options?: { reserveFreeUnitsInPriceOrder?: boolean; exactMoneyAllocation?: boolean }): PromotionCalculation {
   const result: PromotionCalculation = { discountCents: 0, lineDiscounts: {}, lineRules: {}, lineAllocations: {}, appliedRules: {}, statuses: [] };
   const ids = new Set<string>();
   for (const line of lines) {
@@ -59,6 +64,7 @@ export function calculateBoundPromotions(lines: PromotionPricingLine[], campaign
   }
   for (const campaign of active) {
     const beforeCampaign = new Map(remaining);
+    const beforeLineDiscounts = { ...result.lineDiscounts };
     const definition = parsePromotionDefinition(campaign.definition);
     const bindings = new Map(campaign.bindings.map((binding) => [promotionSkuKey(binding), binding.groupKey]));
     const participating = lines.filter((line) => bindings.has(promotionSkuKey(line)))
@@ -111,8 +117,9 @@ export function calculateBoundPromotions(lines: PromotionPricingLine[], campaign
     if (sameSku || buyN) {
       const size = definition.groups[0].quantity;
       const free = definition.freeQuantity!;
-      const batches = sameSku ? [...new Set(participating.map(promotionSkuKey))].map((key) =>
-        participating.filter((line) => promotionSkuKey(line) === key)) : [participating];
+      const groupingKey = (line: PromotionPricingLine) => line.sameSkuGroupKey ?? promotionSkuKey(line);
+      const batches = sameSku ? [...new Set(participating.map(groupingKey))].map((key) =>
+        participating.filter((line) => groupingKey(line) === key)) : [participating];
       let remainingApplications = definition.repeat ? definition.maxApplications ?? Number.MAX_SAFE_INTEGER : 1;
       applications = 0;
       for (const batch of batches) {
@@ -122,14 +129,15 @@ export function calculateBoundPromotions(lines: PromotionPricingLine[], campaign
         applications += allowed;
         let offset = 0;
         const freeBefore = (position: number) => Math.floor(position / size) * free + Math.max(0, position % size - (size - free));
-        for (const line of [...batch].sort((a, b) => b.unitPriceCents - a.unitPriceCents || a.id.localeCompare(b.id))) {
+        const priceOrderedBatch = [...batch].sort((a, b) => b.unitPriceCents - a.unitPriceCents || a.id.localeCompare(b.id));
+        for (const line of priceOrderedBatch) {
           const lineQuantity = availableQuantity(line);
           const end = Math.min(offset + lineQuantity, allowed * size);
           const start = Math.min(offset, allowed * size);
           apply(line, freeBefore(end) - freeBefore(start), 0);
           offset += lineQuantity;
         }
-        reserve(batch, allowed * size);
+        reserve(options?.reserveFreeUnitsInPriceOrder ? priceOrderedBatch : batch, allowed * size);
       }
     } else if (applications > 0) {
       for (const group of qualifiers) {
@@ -157,19 +165,52 @@ export function calculateBoundPromotions(lines: PromotionPricingLine[], campaign
           if (total === 0) continue;
           const selectedCount = selected.reduce((sum, item) => sum + item.quantity, 0);
           const target = Math.min(total, definition.benefit.groupPriceCents * (selectedCount / group.quantity));
-          let remainingTarget = target;
-          selected.forEach(({ line, quantity }, index) => {
-            const price = index === selected.length - 1 ? remainingTarget : Math.floor(target * (line.unitPriceCents * quantity / total));
-            remainingTarget -= price;
-            apply(line, quantity, price);
-          });
+          if (options?.exactMoneyAllocation) {
+            integer(target);
+            const floors = selected.map(({ line, quantity }) => integer((line.minimumUnitCents ?? 0) * quantity));
+            const floorTotal = floors.reduce((sum, floor) => sum + floor, 0);
+            if (floorTotal > target) {
+              applications = 0; discountCents = 0; discountedQuantity = 0;
+              result.lineDiscounts = beforeLineDiscounts;
+              allocationDiscounts.clear();
+              break;
+            }
+            const capacityTotal = total - floorTotal;
+            const totalBig = BigInt(capacityTotal); const targetBig = BigInt(target - floorTotal);
+            const shares = selected.map(({ line, quantity }, index) => {
+              const capacity = integer(line.unitPriceCents * quantity);
+              const floor = floors[index];
+              if (floor > capacity) throw new Error('INVALID_PROMOTION_AMOUNT');
+              const numerator = targetBig * BigInt(capacity - floor);
+              return { line, quantity, capacity, price: floor + (capacityTotal ? Number(numerator / totalBig) : 0),
+                remainder: capacityTotal ? numerator % totalBig : BigInt(0) };
+            });
+            let remainder = target - shares.reduce((sum, share) => sum + share.price, 0);
+            const order = [...shares].sort((a, b) => a.remainder === b.remainder
+              ? (a.line.id < b.line.id ? -1 : a.line.id > b.line.id ? 1 : 0)
+              : a.remainder > b.remainder ? -1 : 1);
+            for (const share of order) {
+              if (remainder > 0 && share.price < share.capacity) { share.price++; remainder--; }
+            }
+            if (remainder !== 0) throw new Error('INVALID_PROMOTION_AMOUNT');
+            for (const share of shares) apply(share.line, share.quantity, share.price);
+          } else {
+            let remainingTarget = target;
+            selected.forEach(({ line, quantity }, index) => {
+              const price = index === selected.length - 1 ? remainingTarget : Math.floor(target * (line.unitPriceCents * quantity / total));
+              remainingTarget -= price;
+              apply(line, quantity, price);
+            });
+          }
         } else {
           for (const { line, quantity } of selected) {
             const benefit = definition.benefit;
             const price = benefit.kind === 'gift' ? 0
               : benefit.kind === 'fixed-price' ? benefit.unitPriceCents
                 : benefit.kind === 'amount-off' ? Math.max(0, line.basePriceCents - benefit.amountCents)
-                  : Math.round(line.basePriceCents * benefit.basisPoints / 10000);
+                  : options?.exactMoneyAllocation
+                    ? Number((BigInt(line.basePriceCents) * BigInt(benefit.basisPoints) + BigInt(5000)) / BigInt(10000))
+                    : Math.round(line.basePriceCents * benefit.basisPoints / 10000);
             apply(line, quantity, price * quantity);
           }
         }

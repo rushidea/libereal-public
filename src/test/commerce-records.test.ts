@@ -31,6 +31,9 @@ describe('customer-visible pricing snapshots', () => {
     expect(JSON.parse(customerVisiblePricingSnapshot(JSON.stringify({
       finalPrice: 10,
       referencePriceApplied: true,
+      referencePricePromotionId: 'internal-promotion-id',
+      referencePriceEligible: true,
+      unifiedPricingEvidenceHash: 'server-only-evidence',
       appliedSource: 'promotion:synthetic-private',
       steps: [{ stage: 'promotion', applied: true, before: 20, after: 10, source: 'promotion', reason: 'Synthetic private rule' }],
       legacy: { keep: true },

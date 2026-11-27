@@ -14,6 +14,7 @@ import { useSession } from 'next-auth/react';
 import { uiSurfaces } from '@/lib/ui-surfaces';
 import type { QuickOrderItem } from '@/context/CartContext';
 import { getEffectiveProductPrice, isPricedProduct } from '@/lib/product-pricing';
+import { CART_ADDON_RULES } from '@/lib/cart-promotions/rules';
 import { canIncreasePromotionItem as legacyCanIncreasePromotionItem } from '@/lib/cart-promotions/detect';
 import { usePromotionPreview } from '@/components/promotions/usePromotionPreview';
 import CartPromotionPanel from '@/components/promotions/CartPromotionPanel';
@@ -29,21 +30,26 @@ export default function CartPage() {
   const productItems = items.filter(i => !i.isQuickOrder) as ProductCartItem[];
   const quickItems = items.filter(i => i.isQuickOrder) as QuickOrderItem[];
 
-  // 有价格产品（直接购买）
-  const pricedItems = productItems.filter(i => isPricedProduct(i.product));
-  // 无价格产品（走询价流程）
-  const unpricedItems = [...productItems.filter(i => !isPricedProduct(i.product)), ...quickItems];
-
-  const promotion = usePromotionPreview(pricedItems);
+  const promotion = usePromotionPreview(productItems, session?.user?.id);
+  // Until the server responds, show neither a checkout nor inquiry classification.
+  const classificationPending = productItems.length > 0 && (promotion.loading || promotion.issues.length > 0);
+  const pricedItems = classificationPending ? [] : productItems.filter((item, index) => promotion.serverLineTotals
+    ? promotion.serverLineTotals[index] !== null : isPricedProduct(item.product));
+  const unpricedItems = [...(classificationPending ? [] : productItems.filter((item, index) => promotion.serverLineTotals
+    ? promotion.serverLineTotals[index] === null : !isPricedProduct(item.product))), ...quickItems];
+  const selectedQualification = (item: ProductCartItem) => promotion.qualifications?.find((view) => view.ruleId === item.addon?.ruleId);
+  const optionStep = (item: ProductCartItem) => selectedQualification(item)?.options.find((option) => option.catalogNumber === item.product.catalogNumber)?.quantity
+    ?? CART_ADDON_RULES.find((rule) => rule.id === item.addon?.ruleId)?.addonOptions?.find((option) => option.catalogNumber === item.product.catalogNumber)?.quantity ?? 1;
   const canIncreasePromotionItem = (item: ProductCartItem, evaluations: typeof promotion.evals) =>
-    promotion.statuses !== undefined || legacyCanIncreasePromotionItem(item, evaluations);
+    promotion.serverLineTotals ? (!item.addon || Boolean(selectedQualification(item)?.canChooseAddon))
+      : promotion.statuses !== undefined || legacyCanIncreasePromotionItem(item, evaluations);
   const hasInvalidPromotionQualification = promotion.evals.some((entry) =>
     ['addon', 'gift'].includes(entry.rule.type)
     && pricedItems.some((item) => item.addon?.ruleId === entry.rule.id)
     && !entry.triggered,
   );
   const subtotal = pricedItems.reduce((sum, item) => sum + getEffectiveProductPrice(item.product) * item.quantity, 0);
-  const estimatedTotal = Math.max(0, subtotal - promotion.discountTotal);
+  const estimatedTotal = promotion.serverTotal ?? Math.max(0, subtotal - promotion.discountTotal);
 
   const formatPrice = (price: number) =>
     new Intl.NumberFormat('zh-CN', { style: 'currency', currency: 'CNY' }).format(price);
@@ -101,6 +107,13 @@ export default function CartPage() {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           <div className="lg:col-span-2 space-y-4">
 
+            {classificationPending && <section aria-label="商品价格核对" className={`rounded-xl p-4 ${uiSurfaces.panel}`}>
+              {productItems.map((item) => <p key={getCartItemKey(item)} className="py-1 text-sm">{item.product.name} · 待确认</p>)}
+              {promotion.loading ? <p role="status">正在核对商品价格</p> : <>
+                {promotion.issues.map((issue) => <p role="alert" key={issue.ruleId}>{issue.message}</p>)}
+                <button type="button" onClick={promotion.retry}>重新加载</button>
+              </>}
+            </section>}
             {pricedItems.length > 0 && (
               <div>
                 <div className="flex items-center justify-between mb-3">
@@ -116,14 +129,18 @@ export default function CartPage() {
                     <tbody className={`divide-y ${uiSurfaces.border}`}>
                       {pricedItems.map((item, index) => {
                         const basePrice = getEffectiveProductPrice(item.product);
-                        const lineDiscount = promotion.lineDiscounts[String(index)] ?? 0;
-                        const salePrice = basePrice - lineDiscount / item.quantity;
+                        const previewIndex = promotion.serverLineTotals ? productItems.indexOf(item) : index;
+                        const lineDiscount = promotion.lineDiscounts[String(previewIndex)] ?? 0;
+                        const serverBands = promotion.serverLineBands?.[previewIndex];
+                        const salePrice = serverBands?.length === 1 ? serverBands[0].unitPrice : basePrice - lineDiscount / item.quantity;
+                        const lineTotal = promotion.serverLineTotals?.[previewIndex] ?? (basePrice * item.quantity - lineDiscount);
+                        const priceUnavailable = promotion.loading || promotion.issues.length > 0;
                         return <tr key={getCartItemKey(item)}>
                           <td className={`px-3 py-3 text-center tabular-nums ${uiSurfaces.textSecondary}`}>{index + 1}</td>
                           <td className="px-3 py-3"><Link href={`/products/${item.product.id}`} className={`block font-medium hover:text-brand-600 ${uiSurfaces.titleText}`}>{item.product.name}</Link><p className={`mt-0.5 text-xs ${uiSurfaces.textSecondary}`}>{item.product.catalogNumber}{item.product.spec ? ` · ${item.product.spec}` : ''}</p></td>
-                          <td className="px-3 py-3 whitespace-nowrap"><span className="font-semibold text-brand-600">{lineDiscount > 0 ? (item.addon ? '加购价 ' : '活动价 ') : item.addon ? '原价 ' : ''}{formatPrice(salePrice)}</span></td>
-                          <td className="px-3 py-3"><div className={`mx-auto flex w-fit items-center rounded-lg border ${uiSurfaces.border}`}><button aria-label="减少数量" onClick={() => updateQuantity(getCartItemKey(item), item.quantity - 1)} className="p-1.5"><Minus className="h-3.5 w-3.5" /></button><span className="min-w-8 text-center tabular-nums">{item.quantity}</span><button aria-label="增加数量" disabled={!canIncreasePromotionItem(item, promotion.evals)} onClick={() => updateQuantity(getCartItemKey(item), item.quantity + 1)} className="p-1.5 disabled:opacity-40"><Plus className="h-3.5 w-3.5" /></button></div></td>
-                          <td className="px-3 py-3 text-right font-semibold text-brand-600 whitespace-nowrap">{formatPrice(basePrice * item.quantity - lineDiscount)}</td>
+                          <td className="px-3 py-3 whitespace-nowrap"><span className="font-semibold text-brand-600">{priceUnavailable ? '核价中' : serverBands && serverBands.length > 1 ? '多档价格' : <>{lineDiscount > 0 ? (item.addon ? '加购价 ' : '活动价 ') : item.addon ? '原价 ' : ''}{formatPrice(salePrice)}</>}</span></td>
+                          <td className="px-3 py-3"><div className={`mx-auto flex w-fit items-center rounded-lg border ${uiSurfaces.border}`}><button aria-label="减少数量" onClick={() => updateQuantity(getCartItemKey(item), item.quantity - optionStep(item))} className="p-1.5"><Minus className="h-3.5 w-3.5" /></button><span className="min-w-8 text-center tabular-nums">{item.quantity}</span><button aria-label="增加数量" disabled={!canIncreasePromotionItem(item, promotion.evals)} onClick={() => updateQuantity(getCartItemKey(item), item.quantity + optionStep(item), Boolean(promotion.serverLineTotals && selectedQualification(item)?.canChooseAddon))} className="p-1.5 disabled:opacity-40"><Plus className="h-3.5 w-3.5" /></button></div></td>
+                          <td className="px-3 py-3 text-right font-semibold text-brand-600 whitespace-nowrap">{priceUnavailable ? '待确认' : formatPrice(lineTotal)}</td>
                           <td className="px-3 py-3 text-right"><button aria-label={`移除 ${item.product.name}`} onClick={() => removeItem(getCartItemKey(item))} className="p-1.5 text-gray-500 hover:text-red-500"><Trash2 className="h-4 w-4" /></button></td>
                         </tr>;
                       })}
@@ -240,7 +257,7 @@ export default function CartPage() {
                   {promotion.issues.map((issue) => <p key={issue.ruleId} role="alert" className="mb-3 text-sm text-[var(--brand-color-error-text)]">{issue.message}</p>)}
                   <div className="flex justify-between items-center mb-3">
                     <span className="text-gray-600">{pricedItems.reduce((s, i) => s + i.quantity, 0)} 件商品</span>
-                    <span className="font-bold text-brand-600">{formatPrice(estimatedTotal)}</span>
+                    <span className="font-bold text-brand-600">{promotion.loading || promotion.issues.length ? '待确认' : formatPrice(estimatedTotal)}</span>
                   </div>
                   <button
                     onClick={() => {

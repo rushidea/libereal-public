@@ -21,7 +21,9 @@ vi.mock('@/lib/cart-promotions/service', async (importOriginal) => {
     },
   };
 });
-vi.mock('@/lib/pricing', () => ({
+vi.mock('@/lib/pricing', async (importOriginal) => ({
+  ...await importOriginal<typeof import('@/lib/pricing')>(),
+  assertBrandDiscountPricesCurrent: vi.fn(),
   AMBIGUOUS_PRODUCT_CATALOG_NUMBER: 'AMBIGUOUS_PRODUCT_CATALOG_NUMBER',
   verifyAndPriceItems: mocks.verifyAndPriceItems,
   getVerifiedInventoryError: (item: { available?: boolean | null; stockQuantity?: number | null; quantity: number }) => {
@@ -208,7 +210,7 @@ describe('POST /api/orders/pricing-preview', () => {
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({
-      checkoutRevision: buildCheckoutRevision({ items: [{ productId: 'product-1', catalogNumber: 'CAT-1', unitPrice: 99, quantity: 1 }], adjustments: [], total: 99, points: null }),
+      checkoutRevision: buildCheckoutRevision({ items: [{ productId: 'product-1', catalogNumber: 'CAT-1', unitPrice: 99, quantity: 1, pricingSnapshot: '{"finalPrice":99}' }], adjustments: [], total: 99, points: null }),
       subtotal: 99,
       totalBeforePoints: 99,
       adjustmentTotal: 0,

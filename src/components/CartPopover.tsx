@@ -2,13 +2,15 @@
 
 import { useState, useRef, useEffect } from 'react';
 import Link from 'next/link';
+import { useSession } from 'next-auth/react';
 import { ShoppingCart, X, Plus, Minus, Trash2 } from 'lucide-react';
-import { useCart, getCartItemKey } from '@/context/CartContext';
+import { useCart, getCartItemKey, type ProductCartItem } from '@/context/CartContext';
 import { uiSurfaces } from '@/lib/ui-surfaces';
 
 import { getEffectiveProductPrice, isPricedProduct } from '@/lib/product-pricing';
-import { toCartLines, canIncreasePromotionItem } from '@/lib/cart-promotions/detect';
-import { computePromoAdjustments } from '@/lib/cart-promotions/service';
+import { CART_ADDON_RULES } from '@/lib/cart-promotions/rules';
+import { canIncreasePromotionItem } from '@/lib/cart-promotions/detect';
+import { usePromotionPreview } from '@/components/promotions/usePromotionPreview';
 
 const cartIconButtonClass = `inline-flex h-10 w-10 items-center justify-center rounded-[var(--brand-border-radius)] ${uiSurfaces.textInteractive} transition-colors hover:bg-[var(--brand-color-bg-hover)] ${uiSurfaces.textInteractiveHover} ${uiSurfaces.focusRing}`;
 const quantityButtonClass = `inline-flex h-8 w-8 items-center justify-center rounded-[var(--brand-border-radius-sm)] ${uiSurfaces.textInteractive} transition-colors hover:bg-[var(--brand-color-bg-hover)] ${uiSurfaces.textInteractiveHover} ${uiSurfaces.focusRing}`;
@@ -16,8 +18,14 @@ const removeButtonClass = `inline-flex h-8 w-8 items-center justify-center round
 
 export default function CartPopover() {
   const { items, totalItems, updateQuantity, removeItem } = useCart();
-  const pricedItems = items.filter((item) => !item.isQuickOrder && isPricedProduct(item.product));
-  const promotion = computePromoAdjustments(toCartLines(pricedItems));
+  const { data: session } = useSession();
+  const productItems = items.filter((item) => !item.isQuickOrder) as ProductCartItem[];
+  const promotion = usePromotionPreview(productItems, session?.user?.id);
+  const pricedItems = productItems.filter((item, index) => promotion.serverLineTotals
+    ? promotion.serverLineTotals[index] !== null : isPricedProduct(item.product));
+  const selectedQualification = (item: ProductCartItem) => promotion.qualifications?.find((view) => view.ruleId === item.addon?.ruleId);
+  const optionStep = (item: ProductCartItem) => selectedQualification(item)?.options.find((option) => option.catalogNumber === item.product.catalogNumber)?.quantity
+    ?? CART_ADDON_RULES.find((rule) => rule.id === item.addon?.ruleId)?.addonOptions?.find((option) => option.catalogNumber === item.product.catalogNumber)?.quantity ?? 1;
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
@@ -94,7 +102,9 @@ export default function CartPopover() {
                     const i = item;
                     // 方案③：展示价由服务端预计算（displayPrice），前端只渲染
                     const salePrice = getEffectiveProductPrice(i.product);
-                    const lineTotal = salePrice * i.quantity - (promotion.lineDiscounts[String(pricedItems.indexOf(i))] ?? 0);
+                    const index = promotion.serverLineTotals ? productItems.indexOf(i) : pricedItems.indexOf(i);
+                    const lineTotal = promotion.serverLineTotals?.[index] ?? (salePrice * i.quantity - (promotion.lineDiscounts[String(index)] ?? 0));
+                    const unpriced = promotion.serverLineTotals ? promotion.serverLineTotals[index] === null : salePrice <= 0;
                     return (
                       <div key={getCartItemKey(i)} className="px-4 py-3 flex items-start gap-3">
                         <div className="flex-1 min-w-0">
@@ -102,12 +112,12 @@ export default function CartPopover() {
                           <p className={`mt-0.5 text-xs ${uiSurfaces.textQuaternary}`}>{i.product.brand} · {i.product.catalogNumber}</p>
                           <div className="flex items-center justify-between mt-2">
                             <span className={`text-sm font-semibold ${uiSurfaces.textInteractive}`}>
-                              {salePrice > 0 ? formatPrice(lineTotal) : '待报价'}
+                              {promotion.loading ? '正在核价' : promotion.issues.length ? '价格待确认' : unpriced ? '待报价' : formatPrice(lineTotal)}
                             </span>
                             <div className="flex items-center gap-1">
-                              <button onClick={() => updateQuantity(getCartItemKey(i), i.quantity - 1)} className={quantityButtonClass}><Minus size={12} /></button>
+                              <button onClick={() => updateQuantity(getCartItemKey(i), i.quantity - optionStep(i))} className={quantityButtonClass}><Minus size={12} /></button>
                               <span className="text-xs font-medium w-5 text-center">{i.quantity}</span>
-                              <button disabled={!canIncreasePromotionItem(i, promotion.evals)} onClick={() => updateQuantity(getCartItemKey(i), i.quantity + 1)} className={quantityButtonClass}><Plus size={12} /></button>
+                              <button disabled={promotion.loading || promotion.issues.length > 0 || (promotion.serverLineTotals ? Boolean(i.addon && !selectedQualification(i)?.canChooseAddon) : promotion.statuses === undefined && !canIncreasePromotionItem(i, promotion.evals))} onClick={() => updateQuantity(getCartItemKey(i), i.quantity + optionStep(i), Boolean(promotion.serverLineTotals && selectedQualification(i)?.canChooseAddon))} className={quantityButtonClass}><Plus size={12} /></button>
                               <button onClick={() => removeItem(getCartItemKey(i))} className={`${removeButtonClass} ml-1`}><Trash2 size={12} /></button>
                             </div>
                           </div>

@@ -16,7 +16,7 @@ import type {
 } from '../types';
 
 /** 命中主品的购物车行（排除促销标记行） */
-function mainLines(items: CartLine[], config: BuyNGetMRuleConfig): CartLine[] {
+export function buyNGetMMainLines(items: CartLine[], config: BuyNGetMRuleConfig): CartLine[] {
   return items.filter(
     (i) =>
       !i.isQuickOrder &&
@@ -26,10 +26,29 @@ function mainLines(items: CartLine[], config: BuyNGetMRuleConfig): CartLine[] {
   );
 }
 
+/** Exact free-unit allocation using the strategy's stable price ordering. */
+export function getBuyNGetMFreeQuantities(items: CartLine[], config: BuyNGetMRuleConfig): Map<CartLine, number> {
+  const lines = buyNGetMMainLines(items, config);
+  const totalQty = lines.reduce((sum, line) => sum + line.quantity, 0);
+  const groupSize = Math.max(1, config.groupSize);
+  const freeCount = Math.max(1, config.freeCount ?? 1);
+  const freeSlots = Math.floor(totalQty / groupSize) * freeCount;
+  const expanded = lines.flatMap((line) => Array.from({ length: line.quantity }, () => ({ line, price: line.product.price ?? 0 })));
+  expanded.sort((a, b) => b.price - a.price);
+  const freeQuantities = new Map<CartLine, number>();
+  for (let k = 1; k <= freeSlots; k++) {
+    const index = k * groupSize - 1;
+    if (index >= expanded.length) continue;
+    const line = expanded[index].line;
+    freeQuantities.set(line, (freeQuantities.get(line) ?? 0) + 1);
+  }
+  return freeQuantities;
+}
+
 export const buyNGetMStrategy: RuleStrategy<BuyNGetMRuleConfig> = {
   type: 'buy-n-get-m',
   evaluate(config, ctx): Omit<RuleEvaluation, 'rule'> {
-    const lines = mainLines(ctx.items, config);
+    const lines = buyNGetMMainLines(ctx.items, config);
     const totalQty = lines.reduce((s, i) => s + i.quantity, 0);
     const groupSize = Math.max(1, config.groupSize);
     const freeCount = Math.max(1, config.freeCount ?? 1);
@@ -38,27 +57,18 @@ export const buyNGetMStrategy: RuleStrategy<BuyNGetMRuleConfig> = {
     const triggered = freeSlots > 0;
 
     // 按件展开并按单价降序（单价相同保持稳定序）
-    const expanded: { line: CartLine; price: number }[] = [];
-    for (const line of lines) {
-      const price = line.product.price ?? 0;
-      for (let q = 0; q < line.quantity; q++) expanded.push({ line, price });
-    }
-    expanded.sort((a, b) => b.price - a.price);
-
-    // 降序排列后，第 groupSize-1、2×groupSize-1 … 位（0-based）免费
-    const freeIndexes = new Set<number>();
-    for (let k = 1; k <= freeSlots; k++) {
-      const idx = k * groupSize - 1;
-      if (idx < expanded.length) freeIndexes.add(idx);
-    }
+    // The same allocation helper is used by unified checkout candidate construction.
+    const freeQuantities = getBuyNGetMFreeQuantities(ctx.items, config);
 
     // 按货号汇总优惠（同一货号多件免单合并）
     const byLine = new Map<CartLine, number>();
     let discountTotal = 0;
-    for (const idx of freeIndexes) {
-      const { line, price } = expanded[idx];
-      byLine.set(line, (byLine.get(line) ?? 0) + price);
-      discountTotal += price;
+    for (const line of lines) {
+      const quantity = freeQuantities.get(line) ?? 0;
+      const price = line.product.price ?? 0;
+      if (!quantity) continue;
+      byLine.set(line, quantity * price);
+      discountTotal += quantity * price;
     }
     discountTotal = Math.round(discountTotal * 100) / 100;
 
@@ -77,15 +87,16 @@ export const buyNGetMStrategy: RuleStrategy<BuyNGetMRuleConfig> = {
       });
     }
 
+    const actualFreeSlots = [...freeQuantities.values()].reduce((sum, quantity) => sum + quantity, 0);
     const summary = triggered
-      ? `${config.name}：已免单 ${Math.min(freeSlots, freeIndexes.size)} 件（立减 ¥${discountTotal.toFixed(2)}）`
+      ? `${config.name}：已免单 ${Math.min(freeSlots, actualFreeSlots)} 件（立减 ¥${discountTotal.toFixed(2)}）`
       : `${config.name}：还差 ${groupSize - totalQty} 件可享买 ${groupSize - freeCount} 免 ${freeCount}`;
 
     return {
       active: true,
       triggered,
       summary,
-      details: { totalQty, groupSize, freeCount, freeSlots: freeIndexes.size, discountTotal },
+      details: { totalQty, groupSize, freeCount, freeSlots: actualFreeSlots, discountTotal },
       adjustments,
       exclusiveLines: config.exclusive
         ? Array.from(byLine.keys()).map((l) => l.product.catalogNumber)

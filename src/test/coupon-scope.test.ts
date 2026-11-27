@@ -206,6 +206,15 @@ describe('coupon scope eligibility', () => {
     expect(result.summary).toContain('已立减 ¥0.55');
   });
 
+  it('keeps a verified static rule distinct from restricted database promotion IDs', () => {
+    const result = evaluate(coupon({ threshold: 50, discount: 10,
+      promotionPolicy: { state: 'restricted', promotionIds: ['legacy-cart:synthetic'] } }), [
+      line({ id: 'static', price: 60, promotionIdentity: { state: 'static', ruleId: 'legacy-cart:synthetic', versionHash: 'verified-hash' } }),
+    ]);
+    expect(result.triggered).toBe(true);
+    expect(result.details?.subtotal).toBe(60);
+  });
+
   it('applies a 100 discount to the 600 eligible subtotal while excluding the 400 promotion line', () => {
     const result = evaluate(coupon({
       threshold: 500,

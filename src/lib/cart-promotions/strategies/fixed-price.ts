@@ -32,7 +32,7 @@ function inScope(config: FixedPriceRuleConfig, line: CartLine): boolean {
   return config.terms.some((t) => line.product.catalogNumber.startsWith(t));
 }
 
-function lookupPrice(config: FixedPriceRuleConfig, line: CartLine): number | null {
+export function lookupFixedPrice(config: FixedPriceRuleConfig, line: CartLine): number | null {
   const spec = line.product.spec ?? line.product.catalogNumber;
   const cat = line.product.catalogNumber;
   const nSpec = normSpec(spec);
@@ -71,7 +71,7 @@ export const fixedPriceStrategy: RuleStrategy<FixedPriceRuleConfig> = {
     const adjustments: PriceAdjustment[] = [];
     let discountTotal = 0;
     for (const line of lines) {
-      const fixed = lookupPrice(config, line);
+      const fixed = lookupFixedPrice(config, line);
       const original = line.product.price ?? 0;
       if (fixed == null || fixed <= 0 || fixed >= original) continue;
       const amount = Math.round((original - fixed) * line.quantity * 100) / 100;

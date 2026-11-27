@@ -49,6 +49,7 @@ export type CouponPromotionPolicy =
 export type CouponPromotionIdentity =
   | { state: 'knownnone' }
   | { state: 'restricted'; promotionId: string }
+  | { state: 'static'; ruleId: string; versionHash: string }
   | { state: 'unknown' };
 
 export const COUPON_SCOPE_EMPTY_MESSAGE = '订单中没有符合该优惠券适用范围的商品';
