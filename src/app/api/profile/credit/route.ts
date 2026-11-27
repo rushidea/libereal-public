@@ -1,3 +1,4 @@
+import { receivableOrderBalance, receivablePrincipal, receivableView } from '@/lib/receivable-balance';
 import { NextResponse } from 'next/server';
 import { requireUser } from '@/lib/session';
 import { prisma } from '@/lib/prisma';
@@ -29,13 +30,16 @@ export async function GET() {
       },
     },
     orderBy: { dueAt: 'asc' },
-    select: { id: true, orderId: true, amount: true, status: true, dueAt: true, reminderCount: true, termStartedAt: true },
+    select: { id: true, userId: true, orderId: true, order: { select: receivableOrderBalance }, amount: true, status: true, dueAt: true, reminderCount: true, termStartedAt: true },
   });
   const now = new Date();
-  const receivables = rawReceivables.map((receivable) => {
-    const overdueDays = overdueDaysFromDueAt(receivable.dueAt, now);
+  const receivables = rawReceivables.flatMap(({ order, userId, ...receivable }) => {
+    const principal = receivablePrincipal(order, { ...receivable, userId }, order.financeEvents);
+    if (!principal) return [];
+    const view = receivableView(receivable, { ...order, total: principal.cents / 100 });
+    const overdueDays = view.amount > 0 ? overdueDaysFromDueAt(receivable.dueAt, now) : -1;
     return {
-      ...receivable,
+      ...view,
       overdueDays,
       trigger: overdueDays >= CREDIT_REVIEW_POLICY.holdAfterDays
         ? 'order_hold'

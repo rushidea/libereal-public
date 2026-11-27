@@ -6,8 +6,7 @@ export function receivableOccupiesCredit(status: string | null | undefined): boo
 }
 
 /**
- * 后付订单结清，以及取消或关闭已占用授信的订单，归财务处理。
- * 发货、确认和其他未占用授信的状态变更仍归订单处理。
+ * 取消或关闭已占用授信的后付订单需要财务权限。实际回款另行核销。
  */
 export function orderStatusRequiresFinanceWrite(input: {
   currentStatus: string;
@@ -17,7 +16,6 @@ export function orderStatusRequiresFinanceWrite(input: {
 }): boolean {
   if (typeof input.nextStatus !== 'string' || input.nextStatus === input.currentStatus) return false;
   if (!isPostDeliveryPaymentMethod(input.paymentMethod)) return false;
-  if (input.nextStatus === 'completed') return true;
   return isInactiveOrderStatus(input.nextStatus)
     && !isInactiveOrderStatus(input.currentStatus)
     && input.hasOpenReceivable;

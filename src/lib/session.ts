@@ -1,13 +1,13 @@
 import { NextResponse } from 'next/server';
 import type { Session } from 'next-auth';
 import { auth } from './auth';
-import { prisma } from './prisma';
-import { isAdminEmail } from './auth-helpers';
-import { ADMIN_PERMISSION_KEYS, type AdminPermissionKey } from './admin-permissions';
+import type { AdminPermissionKey } from './admin-permissions';
+import { getAdminPermissions } from './admin-user-permissions';
+export { getAdminPermissions } from './admin-user-permissions';
 import { requiresAdminMfaForPermission } from './admin-mfa-settings';
 import { isMfaAdminRequired, MFA_RECENT_WINDOW_MS } from './security/mfa-config';
 import { getAdminMfaPolicy } from './security/admin-mfa-policy';
-import { hasSecurityStepUpGrant, type SecurityStepUpAction } from './security/security-step-up';
+import { hasRecentStagingTestAdminStepUp, hasSecurityStepUpGrant, type SecurityStepUpAction } from './security/security-step-up';
 import { getSecuritySessionState, getSecuritySessionStateDetailed, getSecurityRequestMetadata, hasRecentSecuritySessionMfa, registerSecuritySession, touchSecuritySession } from './security/security-session-service';
 
 export interface SessionUser {
@@ -86,32 +86,25 @@ export async function requireRecentActiveMfaUser(): Promise<SessionUser | NextRe
   return user;
 }
 
-export async function getAdminPermissions(user: SessionUser): Promise<AdminPermissionKey[]> {
-  if (user.role !== 'admin') return [];
-  if (isAdminEmail(user.email)) return [...ADMIN_PERMISSION_KEYS];
-
-  const assignments = await prisma.adminUserRole.findMany({
-    where: { userId: user.id },
-    select: { role: { select: { key: true, permissions: { select: { permission: { select: { key: true } } } } } } },
-  });
-  if (assignments.some((assignment) => assignment.role.key === 'super_admin')) return [...ADMIN_PERMISSION_KEYS];
-
-  const keys = new Set(assignments.flatMap((assignment) => assignment.role.permissions.map((item) => item.permission.key)));
-  return ADMIN_PERMISSION_KEYS.filter((key) => keys.has(key));
-}
-
-export async function requireAdminStepUp(user: SessionUser): Promise<SessionUser | NextResponse> {
+export async function requireAdminStepUp(user: SessionUser, options?: { allowStagingTestWindow?: boolean }): Promise<SessionUser | NextResponse> {
   if (!isMfaAdminRequired()) return user;
 
+  const allowStagingTestWindow = options?.allowStagingTestWindow !== false;
   const jwtRecent = user.authLevel === 'mfa_verified' && Boolean(user.mfaVerifiedAt) && Date.now() - user.mfaVerifiedAt! <= MFA_RECENT_WINDOW_MS;
   const sessionRecent = !jwtRecent && user.sessionId ? await hasRecentSecuritySessionMfa(user.id, user.sessionId) : false;
   if (!jwtRecent && !sessionRecent) {
+    if (allowStagingTestWindow && user.sessionId && await hasRecentStagingTestAdminStepUp(user.id, user.sessionId)) {
+      return user;
+    }
     return NextResponse.json({ error: 'Admin MFA required', redirect: '/account/security' }, { status: 403 });
   }
 
   try {
     const policy = await getAdminMfaPolicy(user.id, user.email, true);
     if (!policy.satisfied) {
+      if (allowStagingTestWindow && user.sessionId && await hasRecentStagingTestAdminStepUp(user.id, user.sessionId)) {
+        return user;
+      }
       return NextResponse.json({ error: 'Admin authenticator policy required', redirect: '/account/security' }, { status: 403 });
     }
   } catch (error) {
@@ -130,7 +123,9 @@ export async function requireAdmin(permission?: AdminPermissionKey, stepUp?: { t
   if (permission && !stepUp?.skipStepUp && await requiresAdminMfaForPermission(permission)) {
     const hasGrant = Boolean(stepUp?.token && stepUp.action && user.sessionId && await hasSecurityStepUpGrant(stepUp.token, { userId: user.id, sessionId: user.sessionId, action: stepUp.action }));
     if (!hasGrant) {
-      const required = await requireAdminStepUp(user);
+      const required = stepUp?.action && stepUp.action !== 'admin_sensitive'
+        ? await requireAdminStepUp(user, { allowStagingTestWindow: false })
+        : await requireAdminStepUp(user);
       if (required instanceof NextResponse) return required;
     }
   }

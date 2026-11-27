@@ -8,6 +8,8 @@ import {
 import AlipayPaymentStatusView from '@/components/payment/AlipayPaymentStatus';
 import type { AlipayPaymentSummary } from '@/data/alipay-payment';
 import { formatOrderPaymentMethod } from '@/data/payment-methods';
+import { isAdminMfaStepUpResponse, useAdminMfaStepUp } from '@/components/admin/AdminMfaStepUpDialog';
+import { adminPermissionErrorMessage } from '@/data/admin-permission-message';
 
 interface OrderItem {
   id?: string;
@@ -57,6 +59,8 @@ export default function ArchivedOrdersPage() {
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
   const [orderItems, setOrderItems] = useState<OrderItem[]>([]);
   const [search, setSearch] = useState('');
+  const [actionError, setActionError] = useState('');
+  const { begin: beginMfaStepUp, dialog: mfaDialog } = useAdminMfaStepUp();
 
   useEffect(() => {
     fetchArchivedOrders();
@@ -85,21 +89,34 @@ export default function ArchivedOrdersPage() {
     }
   }, [selectedOrder]);
 
-  async function handleUnarchive(orderIds: string[]) {
-    if (!confirm(`确定要还原 ${orderIds.length} 个订单吗？`)) return;
+  async function submitUnarchive(orderIds: string[], stepUpToken?: string) {
+    setActionError('');
     try {
       const res = await fetch('/api/admin/orders/archive', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ orderIds, action: 'unarchive' }),
+        body: JSON.stringify({ orderIds, action: 'unarchive', ...(stepUpToken ? { stepUpToken } : {}) }),
       });
-      if (res.ok) {
-        fetchArchivedOrders();
-        setSelectedOrder(null);
+      const data = await res.json().catch(() => ({})) as { error?: string; requiredPermission?: string };
+      if (!res.ok) {
+        if (!stepUpToken && isAdminMfaStepUpResponse(res.status, data.error)) {
+          await beginMfaStepUp((grantToken) => submitUnarchive(orderIds, grantToken));
+          return;
+        }
+        setActionError(adminPermissionErrorMessage(data.error, data.requiredPermission));
+        return;
       }
+      fetchArchivedOrders();
+      setSelectedOrder(null);
     } catch (e) {
       console.error(e);
+      setActionError('还原失败，请稍后重试。');
     }
+  }
+
+  async function handleUnarchive(orderIds: string[]) {
+    if (!confirm(`确定要还原 ${orderIds.length} 个订单吗？`)) return;
+    await submitUnarchive(orderIds);
   }
 
   const filteredOrders = orders.filter(o =>
@@ -127,6 +144,7 @@ export default function ArchivedOrdersPage() {
               />
             </div>
           </div>
+          {actionError && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{actionError}</p>}
 
           <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
             <div className="overflow-x-auto">
@@ -261,6 +279,7 @@ export default function ArchivedOrdersPage() {
               </table>
             </div>
           </div>
+          {mfaDialog}
         </div>
   );
 }

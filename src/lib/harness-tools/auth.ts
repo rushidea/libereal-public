@@ -1,0 +1,470 @@
+import { createHash, timingSafeEqual } from 'node:crypto';
+import { readFileSync, statSync } from 'node:fs';
+import { isAbsolute } from 'node:path';
+import { NextResponse } from 'next/server';
+
+export const HARNESS_TOOL_SCOPES = [
+  'inquiry.read',
+  'inquiry.quote.preview',
+  'inquiry.supplier_review.prepare',
+  'inquiry.lease',
+  'events.read',
+  'pricing.read',
+  'pricing.impact.preview',
+  'order.read',
+  'order.approval.preview',
+  'purchase.read',
+  'purchase.prepare.preview',
+  'purchase.payment.preview',
+  'purchase.supply_change.preview',
+  'fulfillment.read',
+  'fulfillment.event.preview',
+  'finance.read',
+  'finance.action.preview',
+  'after_sale.read',
+  'after_sale.action.preview',
+] as const;
+
+export type HarnessToolScope = (typeof HARNESS_TOOL_SCOPES)[number];
+
+export type HarnessErrorClass =
+  | 'unauthorized'
+  | 'forbidden'
+  | 'not_found'
+  | 'version_conflict'
+  | 'idempotency_conflict'
+  | 'lease_conflict'
+  | 'stale_lease'
+  | 'missing_info'
+  | 'awaiting_human'
+  | 'validation_error'
+  | 'disabled'
+  | 'internal_error';
+
+export const HARNESS_HEADER_TOKEN = 'x-libereal-harness-token';
+export const HARNESS_HEADER_CLIENT_ID = 'x-libereal-harness-client-id';
+export const HARNESS_HEADER_ENV = 'x-libereal-harness-env';
+export const HARNESS_HEADER_LEASE_TOKEN = 'x-libereal-harness-lease-token';
+export const HARNESS_HEADER_FENCE_TOKEN = 'x-libereal-harness-fence-token';
+
+const UNTRUSTED_AUTHORIZATION_FIELDS = new Set([
+  'approved',
+  'isApproved',
+  'adminId',
+  'actorId',
+  'actorEmail',
+  'role',
+  'permissions',
+  'bypass',
+  'bypassApproval',
+  'force',
+  'mfaVerified',
+  'stepUpToken',
+  'leaseToken',
+  'fenceToken',
+]);
+
+export interface HarnessClientConfig {
+  clientId: string;
+  tokenSha256: string;
+  scopes: HarnessToolScope[];
+  pilotPricingInquiryIds?: string[];
+  pilotOrderIds?: string[];
+  pilotAfterSaleCaseIds?: string[];
+  expiresAt?: string;
+  revoked?: boolean;
+}
+
+export interface HarnessToolsConfig {
+  enabled: boolean;
+  environment: string;
+  pilotInquiryIds?: string[];
+  clients: HarnessClientConfig[];
+}
+
+export interface HarnessPrincipal {
+  clientId: string;
+  environment: string;
+  scopes: readonly HarnessToolScope[];
+}
+
+const SCOPE_SET = new Set<string>(HARNESS_TOOL_SCOPES);
+const CLIENT_ID_RE = /^[A-Za-z0-9._-]{1,128}$/;
+const ENV_NAME_RE = /^[A-Za-z0-9._-]{1,64}$/;
+const SHA256_HEX_RE = /^[a-f0-9]{64}$/;
+const OBJECT_ID_RE = /^[A-Za-z0-9._-]{1,160}$/;
+
+function isPilotObjectList(input: unknown): input is string[] {
+  return Array.isArray(input) && input.every(id => typeof id === 'string' && OBJECT_ID_RE.test(id));
+}
+
+export function sha256Hex(value: string): string {
+  return createHash('sha256').update(value, 'utf8').digest('hex');
+}
+
+function constantTimeHexMatch(providedHex: string, expectedHex: string): boolean {
+  if (!SHA256_HEX_RE.test(providedHex) || !SHA256_HEX_RE.test(expectedHex)) {
+    return false;
+  }
+  const left = Buffer.from(providedHex, 'hex');
+  const right = Buffer.from(expectedHex, 'hex');
+  return left.length === right.length && timingSafeEqual(left, right);
+}
+
+function parseHarnessToolsConfig(raw: unknown): HarnessToolsConfig | null {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const obj = raw as Record<string, unknown>;
+  if (typeof obj.enabled !== 'boolean') return null;
+  if (typeof obj.environment !== 'string' || !ENV_NAME_RE.test(obj.environment)) return null;
+
+  let pilotInquiryIds: string[] | undefined;
+  if (obj.pilotInquiryIds !== undefined) {
+    if (!Array.isArray(obj.pilotInquiryIds) || obj.pilotInquiryIds.some((id) => typeof id !== 'string' || !id.trim())) {
+      return null;
+    }
+    pilotInquiryIds = obj.pilotInquiryIds.map((id) => (id as string).trim());
+  }
+
+  if (!Array.isArray(obj.clients)) return null;
+  const clients: HarnessClientConfig[] = [];
+  for (const entry of obj.clients) {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return null;
+    const client = entry as Record<string, unknown>;
+    if (typeof client.clientId !== 'string' || !CLIENT_ID_RE.test(client.clientId)) return null;
+    if (typeof client.tokenSha256 !== 'string' || !SHA256_HEX_RE.test(client.tokenSha256)) return null;
+    if (!Array.isArray(client.scopes) || client.scopes.some((s) => typeof s !== 'string' || !SCOPE_SET.has(s))) {
+      return null;
+    }
+    if (client.expiresAt !== undefined && (typeof client.expiresAt !== 'string' || !Number.isFinite(Date.parse(client.expiresAt)))) {
+      return null;
+    }
+    if (client.revoked !== undefined && typeof client.revoked !== 'boolean') {
+      return null;
+    }
+    const { pilotPricingInquiryIds, pilotOrderIds, pilotAfterSaleCaseIds } = client;
+    if (pilotPricingInquiryIds !== undefined && !isPilotObjectList(pilotPricingInquiryIds)) return null;
+    if (pilotOrderIds !== undefined && !isPilotObjectList(pilotOrderIds)) return null;
+    if (pilotAfterSaleCaseIds !== undefined && !isPilotObjectList(pilotAfterSaleCaseIds)) return null;
+    clients.push({
+      clientId: client.clientId,
+      tokenSha256: client.tokenSha256,
+      scopes: [...new Set(client.scopes as HarnessToolScope[])],
+      ...(pilotPricingInquiryIds !== undefined ? { pilotPricingInquiryIds } : {}),
+      ...(pilotOrderIds !== undefined ? { pilotOrderIds } : {}),
+      ...(pilotAfterSaleCaseIds !== undefined ? { pilotAfterSaleCaseIds } : {}),
+      ...(client.expiresAt !== undefined ? { expiresAt: client.expiresAt } : {}),
+      ...(client.revoked !== undefined ? { revoked: client.revoked } : {}),
+    });
+  }
+
+  return {
+    enabled: obj.enabled,
+    environment: obj.environment,
+    ...(pilotInquiryIds !== undefined ? { pilotInquiryIds } : {}),
+    clients,
+  };
+}
+
+export function loadHarnessToolsConfig(): HarnessToolsConfig | null {
+  const inlineRaw = process.env.LIBEREAL_HARNESS_TOOLS_CONFIG?.trim();
+  if (inlineRaw) {
+    try {
+      return parseHarnessToolsConfig(JSON.parse(inlineRaw));
+    } catch {
+      return null;
+    }
+  }
+
+  const filePath = process.env.LIBEREAL_HARNESS_TOOLS_CONFIG_PATH?.trim();
+  if (!filePath || !isAbsolute(filePath)) {
+    return null;
+  }
+
+  try {
+    if (statSync(filePath).size > 65_536) return null;
+    const rawText = readFileSync(filePath, 'utf8');
+    return parseHarnessToolsConfig(JSON.parse(rawText));
+  } catch {
+    return null;
+  }
+}
+
+export function harnessError(
+  status: number,
+  errorClass: HarnessErrorClass,
+  code: string,
+  message: string,
+  retryable = false,
+  details?: Record<string, unknown>,
+): NextResponse {
+  return NextResponse.json(
+    {
+      ok: false,
+      errorClass,
+      code,
+      message,
+      retryable,
+      ...(details ? { details } : {}),
+    },
+    { status },
+  );
+}
+
+export function harnessSuccess(
+  tool: string,
+  principal: HarnessPrincipal,
+  inquiryVersion: string | null,
+  data: unknown,
+  status = 200,
+): NextResponse {
+  return NextResponse.json(
+    {
+      ok: true,
+      tool,
+      environment: principal.environment,
+      clientId: principal.clientId,
+      readAt: new Date().toISOString(),
+      inquiryVersion,
+      data,
+    },
+    { status },
+  );
+}
+
+export function findUntrustedAuthField(
+  value: unknown,
+  depth = 0,
+  allowFields?: ReadonlySet<string>,
+): string | null {
+  if (depth > 6 || !value || typeof value !== 'object') return null;
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const nested = findUntrustedAuthField(item, depth + 1, allowFields);
+      if (nested) return nested;
+    }
+    return null;
+  }
+  const obj = value as Record<string, unknown>;
+  for (const key of Object.keys(obj)) {
+    if (UNTRUSTED_AUTHORIZATION_FIELDS.has(key) && !allowFields?.has(key)) return key;
+    const nested = findUntrustedAuthField(obj[key], depth + 1, allowFields);
+    if (nested) return nested;
+  }
+  return null;
+}
+
+export function rejectUntrustedAuthFields(
+  body: unknown,
+  options?: { allowFields?: ReadonlySet<string> },
+): NextResponse | null {
+  const offendingField = findUntrustedAuthField(body, 0, options?.allowFields);
+  if (!offendingField) return null;
+  return harnessError(
+    400,
+    'validation_error',
+    'UNTRUSTED_AUTHORIZATION_FIELD',
+    `请求体不允许包含越权或伪造授权字段: ${offendingField}`,
+    false,
+    { field: offendingField },
+  );
+}
+
+export type HarnessAuthResult =
+  | { ok: true; principal: HarnessPrincipal }
+  | { ok: false; response: NextResponse };
+
+type HarnessRequest = { headers: { get(name: string): string | null } };
+type HarnessEventAuthResult =
+  | { ok: true; principal: HarnessPrincipal; pilotInquiryIds?: string[]; pilotPricingInquiryIds?: string[]; pilotOrderIds?: string[]; pilotAfterSaleCaseIds?: string[] }
+  | { ok: false; response: NextResponse };
+
+function authorizeHarnessPrincipal(
+  req: HarnessRequest,
+  requiredScope: HarnessToolScope,
+): HarnessEventAuthResult {
+  const config = loadHarnessToolsConfig();
+  if (!config || !config.enabled) {
+    return {
+      ok: false,
+      response: harnessError(503, 'disabled', 'HARNESS_TOOLS_DISABLED', 'Harness 业务工具接口未启用'),
+    };
+  }
+
+  const providedToken = req.headers.get(HARNESS_HEADER_TOKEN)?.trim() ?? '';
+  const providedClientId = req.headers.get(HARNESS_HEADER_CLIENT_ID)?.trim() ?? '';
+  const providedEnv = req.headers.get(HARNESS_HEADER_ENV)?.trim() ?? '';
+
+  if (!providedToken || !providedClientId || !providedEnv) {
+    return {
+      ok: false,
+      response: harnessError(401, 'unauthorized', 'MISSING_CREDENTIALS', '缺少 Harness 服务身份请求头'),
+    };
+  }
+
+  if (providedEnv !== config.environment) {
+    return {
+      ok: false,
+      response: harnessError(403, 'forbidden', 'ENVIRONMENT_MISMATCH', 'Harness 环境标识与当前服务不匹配'),
+    };
+  }
+
+  const providedDigest = sha256Hex(providedToken);
+  const client = config.clients.find((c) => c.clientId === providedClientId);
+  if (!client) {
+    // Perform a dummy constant-time compare to avoid client-existence timing differences.
+    constantTimeHexMatch(providedDigest, '0'.repeat(64));
+    return {
+      ok: false,
+      response: harnessError(401, 'unauthorized', 'INVALID_CREDENTIALS', 'Harness 客户端身份或凭据无效'),
+    };
+  }
+
+  if (!constantTimeHexMatch(providedDigest, client.tokenSha256)) {
+    return {
+      ok: false,
+      response: harnessError(401, 'unauthorized', 'INVALID_CREDENTIALS', 'Harness 客户端身份或凭据无效'),
+    };
+  }
+
+  if (client.revoked === true) {
+    return {
+      ok: false,
+      response: harnessError(403, 'forbidden', 'CLIENT_REVOKED', 'Harness 客户端凭据已吊销'),
+    };
+  }
+
+  if (client.expiresAt !== undefined && Date.parse(client.expiresAt) <= Date.now()) {
+    return {
+      ok: false,
+      response: harnessError(403, 'forbidden', 'CLIENT_EXPIRED', 'Harness 客户端凭据已过期'),
+    };
+  }
+
+  if (!client.scopes.includes(requiredScope)) {
+    return {
+      ok: false,
+      response: harnessError(403, 'forbidden', 'SCOPE_FORBIDDEN', `缺少所需工具权限: ${requiredScope}`),
+    };
+  }
+
+  return {
+    ok: true,
+    principal: {
+      clientId: client.clientId,
+      environment: config.environment,
+      scopes: client.scopes,
+    },
+    pilotInquiryIds: config.pilotInquiryIds,
+    pilotPricingInquiryIds: client.pilotPricingInquiryIds,
+    pilotOrderIds: client.pilotOrderIds,
+    pilotAfterSaleCaseIds: client.pilotAfterSaleCaseIds,
+  };
+}
+
+type BusinessDomain = 'pricing' | 'order' | 'purchase' | 'fulfillment' | 'finance' | 'after_sale';
+export type HarnessBusinessScope = Extract<HarnessToolScope, `${BusinessDomain}.${string}`>;
+
+export function authorizeHarnessBusinessObject(
+  req: HarnessRequest,
+  scope: HarnessBusinessScope,
+  objectId: string,
+) {
+  const auth = authorizeHarnessPrincipal(req, scope);
+  if (!auth.ok) return auth;
+  if (!OBJECT_ID_RE.test(objectId)) {
+    return { ok: false, response: harnessError(400, 'validation_error', 'INVALID_OBJECT_ID', '业务单据编号无效') } as const;
+  }
+  const pricing = scope.startsWith('pricing.');
+  const allowed = pricing ? auth.pilotPricingInquiryIds
+    : scope.startsWith('after_sale.') ? auth.pilotAfterSaleCaseIds : auth.pilotOrderIds;
+  if (!allowed?.includes(objectId) || (pricing && auth.pilotInquiryIds && !auth.pilotInquiryIds.includes(objectId))) {
+    return { ok: false, response: harnessError(403, 'forbidden', 'PILOT_SCOPE_FORBIDDEN', '该单据不在此服务身份允许范围内') } as const;
+  }
+  return auth;
+}
+
+export function authorizeHarnessEventRequest(req: HarnessRequest): HarnessEventAuthResult {
+  return authorizeHarnessPrincipal(req, 'events.read');
+}
+
+export function authorizeHarnessRequest(
+  req: HarnessRequest,
+  options: { requiredScope: HarnessToolScope; inquiryId: string },
+): HarnessAuthResult {
+  const auth = authorizeHarnessPrincipal(req, options.requiredScope);
+  if (!auth.ok) return auth;
+
+  const inquiryId = options.inquiryId.trim();
+  if (!inquiryId || inquiryId.length > 160) {
+    return {
+      ok: false,
+      response: harnessError(400, 'validation_error', 'INVALID_INQUIRY_ID', '询价编号无效'),
+    };
+  }
+
+  if (auth.pilotInquiryIds !== undefined && !auth.pilotInquiryIds.includes(inquiryId)) {
+    return {
+      ok: false,
+      response: harnessError(403, 'forbidden', 'PILOT_SCOPE_FORBIDDEN', '该询价单不在当前试点允许范围内'),
+    };
+  }
+
+  return { ok: true, principal: auth.principal };
+}
+
+export interface HarnessLeaseHeader {
+  leaseToken: string;
+  fenceToken: number;
+}
+
+const LEASE_TOKEN_RE = /^\S{1,128}$/;
+const FENCE_TOKEN_RE = /^[1-9]\d{0,9}$/;
+
+export function extractHarnessLeaseHeaders(req: {
+  headers: { get(name: string): string | null };
+}):
+  | { provided: false }
+  | { provided: true; ok: false; response: NextResponse }
+  | { provided: true; ok: true; lease: HarnessLeaseHeader } {
+  const rawToken = req.headers.get(HARNESS_HEADER_LEASE_TOKEN);
+  const rawFence = req.headers.get(HARNESS_HEADER_FENCE_TOKEN);
+
+  if (rawToken === null && rawFence === null) {
+    return { provided: false };
+  }
+
+  const leaseToken = rawToken?.trim() ?? '';
+  const fenceStr = rawFence?.trim() ?? '';
+  if (!LEASE_TOKEN_RE.test(leaseToken) || !FENCE_TOKEN_RE.test(fenceStr)) {
+    return {
+      provided: true,
+      ok: false,
+      response: harnessError(
+        400,
+        'validation_error',
+        'INVALID_LEASE_HEADERS',
+        '租约请求头格式无效，须同时提供合法的 leaseToken 与正整数 fenceToken',
+      ),
+    };
+  }
+
+  const fenceToken = Number(fenceStr);
+  if (!Number.isSafeInteger(fenceToken) || fenceToken <= 0) {
+    return {
+      provided: true,
+      ok: false,
+      response: harnessError(
+        400,
+        'validation_error',
+        'INVALID_LEASE_HEADERS',
+        'fenceToken 必须为有效的正整数',
+      ),
+    };
+  }
+
+  return {
+    provided: true,
+    ok: true,
+    lease: { leaseToken, fenceToken },
+  };
+}

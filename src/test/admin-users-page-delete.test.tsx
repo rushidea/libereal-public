@@ -45,6 +45,7 @@ const users = [
 describe('admin users page delete selection', () => {
   afterEach(() => {
     cleanup();
+    session.data.user.id = 'admin_test_id';
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
   });
@@ -85,6 +86,29 @@ describe('admin users page delete selection', () => {
     expect(JSON.parse(String(deleteCall?.[1]?.body))).toEqual({ userIds: ['user_a'] });
     expect(confirm).toHaveBeenCalledWith(expect.stringContaining('订单、积分和授信会保留'));
     expect(await screen.findByText('已停用 1 个用户，订单、积分和授信已保留')).toBeInTheDocument();
+  });
+
+  it('keeps the current administrator list when a previous session request finishes late', async () => {
+    let finishPrevious!: (response: Response) => void;
+    const previousList = new Promise<Response>((resolve) => { finishPrevious = resolve; });
+    const fetchMock = vi.fn<(url: string, init?: RequestInit) => Promise<Response>>((url) => {
+      if (url !== '/api/users') return Promise.resolve(Response.json([]));
+      return session.data.user.id === 'admin_test_id' ? previousList : Promise.resolve(Response.json([users[1]]));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const { rerender } = render(<AdminUsersPage />);
+    const previousSignal = fetchMock.mock.calls.find(([url]) => url === '/api/users')?.[1]?.signal;
+    expect(previousSignal?.aborted).toBe(false);
+
+    session.data.user.id = 'other_admin';
+    rerender(<AdminUsersPage />);
+    expect(await screen.findByRole('checkbox', { name: '选择乙老师' })).toBeInTheDocument();
+
+    await act(async () => { finishPrevious(Response.json([users[0]])); });
+    expect(previousSignal?.aborted).toBe(true);
+    expect(screen.getByRole('checkbox', { name: '选择乙老师' })).toBeInTheDocument();
+    expect(screen.queryByRole('checkbox', { name: '选择甲老师' })).not.toBeInTheDocument();
   });
 
   it('mounts one selection control per user and retains selection across breakpoint changes', async () => {

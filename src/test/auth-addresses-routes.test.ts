@@ -112,9 +112,10 @@ function registerBody(overrides: Record<string, unknown> = {}) {
   };
 }
 
+beforeAll(() => { getTestDb(); });
+afterAll(() => { closeTestDb(); });
+
 describe('POST /api/auth/register', () => {
-  beforeAll(() => { getTestDb(); });
-  afterAll(() => { closeTestDb(); });
   afterEach(() => { vi.unstubAllEnvs(); });
   beforeEach(() => {
     responseCookies.clear();
@@ -323,8 +324,6 @@ describe('POST /api/auth/register', () => {
 });
 
 describe('GET /api/auth/role', () => {
-  beforeAll(() => { getTestDb(); });
-  afterAll(() => { closeTestDb(); });
   beforeEach(() => {
     const db = getTestDb();
     clearAllTables(db);
@@ -357,8 +356,6 @@ describe('GET /api/auth/role', () => {
 });
 
 describe('GET/POST /api/addresses', () => {
-  beforeAll(() => { getTestDb(); });
-  afterAll(() => { closeTestDb(); });
   beforeEach(() => {
     const db = getTestDb();
     clearAllTables(db);

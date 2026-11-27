@@ -1,11 +1,22 @@
 'use client';
 
 import React, { useState } from 'react';
-import { Check, X, Edit2, Save, Shield, LockKeyhole } from 'lucide-react';
+import { Check, X, Edit2, Save, Shield, LockKeyhole, CreditCard } from 'lucide-react';
 import { adminPermissionErrorMessage } from '@/data/admin-permission-message';
 import { saveUserProfileThenCredit } from '@/lib/admin-user-row-save';
 import { getInstitutionLabels } from '@/data/institution-profile';
 import { PASSWORD_MIN_LENGTH, validateNewPasswordLength } from '@/lib/password-policy';
+import { isAdminMfaStepUpResponse, useAdminMfaStepUp } from '@/components/admin/AdminMfaStepUpDialog';
+import CustomerCreditEditor from '@/components/admin/CustomerCreditEditor';
+import {
+  addDaysToShanghaiDate,
+  CREDIT_STATUS_LABELS,
+  creditSummaryFromUser,
+  formatCreditDateForInput,
+  previewEffectiveCreditLimit,
+  validateCreditDraftInput,
+  type CustomerCreditSummary,
+} from '@/lib/credit-summary';
 import {
   CUSTOMER_IDENTITY_OPTIONS,
   INTERNAL_IDENTITY_OPTIONS,
@@ -48,6 +59,7 @@ interface UserType {
     status: string;
     paymentTermDays: number;
   } | null;
+  creditSummary?: CustomerCreditSummary | null;
   lastLoginAt?: string | null;
 }
 
@@ -105,6 +117,24 @@ function formatDateTime(value?: string | null): string {
   return date.toLocaleString('zh-CN', { hour12: false });
 }
 
+function formatShortDateTime(value?: string | null): string {
+  if (!value) return '—';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '—';
+  const yy = String(date.getFullYear()).slice(-2);
+  const m = date.getMonth() + 1;
+  const d = date.getDate();
+  const hh = String(date.getHours()).padStart(2, '0');
+  const mm = String(date.getMinutes()).padStart(2, '0');
+  return `${yy}/${m}/${d} ${hh}:${mm}`;
+}
+
+function roleDisplayLabel(role: string): string {
+  if (role === 'admin') return '管理员';
+  if (role === 'customer') return '客户';
+  return role || '—';
+}
+
 function organizationSummary(user: UserType): string {
   const parts = [
     getInstitution(user),
@@ -117,9 +147,7 @@ function organizationSummary(user: UserType): string {
 }
 
 export const userTableColumn = {
-  phone: 'hidden xl:table-cell',
-  role: 'hidden xl:table-cell',
-  dates: 'hidden xl:table-cell',
+  dates: '',
 } as const;
 
 function StatusBadges({ user }: { user: UserType }) {
@@ -154,12 +182,16 @@ interface UserRowProps {
   canWriteCustomers?: boolean;
   canWriteTier?: boolean;
   canWriteCredit?: boolean;
+  autoOpenCredit?: boolean;
+  onCreditEditorHandled?: () => void;
 }
 
 const CUSTOMER_TIERS = [{ value: 'standard', label: 'standard' }];
 
-export default function UserRow({ user, onUpdate, selected, onSelectChange, showEditButton, templates = [], layout = 'table', canWriteCustomers = false, canWriteTier = false, canWriteCredit = false }: UserRowProps) {
-  const [editing, setEditing] = useState(false);
+export default function UserRow({ user, onUpdate, selected, onSelectChange, showEditButton, templates = [], layout = 'table', canWriteCustomers = false, canWriteTier = false, canWriteCredit = false, autoOpenCredit = false, onCreditEditorHandled }: UserRowProps) {
+  const creditSummary = creditSummaryFromUser(user);
+  const [editing, setEditing] = useState(Boolean(autoOpenCredit && showEditButton && user.role !== 'admin'));
+  const [editMode, setEditMode] = useState<'full' | 'credit'>(autoOpenCredit ? 'credit' : 'full');
   const [name, setName] = useState(user.name ?? '');
   const [email, setEmail] = useState(user.email ?? '');
   const [password, setPassword] = useState('');
@@ -179,30 +211,25 @@ export default function UserRow({ user, onUpdate, selected, onSelectChange, show
   const [approvalStatus, setApprovalStatus] = useState(user.approvalStatus ?? (user.isNewUser ? 'pending' : 'approved'));
   const [isBlacklisted, setIsBlacklisted] = useState(Boolean(user.isBlacklisted));
   const [isFrozen, setIsFrozen] = useState(Boolean(user.isFrozen));
-  const [creditOverride, setCreditOverride] = useState(user.creditAccount?.overrideLimit?.toString() ?? '');
-  const [temporaryLimit, setTemporaryLimit] = useState(user.creditAccount?.temporaryLimit?.toString() ?? '0');
-  const [temporaryUntil, setTemporaryUntil] = useState(user.creditAccount?.temporaryUntil?.slice(0, 10) ?? '');
-  const [creditStatus, setCreditStatus] = useState(user.creditAccount?.status ?? 'active');
-  const [paymentTermDays, setPaymentTermDays] = useState(user.creditAccount?.paymentTermDays?.toString() ?? '30');
+  const [creditOverride, setCreditOverride] = useState(creditSummary.overrideLimit?.toString() ?? '');
+  const [temporaryLimit, setTemporaryLimit] = useState(creditSummary.temporaryLimit.toString());
+  const [temporaryUntil, setTemporaryUntil] = useState(formatCreditDateForInput(creditSummary.temporaryUntil));
+  const [creditStatus, setCreditStatus] = useState(creditSummary.status || 'active');
+  const [paymentTermDays, setPaymentTermDays] = useState(creditSummary.paymentTermDays.toString());
   const institutionLabels = getInstitutionLabels(institutionType);
-
-  const parsedBrandDiscounts = (() => {
-    if (!user.brandDiscounts) return null;
-    try { return JSON.parse(user.brandDiscounts) as Record<string, number>; }
-    catch { return null; }
-  })();
+  const { begin: beginMfaStepUp, dialog: mfaDialog } = useAdminMfaStepUp();
+  const [autoOpened, setAutoOpened] = useState(Boolean(autoOpenCredit));
 
   const creditDirty = () => {
-    const account = user.creditAccount;
     const nextOverride = creditOverride === '' ? null : Number(creditOverride);
-    const currentOverride = account?.overrideLimit ?? null;
+    const currentOverride = creditSummary.overrideLimit ?? null;
     const nextUntil = temporaryUntil || null;
-    const currentUntil = account?.temporaryUntil ? account.temporaryUntil.slice(0, 10) : null;
+    const currentUntil = formatCreditDateForInput(creditSummary.temporaryUntil) || null;
     return nextOverride !== currentOverride
-      || Number(temporaryLimit || 0) !== (account?.temporaryLimit ?? 0)
+      || Number(temporaryLimit || 0) !== creditSummary.temporaryLimit
       || nextUntil !== currentUntil
-      || Number(paymentTermDays || 30) !== (account?.paymentTermDays ?? 30)
-      || creditStatus !== (account?.status ?? 'active');
+      || Number(paymentTermDays || 30) !== creditSummary.paymentTermDays
+      || creditStatus !== (creditSummary.status || 'active');
   };
 
   const profileDirty = () => name !== (user.name ?? '')
@@ -221,6 +248,65 @@ export default function UserRow({ user, onUpdate, selected, onSelectChange, show
     || approvalStatus !== (user.approvalStatus ?? (user.isNewUser ? 'pending' : 'approved'))
     || isBlacklisted !== Boolean(user.isBlacklisted)
     || isFrozen !== Boolean(user.isFrozen);
+
+  const patchCreditOnly = async (
+    creditPayload: {
+      overrideLimit: number | null;
+      temporaryLimit: number;
+      temporaryUntil: string | null;
+      status: string;
+      paymentTermDays: number;
+    },
+    stepUpToken?: string,
+  ): Promise<{ ok: boolean; error?: string; mfaRequired?: boolean }> => {
+    const creditRes = await fetch(`/api/admin/users/${user.id}/credit`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        ...creditPayload,
+        reason: '用户管理页面调整',
+        ...(stepUpToken ? { stepUpToken } : {}),
+      }),
+    });
+    const creditData = await creditRes.json().catch(() => ({})) as { error?: string; requiredPermission?: string };
+    if (!stepUpToken && isAdminMfaStepUpResponse(creditRes.status, creditData.error)) {
+      return { ok: false, mfaRequired: true, error: '需要完成管理员身份验证后才能保存授信调整。' };
+    }
+    return {
+      ok: creditRes.ok,
+      error: adminPermissionErrorMessage(creditData.error, creditData.requiredPermission),
+    };
+  };
+
+  const retryCreditAfterMfa = async (
+    creditPayload: {
+      overrideLimit: number | null;
+      temporaryLimit: number;
+      temporaryUntil: string | null;
+      status: string;
+      paymentTermDays: number;
+    },
+    stepUpToken: string,
+  ) => {
+    setSaving(true);
+    setFeedback(null);
+    try {
+      const creditResult = await patchCreditOnly(creditPayload, stepUpToken);
+      if (creditResult.ok) {
+        setPassword('');
+        setEditing(false);
+        setFeedback({ type: 'success', text: '已保存' });
+        onUpdate();
+        return;
+      }
+      setFeedback({ type: 'error', text: creditResult.error || '授信保存失败' });
+      onUpdate();
+    } catch {
+      setFeedback({ type: 'error', text: '网络错误' });
+    } finally {
+      setSaving(false);
+    }
+  };
 
   const handleSave = async () => {
     setSaving(true);
@@ -242,8 +328,16 @@ export default function UserRow({ user, onUpdate, selected, onSelectChange, show
         setFeedback({ type: 'error', text: '修改客户等级需要价格权限。' });
         return;
       }
-      if (creditDirty() && !canWriteCredit) {
+      const creditNeedsSave = user.role !== 'admin' && creditDirty();
+      if (creditNeedsSave && !canWriteCredit) {
         setFeedback({ type: 'error', text: '修改授信需要财务权限。' });
+        return;
+      }
+      const validatedCredit = creditNeedsSave
+        ? validateCreditDraftInput({ creditOverride, temporaryLimit, temporaryUntil, paymentTermDays, creditStatus })
+        : null;
+      if (validatedCredit && !validatedCredit.ok) {
+        setFeedback({ type: 'error', text: validatedCredit.error });
         return;
       }
       const payload: Record<string, unknown> | null = canWriteCustomers
@@ -271,6 +365,7 @@ export default function UserRow({ user, onUpdate, selected, onSelectChange, show
           ? { userId: user.id, tier }
           : null;
 
+      let creditMfaRequired = false;
       const result = await saveUserProfileThenCredit({
         saveProfile: async () => {
           if (!payload) return { ok: true };
@@ -282,24 +377,13 @@ export default function UserRow({ user, onUpdate, selected, onSelectChange, show
           const data = await res.json().catch(() => ({}));
           return { ok: res.ok, error: adminPermissionErrorMessage(data.error, data.requiredPermission) };
         },
-        saveCredit: user.role === 'admin' || !creditDirty() || !canWriteCredit
-          ? null
-          : async () => {
-            const creditRes = await fetch(`/api/admin/users/${user.id}/credit`, {
-              method: 'PATCH',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                overrideLimit: creditOverride === '' ? null : Number(creditOverride),
-                temporaryLimit: Number(temporaryLimit || 0),
-                temporaryUntil: temporaryUntil || null,
-                status: creditStatus,
-                paymentTermDays: Number(paymentTermDays || 30),
-                reason: '用户管理页面调整',
-              }),
-            });
-            const creditData = await creditRes.json().catch(() => ({}));
-            return { ok: creditRes.ok, error: adminPermissionErrorMessage(creditData.error, creditData.requiredPermission) };
-          },
+        saveCredit: validatedCredit && validatedCredit.ok
+          ? async () => {
+            const creditResult = await patchCreditOnly(validatedCredit.payload);
+            if (creditResult.mfaRequired) creditMfaRequired = true;
+            return { ok: creditResult.ok, error: creditResult.error };
+          }
+          : null,
       });
 
       if (result.status === 'ok') {
@@ -311,6 +395,14 @@ export default function UserRow({ user, onUpdate, selected, onSelectChange, show
       }
 
       if (result.status === 'credit_failed') {
+        if (creditMfaRequired && validatedCredit && validatedCredit.ok) {
+          setFeedback({ type: 'error', text: '资料已保存，授信调整尚未生效（需完成管理员身份确认）。' });
+          onUpdate();
+          await beginMfaStepUp(async (token) => {
+            await retryCreditAfterMfa(validatedCredit.payload, token);
+          });
+          return;
+        }
         setFeedback({ type: 'error', text: result.error });
         onUpdate();
         return;
@@ -368,7 +460,7 @@ export default function UserRow({ user, onUpdate, selected, onSelectChange, show
     }
   };
 
-  const handleCancel = () => {
+  function resetEditDraft() {
     setName(user.name ?? '');
     setEmail(user.email ?? '');
     setPassword('');
@@ -386,13 +478,42 @@ export default function UserRow({ user, onUpdate, selected, onSelectChange, show
     setApprovalStatus(user.approvalStatus ?? (user.isNewUser ? 'pending' : 'approved'));
     setIsBlacklisted(Boolean(user.isBlacklisted));
     setIsFrozen(Boolean(user.isFrozen));
-    setCreditOverride(user.creditAccount?.overrideLimit?.toString() ?? '');
-    setTemporaryLimit(user.creditAccount?.temporaryLimit?.toString() ?? '0');
-    setTemporaryUntil(user.creditAccount?.temporaryUntil?.slice(0, 10) ?? '');
-    setCreditStatus(user.creditAccount?.status ?? 'active');
-    setPaymentTermDays(user.creditAccount?.paymentTermDays?.toString() ?? '30');
+    setCreditOverride(creditSummary.overrideLimit?.toString() ?? '');
+    setTemporaryLimit(creditSummary.temporaryLimit.toString());
+    setTemporaryUntil(formatCreditDateForInput(creditSummary.temporaryUntil));
+    setCreditStatus(creditSummary.status || 'active');
+    setPaymentTermDays(creditSummary.paymentTermDays.toString());
+  }
+
+  if (autoOpenCredit && !autoOpened && showEditButton && user.role !== 'admin') {
+    setAutoOpened(true);
+    if (!editing) resetEditDraft();
+    setEditMode('credit');
+    setEditing(true);
     setFeedback(null);
+  }
+
+  const handleCancel = () => {
+    setPassword('');
+    setFeedback(null);
+    if (editMode === 'credit') onCreditEditorHandled?.();
     setEditing(false);
+  };
+
+  const toggleMode = (mode: 'full' | 'credit') => {
+    setFeedback(null);
+    if (editing && editMode === mode) {
+      if (mode === 'credit') onCreditEditorHandled?.();
+      setPassword('');
+      setEditing(false);
+      return;
+    }
+    if (editing && editMode === 'credit' && mode !== 'credit') {
+      onCreditEditorHandled?.();
+    }
+    if (!editing) resetEditDraft();
+    setEditMode(mode);
+    setEditing(true);
   };
 
   const discountText = user.sourceTemplateId
@@ -407,33 +528,114 @@ export default function UserRow({ user, onUpdate, selected, onSelectChange, show
   const phoneLabel = displayValue(user.phone) || '—';
   const createdLabel = formatDate(user.createdAt);
   const lastLoginLabel = formatDateTime(user.lastLoginAt);
-  const actions = user.role !== 'admin' ? (
-    <div className="flex flex-wrap items-center gap-2">
-      {showEditButton && (
-        <button
-          type="button"
-          onClick={(e) => { e.stopPropagation(); setEditing(!editing); setFeedback(null); }}
-          className="inline-flex items-center gap-1 text-xs text-gray-500 hover:text-brand-600"
-          title={editing ? '收起' : '编辑'}
-        >
-          <Edit2 className="h-3.5 w-3.5" />
-          {layout === 'compact' && (editing ? '收起' : '编辑')}
-        </button>
-      )}
-      <button
-        type="button"
-        disabled={saving}
-        onClick={(e) => { e.stopPropagation(); void handleToggleFreeze(); }}
-        className="inline-flex items-center gap-1 text-xs text-slate-500 hover:text-slate-800 disabled:opacity-50"
-        title={user.isFrozen ? '解冻' : '冻结'}
+  const shortLastLoginLabel = formatShortDateTime(user.lastLoginAt);
+  const creditStatusBadgeClass = creditSummary.status === 'paused' || creditSummary.status === 'overdue_hold'
+    ? 'bg-red-50 text-red-700'
+    : 'bg-amber-100 text-amber-800';
+
+  const roleBadge = (
+    <span className="inline-flex min-w-0 max-w-[45%] shrink-0">
+      <span
+        title={roleDisplayLabel(user.role)}
+        className={`max-w-full truncate rounded-full px-1.5 py-0.5 text-[11px] font-medium leading-none ${
+          user.role === 'admin'
+            ? 'bg-purple-100 text-purple-700'
+            : 'bg-gray-100 text-gray-600'
+        }`}
       >
-        <LockKeyhole className="h-3.5 w-3.5" />
-        {layout === 'compact' && (user.isFrozen ? '解冻' : '冻结')}
-      </button>
+        {roleDisplayLabel(user.role)}
+      </span>
+    </span>
+  );
+
+  const creditActionButton = showEditButton ? (
+    <button
+      type="button"
+      onClick={(e) => { e.stopPropagation(); toggleMode('credit'); }}
+      className="inline-flex items-center gap-1 rounded border border-brand-200 bg-brand-50 px-2 py-0.5 text-xs font-medium text-brand-700 hover:bg-brand-100"
+      title={editing && editMode === 'credit' ? '收起授信' : '调整授信额度'}
+    >
+      <CreditCard className="h-3.5 w-3.5" />
+      <span>{editing && editMode === 'credit' ? '收起' : '授信'}</span>
+    </button>
+  ) : null;
+
+  const fullEditActionButton = showEditButton ? (
+    <button
+      type="button"
+      onClick={(e) => { e.stopPropagation(); toggleMode('full'); }}
+      className="inline-flex items-center gap-1 text-xs text-gray-600 hover:text-brand-600"
+      title={editing && editMode === 'full' ? '收起' : '编辑'}
+    >
+      <Edit2 className="h-3.5 w-3.5" />
+      <span>{editing && editMode === 'full' ? '收起' : '编辑'}</span>
+    </button>
+  ) : null;
+
+  const freezeActionButton = (
+    <button
+      type="button"
+      disabled={saving}
+      onClick={(e) => { e.stopPropagation(); void handleToggleFreeze(); }}
+      className="inline-flex items-center gap-1 text-xs text-slate-500 hover:text-slate-800 disabled:opacity-50"
+      title={user.isFrozen ? '解冻' : '冻结'}
+    >
+      <LockKeyhole className="h-3.5 w-3.5" />
+      <span>{user.isFrozen ? '解冻' : '冻结'}</span>
+    </button>
+  );
+
+  const tableActions = user.role !== 'admin' ? (
+    <div className="space-y-1.5">
+      {showEditButton && (
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+          {creditActionButton}
+          {fullEditActionButton}
+        </div>
+      )}
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+        {freezeActionButton}
+      </div>
     </div>
   ) : null;
 
+  const compactActions = user.role !== 'admin' ? (
+    <div className="flex flex-wrap items-center justify-end gap-2">
+      {creditActionButton}
+      {fullEditActionButton}
+      {freezeActionButton}
+    </div>
+  ) : null;
+
+  const fullPreviewLimit = previewEffectiveCreditLimit(
+    creditSummary.hasAccount ? creditSummary.baseLimit : creditSummary.tierDefaultLimit,
+    { creditOverride, temporaryLimit, temporaryUntil, creditStatus },
+  );
+
   const editor = editing ? (
+    editMode === 'credit' && showEditButton && user.role !== 'admin' ? (
+      <CustomerCreditEditor
+        userId={user.id}
+        userName={displayName}
+        tier={user.tier}
+        summary={creditSummary}
+        canWriteCredit={canWriteCredit}
+        defaultReason="用户管理页面调整授信"
+        onSaved={() => {
+          setPassword('');
+          setEditing(false);
+          setFeedback({ type: 'success', text: '授信已更新' });
+          onCreditEditorHandled?.();
+          onUpdate();
+        }}
+        onCancel={handleCancel}
+        onSwitchToFull={() => {
+          setEditMode('full');
+          setFeedback(null);
+          onCreditEditorHandled?.();
+        }}
+      />
+    ) : (
         <div className="min-w-0 rounded-brand border border-brand-100 bg-brand-50/50 p-3 sm:p-4">
             <div className="space-y-3">
               {showEditButton && (
@@ -606,35 +808,63 @@ export default function UserRow({ user, onUpdate, selected, onSelectChange, show
                 </div>
               )}
               {showEditButton && user.role !== 'admin' && (
-                <div className="grid min-w-0 grid-cols-1 gap-3 border-t border-brand-100 pt-3 sm:grid-cols-2 lg:grid-cols-3">
-                  <div>
-                    <label className="text-xs font-medium text-gray-700">等级默认额度</label>
-                    <div className="mt-1 rounded border border-gray-200 bg-gray-50 px-2 py-1.5 text-sm text-gray-600">¥{(user.creditAccount?.baseLimit ?? 0).toLocaleString()}</div>
+                <div className="space-y-3 border-t border-brand-100 pt-3">
+                  <div className="grid min-w-0 grid-cols-2 gap-2 rounded-lg border border-brand-100 bg-white/80 p-2.5 text-xs sm:grid-cols-5">
+                    <div>
+                      <div className="text-gray-500">等级默认额度</div>
+                      <div className="mt-0.5 font-semibold text-gray-800">¥{creditSummary.tierDefaultLimit.toLocaleString()}</div>
+                    </div>
+                    <div>
+                      <div className="text-gray-500">当前生效额度</div>
+                      <div className="mt-0.5 font-semibold text-gray-900">¥{creditSummary.effectiveLimit.toLocaleString()}</div>
+                    </div>
+                    <div>
+                      <div className="text-gray-500">已用额度</div>
+                      <div className="mt-0.5 font-semibold text-gray-800">¥{creditSummary.usedAmount.toLocaleString()}</div>
+                    </div>
+                    <div>
+                      <div className="text-gray-500">当前可用</div>
+                      <div className="mt-0.5 font-semibold text-gray-800">¥{creditSummary.availableAmount.toLocaleString()}</div>
+                    </div>
+                    <div>
+                      <div className="text-gray-500">保存后预计生效</div>
+                      <div className="mt-0.5 font-semibold text-brand-700">¥{fullPreviewLimit.toLocaleString()}</div>
+                    </div>
                   </div>
-                  <div>
-                    <label className="text-xs font-medium text-gray-700">人工额度</label>
-                    <input type="number" min="0" value={creditOverride} onChange={e => setCreditOverride(e.target.value)} disabled={!canWriteCredit} title={canWriteCredit ? undefined : '修改授信需要财务权限'} className="mt-1 w-full rounded border border-gray-200 px-2 py-1.5 text-sm disabled:bg-gray-50 disabled:text-gray-500" placeholder="使用默认额度" />
-                  </div>
-                  <div>
-                    <label className="text-xs font-medium text-gray-700">临时额度</label>
-                    <input type="number" min="0" value={temporaryLimit} onChange={e => setTemporaryLimit(e.target.value)} disabled={!canWriteCredit} className="mt-1 w-full rounded border border-gray-200 px-2 py-1.5 text-sm disabled:bg-gray-50 disabled:text-gray-500" />
-                  </div>
-                  <div>
-                    <label className="text-xs font-medium text-gray-700">临时额度到期</label>
-                    <input type="date" value={temporaryUntil} onChange={e => setTemporaryUntil(e.target.value)} disabled={!canWriteCredit} className="mt-1 w-full rounded border border-gray-200 px-2 py-1.5 text-sm disabled:bg-gray-50 disabled:text-gray-500" />
-                  </div>
-                  <div>
-                    <label className="text-xs font-medium text-gray-700">账期</label>
-                    <input type="number" min="1" max="365" value={paymentTermDays} onChange={e => setPaymentTermDays(e.target.value)} disabled={!canWriteCredit} className="mt-1 w-full rounded border border-gray-200 px-2 py-1.5 text-sm disabled:bg-gray-50 disabled:text-gray-500" />
-                  </div>
-                  <div>
-                    <label className="text-xs font-medium text-gray-700">授信状态</label>
-                    <select value={creditStatus} onChange={e => setCreditStatus(e.target.value)} disabled={!canWriteCredit} title={canWriteCredit ? undefined : '修改授信需要财务权限'} className="mt-1 w-full rounded border border-gray-200 bg-white px-2 py-1.5 text-sm disabled:bg-gray-50 disabled:text-gray-500">
-                      <option value="active">正常</option>
-                      <option value="credit_limited">限额下单</option>
-                      <option value="paused">暂停授信</option>
-                      <option value="overdue_hold">逾期暂停</option>
-                    </select>
+                  <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                    <div>
+                      <label className="text-xs font-medium text-gray-700">永久额度（覆盖等级默认）</label>
+                      <input type="number" min="0" step="0.01" value={creditOverride} onChange={e => setCreditOverride(e.target.value)} disabled={!canWriteCredit} title={canWriteCredit ? undefined : '修改授信需要财务权限'} className="mt-1 w-full rounded border border-gray-200 px-2 py-1.5 text-sm disabled:bg-gray-50 disabled:text-gray-500" placeholder={`留空按等级默认 ¥${creditSummary.tierDefaultLimit.toLocaleString()}`} />
+                    </div>
+                    <div>
+                      <label className="text-xs font-medium text-gray-700">临时额度（叠加生效）</label>
+                      <input type="number" min="0" step="0.01" value={temporaryLimit} onChange={e => setTemporaryLimit(e.target.value)} disabled={!canWriteCredit} title={canWriteCredit ? undefined : '修改授信需要财务权限'} className="mt-1 w-full rounded border border-gray-200 px-2 py-1.5 text-sm disabled:bg-gray-50 disabled:text-gray-500" />
+                    </div>
+                    <div>
+                      <div className="flex items-center justify-between gap-2">
+                        <label className="text-xs font-medium text-gray-700">临时额度到期日</label>
+                        {canWriteCredit && (
+                          <div className="flex items-center gap-1">
+                            <button type="button" onClick={() => setTemporaryUntil(addDaysToShanghaiDate(7))} className="rounded bg-white px-1.5 py-0.5 text-[11px] text-gray-700 border border-gray-200 hover:bg-gray-100">+7天</button>
+                            <button type="button" onClick={() => setTemporaryUntil(addDaysToShanghaiDate(30))} className="rounded bg-white px-1.5 py-0.5 text-[11px] text-gray-700 border border-gray-200 hover:bg-gray-100">+30天</button>
+                          </div>
+                        )}
+                      </div>
+                      <input type="date" value={temporaryUntil} onChange={e => setTemporaryUntil(e.target.value)} disabled={!canWriteCredit} title={canWriteCredit ? undefined : '修改授信需要财务权限'} className="mt-1 w-full rounded border border-gray-200 px-2 py-1.5 text-sm disabled:bg-gray-50 disabled:text-gray-500" />
+                    </div>
+                    <div>
+                      <label className="text-xs font-medium text-gray-700">账期（天）</label>
+                      <input type="number" min="1" max="365" value={paymentTermDays} onChange={e => setPaymentTermDays(e.target.value)} disabled={!canWriteCredit} title={canWriteCredit ? undefined : '修改授信需要财务权限'} className="mt-1 w-full rounded border border-gray-200 px-2 py-1.5 text-sm disabled:bg-gray-50 disabled:text-gray-500" />
+                    </div>
+                    <div>
+                      <label className="text-xs font-medium text-gray-700">授信状态</label>
+                      <select value={creditStatus} onChange={e => setCreditStatus(e.target.value)} disabled={!canWriteCredit} title={canWriteCredit ? undefined : '修改授信需要财务权限'} className="mt-1 w-full rounded border border-gray-200 bg-white px-2 py-1.5 text-sm disabled:bg-gray-50 disabled:text-gray-500">
+                        <option value="active">正常</option>
+                        <option value="credit_limited">限额下单</option>
+                        <option value="paused">暂停授信</option>
+                        <option value="overdue_hold">逾期暂停</option>
+                      </select>
+                    </div>
                   </div>
                 </div>
               )}
@@ -695,57 +925,102 @@ export default function UserRow({ user, onUpdate, selected, onSelectChange, show
               </div>
             </div>
         </div>
+    )
   ) : null;
 
   if (layout === 'table') {
     return (
       <>
         <tr className={`group border-b border-gray-100 ${selected ? 'bg-brand-50/50' : 'hover:bg-gray-50/50'}`}>
-          <td className={`sticky left-0 z-10 w-10 border-b border-gray-100 px-3 py-3 ${selected ? 'bg-brand-50' : 'bg-white group-hover:bg-gray-50'}`}>
+          <td className="w-9 border-b border-gray-100 px-2.5 py-3 align-top">
             <input
               type="checkbox"
               checked={selected ?? false}
               onChange={e => { onSelectChange?.(e.target.checked); }}
-              className="h-4 w-4 cursor-pointer rounded border-gray-300 text-brand-600"
+              className="mt-0.5 h-4 w-4 cursor-pointer rounded border-gray-300 text-brand-600"
               aria-label={`选择${displayName}`}
             />
           </td>
-          <td className={`sticky left-10 z-10 w-36 border-b border-gray-100 px-3 py-3 shadow-[4px_0_6px_-4px_rgba(15,23,42,0.25)] ${selected ? 'bg-brand-50' : 'bg-white group-hover:bg-gray-50'}`}>
-            <TruncatedText text={displayName} className="font-medium text-gray-900" />
-            <TruncatedText text={user.role} className="mt-0.5 text-xs text-gray-500 xl:hidden" />
+          <td className="min-w-0 border-b border-gray-100 px-3 py-3 align-top">
+            <div className="flex min-w-0 items-center gap-1.5">
+              <TruncatedText text={displayName} className="min-w-0 font-medium text-gray-900" />
+              {roleBadge}
+            </div>
+            <TruncatedText text={user.email} className="mt-1 text-xs text-gray-600" />
           </td>
-          <td className="min-w-0 border-b border-gray-100 px-3 py-3">
-            <TruncatedText text={user.email} className="text-gray-700" />
+          <td className="min-w-0 border-b border-gray-100 px-3 py-3 align-top">
+            <TruncatedText text={orgLabel === '-' ? '—' : orgLabel} title={orgTitle} className="text-gray-800" />
+            <div className="mt-1 flex min-w-0 items-center gap-1.5 text-xs">
+              <TruncatedText text={phoneLabel} className="min-w-0 text-gray-600 tabular-nums" />
+              {discountText !== '—' && (
+                <>
+                  <span className="shrink-0 text-gray-300">·</span>
+                  <span className="min-w-0 max-w-[45%]">
+                    <TruncatedText text={`折扣 ${discountText}`} className="text-gray-500" />
+                  </span>
+                </>
+              )}
+            </div>
           </td>
-          <td className={`min-w-0 border-b border-gray-100 px-3 py-3 ${userTableColumn.phone}`}>
-            <TruncatedText text={phoneLabel} className="text-gray-700" />
-          </td>
-          <td className="min-w-0 border-b border-gray-100 px-3 py-3">
-            <TruncatedText text={orgLabel === '-' ? '—' : orgLabel} title={orgTitle} className="text-gray-700" />
-            {discountText !== '—' && <TruncatedText text={`折扣 ${discountText}`} className="text-xs text-gray-500" />}
-          </td>
-          <td className={`min-w-0 overflow-hidden border-b border-gray-100 px-3 py-3 ${userTableColumn.role}`}>
-            <TruncatedText text={user.role} className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${user.role === 'admin' ? 'bg-purple-100 text-purple-700' : 'bg-gray-100 text-gray-700'}`} />
-            <TruncatedText text={user.tier || '—'} className="mt-1 text-xs text-gray-500" />
-          </td>
-          <td className="min-w-0 overflow-hidden border-b border-gray-100 px-3 py-3">
+          <td className="min-w-0 overflow-hidden border-b border-gray-100 px-2.5 py-3 align-top">
             <StatusBadges user={user} />
+            {user.role === 'admin' ? (
+              <div className="mt-1 text-xs text-gray-400">—</div>
+            ) : (
+              <TruncatedText text={user.tier || '—'} className="mt-1 text-xs text-gray-500" />
+            )}
           </td>
-          <td className={`min-w-0 border-b border-gray-100 px-3 py-3 text-xs text-gray-600 ${userTableColumn.dates}`}>
-            <TruncatedText text={`注册 ${createdLabel}`} />
-            <TruncatedText text={`登录 ${lastLoginLabel}`} className="text-gray-500" />
+          <td className="min-w-0 border-b border-gray-100 px-2.5 py-3 align-top">
+            {user.role === 'admin' ? (
+              <span className="text-xs text-gray-400">—</span>
+            ) : (
+              <div className="min-w-0 space-y-1">
+                <div className="flex items-center gap-1 whitespace-nowrap">
+                  <span className="font-medium text-gray-900 tabular-nums">
+                    ¥{creditSummary.effectiveLimit.toLocaleString()}
+                  </span>
+                  {creditSummary.activeTemporaryLimit > 0 && (
+                    <span
+                      className="rounded bg-blue-50 px-1 py-0.5 text-[10px] font-medium leading-none text-blue-700"
+                      title={`含临时额度 ¥${creditSummary.activeTemporaryLimit.toLocaleString()}`}
+                    >
+                      +临
+                    </span>
+                  )}
+                </div>
+                <div className="flex flex-wrap items-center gap-1 text-xs text-gray-500 tabular-nums">
+                  <span className="whitespace-nowrap">可用 ¥{creditSummary.availableAmount.toLocaleString()}</span>
+                  {creditSummary.status !== 'active' && (
+                    <span className={`inline-block rounded px-1 py-0.5 text-[10px] leading-none ${creditStatusBadgeClass}`}>
+                      {CREDIT_STATUS_LABELS[creditSummary.status] || creditSummary.status}
+                    </span>
+                  )}
+                </div>
+              </div>
+            )}
           </td>
-          <td className="whitespace-nowrap border-b border-gray-100 px-3 py-3">{actions}</td>
+          <td className={`min-w-0 border-b border-gray-100 px-2.5 py-3 align-top text-xs ${userTableColumn.dates}`}>
+            <TruncatedText text={`登 ${shortLastLoginLabel}`} title={`最近登录：${lastLoginLabel}`} className="text-gray-700 tabular-nums" />
+            <TruncatedText text={`注 ${createdLabel}`} title={`注册时间：${createdLabel}`} className="mt-1 text-gray-500 tabular-nums" />
+          </td>
+          <td className="border-b border-gray-100 px-2.5 py-3 align-top">{tableActions}</td>
         </tr>
         {feedback && !editing && (
           <tr>
-            <td colSpan={9} className={`px-3 pb-2 text-xs ${feedback.type === 'success' ? 'text-green-600' : 'text-red-600'}`}>{feedback.text}</td>
+            <td colSpan={7} className={`px-3 pb-2 text-xs ${feedback.type === 'success' ? 'text-green-600' : 'text-red-600'}`}>{feedback.text}</td>
           </tr>
         )}
         {editing && (
           <tr>
-            <td colSpan={9} className="border-b border-brand-200 bg-brand-50/70 p-3">
+            <td colSpan={7} className="border-b border-brand-200 bg-brand-50/70 p-3">
               {editor}
+            </td>
+          </tr>
+        )}
+        {mfaDialog && (
+          <tr>
+            <td colSpan={7} className="p-0">
+              {mfaDialog}
             </td>
           </tr>
         )}
@@ -754,8 +1029,8 @@ export default function UserRow({ user, onUpdate, selected, onSelectChange, show
   }
 
   return (
-    <div className={`min-w-0 overflow-hidden rounded-xl border bg-white/85 p-4 shadow-sm ${selected ? 'border-brand-300' : 'border-white/80'}`}>
-      <div className="flex min-w-0 items-start gap-3">
+    <div className={`min-w-0 overflow-hidden rounded-xl border bg-white/85 p-3.5 shadow-sm ${selected ? 'border-brand-300' : 'border-white/80'}`}>
+      <div className="flex min-w-0 items-start gap-2.5">
         <input
           type="checkbox"
           checked={selected ?? false}
@@ -764,45 +1039,75 @@ export default function UserRow({ user, onUpdate, selected, onSelectChange, show
           aria-label={`选择${displayName}`}
         />
         <div className="min-w-0 flex-1">
-          <TruncatedText text={displayName} className="font-medium text-gray-900" />
-          <TruncatedText text={user.email} className="text-xs text-gray-600" />
-          <div className="mt-3 grid grid-cols-1 gap-y-2">
+          <div className="flex min-w-0 items-start justify-between gap-2">
+            <div className="flex min-w-0 flex-1 items-center gap-1.5">
+              <TruncatedText text={displayName} className="min-w-0 font-medium text-gray-900" />
+              {roleBadge}
+            </div>
+            <div className="shrink-0">
+              <StatusBadges user={user} />
+            </div>
+          </div>
+          <TruncatedText text={user.email} className="mt-0.5 text-xs text-gray-600" />
+          <div className="mt-2.5 grid grid-cols-2 gap-x-3 gap-y-2">
+            <div className="col-span-2 min-w-0">
+              <div className="text-[11px] text-gray-500">机构</div>
+              <TruncatedText text={orgLabel === '-' ? '—' : orgLabel} title={orgTitle} className="text-sm text-gray-800" />
+              {discountText !== '—' && (
+                <TruncatedText text={`折扣 ${discountText}`} className="mt-0.5 text-xs text-gray-500" />
+              )}
+            </div>
             <div className="min-w-0">
               <div className="text-[11px] text-gray-500">电话</div>
-              <TruncatedText text={phoneLabel} className="text-sm text-gray-700" />
-            </div>
-            <div className="min-w-0">
-              <div className="text-[11px] text-gray-500">机构</div>
-              <TruncatedText text={orgLabel === '-' ? '—' : orgLabel} title={orgTitle} className="text-sm text-gray-700" />
-            </div>
-            <div className="min-w-0">
-              <div className="text-[11px] text-gray-500">角色</div>
-              <TruncatedText text={user.role} className="text-sm text-gray-700" />
+              <TruncatedText text={phoneLabel} className="text-sm text-gray-700 tabular-nums" />
             </div>
             <div className="min-w-0">
               <div className="text-[11px] text-gray-500">等级</div>
-              <TruncatedText text={user.tier || '—'} className="text-sm text-gray-700" />
+              {user.role === 'admin' ? (
+                <div className="text-sm text-gray-400">—</div>
+              ) : (
+                <TruncatedText text={user.tier || '—'} className="text-sm text-gray-700" />
+              )}
             </div>
+            {user.role !== 'admin' && (
+              <div className="col-span-2 min-w-0">
+                <div className="text-[11px] text-gray-500">授信额度</div>
+                <div className="flex flex-wrap items-center gap-1.5 text-sm text-gray-700 tabular-nums">
+                  <span>生效 ¥{creditSummary.effectiveLimit.toLocaleString()}</span>
+                  {creditSummary.activeTemporaryLimit > 0 && (
+                    <span
+                      className="rounded bg-blue-50 px-1 py-0.5 text-[10px] font-medium leading-none text-blue-700"
+                      title={`含临时额度 ¥${creditSummary.activeTemporaryLimit.toLocaleString()}`}
+                    >
+                      +临
+                    </span>
+                  )}
+                  <span className="text-xs text-gray-500">· 可用 ¥{creditSummary.availableAmount.toLocaleString()}</span>
+                  {creditSummary.status !== 'active' && (
+                    <span className={`inline-block rounded px-1 py-0.5 text-[10px] leading-none ${creditStatusBadgeClass}`}>
+                      {CREDIT_STATUS_LABELS[creditSummary.status] || creditSummary.status}
+                    </span>
+                  )}
+                </div>
+              </div>
+            )}
             <div className="min-w-0">
               <div className="text-[11px] text-gray-500">注册</div>
-              <TruncatedText text={createdLabel} className="text-sm text-gray-700" />
+              <TruncatedText text={createdLabel} className="text-xs text-gray-700 tabular-nums" />
             </div>
             <div className="min-w-0">
               <div className="text-[11px] text-gray-500">最近登录</div>
-              <TruncatedText text={lastLoginLabel} className="text-sm text-gray-700" />
+              <TruncatedText text={shortLastLoginLabel} title={lastLoginLabel} className="text-xs text-gray-700 tabular-nums" />
             </div>
           </div>
-          <div className="mt-3"><StatusBadges user={user} /></div>
-          {discountText !== '—' && (
-            <TruncatedText text={`折扣 ${discountText}`} className="mt-2 text-xs text-gray-500" />
-          )}
         </div>
       </div>
-      {actions && <div className="mt-3 flex justify-end">{actions}</div>}
+      {compactActions && <div className="mt-2.5 flex justify-end border-t border-gray-100 pt-2.5">{compactActions}</div>}
       {feedback && !editing && (
         <p className={`mt-2 text-xs ${feedback.type === 'success' ? 'text-green-600' : 'text-red-600'}`}>{feedback.text}</p>
       )}
       {editor && <div className="mt-3">{editor}</div>}
+      {mfaDialog}
     </div>
   );
 }

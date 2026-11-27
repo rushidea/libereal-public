@@ -240,8 +240,7 @@ export async function ingestPreviewChunk(input: {
           throw new PreviewBatchError('预览批次不完整，请重新生成', 409);
         }
         const merged = mergeFilePreviewDrafts(drafts);
-        await commitPriceAdjustmentPlan(assembled.value, merged);
-        return merged.preview;
+        return commitPriceAdjustmentPlan(assembled.value, merged);
       })()
       : await previewPriceAdjustment(assembled.value);
 

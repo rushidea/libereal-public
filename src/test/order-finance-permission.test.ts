@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import { reserveOrderCredit } from '@/lib/customer-credit';
 import { orderStatusRequiresFinanceWrite } from '@/lib/order-finance-access';
 import { clearAllTables, closeTestDb, getTestDb, seedUser } from './db-helpers';
 
@@ -14,7 +15,7 @@ vi.mock('@/lib/session', () => ({
   requireActiveSession: sessionMocks.requireActiveSession,
 }));
 
-import { PATCH as adminOrderPATCH } from '@/app/api/admin/orders/[id]/route';
+import { GET as adminOrderGET, PATCH as adminOrderPATCH } from '@/app/api/admin/orders/[id]/route';
 import { POST as pointsRefundPOST } from '@/app/api/admin/orders/[id]/points-refund/route';
 import { PATCH as customerOrderPATCH } from '@/app/api/orders/[id]/route';
 
@@ -73,10 +74,10 @@ function patch(url: string, body: object) {
 }
 
 describe('orderStatusRequiresFinanceWrite', () => {
-  it('uses finance only for postpaid settlement and closing an order that still occupies credit', () => {
+  it('requires finance to cancel an order that still occupies credit', () => {
     expect(orderStatusRequiresFinanceWrite({
       currentStatus: 'confirmed', nextStatus: 'completed', paymentMethod: 'bank_transfer', hasOpenReceivable: true,
-    })).toBe(true);
+    })).toBe(false);
     expect(orderStatusRequiresFinanceWrite({
       currentStatus: 'shipped', nextStatus: 'completed', paymentMethod: 'alipay', hasOpenReceivable: false,
     })).toBe(false);
@@ -95,7 +96,7 @@ describe('orderStatusRequiresFinanceWrite', () => {
   });
 });
 
-describe('finance permissions on payment, refund and settlement', () => {
+describe('order completion and financial permissions', () => {
   beforeAll(() => { getTestDb(); });
   afterAll(() => { closeTestDb(); });
   beforeEach(() => {
@@ -106,26 +107,75 @@ describe('finance permissions on payment, refund and settlement', () => {
     allowExcept(null);
   });
 
-  it('rejects postpaid completion without finance.write and settles when finance.write is present', async () => {
-    seedOrder({ id: 'o_pay', status: 'confirmed', paymentMethod: 'bank_transfer' });
-    await seedOpenReceivable('o_pay');
-    allowExcept('finance.write');
+  it.each([
+    { path: '/api/admin/orders', handler: adminOrderPATCH },
+    { path: '/api/orders', handler: customerOrderPATCH },
+  ])('requires actual delivery and preserves bank receivables on $path', async ({ path, handler }) => {
+    const orderId = 'o_delivery';
+    const orderItemId = 'o_delivery_item';
+    const userId = 'user_1';
+    const url = `http://localhost${path}/${orderId}`;
+    const complete = () => handler(patch(url, { status: 'completed' }), { params: Promise.resolve({ id: orderId }) });
+    seedOrder({ id: orderId, status: 'shipped', paymentMethod: 'bank_transfer' });
+    await prisma.orderItem.update({ where: { id: orderItemId }, data: { quantity: 2, unitPrice: 500, shippedQty: 2 } });
+    await prisma.creditAccount.create({ data: { userId, baseLimit: 5000, paymentTermDays: 30 } });
+    const receivable = await prisma.$transaction(tx => reserveOrderCredit(tx, orderId, finance.id));
+    await prisma.user.update({ where: { id: userId }, data: { points: 17 } });
 
-    const denied = await adminOrderPATCH(patch('http://localhost/api/admin/orders/o_pay', { status: 'completed' }), {
-      params: Promise.resolve({ id: 'o_pay' }),
-    });
-    expect(denied.status).toBe(403);
-    expect(sessionMocks.requireAdmin).toHaveBeenCalledWith('finance.write');
-    expect(sessionMocks.requireAdmin).not.toHaveBeenCalledWith('orders.write');
-    expect(getTestDb().prepare('SELECT status FROM "Order" WHERE id = ?').get('o_pay')).toEqual({ status: 'confirmed' });
+    allowExcept('orders.write');
+    expect((await complete()).status).toBe(403);
+    expect(sessionMocks.requireAdmin).toHaveBeenCalledWith('orders.write');
 
     allowExcept(null);
-    const allowed = await adminOrderPATCH(patch('http://localhost/api/admin/orders/o_pay', { status: 'completed' }), {
-      params: Promise.resolve({ id: 'o_pay' }),
-    });
-    expect(allowed.status).toBe(200);
-    expect(await prisma.accountReceivable.findUnique({ where: { orderId: 'o_pay' } })).toMatchObject({ status: 'paid' });
-    expect(await prisma.creditAccount.findUnique({ where: { userId: 'user_1' } })).toMatchObject({ usedAmount: 0, status: 'active' });
+    expect((await complete()).status).toBe(409);
+
+    const shippedAt = new Date('2026-11-20T01:00:00Z');
+    const deliveredAt = new Date('2026-11-21T01:00:00Z');
+    await prisma.shipment.create({ data: {
+      id: 'shipment-first', orderId, status: 'delivered', shippedAt, deliveredAt,
+      items: { create: { orderItemId, quantity: 1 } },
+    } });
+    await prisma.shipment.create({ data: {
+      id: 'shipment-second', orderId, status: 'delivered', deliveredAt,
+      items: { create: { orderItemId, quantity: 1 } },
+    } });
+    expect((await complete()).status).toBe(409);
+
+    await prisma.shipment.update({ where: { id: 'shipment-second' }, data: { shippedAt, status: 'shipped' } });
+    expect((await complete()).status).toBe(409);
+
+    await prisma.shipment.create({ data: {
+      id: 'historical-delivery-without-dispatch', orderId, status: 'delivered', deliveredAt,
+      items: { create: { orderItemId, quantity: 1 } },
+    } });
+    expect((await complete()).status).toBe(409);
+    await prisma.shipment.delete({ where: { id: 'historical-delivery-without-dispatch' } });
+
+    await prisma.shipment.update({ where: { id: 'shipment-second' }, data: {
+      status: 'delivered', deliveredAt: new Date('2026-11-19T01:00:00Z'),
+    } });
+    expect((await complete()).status).toBe(409);
+
+    await prisma.shipment.update({ where: { id: 'shipment-second' }, data: { deliveredAt: null } });
+    expect((await complete()).status).toBe(409);
+    expect(await prisma.order.findUniqueOrThrow({ where: { id: orderId } })).toMatchObject({ status: 'shipped', paidAt: null });
+
+    await prisma.shipment.update({ where: { id: 'shipment-second' }, data: { deliveredAt } });
+    sessionMocks.requireAdmin.mockClear();
+    allowExcept('finance.write');
+    const completed = await complete();
+    expect(completed.status, await completed.text()).toBe(200);
+    expect(sessionMocks.requireAdmin).toHaveBeenCalledWith('orders.write');
+    expect(sessionMocks.requireAdmin).not.toHaveBeenCalledWith('finance.write');
+    expect(await prisma.order.findUniqueOrThrow({ where: { id: orderId } })).toMatchObject({ status: 'completed', paidAt: null });
+    expect(await prisma.accountReceivable.findUniqueOrThrow({ where: { orderId } })).toEqual(receivable);
+    expect(receivable).toMatchObject({ status: 'open', paidAt: null, amount: 1000 });
+    expect(await prisma.creditAccount.findUniqueOrThrow({ where: { userId } })).toMatchObject({ usedAmount: 1000, status: 'active' });
+    expect(await prisma.creditTransaction.findMany({ where: { orderId } })).toMatchObject([
+      { type: 'reserve', amount: 1000, balanceAfter: 1000 },
+    ]);
+    expect(await prisma.user.findUniqueOrThrow({ where: { id: userId } })).toMatchObject({ points: 17 });
+    expect(await prisma.pointsLog.count({ where: { userId } })).toBe(0);
   });
 
   it('uses orders.write to confirm or ship, and finance.write to cancel an open receivable', async () => {
@@ -134,9 +184,11 @@ describe('finance permissions on payment, refund and settlement', () => {
     });
     seedOrder({ id: 'o_confirm', status: 'pending', paymentMethod: 'bank_transfer' });
     allowExcept('finance.write');
-    const confirmed = await adminOrderPATCH(patch('http://localhost/api/admin/orders/o_confirm', { status: 'confirmed' }), {
-      params: Promise.resolve({ id: 'o_confirm' }),
-    });
+    const params = { params: Promise.resolve({ id: 'o_confirm' }) };
+    const url = 'http://localhost/api/admin/orders/o_confirm';
+    const detail = await adminOrderGET(new NextRequest(url), params);
+    const approval = (await detail.json()).order.approvalPreview;
+    const confirmed = await adminOrderPATCH(patch(url, { status: 'confirmed', approvalVersion: approval.version }), params);
     expect(confirmed.status).toBe(200);
     expect(sessionMocks.requireAdmin).toHaveBeenCalledWith('orders.write');
     expect(sessionMocks.requireAdmin).not.toHaveBeenCalledWith('finance.write');
@@ -172,6 +224,17 @@ describe('finance permissions on payment, refund and settlement', () => {
     expect(await prisma.accountReceivable.findUnique({ where: { orderId: 'o_credit' } })).toMatchObject({ status: 'open' });
 
     allowExcept(null);
+    const unknownReservation = await adminOrderPATCH(patch('http://localhost/api/admin/orders/o_credit', { status: 'cancelled' }), {
+      params: Promise.resolve({ id: 'o_credit' }),
+    });
+    expect(unknownReservation.status).toBe(409);
+    const receivable = await prisma.accountReceivable.findUniqueOrThrow({ where: { orderId: 'o_credit' } });
+    expect(receivable.status).toBe('open');
+    expect(await prisma.creditTransaction.count({ where: { orderId: 'o_credit', type: 'release' } })).toBe(0);
+    expect(await prisma.creditAccount.findUnique({ where: { userId: receivable.userId } })).toMatchObject({ usedAmount: 800 });
+    await prisma.creditTransaction.create({ data: {
+      orderId: 'o_credit', userId: receivable.userId, type: 'reserve', amount: 800, balanceAfter: 800, actorId: 'admin_test_id',
+    } });
     const allowedCancel = await adminOrderPATCH(patch('http://localhost/api/admin/orders/o_credit', { status: 'cancelled' }), {
       params: Promise.resolve({ id: 'o_credit' }),
     });
@@ -179,25 +242,7 @@ describe('finance permissions on payment, refund and settlement', () => {
     expect(await prisma.accountReceivable.findUnique({ where: { orderId: 'o_credit' } })).toMatchObject({ status: 'cancelled' });
   });
 
-  it('requires finance.write for the order page settlement path and for points refunds', async () => {
-    seedOrder({ id: 'o_page', status: 'confirmed', paymentMethod: 'casmart' });
-    await seedOpenReceivable('o_page');
-    allowExcept('finance.write');
-
-    const denied = await customerOrderPATCH(patch('http://localhost/api/orders/o_page', { status: 'completed' }), {
-      params: Promise.resolve({ id: 'o_page' }),
-    });
-    expect(denied.status).toBe(403);
-    expect(sessionMocks.requireAdmin).toHaveBeenCalledWith('finance.write');
-    expect(getTestDb().prepare('SELECT status FROM "Order" WHERE id = ?').get('o_page')).toEqual({ status: 'confirmed' });
-
-    allowExcept(null);
-    const allowed = await customerOrderPATCH(patch('http://localhost/api/orders/o_page', { status: 'completed' }), {
-      params: Promise.resolve({ id: 'o_page' }),
-    });
-    expect(allowed.status).toBe(200);
-    expect(await prisma.accountReceivable.findUnique({ where: { orderId: 'o_page' } })).toMatchObject({ status: 'paid' });
-
+  it('requires finance.write for points refunds', async () => {
     seedOrder({ id: 'o_points', status: 'completed', paymentMethod: 'alipay' });
     sessionMocks.requireAdmin.mockClear();
     allowExcept('finance.write');

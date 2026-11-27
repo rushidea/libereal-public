@@ -1,9 +1,15 @@
-import type { Prisma } from '@prisma/client';
+import { jsonObject } from '@/lib/order-catalog-repricing';
+import type { CreditTransaction, Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { calculateOrderPoints } from '@/lib/points';
 import { getTierByRollingSpend, DEFAULT_TIER, TIERS } from '@/lib/discount';
+import { isPostDeliveryPaymentMethod } from '@/data/payment-methods';
+import { formatCreditDateForInput, type CustomerCreditSummary } from '@/lib/credit-summary';
+import { INACTIVE_ORDER_STATUSES } from '@/lib/order-domain';
+import { collectibleReceivableCents, receivableOrderBalance } from '@/lib/receivable-balance';
 
 type Tx = Prisma.TransactionClient;
+type CreditReader = Tx | typeof prisma;
 
 export const CREDIT_REVIEW_POLICY = {
   reminderAfterDays: 30,
@@ -12,6 +18,12 @@ export const CREDIT_REVIEW_POLICY = {
   holdAfterDays: 90,
   reminderIntervalDays: 15,
 } as const;
+
+export const creditReminderIntervalMs = CREDIT_REVIEW_POLICY.reminderIntervalDays * 86400000;
+
+export function receivableReminderKey(receivableId: string, remindedAt: Date) {
+  return `receivable-reminder:${receivableId}:${Math.floor(remindedAt.getTime() / creditReminderIntervalMs)}`;
+}
 
 export type CreditRestriction = 'active' | 'credit_limited' | 'overdue_hold';
 
@@ -83,6 +95,118 @@ export function effectiveCreditLimit(account: {
   return permanent + temporary;
 }
 
+export function defaultCreditLimitForTier(tierName: string | null | undefined): number {
+  return (TIERS.find((item) => item.name === tierName) ?? DEFAULT_TIER).creditLimit;
+}
+
+export type CreditAccountSnapshot = {
+  baseLimit: number;
+  overrideLimit: number | null;
+  temporaryLimit: number;
+  temporaryUntil: Date | string | null;
+  usedAmount: number;
+  status: string;
+  paymentTermDays: number;
+};
+
+export function summarizeCustomerCredit(
+  user: { tier?: string | null },
+  account: CreditAccountSnapshot | null | undefined,
+  now = new Date(),
+): CustomerCreditSummary {
+  const tierDefaultLimit = defaultCreditLimitForTier(user.tier);
+  const baseLimit = account ? account.baseLimit : tierDefaultLimit;
+  const overrideLimit = account?.overrideLimit ?? null;
+  const permanentLimit = overrideLimit ?? baseLimit;
+  const temporaryLimit = account?.temporaryLimit ?? 0;
+  const rawTemporaryUntil = account?.temporaryUntil ? new Date(account.temporaryUntil) : null;
+  const temporaryUntilDate = rawTemporaryUntil && !Number.isNaN(rawTemporaryUntil.getTime()) ? rawTemporaryUntil : null;
+  const activeTemporaryLimit = temporaryUntilDate && temporaryUntilDate >= now ? temporaryLimit : 0;
+  const status = account?.status ?? 'active';
+  const effectiveLimit = creditLimitForAccount({
+    baseLimit,
+    overrideLimit,
+    temporaryLimit,
+    temporaryUntil: temporaryUntilDate,
+    status,
+  }, now);
+  const usedAmount = roundCents(account?.usedAmount ?? 0);
+  const availableAmount = roundCents(effectiveLimit - usedAmount);
+  return {
+    tierDefaultLimit,
+    baseLimit,
+    overrideLimit,
+    permanentLimit,
+    temporaryLimit,
+    temporaryUntil: temporaryUntilDate ? temporaryUntilDate.toISOString() : null,
+    activeTemporaryLimit,
+    effectiveLimit,
+    usedAmount,
+    availableAmount,
+    status,
+    paymentTermDays: account?.paymentTermDays ?? 30,
+    hasAccount: Boolean(account),
+  };
+}
+
+export function parseTemporaryUntilInput(
+  value: unknown,
+): { ok: true; value: Date | null } | { ok: false; error: string } {
+  if (value === null || value === undefined || value === '') {
+    return { ok: true, value: null };
+  }
+  if (typeof value !== 'string') {
+    return { ok: false, error: '临时额度到期日格式无效' };
+  }
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return { ok: true, value: null };
+  }
+  if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+    const parsed = new Date(`${trimmed}T23:59:59.999+08:00`);
+    if (Number.isNaN(parsed.getTime()) || formatCreditDateForInput(parsed) !== trimmed) {
+      return { ok: false, error: '临时额度到期日无效' };
+    }
+    return { ok: true, value: parsed };
+  }
+  const parsed = new Date(trimmed);
+  if (Number.isNaN(parsed.getTime())) {
+    return { ok: false, error: '临时额度到期日格式无效' };
+  }
+  return { ok: true, value: parsed };
+}
+
+export async function evaluatePostDeliveryCredit(
+  db: CreditReader,
+  input: { userId: string | null; email: string; paymentMethod: string | null; total: number },
+  now = new Date(),
+) {
+  if (!isPostDeliveryPaymentMethod(input.paymentMethod)) {
+    return { applicable: false as const };
+  }
+  const user = input.userId
+    ? await db.user.findUnique({ where: { id: input.userId }, select: { id: true, tier: true } })
+    : await db.user.findUnique({ where: { email: input.email }, select: { id: true, tier: true } });
+  if (!user) {
+    return { applicable: false as const };
+  }
+  const account = await db.creditAccount.findUnique({ where: { userId: user.id } });
+  const summary = summarizeCustomerCredit(user, account, now);
+  const suspended = !['active', 'credit_limited'].includes(summary.status);
+  const projectedUsed = roundCents(summary.usedAmount + input.total);
+  const exceedsLimit = projectedUsed > summary.effectiveLimit;
+  const shortfall = exceedsLimit ? roundCents(projectedUsed - summary.effectiveLimit) : 0;
+  return {
+    applicable: true as const,
+    userId: user.id,
+    tier: user.tier,
+    summary,
+    suspended,
+    exceedsLimit,
+    shortfall,
+  };
+}
+
 export async function ensureCreditAccount(tx: Tx, userId: string, tierName: string) {
   const tier = TIERS.find((item) => item.name === tierName) ?? DEFAULT_TIER;
   return tx.creditAccount.upsert({
@@ -103,19 +227,28 @@ export async function reserveOrderCredit(tx: Tx, orderId: string, actorId?: stri
   if (!user) throw new Error('CREDIT_USER_NOT_FOUND');
   const account = await ensureCreditAccount(tx, user.id, user.tier);
   if (!['active', 'credit_limited'].includes(account.status)) throw new Error('CREDIT_ACCOUNT_SUSPENDED');
-  const limit = creditLimitForAccount(account);
-  if (account.usedAmount + order.total > limit) throw new Error('CREDIT_LIMIT_EXCEEDED');
-  const confirmedAt = new Date();
-  const usedAmount = account.usedAmount + order.total;
+  const limit = roundCents(creditLimitForAccount(account));
+  const orderAmount = roundCents(order.total);
+  const usedAmount = roundCents(account.usedAmount + orderAmount);
+  if (usedAmount > limit) throw new Error('CREDIT_LIMIT_EXCEEDED');
+  const history = actorId && order.status === 'confirmed' ? await tx.orderStatusHistory.findFirst({
+    where: { orderId, fromStatus: 'pending', toStatus: 'confirmed', actorId },
+    orderBy: { createdAt: 'desc' }, select: { createdAt: true, metadata: true },
+  }) : null;
+  const merchant = jsonObject(history?.metadata);
+  const acceptedAt = history && merchant?.actorType === 'libereal_admin' && merchant.action === 'accept_order'
+    && merchant.version === 2 ? history.createdAt : null;
+  const confirmedAt = acceptedAt ?? new Date();
   await tx.creditAccount.update({ where: { id: account.id }, data: { usedAmount } });
-  await tx.creditTransaction.create({ data: { userId: user.id, orderId, type: 'reserve', amount: order.total, balanceAfter: usedAmount, actorId } });
+  await tx.creditTransaction.create({ data: { userId: user.id, orderId, type: 'reserve', amount: orderAmount, balanceAfter: usedAmount, actorId } });
   await tx.order.update({ where: { id: orderId }, data: { customerId: user.id } });
   return tx.accountReceivable.create({
     data: {
       orderId,
       userId: user.id,
-      amount: order.total,
+      amount: orderAmount,
       confirmedAt,
+      ...(acceptedAt ? { termStartedAt: acceptedAt, dueAt: new Date(acceptedAt.getTime() + account.paymentTermDays * 86400000) } : {}),
       paymentTermDaysSnapshot: account.paymentTermDays,
     },
   });
@@ -131,12 +264,56 @@ export function isUnsettledReceivableStatus(status: string): boolean {
   return UNSETTLED_RECEIVABLE_STATUSES.has(status);
 }
 
+export const overdueReceivableWhere = (now: Date) => ({
+  status: { in: [...UNSETTLED_RECEIVABLE_STATUSES] },
+  paidAt: null,
+  dueAt: { not: null, lte: now },
+  order: { paidAt: null, status: { notIn: [...INACTIVE_ORDER_STATUSES] } },
+}) satisfies Prisma.AccountReceivableWhereInput;
+
+type OrderCreditLedger = {
+  id: string;
+  customerId: string | null;
+  receivable: { id: string } | null;
+  creditTransactions: Pick<CreditTransaction, 'id' | 'type' | 'amount' | 'userId'>[];
+};
+
+// The order may have reserved only the balance after a deposit.
+export async function orderCreditHeldCents(tx: Tx, order: OrderCreditLedger) {
+  const ledger = order.creditTransactions;
+  const reserves = ledger.filter(row => row.type === 'reserve');
+  if (!order.customerId || reserves.length !== 1 || reserves[0].amount < 0) return null;
+  const postings = ledger.some(row => row.type === 'release') ? await tx.customerCashPosting.findMany({
+    where: { orderId: order.id, creditTransactionId: { not: null } },
+    select: { creditTransactionId: true, releasedCents: true, receivableId: true },
+  }) : [];
+  const linked = new Map(postings.map(row => [row.creditTransactionId, row]));
+  let balance = 0;
+  for (const row of ledger) {
+    if (!['reserve', 'amount_adjust', 'release'].includes(row.type) || row.userId !== order.customerId) return null;
+    const amount = Math.round(row.amount * 100);
+    if (!Number.isSafeInteger(amount)) return null;
+    if (row.type === 'release') {
+      const post = linked.get(row.id);
+      if (!post || !order.receivable || post.receivableId !== order.receivable.id
+        || amount >= 0 || Number(post.releasedCents) !== -amount) return null;
+    }
+    balance += amount;
+  }
+  return Number.isSafeInteger(balance) && balance >= 0 ? balance : null;
+}
+
 export type UnsettledReceivableSync = {
   adjusted: boolean;
   amount: number;
   usedAmount: number;
   status: string;
 };
+
+async function hasCustomerCash(tx: Tx, orderId: string) {
+  return Boolean(await tx.customerCashPosting.findFirst({ where: { orderId }, select: { id: true } })
+    || await tx.purchaseActivity.findFirst({ where: { orderId, action: 'record_customer_receipt' }, select: { id: true } }));
+}
 
 export async function syncUnsettledReceivableAmount(
   tx: Tx,
@@ -160,6 +337,7 @@ export async function syncUnsettledReceivableAmount(
     return { adjusted: false, amount: nextAmount, usedAmount: account.usedAmount, status: receivable.status };
   }
 
+  if (await hasCustomerCash(tx, orderId)) throw new Error('ORDER_AMOUNT_LOCKED');
   const usedAmount = roundCents(account.usedAmount + delta);
   if (usedAmount < 0) throw new Error('CREDIT_USED_INVALID');
   if (delta > 0) {
@@ -195,24 +373,34 @@ export async function startOrderReceivableTerm(tx: Tx, orderId: string, startedA
 }
 
 export async function releaseOrderReceivableOnCancellation(tx: Tx, orderId: string, actorId?: string | null) {
-  const receivable = await tx.accountReceivable.findUnique({ where: { orderId } });
+  const order = await tx.order.findUnique({ where: { id: orderId }, select: {
+    id: true, customerId: true, paidAt: true, receivable: true,
+    creditTransactions: { select: { id: true, type: true, amount: true, userId: true } },
+  } });
+  if (!order) return null;
+  const { receivable } = order;
   if (!receivable || receivable.status === 'cancelled') return receivable;
-  if (receivable.status === 'paid') throw new Error('PAID_ORDER_REFUND_REQUIRED');
+  if (receivable.status === 'paid' || receivable.paidAt || order.paidAt || await hasCustomerCash(tx, orderId)) {
+    throw new Error('PAID_ORDER_REFUND_REQUIRED');
+  }
+  const held = await orderCreditHeldCents(tx, order);
+  if (!isUnsettledReceivableStatus(receivable.status) || held === null || order.customerId !== receivable.userId) {
+    throw new Error('CREDIT_RESERVATION_REVIEW_REQUIRED');
+  }
   const account = await tx.creditAccount.findUnique({ where: { userId: receivable.userId } });
   if (!account) throw new Error('CREDIT_ACCOUNT_NOT_FOUND');
-  const usedAmount = Math.max(0, account.usedAmount - receivable.amount);
-  await tx.creditAccount.update({ where: { id: account.id }, data: { usedAmount } });
-  await tx.creditTransaction.create({
-    data: {
-      userId: receivable.userId,
-      orderId,
-      type: 'release',
-      amount: -receivable.amount,
-      balanceAfter: usedAmount,
-      reason: '订单取消释放授信',
-      actorId,
-    },
-  });
+  const usedAmount = roundCents(account.usedAmount - held / 100);
+  if (!Number.isFinite(usedAmount) || usedAmount < 0) throw new Error('CREDIT_RESERVATION_REVIEW_REQUIRED');
+  if (held > 0) {
+    const changed = await tx.creditAccount.updateMany({
+      where: { id: account.id, usedAmount: account.usedAmount }, data: { usedAmount },
+    });
+    if (changed.count !== 1) throw new Error('CREDIT_RESERVATION_REVIEW_REQUIRED');
+    await tx.creditTransaction.create({ data: {
+      userId: receivable.userId, orderId, type: 'release', amount: -held / 100,
+      balanceAfter: usedAmount, reason: '订单取消释放授信', actorId,
+    } });
+  }
   return tx.accountReceivable.update({ where: { id: receivable.id }, data: { status: 'cancelled' } });
 }
 
@@ -222,40 +410,49 @@ export async function settleOrderReceivable(tx: Tx, orderId: string, actorId?: s
   if (receivable.status === 'paid') return receivable;
   const account = await tx.creditAccount.findUnique({ where: { userId: receivable.userId } });
   if (!account) throw new Error('CREDIT_ACCOUNT_NOT_FOUND');
+  if (!isUnsettledReceivableStatus(receivable.status) || await hasCustomerCash(tx, orderId)) {
+    throw new Error('VERIFIED_RECEIPTS_REQUIRED');
+  }
   const paidAt = new Date();
-  const usedAmount = Math.max(0, account.usedAmount - receivable.amount);
+  const usedAmount = roundCents(account.usedAmount - receivable.amount);
+  if (usedAmount < 0) throw new Error('CREDIT_USED_INVALID');
+  await tx.creditAccount.update({ where: { id: account.id }, data: { usedAmount } });
+  await tx.creditTransaction.create({ data: { userId: receivable.userId, orderId, type: 'release', amount: -receivable.amount, balanceAfter: usedAmount, actorId } });
+  return finishCustomerReceivable(tx, receivable, paidAt);
+}
+
+export async function refreshCreditRestrictions(tx: Tx, userId: string, now: Date) {
+  const account = await tx.creditAccount.findUnique({ where: { userId } });
+  if (!account) return;
   const openReceivables = await tx.accountReceivable.findMany({
-    where: {
-      userId: receivable.userId,
-      status: { in: ['open', 'overdue'] },
-      id: { not: receivable.id },
-      dueAt: { not: null, lte: paidAt },
-    },
-    select: { dueAt: true },
+    where: { ...overdueReceivableWhere(now), userId },
+    select: { id: true, userId: true, dueAt: true, amount: true, status: true, order: { select: receivableOrderBalance } },
   });
+  const outstanding = openReceivables.filter(row => collectibleReceivableCents(row, row.order) > 0);
   const nextStatus = creditStatusForOverdueReceivables({
     currentStatus: account.status,
     statusSource: account.statusSource,
-    maxOverdueDays: maxOverdueDaysForReceivables(openReceivables, paidAt),
-    hasEligibleHold: hasEligibleCreditHold(openReceivables, account.manuallyUnlockedAt, paidAt),
+    maxOverdueDays: maxOverdueDaysForReceivables(outstanding, now),
+    hasEligibleHold: hasEligibleCreditHold(outstanding, account.manuallyUnlockedAt, now),
   });
-  await tx.creditAccount.update({
-    where: { id: account.id },
-    data: {
-      usedAmount,
-      ...(nextStatus === account.status ? {} : { status: nextStatus, statusSource: 'system' }),
-    },
-  });
-  await tx.creditTransaction.create({ data: { userId: receivable.userId, orderId, type: 'release', amount: -receivable.amount, balanceAfter: usedAmount, actorId } });
+  if (nextStatus !== account.status) {
+    await tx.creditAccount.update({ where: { id: account.id }, data: { status: nextStatus, statusSource: 'system' } });
+  }
+}
+
+export async function finishCustomerReceivable(tx: Tx, receivable: { id: string; orderId: string; userId: string; amount: number }, paidAt: Date) {
+  const { orderId } = receivable;
+  const bookedAt = new Date();
   await tx.accountReceivable.update({ where: { id: receivable.id }, data: { status: 'paid', paidAt } });
-  await tx.order.update({ where: { id: orderId }, data: { status: 'completed', paidAt } });
+  await tx.order.update({ where: { id: orderId }, data: { paidAt } });
+  await refreshCreditRestrictions(tx, receivable.userId, bookedAt);
   const existingPoints = await tx.pointsLog.findFirst({ where: { userId: receivable.userId, relatedId: orderId, type: 'order_credit' } });
   const earned = calculateOrderPoints(receivable.amount);
   if (!existingPoints && earned > 0) {
     await tx.user.update({ where: { id: receivable.userId }, data: { points: { increment: earned } } });
     await tx.pointsLog.create({ data: { userId: receivable.userId, delta: earned, type: 'order_credit', relatedId: orderId, reason: '订单回款积分' } });
   }
-  await recalculateUserTier(tx, receivable.userId, paidAt);
+  await recalculateUserTier(tx, receivable.userId, bookedAt);
   return tx.accountReceivable.findUniqueOrThrow({ where: { id: receivable.id } });
 }
 

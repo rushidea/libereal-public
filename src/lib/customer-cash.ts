@@ -1,0 +1,95 @@
+import type { Prisma } from '@prisma/client';
+import { finishCustomerReceivable, isUnsettledReceivableStatus, orderCreditHeldCents } from '@/lib/customer-credit';
+import { isActivePurchaseOrder, readPurchaseAcceptance } from '@/lib/purchase-acceptance';
+import { readPurchaseActivities } from '@/lib/purchase-activity';
+import { orderReceiptEvidence } from '@/lib/purchase-receipts';
+import { loadPurchaseOrderSource, type SourceOrder } from '@/lib/purchase-source';
+import { PurchaseError } from '@/lib/purchase-terms';
+import { readReceivablePrincipal } from '@/lib/receivable-balance';
+
+type Db = Prisma.TransactionClient;
+export type CustomerCashSource = { bankAllocationId: string } | { paymentAttemptId: string };
+
+const cents = (yuan: number) => Math.round(yuan * 100);
+
+export async function customerCashProjection(tx: Db, order: SourceOrder, amount: number, source: 'bank' | 'alipay' = 'bank') {
+  if (source === 'bank' && (!isActivePurchaseOrder(order)
+    || !(await readPurchaseAcceptance(tx, order, await readPurchaseActivities(tx, order.id))).proof)) {
+    throw new PurchaseError('原订单缺少有效的平台接单依据，银行回单可先核验，补齐接单依据后再核销');
+  }
+  const previous = await tx.customerCashPosting.findMany({ where: { orderId: order.id } });
+  const before = previous.reduce((sum, row) => sum + Number(row.amountCents), 0);
+  const proof = await readReceivablePrincipal(tx, order, source === 'bank' ? order.receivable : null);
+  if (!proof) throw new PurchaseError('原订单金额须先核对，保留已有应收和到账凭据');
+  const face = proof.cents;
+  const remaining = face - before - amount;
+  if (!Number.isSafeInteger(remaining) || remaining < 0) throw new PurchaseError('本次归入金额超过未核销的订单余额');
+  const ar = order.receivable;
+  if (ar && !isUnsettledReceivableStatus(ar.status)) throw new PurchaseError('原应收已经结清或关闭，请核对原始账务');
+  const creditReservationUnverified = Boolean(ar && proof.reviewId && !order.creditTransactions.length);
+  const held = ar && !creditReservationUnverified ? await orderCreditHeldCents(tx, order) : 0;
+  const account = ar ? await tx.creditAccount.findUnique({ where: { userId: ar.userId } }) : null;
+  if (held === null || ar && (ar.userId !== order.customerId || !account && !creditReservationUnverified || account && cents(account.usedAmount) < held
+    || held > cents(ar.amount) || held > face - before)) throw new PurchaseError('应收或已占授信与原单不符，请核对原始账务');
+  const released = Math.min(amount, Math.max(0, held - remaining));
+  return { amountCents: amount, postedBeforeCents: before, remainingCents: remaining, receivableId: ar?.id ?? null,
+    releaseCents: released, orderCreditAfterCents: creditReservationUnverified ? null : held - released, creditReservationUnverified, accountId: account?.id ?? null,
+    accountUsedBefore: account?.usedAmount ?? null, accountUsedAfter: account ? (cents(account.usedAmount) - released) / 100 : null };
+}
+
+export async function postVerifiedCustomerCash(tx: Db, orderId: string, source: CustomerCashSource, actorId: string) {
+  const existing = await tx.customerCashPosting.findUnique({ where: source });
+  if (existing) {
+    if (existing.orderId !== orderId) throw new PurchaseError('到账记录已经关联其他订单');
+    return existing.id;
+  }
+  const order = await loadPurchaseOrderSource(tx, orderId);
+  const activities = await readPurchaseActivities(tx, orderId);
+  const face = cents(order.total);
+  const { payment } = await orderReceiptEvidence(tx, order, activities, face);
+  const bankId = 'bankAllocationId' in source ? source.bankAllocationId : null;
+  const entry = payment.receipts.find(row => row.counted && row.id === bankId);
+  const native = 'paymentAttemptId' in source && source.paymentAttemptId === payment.paymentAttemptId;
+  const amount = native ? face : entry?.amountCents;
+  const occurredAt = native ? payment.nativePaidAt : entry?.occurredAt;
+  if (!amount || !Number.isSafeInteger(amount) || typeof occurredAt !== 'string' || !Number.isFinite(Date.parse(occurredAt))) {
+    throw new PurchaseError('须核对原订单的平台交易或已核验的银行到账分摊');
+  }
+  const previous = await tx.customerCashPosting.findMany({ where: { orderId } });
+  const ar = order.receivable;
+  if ((payment.paymentAttemptId && payment.allocatedCents > 0) || order.paidAt && !native
+    || previous.some(row => row.bankAllocationId && !payment.receipts.some(item => item.counted && item.id === row.bankAllocationId))) {
+    throw new PurchaseError('已有付款日期或不同来源的到账记录需要财务核对，不能再次核销');
+  }
+  const projection = await customerCashProjection(tx, order, amount, native ? 'alipay' : 'bank');
+  const released = projection.releaseCents;
+  const remaining = projection.remainingCents;
+  let creditTransactionId: string | null = null;
+  if (ar && projection.accountId && projection.accountUsedAfter !== null && projection.accountUsedBefore !== null) {
+    if (released) {
+      const balanceAfter = projection.accountUsedAfter;
+      const changed = await tx.creditAccount.updateMany({
+        where: { id: projection.accountId, usedAmount: projection.accountUsedBefore }, data: { usedAmount: balanceAfter },
+      });
+      if (changed.count !== 1) throw new PurchaseError('客户授信占用发生变化，请重新核对');
+      const credit = await tx.creditTransaction.create({ data: {
+        userId: ar.userId, orderId, type: 'release', amount: -released / 100, balanceAfter,
+        reason: '按已核验的实际回款核销', actorId,
+      } });
+      creditTransactionId = credit.id;
+    }
+  }
+  const posted = await tx.customerCashPosting.create({ data: {
+    orderId, ...source, amountCents: BigInt(amount), releasedCents: BigInt(released),
+    receivableId: ar?.id, creditTransactionId, actorId,
+  } });
+  if (remaining === 0) {
+    const linked = new Set(previous.map(row => row.bankAllocationId).concat(bankId));
+    const paymentDates = payment.receipts.filter(row => row.counted && linked.has(row.id))
+      .map(row => Date.parse(String(row.occurredAt)));
+    const paidAt = new Date(Math.max(Date.parse(occurredAt), ...paymentDates));
+    if (ar) await finishCustomerReceivable(tx, ar, paidAt);
+    else if (!order.paidAt) await tx.order.update({ where: { id: orderId }, data: { paidAt } });
+  }
+  return posted.id;
+}

@@ -4,6 +4,7 @@ import Database from 'better-sqlite3';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
 import { NextRequest } from 'next/server';
+import { testDatabasePath } from './test-database-path';
 
 const cookieJar = vi.hoisted(() => new Map<string, string>());
 
@@ -73,7 +74,7 @@ async function getCsrf(handlers: { GET: (req: NextRequest) => Promise<Response> 
 describe('real Auth.js mfa-verify session gate', () => {
   it('issues an mfa_verified session only after a correct TOTP code', async () => {
     vi.resetModules();
-    const dbPath = `/tmp/libereal-auth-mfa-verify-${process.pid}-${randomUUID()}.db`;
+    const dbPath = testDatabasePath('libereal-auth-mfa-verify');
     const db = new Database(dbPath);
     createVerifySchema(db);
     const key = randomBytes(32).toString('base64');

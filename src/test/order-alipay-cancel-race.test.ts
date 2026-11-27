@@ -110,6 +110,7 @@ const db = vi.hoisted(() => {
       findUnique: vi.fn(async () => ({ ...shared.order })),
     },
     paymentAttempt: {
+      findMany: vi.fn(async () => []),
       findUnique: vi.fn(async () => {
         if (shared.controls.pauseAttempt) {
           shared.controls.notifyHasEntered();
@@ -121,6 +122,7 @@ const db = vi.hoisted(() => {
       updateMany: shared.attemptUpdateMany,
     },
     accountReceivable: { findUnique: vi.fn(async () => null) },
+    orderEvent: { findMany: vi.fn(async () => []) },
   };
   return {
     tx,

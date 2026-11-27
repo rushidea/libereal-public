@@ -231,6 +231,10 @@ export function inquiryItemView(item: InquiryItemView, options?: { productBrand?
   };
 }
 
+function parseObject(value: string | null | undefined): Record<string, unknown> {
+  try { const parsed = JSON.parse(value || '{}'); return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {}; } catch { return {}; }
+}
+
 export function orderItemView(item: OrderItemView) {
   let variantId: string | null = null;
   let spec: string | null = null;
@@ -256,6 +260,7 @@ export function orderItemView(item: OrderItemView) {
     shippedQty: item.shippedQty,
     leadTime: item.leadTime,
     status: item.status,
+    customerSupplyConditions: text(parseObject(item.pricingSnapshot).customerSupplyConditions),
     pricingSnapshot: customerVisiblePricingSnapshot(item.pricingSnapshot),
     metadata: item.metadata ?? null,
     variantId,

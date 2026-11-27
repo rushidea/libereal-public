@@ -15,11 +15,13 @@ import { QuoteQuantityNudgeNotice } from '@/components/account/QuoteQuantityNudg
 import { findQuoteQuantityNudges } from '@/lib/quote-quantity-nudge';
 import { customerCanAcceptQuote, effectiveInquiryStatus, quoteIsExpired } from '@/lib/quote-expiry';
 import DeclineQuoteDialog from '@/components/account/DeclineQuoteDialog';
+import InquiryFeedbackSection from '@/components/account/InquiryFeedbackSection';
 import { CheckoutPaymentFields, useCheckoutPointsBalance } from '@/components/checkout/CheckoutPaymentFields';
 import { InquiryIdDisplay } from '@/components/InquiryIdDisplay';
 import { quoteConfirmSettlementFields } from '@/lib/admin-acting-points';
 import { describeCheckoutPayable } from '@/lib/checkout-payment';
 import { startAlipayCheckout } from '@/lib/alipay-checkout-client';
+import { formatQuoteConfirmError } from '@/lib/credit-summary';
 
 import Breadcrumb from '@/components/Breadcrumb';
 import { ORDER_STATUS_LABELS } from '@/lib/order-domain';
@@ -78,9 +80,23 @@ interface Inquiry {
   createdAt: string;
   organizationId?: string | null;
   ownerScope?: 'personal' | 'organization';
-  activeQuote?: { id: string; version: number; status: string; subtotal: number; validUntil?: string | null; sentAt?: string; acceptedAt?: string; items: InquiryItem[] } | null;
+  activeQuote?: {
+    id: string;
+    version: number;
+    status: string;
+    subtotal: number;
+    validUntil?: string | null;
+    sentAt?: string;
+    acceptedAt?: string;
+    declineReasonCode?: string | null;
+    declineNote?: string | null;
+    declinedAt?: string | null;
+    declinedByEmail?: string | null;
+    items: InquiryItem[];
+  } | null;
   orderCount?: number;
   orders?: Order[];
+  feedbackSummary?: { totalCount: number; pendingCount: number };
 }
 
 const STATUS_CONFIG: Record<string, { label: string; color: string; icon: React.ComponentType<{ className?: string }> }> = {
@@ -145,8 +161,8 @@ export default function MyInquiriesPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [status]);
 
-  async function fetchInquiries() {
-    setLoading(true);
+  async function fetchInquiries(options?: { silent?: boolean }) {
+    if (!options?.silent) setLoading(true);
     try {
       const res = await fetch('/api/my-orders');
       const data = await res.json();
@@ -192,7 +208,7 @@ export default function MyInquiriesPage() {
     } catch (e) {
       console.error(e);
     } finally {
-      setLoading(false);
+      if (!options?.silent) setLoading(false);
     }
   }
 
@@ -327,7 +343,7 @@ export default function MyInquiriesPage() {
         if (code === 'QUOTE_STALE' || code === 'QUOTE_EXPIRED' || code === 'QUOTE_NOT_ACTIONABLE' || code === 'QUOTE_VERSION_CONFLICT' || res.status === 400 || res.status === 409) {
           await fetchInquiries();
         }
-        alert(code ? `${err.error || '报价状态已变化'} 请刷新后重新核对。` : (res.status === 400 || res.status === 409 ? `${err.detail || err.error || '报价状态已变化'} 请刷新后重新核对。` : (err.detail || err.error || '提交失败')));
+        alert(formatQuoteConfirmError(err, res.status));
       }
     } catch (e) {
       console.error(e);
@@ -698,6 +714,14 @@ export default function MyInquiriesPage() {
                           })()}
                         </div>
                       )}
+                      <div className="mt-4">
+                        <InquiryFeedbackSection
+                          inquiryId={inquiry.id}
+                          inquiryStatus={inquiry.status}
+                          activeQuote={inquiry.activeQuote}
+                          onSubmitted={() => { void fetchInquiries({ silent: true }); }}
+                        />
+                      </div>
                     </div>
                   )}
                 </div>

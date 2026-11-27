@@ -1,10 +1,13 @@
 'use client';
 
+import ShipmentProgress from '@/components/customer/ShipmentProgress';
+
 import { Fragment, use } from 'react';
 
 import { useEffect, useState } from 'react';
 import { useSession } from 'next-auth/react';
 import { useRouter } from 'next/navigation';
+import OrderAfterSales from '@/components/account/OrderAfterSales';
 import Link from 'next/link';
 import {
   Package, CheckCircle, Clock, Truck, XCircle, RotateCcw,
@@ -59,7 +62,7 @@ type Order = {
   addressSnapshot?: { name: string; phone: string; address: string; institution?: string };
   shipments: Array<{
     id: string; method: string; status: string; carrier?: string; trackingNumber?: string;
-    pickupPoint?: string; contactName?: string; contactPhone?: string; shippedAt?: string;
+    pickupPoint?: string; contactName?: string; contactPhone?: string; shippedAt?: string; deliveredAt?: string | null; fulfillmentParcel?: { status: string } | null;
   }>;
   createdAt: string;
   updatedAt: string;
@@ -84,6 +87,7 @@ type Order = {
     groupPoints: number;
     groupId: string | null;
   } | null;
+  creditReviewPending?: boolean;
 };
 
 const STATUS_CONFIG: Record<string, { label: string; color: string; bg: string; icon: React.ComponentType<{ size?: number; className?: string }> }> = {
@@ -147,7 +151,9 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
       });
       const data = await response.json().catch(() => ({})) as { error?: string };
       if (!response.ok) {
-        window.alert(data.error === 'PAID_ORDER_REFUND_REQUIRED'
+        window.alert(data.error === 'ALIPAY_RECEIPT_PENDING_REVIEW'
+          ? '已记录取消申请。支付宝到账正由财务核对。'
+          : data.error === 'PAID_ORDER_REFUND_REQUIRED'
           ? '已付款订单需要退款审核，暂时不能自助取消。'
           : data.error === 'POINTS_REFUND_FAILED'
             ? '积分没有退回，订单没有取消。请稍后重试。'
@@ -235,6 +241,15 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
             </div>
           </div>
 
+          {order.status === 'pending' && order.creditReviewPending && (
+            <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900 dark:border-amber-500/40 dark:bg-amber-900/20 dark:text-amber-100">
+              <p className="font-semibold">订单已提交，待人工授信审核</p>
+              <p className="mt-1 text-xs leading-5 text-amber-800 dark:text-amber-200">
+                本单金额超出您当前的可用授信额度，暂未占用授信额度也尚未正式接单。请等待 Libereal 工作人员人工核对授信后再确认接单；如需尽快安排采购，也可以联系客服沟通调额或改用支付宝付款。
+              </p>
+            </div>
+          )}
+
           <div className="border-t border-gray-100 dark:border-slate-400 pt-4 space-y-3">
             <p className="text-xs text-gray-500 dark:text-gray-500">发货记录</p>
             {order.shipments.length === 0 ? (
@@ -245,6 +260,7 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
                 <div>
                   <p className="font-medium text-gray-800 dark:text-slate-900">{SHIPPING_LABELS[shipment.method] || shipment.method}</p>
                   {shipment.trackingNumber && <p className="text-gray-600 dark:text-gray-400">{shipment.carrier || '物流'} · {shipment.trackingNumber}</p>}
+                  <ShipmentProgress shipment={shipment}/>
                   {shipment.pickupPoint && <p className="text-gray-600 dark:text-gray-400">{shipment.pickupPoint}</p>}
                   {shipment.contactName && <p className="text-gray-600 dark:text-gray-400">{shipment.contactName} {shipment.contactPhone || ''}</p>}
                 </div>
@@ -433,6 +449,7 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
                 </div>
               </div>
             </div>
+            <OrderAfterSales key={order.id} orderId={order.id} items={parsedItems}/>
           </div>
         </div>
 

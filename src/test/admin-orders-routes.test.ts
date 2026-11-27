@@ -26,6 +26,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import { isAdminMfaScenarioEnabled, requiresAdminMfaForPermission } from '@/lib/admin-mfa-settings';
 import { getTestDb, closeTestDb, seedAdmin, seedUser, clearAllTables } from './db-helpers';
 
+beforeAll(() => { getTestDb(); });
+afterAll(() => { closeTestDb(); });
+
 function seedOrder(db: ReturnType<typeof getTestDb>, order: {
   id: string;
   email: string;
@@ -56,8 +59,6 @@ function seedOrder(db: ReturnType<typeof getTestDb>, order: {
 }
 
 describe('GET /api/admin/orders/[id]', () => {
-  beforeAll(() => { getTestDb(); });
-  afterAll(() => { closeTestDb(); });
   beforeEach(() => {
     const db = getTestDb();
     clearAllTables(db);
@@ -89,8 +90,6 @@ describe('GET /api/admin/orders/[id]', () => {
 });
 
 describe('PATCH /api/admin/orders/[id]', () => {
-  beforeAll(() => { getTestDb(); });
-  afterAll(() => { closeTestDb(); });
   beforeEach(() => {
     const db = getTestDb();
     clearAllTables(db);
@@ -194,8 +193,6 @@ describe('PATCH /api/admin/orders/[id]', () => {
 });
 
 describe('PATCH /api/admin/orders/archive', () => {
-  beforeAll(() => { getTestDb(); });
-  afterAll(() => { closeTestDb(); });
   beforeEach(() => {
     const db = getTestDb();
     clearAllTables(db);
@@ -285,6 +282,10 @@ describe('PATCH /api/admin/orders/archive', () => {
       INSERT INTO AccountReceivable (
         id, orderId, userId, amount, status, confirmedAt, paymentTermDaysSnapshot, createdAt, updatedAt
       ) VALUES ('ar1', 'o1', 'buyer_1', 180, 'open', datetime('now'), 30, datetime('now'), datetime('now'))
+    `).run();
+    db.prepare(`
+      INSERT INTO CreditTransaction (id, userId, orderId, type, amount, balanceAfter, actorId, createdAt)
+      VALUES ('ct1', 'buyer_1', 'o1', 'reserve', 180, 180, 'admin_test_id', datetime('now'))
     `).run();
     db.prepare(`
       INSERT INTO PaymentAttempt (id, orderId, provider, outTradeNo, amount, status, createdAt, updatedAt)
@@ -445,8 +446,6 @@ describe('PATCH /api/admin/orders/archive', () => {
 });
 
 describe('GET /api/admin/orders/archived', () => {
-  beforeAll(() => { getTestDb(); });
-  afterAll(() => { closeTestDb(); });
   beforeEach(() => {
     const db = getTestDb();
     clearAllTables(db);
@@ -475,8 +474,6 @@ describe('finance.write MFA scenario gating', () => {
     });
   }
 
-  beforeAll(() => { getTestDb(); });
-  afterAll(() => { closeTestDb(); });
   beforeEach(() => {
     const db = getTestDb();
     clearAllTables(db);
@@ -499,20 +496,28 @@ describe('finance.write MFA scenario gating', () => {
     expect(res.status).toBe(200);
   });
 
-  it('blocks postpaid settlement when the finance step-up is rejected', async () => {
+  it('blocks cancellation of a postpaid order with occupied credit when the finance step-up is rejected', async () => {
     vi.mocked(requiresAdminMfaForPermission).mockImplementation(async (permission) => permission === 'finance.write');
     const previousMfa = process.env.MFA_ADMIN_REQUIRED;
     process.env.MFA_ADMIN_REQUIRED = 'true';
-    getTestDb().prepare(`UPDATE "Order" SET status = 'confirmed', paymentMethod = 'bank_transfer' WHERE id = 'o1'`).run();
+    const db = getTestDb();
+    seedUser(db, { id: 'credit-buyer', email: 'credit-buyer@example.test' });
+    db.prepare(`UPDATE "Order" SET status = 'confirmed', paymentMethod = 'bank_transfer', customerId='credit-buyer' WHERE id = 'o1'`).run();
+    db.prepare(`INSERT INTO CreditAccount (id,userId,baseLimit,usedAmount,status,paymentTermDays,createdAt,updatedAt)
+      VALUES ('credit-hold','credit-buyer',200,40,'active',30,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`).run();
+    db.prepare(`INSERT INTO AccountReceivable (id,orderId,userId,amount,status,confirmedAt,paymentTermDaysSnapshot,createdAt,updatedAt)
+      VALUES ('credit-receivable','o1','credit-buyer',40,'open',CURRENT_TIMESTAMP,30,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`).run();
 
     try {
-      const res = await orderPATCH(makePatch('o1', { status: 'completed' }) as NextRequest, {
+      const res = await orderPATCH(makePatch('o1', { status: 'cancelled' }) as NextRequest, {
         params: Promise.resolve({ id: 'o1' }),
       });
 
       expect(res.status).toBe(403);
       await expect(res.json()).resolves.toMatchObject({ error: 'Admin MFA required' });
-      expect(getTestDb().prepare('SELECT status FROM "Order" WHERE id = ?').get('o1')).toEqual({ status: 'confirmed' });
+      expect(db.prepare('SELECT status FROM "Order" WHERE id = ?').get('o1')).toEqual({ status: 'confirmed' });
+      expect(db.prepare('SELECT status,paidAt FROM AccountReceivable WHERE id = ?').get('credit-receivable')).toEqual({ status: 'open', paidAt: null });
+      expect(db.prepare('SELECT usedAmount FROM CreditAccount WHERE id = ?').get('credit-hold')).toEqual({ usedAmount: 40 });
     } finally {
       if (previousMfa === undefined) delete process.env.MFA_ADMIN_REQUIRED;
       else process.env.MFA_ADMIN_REQUIRED = previousMfa;
@@ -528,15 +533,37 @@ describe('finance.write MFA scenario gating', () => {
     expect(res.status).toBe(200);
   });
 
-  it('does not apply finance step-up to a confirming transition even when enabled', async () => {
-    vi.mocked(requiresAdminMfaForPermission).mockImplementation(async (permission) => permission === 'finance.write');
+  it('denies merchant acceptance without orders.write and leaves no acceptance history', async () => {
+    const db = getTestDb();
+    db.prepare(`UPDATE "Order" SET paymentMethod = 'alipay', paidAt = datetime('now') WHERE id = 'o1'`).run();
+    db.prepare("UPDATE AdminRole SET key = 'test_order_reader' WHERE key = 'super_admin'").run();
+    db.prepare("DELETE FROM AdminRolePermission WHERE permissionId = 'perm_orders_write'").run();
 
-    const res = await orderPATCH(makePatch('o1', { status: 'confirmed' }) as NextRequest, {
+    const res = await orderPATCH(makePatch('o1', { status: 'confirmed' }), {
       params: Promise.resolve({ id: 'o1' }),
     });
 
+    expect(res.status).toBe(403);
+    await expect(res.json()).resolves.toMatchObject({ requiredPermission: 'orders.write' });
+    expect(db.prepare('SELECT status FROM "Order" WHERE id = ?').get('o1')).toEqual({ status: 'pending' });
+    expect(db.prepare('SELECT id FROM OrderStatusHistory WHERE orderId = ?').all('o1')).toEqual([]);
+  });
+
+  it('does not apply finance step-up to a confirming transition even when enabled', async () => {
+    vi.mocked(requiresAdminMfaForPermission).mockImplementation(async (permission) => permission === 'finance.write');
+    getTestDb().prepare(`UPDATE "Order" SET paymentMethod = 'alipay', paidAt = datetime('now') WHERE id = 'o1'`).run();
+
+    const params = { params: Promise.resolve({ id: 'o1' }) };
+    const detail = await orderGET(new NextRequest('http://localhost:3000/api/admin/orders/o1'), params);
+    const approval = (await detail.json()).order.approvalPreview;
+    const res = await orderPATCH(makePatch('o1', { status: 'confirmed', approvalVersion: approval.version }), params);
+
     expect(sessionMocks.requireAdminStepUp).not.toHaveBeenCalled();
     expect(res.status).toBe(200);
+    const history = getTestDb().prepare('SELECT actorId, metadata FROM OrderStatusHistory WHERE orderId = ? AND toStatus = ?')
+      .get('o1', 'confirmed') as { actorId: string; metadata: string };
+    expect(history.actorId).toBe('admin_test_id');
+    expect(JSON.parse(history.metadata)).toMatchObject({ action: 'accept_order', actorType: 'libereal_admin', orderVersion: approval.version });
   });
 
   it('requires admin step-up for points refund with finance.write enabled', async () => {

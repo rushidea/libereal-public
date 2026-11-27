@@ -6,7 +6,7 @@ Use the local .agents/skills/astra-orchestrator/SKILL.md for complex tasks when 
 
 Never import legacy Git history, old branches/tags, private business configuration, supplier-specific formulas, real SKU/price/discount rules, supplier documents, real customer/order data, databases, secrets or deployment assets.
 
-Public CI must run independently on GitHub-hosted runners without private repository checkout or commercial secrets. Use Node 20 as configured in .github/workflows/ci.yml.
+Public CI must run independently on GitHub-hosted runners without private repository checkout or commercial secrets. Use the Owner-approved Node 26.13.0 version pinned in .node-version and .github/workflows/ci.yml.
 
 Feature changes enter integration branches through pull requests. If staging-main is used, require the catalog/search/filter/promotion validation gate before merging. Production deployment is a separate private operation with an explicit human decision gate.
 

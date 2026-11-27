@@ -12,13 +12,16 @@ import { QuoteQuantityNudgeNotice } from '@/components/account/QuoteQuantityNudg
 import { findQuoteQuantityNudges } from '@/lib/quote-quantity-nudge';
 import { customerCanAcceptQuote, effectiveInquiryStatus, quoteIsExpired } from '@/lib/quote-expiry';
 import DeclineQuoteDialog from '@/components/account/DeclineQuoteDialog';
+import InquiryFeedbackSection from '@/components/account/InquiryFeedbackSection';
 import { CheckoutPaymentFields, useCheckoutPointsBalance } from '@/components/checkout/CheckoutPaymentFields';
 import { InquiryIdDisplay } from '@/components/InquiryIdDisplay';
 import { quoteConfirmSettlementFields } from '@/lib/admin-acting-points';
 import { describeCheckoutPayable } from '@/lib/checkout-payment';
 import { startAlipayCheckout } from '@/lib/alipay-checkout-client';
+import { formatQuoteConfirmError } from '@/lib/credit-summary';
 
 interface InquiryItem {
+  notes?: string | null;
   id?: string;
   isQuickOrder?: boolean;
   name?: string;
@@ -72,8 +75,22 @@ interface Inquiry {
   createdAt: string;
   organizationId?: string | null;
   ownerScope?: 'personal' | 'organization';
-  activeQuote?: { id: string; version: number; status: string; subtotal: number; validUntil?: string | null; sentAt?: string; acceptedAt?: string; items: InquiryItem[] } | null;
+  activeQuote?: {
+    id: string;
+    version: number;
+    status: string;
+    subtotal: number;
+    validUntil?: string | null;
+    sentAt?: string;
+    acceptedAt?: string;
+    declineReasonCode?: string | null;
+    declineNote?: string | null;
+    declinedAt?: string | null;
+    declinedByEmail?: string | null;
+    items: InquiryItem[];
+  } | null;
   orderCount?: number;
+  feedbackSummary?: { totalCount: number; pendingCount: number };
 }
 
 const STATUS_CONFIG: Record<string, { label: string; color: string; icon: React.ComponentType<{ className?: string }> }> = {
@@ -145,8 +162,8 @@ export default function InquiriesPanel() {
   const [inquiryOrders, setInquiryOrders] = useState<Record<string, LinkedOrder[]>>({});
   const actorScope = useCallback((inq: Inquiry) => `${session?.user?.id || session?.user?.email || 'unknown'}:${inq.ownerScope || 'personal'}:${inq.organizationId || ''}`, [session?.user?.id, session?.user?.email]);
 
-  const fetchInquiries = useCallback(async (preserveSelection = true) => {
-    setLoading(true);
+  const fetchInquiries = useCallback(async (preserveSelection = true, options?: { silent?: boolean }) => {
+    if (!options?.silent) setLoading(true);
     try {
       const res = await fetch('/api/my-orders');
       const data = await res.json();
@@ -196,7 +213,7 @@ export default function InquiriesPanel() {
     } catch (e) {
       console.error(e);
     } finally {
-      setLoading(false);
+      if (!options?.silent) setLoading(false);
     }
   }, [actorScope]);
 
@@ -336,7 +353,7 @@ export default function InquiriesPanel() {
         if (code === 'QUOTE_STALE' || code === 'QUOTE_EXPIRED' || code === 'QUOTE_NOT_ACTIONABLE' || code === 'QUOTE_VERSION_CONFLICT' || res.status === 400 || res.status === 409) {
           await fetchInquiries();
         }
-          alert(code ? `${err.error || '报价状态已变化'} 请刷新后重新核对。` : (res.status === 400 || res.status === 409 ? `${err.detail || err.error || '报价状态已变化'} 请刷新后重新核对。` : (err.detail || err.error || '提交失败')));
+        alert(formatQuoteConfirmError(err, res.status));
       }
     } catch (e) {
       console.error(e);
@@ -598,6 +615,7 @@ export default function InquiriesPanel() {
                               <div>
                                 <p className={`mb-1 text-xs ${uiSurfaces.mutedText}`}>货期</p>
                                 <p className={`text-xs font-medium ${uiSurfaces.textSecondary}`}>{leadTime || '-'}</p>
+                                {item.notes && <p className={`text-xs ${uiSurfaces.textSecondary}`}>{item.notes}</p>}
                               </div>
                             </div>
                           </div>
@@ -672,6 +690,12 @@ export default function InquiriesPanel() {
                         })()}
                       </div>
                     )}
+                    <InquiryFeedbackSection
+                      inquiryId={inquiry.id}
+                      inquiryStatus={inquiry.status}
+                      activeQuote={inquiry.activeQuote}
+                      onSubmitted={() => { void fetchInquiries(true, { silent: true }); }}
+                    />
                   </div>
                 )}
               </div>

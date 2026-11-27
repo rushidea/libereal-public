@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   registerSecuritySession: vi.fn(),
   touchSecuritySession: vi.fn(),
   hasRecentSecuritySessionMfa: vi.fn(),
+  hasRecentStagingTestAdminStepUp: vi.fn(),
   getAdminMfaPolicy: vi.fn(),
   shouldRequireAdminMfaForPermission: vi.fn((permission: string) => ['orders.write', 'roles.manage'].includes(permission)),
 }));
@@ -21,6 +22,13 @@ vi.mock('@/lib/security/security-session-service', () => ({
   touchSecuritySession: mocks.touchSecuritySession,
   hasRecentSecuritySessionMfa: mocks.hasRecentSecuritySessionMfa,
 }));
+vi.mock('@/lib/security/security-step-up', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/security/security-step-up')>();
+  return {
+    ...actual,
+    hasRecentStagingTestAdminStepUp: mocks.hasRecentStagingTestAdminStepUp,
+  };
+});
 vi.mock('@/lib/security/admin-mfa-policy', () => ({
   getAdminMfaPolicy: mocks.getAdminMfaPolicy,
 }));
@@ -252,6 +260,45 @@ describe('requireActiveSession', () => {
     } finally {
       if (previous === undefined) delete process.env.MFA_ADMIN_REQUIRED;
       else process.env.MFA_ADMIN_REQUIRED = previous;
+    }
+  });
+
+  it('accepts a scoped staging test admin window for orders.write but rejects it for admin_mfa_policy', async () => {
+    const previousMfa = process.env.MFA_ADMIN_REQUIRED;
+    process.env.MFA_ADMIN_REQUIRED = 'true';
+    try {
+      const user = {
+        ...sessionUser,
+        email: 'icylix@gmail.com',
+        role: 'admin' as const,
+        authLevel: 'primary_verified' as const,
+      };
+      mocks.auth.mockResolvedValue({ user });
+      mocks.getSecuritySessionState.mockResolvedValue({ known: true, active: true });
+      mocks.hasRecentSecuritySessionMfa.mockResolvedValue(false);
+      mocks.getAdminMfaPolicy.mockResolvedValue({
+        required: true,
+        requirement: 'super_admin',
+        hasTotp: false,
+        hasPasskey: false,
+        satisfied: false,
+      });
+      mocks.hasRecentStagingTestAdminStepUp.mockResolvedValue(true);
+
+      await expect(requireAdmin('orders.write')).resolves.toEqual(user);
+      expect(mocks.hasRecentStagingTestAdminStepUp).toHaveBeenCalledWith('user-1', 'session-1');
+
+      const policyResponse = await requireAdmin('roles.manage', { action: 'admin_mfa_policy' });
+      expect(policyResponse).toHaveProperty('status', 403);
+      await expect((policyResponse as Response).json()).resolves.toEqual({ error: 'Admin MFA required', redirect: '/account/security' });
+
+      mocks.hasRecentStagingTestAdminStepUp.mockResolvedValue(false);
+      const deniedResponse = await requireAdmin('orders.write');
+      expect(deniedResponse).toHaveProperty('status', 403);
+    } finally {
+      mocks.hasRecentStagingTestAdminStepUp.mockReset();
+      if (previousMfa === undefined) delete process.env.MFA_ADMIN_REQUIRED;
+      else process.env.MFA_ADMIN_REQUIRED = previousMfa;
     }
   });
 });

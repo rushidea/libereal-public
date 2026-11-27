@@ -20,6 +20,7 @@ interface NavItem {
   icon: React.ComponentType<{ className?: string }>;
   exact?: boolean;
   permission: AdminPermissionKey;
+  alternativePermission?: AdminPermissionKey;
 }
 
 interface NavSection {
@@ -45,6 +46,9 @@ const NAV_SECTIONS: NavSection[] = [
     title: '订单管理',
     items: [
       { href: '/admin/orders', label: '活跃订单', icon: ClipboardList, permission: 'orders.read' },
+      { href: '/admin/purchases', label: '供应商采购', icon: Package, permission: 'purchases.read' },
+      { href: '/admin/finance', label: '票款与对账', icon: Receipt, permission: 'finance.read' },
+      { href: '/admin/after-sales', label: '订单售后', icon: Ticket, permission: 'orders.read', alternativePermission: 'purchases.read' },
       { href: '/admin/orders/new', label: '代客下单', icon: Receipt, permission: 'orders.write' },
       { href: '/admin/orders/archived', label: '归档订单', icon: Archive, permission: 'orders.read' },
     ],
@@ -76,6 +80,7 @@ const NAV_SECTIONS: NavSection[] = [
     title: '内容与合规',
     items: [
       { href: '/admin/notifications', label: '消息管理', icon: Megaphone, permission: 'content.read' },
+      { href: '/admin/business-letters', label: '商务信函', icon: Receipt, permission: 'inquiries.read', alternativePermission: 'content.read' },
       { href: '/admin/wechat-articles', label: '服务号文章', icon: Newspaper, permission: 'content.read' },
       { href: '/admin/legal', label: '文书管理', icon: Scale, permission: 'content.read' },
     ],
@@ -133,7 +138,7 @@ export default function AdminSidebar({ collapsed = false }: AdminSidebarProps) {
   const [todoCounts, setTodoCounts] = useState<TodoCounts>({ orders: 0, inquiries: 0, users: 0, community: 0, organizations: 0 });
   const visibleSections = NAV_SECTIONS.map((section) => ({
     ...section,
-    items: section.items.filter((item) => (permissions ? permissions.includes(item.permission) : item.permission === 'admin.access')),
+    items: section.items.filter((item) => (permissions ? permissions.includes(item.permission) || Boolean(item.alternativePermission && permissions.includes(item.alternativePermission)) : item.permission === 'admin.access')),
   })).filter((section) => section.items.length > 0);
   const mobileItems = visibleSections.flatMap(section => section.items);
   const preferredMobileHrefs = ['/admin', '/admin/orders', '/admin/inquiries', '/admin/users'];

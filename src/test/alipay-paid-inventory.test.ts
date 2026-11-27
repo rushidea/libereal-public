@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { prisma } from '@/lib/prisma';
 import { reserveOrderInventory } from '@/lib/inventory';
+import { closeStalePendingOrders, reconcileStockHeldAlipayPayments } from '@/lib/order-auto-close';
 import { clearAllTables, closeTestDb, getTestDb } from './db-helpers';
 
 vi.mock('@/lib/alipay', async (importOriginal) => {
@@ -16,17 +17,18 @@ vi.mock('@/lib/alipay', async (importOriginal) => {
 
 import { POST } from '@/app/api/payments/alipay/notify/route';
 
-function notify(outTradeNo: string, amount = '100.00') {
+function notify(outTradeNo: string, amount = '100.00', tradeStatus = 'TRADE_SUCCESS', paidAt?: Date) {
   const body = new URLSearchParams({
     app_id: '9021000000000000',
     seller_id: '2088000000000000',
     out_trade_no: outTradeNo,
     total_amount: amount,
-    trade_status: 'TRADE_SUCCESS',
+    trade_status: tradeStatus,
     trade_no: `trade-${outTradeNo}`,
     sign_type: 'RSA2',
     sign: 'signed-value',
   });
+  if (paidAt) body.set('gmt_payment', new Date(paidAt.getTime() + 8 * 3600000).toISOString().slice(0, 19).replace('T', ' '));
   return new Request('https://libereal.cn/api/payments/alipay/notify', {
     method: 'POST',
     headers: { 'content-type': 'application/x-www-form-urlencoded' },
@@ -119,6 +121,12 @@ describe('Alipay payment inventory reservation', () => {
     expect(repeat.status).toBe(200);
     expect(await prisma.auditLog.count({ where: { action: 'payment.alipay_stock_shortfall_reconciliation_required' } })).toBe(1);
 
+    const delayed = await POST(notify('LP-SHORT', '200.00', 'TRADE_CLOSED'));
+    await expect(delayed.text()).resolves.toBe('success');
+    expect(await prisma.paymentAttempt.findUnique({ where: { outTradeNo: 'LP-SHORT' } })).toMatchObject({
+      status: 'paid_stock_shortfall_reconciliation_required', tradeNo: 'trade-LP-SHORT',
+    });
+
     getTestDb().prepare('UPDATE Product SET stockQuantity = 5 WHERE id = ?').run('p1');
     const recovered = await POST(notify('LP-SHORT', '200.00'));
     expect(recovered.status).toBe(200);
@@ -132,6 +140,35 @@ describe('Alipay payment inventory reservation', () => {
       reservedQuantity: 2,
       availableQuantity: 3,
     });
+  });
+
+  it('protects an original signed receipt through a stale close scan and resumes it from the scheduled job after restock', async () => {
+    seedOrder('held-office-order', 'LP-HELD-OFFICE', 2, 1);
+    seedOrder('unpaid-office-order', 'LP-UNPAID-OFFICE', 1, 1);
+    const expired = new Date(Date.now() - 60000);
+    await prisma.order.updateMany({ where: { id: { in: ['held-office-order', 'unpaid-office-order'] } }, data: { autoCloseAt: expired } });
+    const scanned = await prisma.order.findMany({ where: { id: 'held-office-order' } });
+    const paidAt = new Date(Math.floor((Date.now() - 120000) / 1000) * 1000);
+    await expect((await POST(notify('LP-HELD-OFFICE', '200.00', 'TRADE_SUCCESS', paidAt))).text()).resolves.toBe('success');
+    const held = await prisma.paymentAttempt.findUniqueOrThrow({ where: { outTradeNo: 'LP-HELD-OFFICE' } });
+    expect(held).toMatchObject({ status: 'paid_stock_shortfall_reconciliation_required', paidAt });
+    const staleSelection = vi.spyOn(prisma.order, 'findMany').mockResolvedValueOnce(scanned);
+    try {
+      expect(await closeStalePendingOrders()).toMatchObject({ closed: 0 });
+    } finally { staleSelection.mockRestore(); }
+    expect(await closeStalePendingOrders()).toMatchObject({ closed: 1 });
+    expect(await prisma.order.findUnique({ where: { id: 'unpaid-office-order' } })).toMatchObject({ status: 'closed' });
+    expect(await prisma.order.findUnique({ where: { id: 'held-office-order' } })).toMatchObject({ status: 'unpaid', paidAt: null, autoCloseAt: expired });
+    expect(await reconcileStockHeldAlipayPayments()).toEqual({ stockReceiptsResumed: 0, stockReceiptsDeferred: 1 });
+
+    await prisma.product.update({ where: { id: 'p1' }, data: { stockQuantity: 5 } });
+    expect(await reconcileStockHeldAlipayPayments()).toEqual({ stockReceiptsResumed: 1, stockReceiptsDeferred: 0 });
+    expect(await reconcileStockHeldAlipayPayments()).toEqual({ stockReceiptsResumed: 0, stockReceiptsDeferred: 0 });
+    expect(await closeStalePendingOrders()).toMatchObject({ closed: 0 });
+    expect(await prisma.order.findUnique({ where: { id: 'held-office-order' } })).toMatchObject({ status: 'pending', autoCloseAt: null, paidAt });
+    expect(await prisma.paymentAttempt.findUnique({ where: { id: held.id } })).toMatchObject({ status: 'paid', paidAt, notifiedAt: held.notifiedAt });
+    expect(await prisma.orderEvent.count({ where: { orderId: 'held-office-order', type: 'payment_received' } })).toBe(1);
+    expect(await prisma.inventoryReservation.count({ where: { orderId: 'held-office-order' } })).toBe(1);
   });
 
   it('still accepts payment for unknown stock without driving available quantity negative', async () => {

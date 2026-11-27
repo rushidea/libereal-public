@@ -189,7 +189,7 @@ type PointsSettlementOrder = {
   pointsApplied: boolean;
 };
 
-async function heldOrderRedeemPoints(tx: Tx, order: PointsSettlementOrder) {
+export async function heldOrderRedeemPoints(tx: Tx, order: PointsSettlementOrder) {
   let personal = 0;
   if (order.pointsPersonal > 0 && order.customerId) {
     const logs = await tx.pointsLog.findMany({

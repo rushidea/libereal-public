@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   acquireLock: vi.fn(),
   releaseLock: vi.fn(),
   reconcile: vi.fn(),
+  resumeStockReceipts: vi.fn(),
   closeStale: vi.fn(),
   listUrls: vi.fn(),
   submitIndexNow: vi.fn(),
@@ -31,6 +32,7 @@ vi.mock('@/lib/customer-credit', () => ({
     limitedCreditLimit: 0,
   },
   creditRestrictionForOverdueDays: vi.fn(),
+  overdueReceivableWhere: vi.fn(),
   overdueDaysFromDueAt: vi.fn(),
   runDailyTierReview: mocks.runDailyTierReview,
 }));
@@ -47,6 +49,7 @@ vi.mock('@/lib/background-tasks', () => ({
 }));
 
 vi.mock('@/lib/order-auto-close', () => ({
+  reconcileStockHeldAlipayPayments: mocks.resumeStockReceipts,
   reconcilePendingAlipayOrderPoints: mocks.reconcile,
   closeStalePendingOrders: mocks.closeStale,
 }));
@@ -105,6 +108,7 @@ beforeEach(() => {
   mocks.acquireLock.mockResolvedValue('lock-token');
   mocks.releaseLock.mockResolvedValue(undefined);
   mocks.reconcile.mockResolvedValue({ reconciled: 0, failed: 0 });
+  mocks.resumeStockReceipts.mockResolvedValue({ stockReceiptsResumed: 0, stockReceiptsDeferred: 0 });
   mocks.closeStale.mockResolvedValue({ closed: 0, skipped: 0 });
   mocks.listUrls.mockResolvedValue([]);
   mocks.submitIndexNow.mockResolvedValue({ submitted: 0, batches: 0 });
@@ -221,6 +225,7 @@ describe('cron routes', () => {
       expect(route.started()).toHaveBeenCalledTimes(2);
     }
     expect(mocks.closeStale).toHaveBeenCalledTimes(2);
+    expect(mocks.resumeStockReceipts).toHaveBeenCalledTimes(2);
     expect(mocks.runDailyTierReview).toHaveBeenCalledTimes(2);
     expect(mocks.submitIndexNow).toHaveBeenCalledTimes(2);
     expect(mocks.releaseLock).toHaveBeenCalledTimes(2);

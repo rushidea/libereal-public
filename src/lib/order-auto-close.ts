@@ -8,6 +8,7 @@
 
 import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
+import { closeOrderRepricing } from '@/lib/order-catalog-repricing';
 import { releaseOrderReceivableOnCancellation } from '@/lib/customer-credit';
 import { restoreRedeemedOrderCoupons } from '@/lib/coupon-service';
 import { releaseOrderInventory } from '@/lib/inventory';
@@ -22,6 +23,8 @@ import {
 import { isAlipayPaymentMethod, isPostDeliveryPaymentMethod } from '@/data/payment-methods';
 import { ALIPAY_PAYMENT_WINDOW_MS } from '@/data/alipay-payment';
 import { writeAuditLog } from '@/lib/audit';
+import { alipayReceiptWhere } from '@/lib/payment-concurrency';
+import { AlipayStockReceiptDeferred, applyStockHeldAlipayPayment, previewStockHeldAlipayPayment, STOCK_SHORTFALL_STATUS } from '@/lib/alipay-order-settlement';
 import { AUTO_CLOSEABLE_ORDER_STATUSES, assertOrderTransition, INACTIVE_ORDER_STATUSES, isAutoCloseableOrderStatus } from '@/lib/order-domain';
 
 export const AUTO_CLOSE_HOURS = 48;
@@ -183,15 +186,42 @@ export async function reconcilePendingAlipayOrderPoints(batchLimit = 100): Promi
   return { reconciled, failed };
 }
 
+export async function reconcileStockHeldAlipayPayments(batchLimit = 100) {
+  const attempts = await prisma.paymentAttempt.findMany({
+    where: { provider: 'alipay', status: STOCK_SHORTFALL_STATUS, tradeNo: { not: null },
+      order: { paidAt: null, archivedAt: null, status: { in: [...AUTO_CLOSEABLE_ORDER_STATUSES] } } },
+    select: { id: true, orderId: true }, orderBy: [{ notifiedAt: 'asc' }, { id: 'asc' }], take: batchLimit,
+  });
+  let stockReceiptsResumed = 0;
+  let stockReceiptsDeferred = 0;
+  for (const attempt of attempts) {
+    try {
+      await prisma.$transaction(async tx => {
+        const plan = await previewStockHeldAlipayPayment(tx, attempt.orderId, attempt.id);
+        await applyStockHeldAlipayPayment(tx, plan);
+      });
+      stockReceiptsResumed++;
+    } catch (error) {
+      stockReceiptsDeferred++;
+      if (!(error instanceof AlipayStockReceiptDeferred)) console.error('[order-auto-close] reconcile stock-held receipt failed:', attempt.id, error);
+    }
+  }
+  return { stockReceiptsResumed, stockReceiptsDeferred };
+}
+
 export async function closeStalePendingOrders(now = new Date(), batchLimit = 100): Promise<{ closed: number; skipped: number }> {
+  const overdueUnpaid = {
+    status: { in: [...AUTO_CLOSEABLE_ORDER_STATUSES] },
+    archivedAt: null,
+    autoCloseAt: { lt: now },
+    NOT: { OR: [
+      { paymentMethod: { in: ALIPAY_PAYMENT_METHOD_STORAGE_VALUES }, paidAt: { not: null } },
+      { paymentAttempts: { some: alipayReceiptWhere } },
+    ] },
+  } satisfies Prisma.OrderWhereInput;
   const staleOrders = await prisma.order.findMany({
-    where: {
-      status: { in: [...AUTO_CLOSEABLE_ORDER_STATUSES] },
-      archivedAt: null,
-      autoCloseAt: { lt: now },
-      NOT: { paymentMethod: { in: ALIPAY_PAYMENT_METHOD_STORAGE_VALUES }, paidAt: { not: null } },
-    },
-    select: { id: true, status: true, paymentMethod: true, paidAt: true, total: true, pointsDiscount: true },
+    where: overdueUnpaid,
+    select: { id: true },
     orderBy: { autoCloseAt: 'asc' },
     take: batchLimit,
   });
@@ -200,18 +230,17 @@ export async function closeStalePendingOrders(now = new Date(), batchLimit = 100
   let failed = 0;
 
   for (const order of staleOrders) {
-    if (isAlipayPaymentMethod(order.paymentMethod) && order.paidAt) {
-      failed += 1;
-      continue;
-    }
     try {
       const didClose = await prisma.$transaction(async (tx) => {
-        const fresh = await tx.order.findUnique({ where: { id: order.id }, select: { status: true } });
+        const fresh = await tx.order.findUnique({
+          where: { ...overdueUnpaid, id: order.id },
+          select: { status: true, paymentMethod: true, total: true, pointsDiscount: true },
+        });
         if (!fresh || !isAutoCloseableOrderStatus(fresh.status)) return false;
         assertOrderTransition(fresh.status, 'closed');
 
         await tx.order.update({
-          where: { id: order.id },
+          where: { ...overdueUnpaid, id: order.id, status: fresh.status },
           data: {
             status: 'closed',
             autoCloseAt: null,
@@ -236,10 +265,11 @@ export async function closeStalePendingOrders(now = new Date(), batchLimit = 100
           },
         });
 
-        if (isPostDeliveryPaymentMethod(order.paymentMethod)) await releaseOrderReceivableOnCancellation(tx, order.id, null);
+        await closeOrderRepricing(tx, order.id, { id: null, email: 'system' });
+        if (isPostDeliveryPaymentMethod(fresh.paymentMethod)) await releaseOrderReceivableOnCancellation(tx, order.id, null);
         await releaseOrderInventory(tx, order.id, null, '超时未付款自动关闭释放库存');
         await restoreRedeemedOrderCoupons(tx, order.id);
-        const originalPaidYuan = Math.round((order.total + order.pointsDiscount) * 100) / 100;
+        const originalPaidYuan = Math.round((fresh.total + fresh.pointsDiscount) * 100) / 100;
         requirePointsRefund(await refundOrderPointsProportionally(tx, {
           orderId: order.id,
           refundYuan: originalPaidYuan,

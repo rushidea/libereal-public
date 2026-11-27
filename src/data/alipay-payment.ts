@@ -1,5 +1,6 @@
 import { normalizeOrderPaymentMethod } from '@/data/payment-methods';
 import { ALIPAY_PAYABLE_ORDER_STATUSES, isInactiveOrderStatus } from '@/lib/order-domain';
+import { isAlipayReconciliationStatus } from '@/lib/payment-concurrency';
 
 export const ALIPAY_PAYMENT_WINDOW_MS = 24 * 60 * 60 * 1000;
 
@@ -10,7 +11,7 @@ type AlipayPayableOrder = {
   status?: string | null;
 };
 
-export type AlipayPaymentStatus = 'pending' | 'processing' | 'paid' | 'expired' | 'closed' | 'failed';
+export type AlipayPaymentStatus = 'pending' | 'processing' | 'paid' | 'expired' | 'closed' | 'failed' | 'reconciliation';
 
 export type AlipayPaymentSummary = {
   provider: 'alipay';
@@ -74,10 +75,13 @@ export function getAlipayPaymentSummary(
 
   const attemptStatus = attempt?.status?.trim() || null;
   const normalizedAttemptStatus = attemptStatus?.toUpperCase() || '';
-  const paidAt = toIsoString(order.paidAt || attempt?.paidAt);
+  const pendingReview = isAlipayReconciliationStatus(attemptStatus);
+  const paidAt = toIsoString(order.paidAt || (pendingReview ? null : attempt?.paidAt));
   let status: AlipayPaymentStatus;
 
-  if (paidAt || PAID_ATTEMPT_STATUSES.has(normalizedAttemptStatus)) {
+  if (pendingReview && !order.paidAt) {
+    status = 'reconciliation';
+  } else if (paidAt || PAID_ATTEMPT_STATUSES.has(normalizedAttemptStatus)) {
     status = 'paid';
   } else if (isInactiveOrderStatus(order.status) || CLOSED_ATTEMPT_STATUSES.has(normalizedAttemptStatus)) {
     status = 'closed';

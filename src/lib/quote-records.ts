@@ -1,4 +1,5 @@
 import { effectiveQuoteQuantityConstraint } from '@/lib/quote-acceptance';
+import { pricingContentHash } from '@/lib/pricing-adjustment-approval';
 
 export type QuoteProductTaxonomy = {
   category: string | null;
@@ -63,6 +64,14 @@ export type QuoteRecord = {
   items: QuoteItemRecord[];
 };
 
+export function quoteContentHash(quote: QuoteRecord) {
+  return pricingContentHash({ id: quote.id, version: quote.version, status: quote.status,
+    subtotal: quote.subtotal, currency: quote.currency, validUntil: quote.validUntil,
+    items: quote.items.map((item) => ({ id: item.id, productId: item.productId, catalogNumber: item.catalogNumber,
+      name: item.name, quantity: item.quantity, orderedQty: item.orderedQty, unitPrice: item.unitPrice,
+      lineTotal: item.lineTotal, leadTime: item.leadTime, available: item.available, notes: item.notes, metadata: item.metadata ?? null })) });
+}
+
 // Decline fields are returned only by reads that already authorize the caller:
 // GET /api/inquiries — admin inquiries.read
 // GET /api/inquiries/[id] — personal owner, organization record access, or admin inquiries.read
@@ -74,6 +83,10 @@ export function quoteView(
 ) {
   return {
     id: quote.id,
+    contentHash: quoteContentHash(quote),
+    catalogRepricing: quote.items.some((item) => {
+      try { return typeof JSON.parse(item.metadata || '{}').catalogRepricingApprovalHash === 'string'; } catch { return false; }
+    }),
     version: quote.version,
     status: quote.status,
     subtotal: quote.subtotal,

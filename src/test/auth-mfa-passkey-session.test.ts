@@ -5,6 +5,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { NextRequest } from 'next/server';
 import { describe, expect, it, vi } from 'vitest';
 import { hashChallengeForStorage } from '@/lib/security/mfa-challenge-store';
+import { testDatabasePath } from './test-database-path';
 
 const cookieJar = vi.hoisted(() => new Map<string, string>());
 const transientValues = vi.hoisted(() => new Map<string, string>());
@@ -87,7 +88,7 @@ describe('real Auth.js Passkey MFA session gate', () => {
 
   it('issues a session through mfa-verify with mfaMethod=passkey', async () => {
     vi.resetModules();
-    const dbPath = `/tmp/libereal-auth-passkey-${process.pid}-${randomUUID()}.db`;
+    const dbPath = testDatabasePath('libereal-auth-passkey');
     const db = new Database(dbPath);
     db.exec(`
       CREATE TABLE User (id TEXT PRIMARY KEY, email TEXT NOT NULL, name TEXT, role TEXT NOT NULL DEFAULT 'customer', avatar TEXT, displayAvatarUrl TEXT);

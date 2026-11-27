@@ -1,5 +1,7 @@
 'use client';
 
+import ShipmentProgress from '@/components/customer/ShipmentProgress';
+
 import React, { useEffect, useState, useRef, Suspense, startTransition } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useSession } from 'next-auth/react';
@@ -57,13 +59,14 @@ type Order = {
   adjustmentTotal: number;
   total: number;
   status: string;
+  creditReviewPending?: boolean;
   paymentMethod?: string;
   paidAt?: string | null;
   payment?: AlipayPaymentSummary | null;
   adjustments: Array<{ id: string; label: string; amount: number; reason?: string | null }>;
   shipments: Array<{
     id: string; method: string; carrier?: string; trackingNumber?: string; pickupPoint?: string;
-    contactName?: string; contactPhone?: string; shippedAt?: string;
+    contactName?: string; contactPhone?: string; shippedAt?: string; deliveredAt?: string | null; fulfillmentParcel?: { status: string } | null;
   }>;
   createdAt: string;
   updatedAt: string;
@@ -115,6 +118,7 @@ function canReorderOrder(order: Order): boolean {
 
 function orderActionErrorMessage(error: string | undefined): string {
   if (error === 'PAID_ORDER_REFUND_REQUIRED') return '已付款订单需要退款审核，暂时不能自助取消。';
+  if (error === 'ALIPAY_RECEIPT_PENDING_REVIEW') return '已记录取消申请。支付宝到账正由财务核对。';
   if (error === 'INVALID_ORDER_TRANSITION') return '订单当前状态不能取消。';
   if (error === 'POINTS_REFUND_FAILED') return '积分没有退回，订单没有取消。请稍后重试。';
   if (error === 'REORDER_PRODUCT_UNAVAILABLE') return '订单中的部分商品已下架，暂时无法再次下单。';
@@ -189,8 +193,8 @@ function OrdersContent() {
         window.alert(orderActionErrorMessage(data.error));
         return;
       }
-      setOrders((current) => current.map((item) => item.id === order.id ? { ...item, status: 'cancelled' } : item));
-      setSelectedOrder((current) => current?.id === order.id ? { ...current, status: 'cancelled' } : current);
+      setOrders((current) => current.map((item) => item.id === order.id ? { ...item, status: 'cancelled', creditReviewPending: false } : item));
+      setSelectedOrder((current) => current?.id === order.id ? { ...current, status: 'cancelled', creditReviewPending: false } : current);
     } catch {
       window.alert('网络错误，请稍后重试。');
     } finally {
@@ -353,6 +357,11 @@ function OrdersContent() {
                             <span className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium ${STATUS_COLORS[displayedOrderStatus(order)] || 'bg-gray-100 text-gray-600'}`}>
                               {STATUS_LABELS[displayedOrderStatus(order)] || order.status}
                             </span>
+                            {order.status === 'pending' && order.creditReviewPending && (
+                              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-800 dark:bg-amber-900/50 dark:text-amber-300">
+                                待授信审核
+                              </span>
+                            )}
                             {order.payment && <AlipayPaymentStatusView payment={order.payment} compact />}
                           </div>
                         </td>
@@ -387,7 +396,7 @@ function OrdersContent() {
                                 {selectedOrder.shipments.length === 0 ? <p className="text-sm text-gray-500">暂未发货</p> : selectedOrder.shipments.map((shipment) => (
                                   <div key={shipment.id} className="flex items-start gap-2 text-sm text-gray-600 dark:text-gray-400">
                                     <Truck className="w-4 h-4 mt-0.5" />
-                                    <span>{SHIPPING_LABELS[shipment.method] || shipment.method}{shipment.carrier ? ` · ${shipment.carrier}` : ''}{shipment.trackingNumber ? ` · ${shipment.trackingNumber}` : ''}{shipment.pickupPoint ? ` · ${shipment.pickupPoint}` : ''}</span>
+                                    <span>{SHIPPING_LABELS[shipment.method] || shipment.method}{shipment.carrier ? ` · ${shipment.carrier}` : ''}{shipment.trackingNumber ? ` · ${shipment.trackingNumber}` : ''}{shipment.pickupPoint ? ` · ${shipment.pickupPoint}` : ''}<ShipmentProgress shipment={shipment}/></span>
                                   </div>
                                 ))}
                               </div>
@@ -456,6 +465,12 @@ function OrdersContent() {
                                   付款方式：<span className="font-bold text-orange-600">{translatePaymentMethod(selectedOrder.paymentMethod)}</span>
                                 </div>
                               )}
+                              {selectedOrder.status === 'pending' && selectedOrder.creditReviewPending && (
+                                <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs leading-5 text-amber-900 dark:border-amber-700/60 dark:bg-amber-900/20 dark:text-amber-200">
+                                  <strong>订单已提交，待人工授信审核：</strong>
+                                  当前订单金额超出可用授信额度，暂未占用额度或锁价，待财务审核并确认接单后生效。
+                                </div>
+                              )}
                               {selectedOrder.ownerPrepaySettlement?.eligible && (
                                 <OrderPrepaySettlement
                                   orderId={selectedOrder.id}
@@ -492,6 +507,11 @@ function OrdersContent() {
                       <span className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium ${STATUS_COLORS[displayedOrderStatus(order)] || 'bg-gray-100 text-gray-600'}`}>
                         {STATUS_LABELS[displayedOrderStatus(order)] || order.status}
                       </span>
+                      {order.status === 'pending' && order.creditReviewPending && (
+                        <span className="ml-1.5 inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-800 dark:bg-amber-900/50 dark:text-amber-300">
+                          待授信审核
+                        </span>
+                      )}
                       {order.payment && <div className="mt-1.5"><AlipayPaymentStatusView payment={order.payment} compact /></div>}
                     </div>
                     <div className="text-right">
@@ -528,13 +548,19 @@ function OrdersContent() {
                       {selectedOrder.shipments.length > 0 && (
                         <div>
                           <p className="text-xs text-gray-500 dark:text-gray-500 mb-1">发货记录</p>
-                          {selectedOrder.shipments.map((shipment) => <p key={shipment.id} className="text-gray-700 dark:text-slate-900">{SHIPPING_LABELS[shipment.method] || shipment.method}{shipment.trackingNumber ? ` · ${shipment.trackingNumber}` : ''}</p>)}
+                          {selectedOrder.shipments.map((shipment) => <p key={shipment.id} className="text-gray-700 dark:text-slate-900">{SHIPPING_LABELS[shipment.method] || shipment.method}{shipment.trackingNumber ? ` · ${shipment.trackingNumber}` : ''}<ShipmentProgress shipment={shipment}/></p>)}
                         </div>
                       )}
                       {selectedOrder.paymentMethod && (
                         <div>
                           <p className="text-xs text-gray-500 dark:text-gray-500 mb-1">付款方式</p>
                           <p className="text-orange-600 font-medium">{translatePaymentMethod(selectedOrder.paymentMethod)}</p>
+                        </div>
+                      )}
+                      {selectedOrder.status === 'pending' && selectedOrder.creditReviewPending && (
+                        <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs leading-5 text-amber-900 dark:border-amber-700/60 dark:bg-amber-900/20 dark:text-amber-200">
+                          <strong>订单已提交，待人工授信审核：</strong>
+                          当前订单金额超出可用授信额度，暂未占用额度或锁价，待财务审核并确认接单后生效。
                         </div>
                       )}
                       {selectedOrder.ownerPrepaySettlement?.eligible && (

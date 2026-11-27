@@ -10,6 +10,7 @@ import { loadQuoteProductTaxonomy } from '@/lib/quote-item-taxonomy';
 import { canAccessOrganizationRecord } from '@/lib/organization-record-access';
 import { emailKeyedAccess } from '@/lib/verified-email-access';
 import { INQUIRY_STATUS_LABELS, inquiryStatusTransitionError, isInquiryStatus } from '@/lib/inquiry-status';
+import { buildFeedbackSummaryMap, emptyFeedbackSummary } from '@/lib/inquiry-feedback';
 
 interface LogItem {
   name: string;
@@ -41,7 +42,9 @@ export async function GET(
     where: { id },
     include: {
       inquiryItems: { orderBy: { position: 'asc' } },
-      quotes: { orderBy: { version: 'desc' }, take: 1, include: { items: { orderBy: { position: 'asc' } } } },
+      quotes: { ...(user.role === 'admin' ? {} : { where: { OR: [
+        { sentAt: { not: null } }, { status: { in: ['sent', 'accepted', 'expired', 'declined'] } },
+      ] } }), orderBy: { version: 'desc' }, take: 1, include: { items: { orderBy: { position: 'asc' } } } },
     },
   });
   if (!inquiry) return NextResponse.json({ error: 'Inquiry not found' }, { status: 404 });
@@ -56,11 +59,22 @@ export async function GET(
   const currentInquiry = applySettledQuoteExpiry(inquiry, settled);
   const { inquiryItems, quotes, userId: creatorUserId, ...publicInquiry } = currentInquiry;
   void creatorUserId;
-  const quoteTaxonomy = await loadQuoteProductTaxonomy(quotes.flatMap((quote) => quote.items.map((item) => item.productId)));
+  const [quoteTaxonomy, feedbackRows] = await Promise.all([
+    loadQuoteProductTaxonomy(quotes.flatMap((quote) => quote.items.map((item) => item.productId))),
+    prisma.inquiryFeedback.findMany({
+      where: { inquiryId: inquiry.id },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+    }),
+  ]);
+  const feedbackSummary = (user.role === 'admin'
+    ? buildFeedbackSummaryMap(feedbackRows, 'admin')
+    : buildFeedbackSummaryMap(feedbackRows, 'customer')
+  ).get(inquiry.id) ?? emptyFeedbackSummary();
   return NextResponse.json({
     ...publicInquiry,
     items: await viewInquiryItems(inquiryItems),
     activeQuote: quotes[0] ? quoteView(quotes[0], quoteTaxonomy) : null,
+    feedbackSummary,
   });
 }
 

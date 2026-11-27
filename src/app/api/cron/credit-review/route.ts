@@ -1,11 +1,15 @@
+import { collectibleReceivableCents, receivableOrderBalance } from '@/lib/receivable-balance';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import {
   CREDIT_REVIEW_POLICY,
+  creditReminderIntervalMs,
   creditStatusForOverdueReceivables,
   hasEligibleCreditHold,
   maxOverdueDaysForReceivables,
+  overdueReceivableWhere,
   overdueDaysFromDueAt,
+  receivableReminderKey,
   runDailyTierReview,
 } from '@/lib/customer-credit';
 import { enqueueBackgroundTask } from '@/lib/background-tasks';
@@ -25,112 +29,97 @@ async function handle(req: NextRequest) {
   if (!lockToken) return NextResponse.json({ error: 'Task already running' }, { status: 409 });
   try {
     const now = new Date();
-    const reminderInterval = CREDIT_REVIEW_POLICY.reminderIntervalDays * 86400000;
-    const receivables = await prisma.accountReceivable.findMany({
-      where: { status: { in: ['open', 'overdue'] }, dueAt: { not: null, lte: now } },
-      include: {
-        user: { select: { id: true, email: true, phone: true } },
-        order: {
-          select: {
-            id: true,
-            organizationId: true,
-            ownerScope: true,
-            organization: { select: { ownerUserId: true, owner: { select: { email: true } } } },
-          },
-        },
-      },
-    });
+    const due = overdueReceivableWhere(now);
+    const [candidates, restrictedAccounts] = await Promise.all([
+      prisma.accountReceivable.findMany({ where: due, select: { userId: true } }),
+      prisma.creditAccount.findMany({ where: { status: { in: ['credit_limited', 'overdue_hold'] } }, select: { userId: true } }),
+    ]);
     let reminded = 0;
     let suspended = 0;
     let limited = 0;
-    const receivablesByUser = new Map<string, typeof receivables>();
-    for (const receivable of receivables) {
-      const userReceivables = receivablesByUser.get(receivable.userId) || [];
-      userReceivables.push(receivable);
-      receivablesByUser.set(receivable.userId, userReceivables);
-    }
-    const restrictedAccounts = await prisma.creditAccount.findMany({
-      where: { status: { in: ['credit_limited', 'overdue_hold'] } },
-      select: { userId: true },
-    });
-    for (const account of restrictedAccounts) {
-      if (!receivablesByUser.has(account.userId)) receivablesByUser.set(account.userId, []);
-    }
+    let receivables = 0;
+    const userIds = new Set([...candidates, ...restrictedAccounts].map(row => row.userId));
 
-    for (const [userId, userReceivables] of receivablesByUser) {
-      const account = await prisma.creditAccount.findUnique({ where: { userId } });
-      if (!account) continue;
-      const maxOverdueDays = maxOverdueDaysForReceivables(userReceivables, now);
-      const desiredStatus = creditStatusForOverdueReceivables({
-        currentStatus: account.status,
-        statusSource: account.statusSource,
-        maxOverdueDays,
-        hasEligibleHold: hasEligibleCreditHold(userReceivables, account.manuallyUnlockedAt, now),
-      });
-      if (desiredStatus !== account.status) {
-        await prisma.$transaction(async (tx) => {
-          await tx.creditAccount.update({ where: { id: account.id }, data: { status: desiredStatus, statusSource: 'system' } });
-          const isLimited = desiredStatus === 'credit_limited';
-          await tx.notification.create({
-            data: {
-              userId,
-              email: userReceivables[0]?.user.email || '',
-              role: 'customer',
-              type: isLimited ? 'credit_limit_reduced' : desiredStatus === 'overdue_hold' ? 'credit_order_hold' : 'credit_order_released',
-              title: isLimited ? '账户进入限额下单' : desiredStatus === 'overdue_hold' ? '账户已限制下单' : '账户下单状态恢复',
-              content: isLimited
-                ? `账户存在超过 ${CREDIT_REVIEW_POLICY.limitedAfterDays} 天未结清订单，累计应付款额度已调整为 ¥${CREDIT_REVIEW_POLICY.limitedCreditLimit.toFixed(2)}。`
-                : desiredStatus === 'overdue_hold'
-                  ? `账户存在超过 ${CREDIT_REVIEW_POLICY.holdAfterDays} 天未结清订单，系统已限制新订单。`
-                  : '账户未结清订单已回到系统允许的下单状态。',
-              linkUrl: '/account/credit',
-              metadata: JSON.stringify({ userId, status: desiredStatus, maxOverdueDays }),
-            },
+    for (const userId of userIds) {
+      const result = await prisma.$transaction(async tx => {
+        const [account, rows] = await Promise.all([
+          tx.creditAccount.findUnique({ where: { userId }, include: { user: { select: { email: true } } } }),
+          tx.accountReceivable.findMany({ where: { ...due, userId }, include: {
+            user: { select: { email: true } },
+            order: { select: { ...receivableOrderBalance, id: true, organizationId: true, ownerScope: true,
+              organization: { select: { ownerUserId: true, owner: { select: { email: true } } } } } },
+          } }),
+        ]);
+        const outstanding = rows.map(row => ({ ...row,
+          balance: collectibleReceivableCents(row, row.order),
+        })).filter(row => row.balance > 0);
+        const maxOverdueDays = maxOverdueDaysForReceivables(outstanding, now);
+        let newRestriction: string | null = null;
+        if (account) {
+          const status = creditStatusForOverdueReceivables({
+            currentStatus: account.status, statusSource: account.statusSource, maxOverdueDays,
+            hasEligibleHold: hasEligibleCreditHold(outstanding, account.manuallyUnlockedAt, now),
           });
-        });
-        if (desiredStatus === 'credit_limited') limited++;
-        if (desiredStatus === 'overdue_hold') suspended++;
-      }
-    }
-
-    for (const receivable of receivables) {
-      if (!receivable.dueAt) continue;
-      const overdueDays = overdueDaysFromDueAt(receivable.dueAt, now);
-      if (overdueDays < CREDIT_REVIEW_POLICY.reminderAfterDays) continue;
-      if (receivable.lastReminderAt && now.getTime() - receivable.lastReminderAt.getTime() < reminderInterval) continue;
-      await prisma.$transaction(async (tx) => {
-        await enqueueBackgroundTask('order.reminder', { receivableId: receivable.id, overdueDays }, {
-          priority: 8,
-          maxAttempts: 5,
-          dedupeKey: `receivable-reminder:${receivable.id}:${Math.floor(now.getTime() / reminderInterval)}`,
-        }, tx);
-        await tx.accountReceivable.update({ where: { id: receivable.id }, data: { lastReminderAt: now, reminderCount: { increment: 1 }, status: 'overdue' } });
-        const organization = receivable.order.ownerScope === 'organization' ? receivable.order.organization : null;
-        const recipients = [{
-          userId: receivable.user.id,
-          email: receivable.user.email,
-          linkUrl: organization ? `/account/organizations/history?organizationId=${encodeURIComponent(receivable.order.organizationId || '')}&view=payables` : '/account/credit',
-        }];
-        if (organization && organization.ownerUserId !== receivable.user.id && organization.owner.email) {
-          recipients.push({ userId: organization.ownerUserId, email: organization.owner.email, linkUrl: `/account/organizations/history?organizationId=${encodeURIComponent(receivable.order.organizationId || '')}&view=payables` });
+          if (status !== account.status) {
+            await tx.creditAccount.update({ where: { id: account.id }, data: { status, statusSource: 'system' } });
+            newRestriction = status;
+            const isLimited = status === 'credit_limited';
+            const isHeld = status === 'overdue_hold';
+            await tx.notification.create({
+              data: {
+                userId, email: account.user.email, role: 'customer',
+                type: isLimited ? 'credit_limit_reduced' : isHeld ? 'credit_order_hold' : 'credit_order_released',
+                title: isLimited ? '账户进入限额下单' : isHeld ? '账户已限制下单' : '账户下单状态恢复',
+                content: isLimited
+                  ? `账户存在超过 ${CREDIT_REVIEW_POLICY.limitedAfterDays} 天未结清订单，累计应付款额度已调整为 ¥${CREDIT_REVIEW_POLICY.limitedCreditLimit.toFixed(2)}。`
+                  : isHeld ? `账户存在超过 ${CREDIT_REVIEW_POLICY.holdAfterDays} 天未结清订单，系统已限制新订单。`
+                    : '账户未结清订单已回到系统允许的下单状态。',
+                linkUrl: '/account/credit',
+                metadata: JSON.stringify({ userId, status, maxOverdueDays }),
+              },
+            });
+          }
         }
-        await Promise.all(recipients.map((recipient) => tx.notification.create({
-          data: {
-            userId: recipient.userId,
-            email: recipient.email,
-            role: 'customer',
-            type: 'account_payable_reminder',
-            title: '应付款提醒',
-            content: `订单 ${receivable.order.id} 应付款 ¥${receivable.amount.toFixed(2)} 已超过 ${overdueDays} 天，请及时完成付款。`,
-            linkUrl: recipient.linkUrl,
-            metadata: JSON.stringify({ receivableId: receivable.id, orderId: receivable.order.id, overdueDays }),
-          },
-        })));
+        let reminders = 0;
+        for (const receivable of outstanding) {
+          if (!receivable.dueAt) continue;
+          const overdueDays = overdueDaysFromDueAt(receivable.dueAt, now);
+          if (overdueDays < CREDIT_REVIEW_POLICY.reminderAfterDays) continue;
+          if (receivable.lastReminderAt && now.getTime() - receivable.lastReminderAt.getTime() < creditReminderIntervalMs) continue;
+          const dedupeKey = receivableReminderKey(receivable.id, now);
+          if (await tx.backgroundTask.findUnique({ where: { dedupeKey }, select: { id: true } })) continue;
+          const changed = await tx.accountReceivable.updateMany({
+            where: { id: receivable.id, status: receivable.status, dueAt: receivable.dueAt, lastReminderAt: receivable.lastReminderAt },
+            data: { lastReminderAt: now, reminderCount: { increment: 1 }, status: 'overdue' },
+          });
+          if (changed.count !== 1) continue;
+          await enqueueBackgroundTask('order.reminder', {
+            receivableId: receivable.id, overdueDays, reminderAt: now.toISOString(), dueAt: receivable.dueAt.toISOString(),
+          }, { priority: 8, maxAttempts: 5, dedupeKey }, tx);
+          const { order } = receivable;
+          const organization = order.ownerScope === 'organization' ? order.organization : null;
+          const linkUrl = organization
+            ? `/account/organizations/history?organizationId=${encodeURIComponent(order.organizationId || '')}&view=payables` : '/account/credit';
+          const recipients = [{ userId, email: receivable.user.email }];
+          if (organization && organization.ownerUserId !== userId && organization.owner.email) {
+            recipients.push({ userId: organization.ownerUserId, email: organization.owner.email });
+          }
+          const content = `订单 ${order.id} 应付款 ¥${(receivable.balance / 100).toFixed(2)} 已超过 ${overdueDays} 天，请及时完成付款。`;
+          const metadata = JSON.stringify({ receivableId: receivable.id, orderId: order.id, overdueDays });
+          await tx.notification.createMany({ data: recipients.map(recipient => ({
+            ...recipient, role: 'customer', type: 'account_payable_reminder', title: '应付款提醒', content, linkUrl, metadata,
+          })) });
+          reminders++;
+        }
+        return { receivables: outstanding.length, reminders, newRestriction };
       });
-      reminded++;
+      receivables += result.receivables;
+      reminded += result.reminders;
+      if (result.newRestriction === 'credit_limited') limited++;
+      if (result.newRestriction === 'overdue_hold') suspended++;
     }
     const reviewedUsers = await runDailyTierReview(now);
-    return NextResponse.json({ reviewedUsers, receivables: receivables.length, reminded, limited, suspended });
+    return NextResponse.json({ reviewedUsers, receivables, reminded, limited, suspended });
   } finally {
     await store.releaseLock(lockKey, lockToken).catch((error) => console.error('[credit review lock release]', error));
   }

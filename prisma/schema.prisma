@@ -517,6 +517,7 @@ model Inquiry {
   orders       Order[]
   inquiryItems InquiryItem[]
   quotes       Quote[]
+  feedbacks    InquiryFeedback[]
 
   @@index([email])
   @@index([createdAt])
@@ -559,6 +560,7 @@ model Order {
   quoteSentAt     DateTime?
   addressSnapshot OrderAddressSnapshot?
   orderItems      OrderItem[]
+  afterSaleCases  AfterSaleCase[]
   statusHistory   OrderStatusHistory[]
   adjustments     OrderAdjustment[]
   shipments       Shipment[]
@@ -567,6 +569,10 @@ model Order {
   organization    Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
   receivable      AccountReceivable?
   creditTransactions CreditTransaction[]
+  purchaseOrders PurchaseOrder[]
+  purchaseRequirements PurchaseRequirement[]
+  purchaseReplacementLines PurchaseReplacementLine[]
+  purchaseActivities PurchaseActivity[]
   inventoryReservations InventoryReservation[]
   inventoryTransactions InventoryTransaction[]
   paymentAttempts PaymentAttempt[]
@@ -581,6 +587,11 @@ model Order {
   pointsRefundedGroup Int      @default(0)
   pointsRefundedCash   Float    @default(0) // 已计入积分退款比例的现金（元）
   researchGroup       ResearchGroup? @relation(fields: [pointsGroupId], references: [id], onDelete: SetNull)
+  fulfillmentParcels FulfillmentParcel[]
+
+  cashPostings CustomerCashPosting[]
+  invoicePlans FinanceInvoicePlan[]
+  financeEvents FinanceEvent[]
 
   @@unique([inquiryId, inquiryOrderSeq])
   @@index([email])
@@ -614,6 +625,8 @@ model PaymentAttempt {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
   order       Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  cashPosting CustomerCashPosting?
 
   @@index([orderId, createdAt])
   @@index([provider, status])
@@ -684,6 +697,7 @@ model Shipment {
   updatedAt      DateTime @updatedAt
   order          Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
   items          ShipmentItem[]
+  fulfillmentParcel FulfillmentParcel?
 
   @@index([orderId, createdAt])
   @@index([trackingNumber])
@@ -752,6 +766,8 @@ model CreditTransaction {
   user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   order        Order?   @relation(fields: [orderId], references: [id], onDelete: SetNull)
 
+  cashPosting CustomerCashPosting?
+
   @@index([userId, createdAt])
   @@index([orderId])
   @@index([type])
@@ -775,8 +791,104 @@ model AccountReceivable {
   order          Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
   user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
+  cashPostings CustomerCashPosting[]
+
   @@index([userId, status])
   @@index([status, dueAt])
+}
+
+// A posting records money already verified against a bank allocation or an order-bound payment.
+model CustomerCashPosting {
+  id                  String @id @default(cuid())
+  orderId             String
+  receivableId        String?
+  bankAllocationId    String? @unique
+  paymentAttemptId    String? @unique
+  creditTransactionId String? @unique
+  amountCents         BigInt
+  releasedCents       BigInt @default(0)
+  actorId             String?
+  createdAt           DateTime @default(now())
+  order               Order @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  receivable          AccountReceivable? @relation(fields: [receivableId], references: [id], onDelete: Restrict)
+  bankAllocation      PurchaseActivity? @relation(fields: [bankAllocationId], references: [id], onDelete: Restrict)
+  paymentAttempt      PaymentAttempt? @relation(fields: [paymentAttemptId], references: [id], onDelete: Restrict)
+  creditTransaction   CreditTransaction? @relation(fields: [creditTransactionId], references: [id], onDelete: Restrict)
+
+  @@index([orderId])
+}
+
+model FinanceInvoicePlan {
+  id              String @id @default(cuid())
+  orderId         String
+  purchaseOrderId String?
+  side            String
+  partyKey        String
+  issuer          String
+  recipient       String
+  grossCents      BigInt
+  trigger         String
+  ownerId         String
+  reference       String
+  sha256          String
+  createdAt       DateTime @default(now())
+  order           Order @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  purchaseOrder   PurchaseOrder? @relation(fields: [purchaseOrderId, orderId], references: [id, orderId], onDelete: Restrict)
+  allocations     FinanceInvoiceAllocation[]
+  events          FinanceEvent[]
+
+  @@index([orderId, side])
+  @@index([purchaseOrderId])
+}
+
+model FinanceInvoice {
+  id          String @id @default(cuid())
+  side        String
+  partyKey    String
+  issuer      String
+  recipient   String
+  number      String
+  identityKey String @unique
+  reference   String
+  sha256      String @unique
+  issuedAt    DateTime
+  grossCents  BigInt
+  actorId     String
+  createdAt   DateTime @default(now())
+  allocations FinanceInvoiceAllocation[]
+  events      FinanceEvent[]
+}
+
+model FinanceInvoiceAllocation {
+  id          String @id @default(cuid())
+  planId      String
+  invoiceId   String
+  amountCents BigInt
+  plan        FinanceInvoicePlan @relation(fields: [planId], references: [id], onDelete: Restrict)
+  invoice     FinanceInvoice @relation(fields: [invoiceId], references: [id], onDelete: Restrict)
+
+  @@unique([planId, invoiceId])
+  @@index([invoiceId])
+}
+
+model FinanceEvent {
+  id           String @id @default(cuid())
+  orderId      String
+  planId       String?
+  invoiceId    String?
+  action       String
+  actorId      String
+  requestKey   String @unique
+  intentHash   String
+  approvedHash String
+  detail       String
+  createdAt    DateTime @default(now())
+  order        Order @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  plan         FinanceInvoicePlan? @relation(fields: [planId], references: [id], onDelete: Restrict)
+  invoice      FinanceInvoice? @relation(fields: [invoiceId], references: [id], onDelete: Restrict)
+
+  @@index([orderId, createdAt])
+  @@index([invoiceId])
 }
 
 model UserTierHistory {
@@ -843,6 +955,7 @@ model Quote {
   inquiry       Inquiry   @relation(fields: [inquiryId], references: [id], onDelete: Cascade)
   items         QuoteItem[]
   confirmations QuoteConfirmation[]
+  feedbacks     InquiryFeedback[]
 
   @@unique([inquiryId, version])
   @@index([inquiryId, status, version])
@@ -893,6 +1006,39 @@ model QuoteConfirmation {
   @@index([email])
 }
 
+model InquiryFeedback {
+  id                  String    @id @default(cuid())
+  inquiryId           String
+  quoteId             String?
+  quoteVersion        Int?
+  actorType           String    // customer | admin_proxy
+  actorUserId         String?
+  actorEmail          String
+  actorName           String?
+  channel             String    // website | wechat | email | phone | offline | other
+  channelReference    String?
+  feedbackType        String    // price_negotiation | terms_change | consultation | intent_confirm
+  content             String
+  handlingStatus      String    @default("pending") // pending | resolved | ignored
+  handledByAdminId    String?
+  handledByAdminEmail String?
+  handledAt           DateTime?
+  resolutionNote      String?
+  resolvedByQuoteId   String?
+  clientRequestId     String?
+  ip                  String?
+  userAgent           String?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+  inquiry             Inquiry   @relation(fields: [inquiryId], references: [id], onDelete: Cascade)
+  quote               Quote?    @relation(fields: [quoteId], references: [id], onDelete: SetNull)
+
+  @@unique([inquiryId, clientRequestId])
+  @@index([inquiryId, createdAt])
+  @@index([inquiryId, handlingStatus])
+  @@index([quoteId])
+}
+
 model OrderItem {
   id            String   @id @default(cuid())
   orderId       String
@@ -914,12 +1060,105 @@ model OrderItem {
   updatedAt     DateTime @updatedAt
   order         Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
   shipmentItems ShipmentItem[]
+  purchaseRequirement PurchaseRequirement?
+  purchaseReplacementLines PurchaseReplacementLine[]
   inventoryReservation InventoryReservation?
+  fulfillmentParcelLines FulfillmentParcelLine[]
 
+  afterSaleCases AfterSaleCase[]
+
+  @@unique([id, orderId])
   @@unique([orderId, position])
   @@index([orderId])
   @@index([catalogNumber])
   @@index([productId])
+}
+
+model PurchaseOrder {
+  id           String @id
+  orderId      String
+  groupKey     String
+  status       String
+  revision     Int @default(1)
+  approvedHash String?
+  createdAt    String
+  updatedAt    String
+  order        Order @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  lines        PurchaseRequirement[]
+  replacements PurchaseReplacementLine[] @relation("ReplacementPurchase")
+  replacedLines PurchaseReplacementLine[] @relation("OriginalPurchase")
+  activities   PurchaseActivity[]
+  fulfillmentParcelLines FulfillmentParcelLine[]
+
+  invoicePlans FinanceInvoicePlan[]
+
+  @@unique([id, orderId])
+  @@index([orderId, status])
+}
+
+model PurchaseRequirement {
+  orderItemId     String @id
+  orderId         String
+  ownerId         String
+  source          String
+  terms           String
+  revision        Int @default(1)
+  purchaseOrderId String?
+  createdAt       String
+  updatedAt       String
+  orderItem       OrderItem @relation(fields: [orderItemId], references: [id], onDelete: Restrict)
+  order           Order @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  purchaseOrder   PurchaseOrder? @relation(fields: [purchaseOrderId, orderId], references: [id, orderId], onDelete: Restrict)
+
+  @@index([orderId])
+  @@index([purchaseOrderId])
+}
+
+model PurchaseActivity {
+  id              String @id
+  orderId         String
+  purchaseOrderId String?
+  orderItemId     String?
+  actorId         String
+  action          String
+  requestKey      String? @unique
+  referenceKey    String? @unique
+  amountCents     BigInt?
+  detail          String
+  createdAt       String
+  order           Order @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  purchaseOrder   PurchaseOrder? @relation(fields: [purchaseOrderId, orderId], references: [id, orderId], onDelete: Restrict)
+  authorizedReplacements PurchaseReplacementLine[]
+
+  cashPosting CustomerCashPosting?
+
+  @@index([orderId, createdAt])
+}
+
+model PurchaseReplacementLine {
+  id                  String @id
+  orderId             String
+  orderItemId         String
+  fromPurchaseOrderId String
+  purchaseOrderId     String
+  authorizationId     String
+  quantity            Int
+  ownerId             String
+  source              String
+  terms               String
+  revision            Int @default(1)
+  createdAt           String
+  updatedAt           String
+  order               Order @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  orderItem           OrderItem @relation(fields: [orderItemId], references: [id], onDelete: Restrict)
+  fromPurchaseOrder   PurchaseOrder @relation("OriginalPurchase", fields: [fromPurchaseOrderId, orderId], references: [id, orderId], onDelete: Restrict)
+  purchaseOrder       PurchaseOrder @relation("ReplacementPurchase", fields: [purchaseOrderId, orderId], references: [id, orderId], onDelete: Restrict)
+  authorization       PurchaseActivity @relation(fields: [authorizationId], references: [id], onDelete: Restrict)
+
+  @@unique([purchaseOrderId, orderItemId])
+  @@unique([authorizationId, orderItemId])
+  @@index([orderId])
+  @@index([fromPurchaseOrderId])
 }
 
 model OrderStatusHistory {
@@ -1149,6 +1388,25 @@ model ProductVariant {
   @@index([source])
 }
 
+model BusinessLetterContact {
+  id String @id
+  companyName String
+  contactName String
+  salutation String @default("")
+  email String @default("")
+  phone String @default("")
+  qq String @default("")
+  brandIds String @default("[]")
+  notes String @default("")
+  sourceReference String @default("")
+  enabled Int @default(0)
+  revision Int @default(1)
+  updatedAt String
+  updatedBy String
+
+  @@index([companyName, contactName])
+}
+
 model Brand {
   id          String    @id @default(cuid())
   name        String    @unique
@@ -1158,6 +1416,8 @@ model Brand {
   logoUrl     String?
   isActive    Boolean   @default(true)
   sortOrder   Int       @default(0)
+  defaultDiscountRate Float? // 本品牌全店默认折扣；null 表示尚未确认，不从客户历史单值推断
+  supplierQuoteRequiredAbove Float? // 单个销售包装目录价超过此金额时，先核验供应商书面询价回复
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
   products    Product[]
@@ -1338,6 +1598,7 @@ model InventoryBatch {
   account          InventoryAccount @relation(fields: [inventoryAccountId], references: [id], onDelete: Cascade)
   transactions     InventoryTransaction[]
   batchAllocations InventoryReservationBatch[]
+  fulfillmentReceipts FulfillmentReceipt[]
 
   @@unique([inventoryAccountId, batchNumber])
   @@index([expiryDate])
@@ -1349,6 +1610,7 @@ model InventoryReservationBatch {
   batchId       String
   quantity      Int
   fulfilledQuantity Int @default(0)
+  releasedQuantity Int @default(0)
   reservation   InventoryReservation @relation(fields: [reservationId], references: [id], onDelete: Cascade)
   batch         InventoryBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
 
@@ -1363,6 +1625,7 @@ model InventoryReservation {
   orderItemId      String   @unique
   quantity         Int
   fulfilledQuantity Int     @default(0)
+  releasedQuantity Int @default(0)
   status           String   @default("active")
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
@@ -1584,6 +1847,39 @@ model SystemSettings {
   updatedAt           DateTime @updatedAt
 }
 
+model BusinessLetterTemplate {
+  id String @id
+  name String
+  subject String
+  body String
+  enabled Int @default(0)
+  revision Int @default(1)
+  updatedAt String
+  drafts BusinessLetterDraft[]
+}
+
+model BusinessLetterDraft {
+  id String @id
+  templateId String
+  templateRevision Int
+  businessReference String
+  snapshot String
+  approvalHash String @unique
+  // Partial unique sending/terminal index is maintained in the SQL migration.
+  deliveryKey String
+  status String @default("draft")
+  origin String
+  createdBy String
+  approvedBy String?
+  approvedAt String?
+  result String?
+  createdAt String
+  updatedAt String
+  template BusinessLetterTemplate @relation(fields: [templateId], references: [id], onDelete: Restrict)
+
+  @@index([createdAt])
+}
+
 model OrganizationCreationGrant {
   id             String   @id @default(cuid())
   userId         String   @unique @map("user_id")
@@ -1726,4 +2022,167 @@ model LegalDocument {
 
   @@index([published])
   @@index([sortOrder])
+}
+
+// A parcel follows one physical route. Customer-facing legs also use the existing Shipment record.
+model FulfillmentParcel {
+  id                 String   @id @default(cuid())
+  orderId            String
+  shipmentId         String?  @unique
+  route              String
+  carrier            String?
+  trackingNumber     String?
+  feedSource         String?
+  status             String
+  dispatchedAt       DateTime
+  reference          String
+  evidenceSha256     String
+  evidenceRow        Int
+  requestKey         String   @unique
+  businessKey        String   @unique
+  contentHash        String
+  actorId            String
+  createdAt          DateTime @default(now())
+  order              Order     @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  shipment           Shipment? @relation(fields: [shipmentId], references: [id], onDelete: Restrict)
+  lines              FulfillmentParcelLine[]
+  events             FulfillmentEvent[]
+
+  @@index([orderId, createdAt])
+  @@index([feedSource, carrier, trackingNumber])
+}
+
+model FulfillmentParcelLine {
+  id                String @id @default(cuid())
+  parcelId          String
+  purchaseOrderId   String?
+  orderItemId       String
+  sourceReceiptId   String?
+  afterSaleApprovalId String?
+  catalogNumber     String?
+  productId         String?
+  variantId         String?
+  quantity          Int
+  receivedQuantity  Int    @default(0)
+  parcel            FulfillmentParcel  @relation(fields: [parcelId], references: [id], onDelete: Restrict)
+  purchase          PurchaseOrder?     @relation(fields: [purchaseOrderId], references: [id], onDelete: Restrict)
+  orderItem         OrderItem          @relation(fields: [orderItemId], references: [id], onDelete: Restrict)
+  sourceReceipt     FulfillmentReceipt? @relation("ForwardedReceipt", fields: [sourceReceiptId], references: [id], onDelete: Restrict)
+  afterSaleApproval AfterSaleEvent?    @relation(fields: [afterSaleApprovalId], references: [id], onDelete: Restrict)
+  receipts          FulfillmentReceipt[] @relation("ParcelLineReceipts")
+  resolutions       FulfillmentLineResolution[]
+
+  @@index([parcelId])
+  @@index([purchaseOrderId, orderItemId])
+  @@index([sourceReceiptId])
+  @@index([afterSaleApprovalId])
+}
+
+model FulfillmentReceipt {
+  id                 String @id @default(cuid())
+  parcelLineId       String
+  eventId            String
+  inventoryBatchId   String
+  quantity           Int
+  forwardedQuantity  Int    @default(0)
+  releasedQuantity   Int    @default(0)
+  parcelLine         FulfillmentParcelLine @relation("ParcelLineReceipts", fields: [parcelLineId], references: [id], onDelete: Restrict)
+  event              FulfillmentEvent      @relation(fields: [eventId], references: [id], onDelete: Restrict)
+  inventoryBatch     InventoryBatch        @relation(fields: [inventoryBatchId], references: [id], onDelete: Restrict)
+  forwardedLines     FulfillmentParcelLine[] @relation("ForwardedReceipt")
+
+  @@unique([parcelLineId, eventId, inventoryBatchId])
+  @@index([inventoryBatchId])
+}
+
+// Carrier reports are retained if a parcel has not been matched. Physical receipts are separate staff actions.
+model FulfillmentEvent {
+  id              String   @id @default(cuid())
+  parcelId        String?
+  source          String
+  kind            String
+  status          String
+  occurredAt      DateTime
+  requestKey      String   @unique
+  businessKey     String   @unique
+  contentHash     String
+  reference       String
+  evidenceSha256  String
+  evidenceRow     Int
+  details         String
+  actorId         String?
+  createdAt       DateTime @default(now())
+  parcel          FulfillmentParcel? @relation(fields: [parcelId], references: [id], onDelete: Restrict)
+  receipts        FulfillmentReceipt[]
+  lineResolutions FulfillmentLineResolution[]
+
+  @@index([parcelId, occurredAt])
+  @@index([source, status])
+}
+
+model FulfillmentLineResolution {
+  id           String @id @default(cuid())
+  eventId      String
+  parcelLineId String
+  kind         String
+  quantity     Int
+  event        FulfillmentEvent @relation(fields: [eventId], references: [id], onDelete: Restrict)
+  parcelLine   FulfillmentParcelLine @relation(fields: [parcelLineId], references: [id], onDelete: Restrict)
+
+  afterSaleCases AfterSaleCase[]
+
+  @@unique([eventId, parcelLineId])
+  @@index([parcelLineId])
+}
+
+model AfterSaleCase {
+  id              String @id @default(cuid())
+  orderId         String
+  orderItemId     String
+  quantity        Int
+  relatedCents    BigInt?
+  issue           String
+  channel         String
+  report          String
+  reportedAt      DateTime
+  sourceReference String
+  sourceSha256    String
+  sourceRow       Int
+  sourceKey       String @unique
+  shortfallId     String?
+  createdBy       String
+  ownerId         String?
+  customerState   String @default("reported")
+  supplierState   String @default("unreviewed")
+  revision        Int @default(1)
+  createdAt       DateTime @default(now())
+  order           Order @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  item            OrderItem @relation(fields: [orderItemId, orderId], references: [id, orderId], onDelete: Restrict)
+  shortfall       FulfillmentLineResolution? @relation(fields: [shortfallId], references: [id], onDelete: Restrict)
+  events          AfterSaleEvent[]
+
+  @@index([orderId, orderItemId])
+  @@index([shortfallId])
+  @@index([customerState, supplierState])
+}
+
+model AfterSaleEvent {
+  id             String @id @default(cuid())
+  caseId         String
+  action         String
+  actorId        String
+  requestKey     String @unique
+  businessKey    String @unique
+  intentHash     String
+  approvedHash   String
+  occurredAt     DateTime
+  reference      String
+  sha256         String
+  documentRow    Int
+  detail         String
+  createdAt      DateTime @default(now())
+  case           AfterSaleCase @relation(fields: [caseId], references: [id], onDelete: Restrict)
+  exchangeParcels FulfillmentParcelLine[]
+
+  @@index([caseId, createdAt])
 }

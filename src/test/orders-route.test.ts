@@ -4,6 +4,7 @@ const mocks = vi.hoisted(() => ({
   auth: vi.fn(),
   verifyAndPriceItems: vi.fn(),
   revalidateReferencePriceEvidence: vi.fn(),
+  assertBrandDiscountPricesCurrent: vi.fn(),
   capturePromoLines: vi.fn(),
   userFindUnique: vi.fn(),
   orderFindFirst: vi.fn(),
@@ -40,6 +41,7 @@ vi.mock('@/lib/pricing', async (importOriginal) => {
     ...actual,
     verifyAndPriceItems: mocks.verifyAndPriceItems,
     revalidateReferencePriceEvidence: mocks.revalidateReferencePriceEvidence,
+    assertBrandDiscountPricesCurrent: mocks.assertBrandDiscountPricesCurrent,
   };
 });
 vi.mock('@/lib/prisma', () => ({
@@ -269,6 +271,40 @@ describe('POST /api/orders', () => {
     ]));
   });
 
+  it.each([
+    { defaultDiscountRate: null, supplierQuoteRequiredAbove: null, status: 200 },
+    { defaultDiscountRate: 0.9, supplierQuoteRequiredAbove: null, status: 409 },
+    { defaultDiscountRate: null, supplierQuoteRequiredAbove: 100, status: 409 },
+  ])('uses the real brand-policy guard for a split unified promotion ($status)', async ({ status, ...brandPolicy }) => {
+    const { assertBrandDiscountPricesCurrent } = await vi.importActual<typeof import('@/lib/pricing')>('@/lib/pricing');
+    mocks.assertBrandDiscountPricesCurrent.mockImplementation(assertBrandDiscountPricesCurrent);
+    const getBrand = vi.fn().mockResolvedValue(brandPolicy);
+    mocks.transactionRunner = (run) => run({
+      order: { create: mocks.orderCreate },
+      product: { findUnique: vi.fn().mockResolvedValue({ brand: 'BrandX', brandRecordId: null }) },
+      brand: { findUnique: getBrand },
+    });
+    const dependencies = unifiedCheckoutDependencies();
+    dependencies.client.$transaction = mocks.transactionRunner;
+    const input = {
+      items: [{ productId: 'product-1', name: '合成商品', price: 1, quantity: 2 }],
+      paymentMethod: 'bank_transfer', acceptedLegalIds: ['checkout-terms'],
+    };
+    const preview = await pricingPreviewPOST.forTest(request(input) as never, dependencies as never);
+    const response = await POST.forTest(request(input) as never, dependencies as never);
+
+    expect(preview.status).toBe(status);
+    expect(response.status).toBe(status);
+    expect(getBrand).toHaveBeenCalledWith(expect.objectContaining({ where: { name: 'BrandX' } }));
+    if (status === 200) {
+      expect(mocks.orderCreate).toHaveBeenCalledTimes(1);
+      expect(mocks.orderCreate).toHaveBeenCalledWith({ data: expect.objectContaining({ subtotal: 1.5 }) });
+    } else {
+      expect(await response.json()).toMatchObject({ error: expect.stringContaining('活动条件尚需核对') });
+      expect(mocks.orderCreate).not.toHaveBeenCalled();
+    }
+  });
+
   it('blocks a legacy discount on an ordinary tier occupied by a unified campaign', () => {
     const overlaps = POST.campaignOverlapsLegacyDiscountsForTest as (items: unknown[], discounts: Record<string, number>) => boolean;
     expect(overlaps([{ productId: 'product-1', selectedPromotionId: null, unifiedOccupiedPromotionId: 'campaign-1' }], { '0': 1 })).toBe(true);
@@ -341,6 +377,15 @@ describe('POST /api/orders', () => {
     expect(mocks.revalidateReferencePriceEvidence).toHaveBeenCalledWith(
       expect.anything(), [priced.verifiedItems[0].promotionPricingEvidence], expect.any(Date),
     );
+  });
+  it('rejects a changed brand/customer policy before creating the order', async () => {
+    mocks.assertBrandDiscountPricesCurrent.mockRejectedValueOnce(new Error('BRAND_DISCOUNT_PRICE_DRIFT'));
+    const response = await POST(request({
+      items: [{ productId: 'product-1', name: '测试产品', price: 100, quantity: 1 }],
+      paymentMethod: 'bank_transfer', acceptedLegalIds: ['checkout-terms'],
+    }) as never);
+    expect(response.status).toBe(409);
+    expect(mocks.orderCreate).not.toHaveBeenCalled();
   });
   it('rejects changed pricing evidence inside the order transaction even when the price is unchanged', async () => {
     const first = { verifiedSubtotal: 100, mismatchedCount: 0, verifiedItems: [{
@@ -495,6 +540,7 @@ describe('POST /api/orders', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.revalidateReferencePriceEvidence.mockResolvedValue(true);
+    mocks.assertBrandDiscountPricesCurrent.mockResolvedValue(undefined);
     mocks.auth.mockResolvedValue({ user: { id: 'user-1', email: 'buyer@example.com', role: 'customer', sessionId: 'session-1' } });
     mocks.requireActiveSession.mockResolvedValue({ id: 'user-1', email: 'buyer@example.com', role: 'customer', sessionId: 'session-1' });
     mocks.userFindUnique.mockResolvedValue({

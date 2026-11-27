@@ -36,7 +36,7 @@ export default function AlipayPaymentButton({ order, payment, className = '' }: 
   const payable = canPayOrderWithAlipay(order, new Date(now));
   const currentPayment = useMemo(() => {
     const summary = payment || getAlipayPaymentSummary(order, null, new Date(now));
-    if (summary && !order.paidAt && now >= expiresAt && summary.status !== 'paid') {
+    if (summary && !order.paidAt && now >= expiresAt && summary.status !== 'paid' && summary.status !== 'reconciliation') {
       return { ...summary, status: 'expired' as const };
     }
     return summary;
@@ -69,7 +69,7 @@ export default function AlipayPaymentButton({ order, payment, className = '' }: 
   return (
     <div className={`space-y-3 ${className}`}>
       <AlipayPaymentStatusView payment={currentPayment} />
-      {allowContinuePayment && payable && currentPayment.status !== 'paid' && currentPayment.status !== 'processing' ? (
+      {allowContinuePayment && payable && currentPayment.status !== 'paid' && currentPayment.status !== 'processing' && currentPayment.status !== 'reconciliation' ? (
         <>
           <button
             type="button"

@@ -1,8 +1,10 @@
 import type { Prisma } from '@prisma/client';
+import { closeOrderRepricing } from '@/lib/order-catalog-repricing';
 import { writeAuditLog } from '@/lib/audit';
 import { releaseOrderReceivableOnCancellation } from '@/lib/customer-credit';
 import { releaseOrderInventory } from '@/lib/inventory';
 import { canTransitionOrder, isInactiveOrderStatus, isOrderStatus, requiresPaidAlipayRefund } from '@/lib/order-domain';
+import { recordOrderChangeDuringAlipayReview } from '@/lib/order-payment-review';
 import { refundOrderPointsProportionally } from '@/lib/points-checkout-service';
 
 type Tx = Prisma.TransactionClient;
@@ -46,7 +48,7 @@ export async function withdrawAdminOrders(
   orderIds: string[],
   actor: { id: string; email: string },
   now = new Date(),
-): Promise<number> {
+): Promise<{ count: number; blockedOrderId?: string }> {
   const uniqueIds = [...new Set(orderIds.map((id) => (typeof id === 'string' ? id.trim() : '')).filter(Boolean))];
   if (uniqueIds.length === 0) throw new AdminOrderWithdrawalError('ORDER_NOT_FOUND', 404);
 
@@ -68,11 +70,23 @@ export async function withdrawAdminOrders(
   });
   if (orders.length !== uniqueIds.length) throw new AdminOrderWithdrawalError('ORDER_NOT_FOUND', 404);
 
+  const blocked = await recordWithdrawalsAwaitingAlipayReview(tx, uniqueIds, actor, 'removed');
+  if (blocked) return { count: 0, blockedOrderId: blocked };
   const byId = new Map(orders.map((order) => [order.id, order]));
   for (const id of uniqueIds) {
     await withdrawOne(tx, byId.get(id)!, actor, now);
   }
-  return uniqueIds.length;
+  return { count: uniqueIds.length };
+}
+
+export async function recordWithdrawalsAwaitingAlipayReview(
+  tx: Tx, orderIds: string[], actor: { id: string; email: string }, action: 'archived' | 'removed',
+) {
+  const blocked: string[] = [];
+  for (const id of new Set(orderIds)) {
+    if (await recordOrderChangeDuringAlipayReview(tx, id, actor, action)) blocked.push(id);
+  }
+  return blocked[0];
 }
 
 async function withdrawOne(
@@ -126,12 +140,12 @@ async function withdrawOne(
     },
   });
 
-  // 只要还有未结应收就回退已用额度。没有应收，或应收已经是取消状态时，该调用直接返回。
+  // 释放原订单流水可核实的预占，保留其它订单占用。
   try {
     await releaseOrderReceivableOnCancellation(tx, order.id, actor.id);
   } catch (err) {
     const message = err instanceof Error ? err.message : '';
-    if (message === 'PAID_ORDER_REFUND_REQUIRED' || message === 'CREDIT_ACCOUNT_NOT_FOUND') {
+    if (['PAID_ORDER_REFUND_REQUIRED', 'CREDIT_ACCOUNT_NOT_FOUND', 'CREDIT_RESERVATION_REVIEW_REQUIRED'].includes(message)) {
       throw new AdminOrderWithdrawalError(message, 409, order.id);
     }
     throw err;
@@ -163,4 +177,6 @@ async function withdrawOne(
     after: { status: nextStatus, archivedAt: now.toISOString() },
     reason: 'admin_withdraw',
   }, tx);
+  // Close the price review only after the original cancellation has been recorded.
+  await closeOrderRepricing(tx, order.id, actor);
 }

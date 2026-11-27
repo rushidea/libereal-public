@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireActiveSession } from '@/lib/session';
 import { prisma } from '@/lib/prisma';
-import { AMBIGUOUS_PRODUCT_CATALOG_NUMBER, getVerifiedInventoryError, verifyAndPriceItems } from '@/lib/pricing';
+import { AMBIGUOUS_PRODUCT_CATALOG_NUMBER, assertBrandDiscountPricesCurrent, discountPricingFailure, getVerifiedInventoryError, verifyAndPriceItems } from '@/lib/pricing';
 import { calculateCheckoutFeeAdjustments } from '@/lib/checkout-fees';
 import { isThirdPartyPaymentMethod } from '@/data/payment-methods';
 import { calculateOrderAmounts } from '@/lib/order-domain';
@@ -174,6 +174,7 @@ async function unifiedVerifiedItems(
       }
     }
     rows.sort((a, b) => a.sourceIndex - b.sourceIndex || b.item.unitPrice - a.item.unitPrice);
+    await assertBrandDiscountPricesCurrent(tx, rows.map((entry) => entry.item), { userId });
     const displayItems = identities.map((identity, sourceIndex) => {
       const sourceRows = rows.filter((entry) => entry.sourceIndex === sourceIndex).map((entry) => entry.item);
       const lineTotalCents = sourceRows.reduce((sum, item) => sum + BigInt(Math.round(item.lineTotal * 100)), BigInt(0));
@@ -403,6 +404,8 @@ async function post(req: NextRequest, dependencies: UnifiedPreviewDependencies) 
       }),
     });
   } catch (error) {
+    const discountError = discountPricingFailure(error);
+    if (discountError) return NextResponse.json({ error: discountError }, { status: 409 });
     const message = error instanceof Error ? error.message : '';
     if (message === 'PROMOTION_UNIFIED_RUNTIME_REQUIRED') return NextResponse.json({ error: '促销定价暂不可用，请稍后重试', code: message }, { status: 503 });
     if (message === 'UNIFIED_PROMO_MARK_UNSUPPORTED' || message === 'UNIFIED_PROMO_MARK_INVALID' || message === 'UNIFIED_REFERENCE_PRICE_PRICING_UNSUPPORTED'

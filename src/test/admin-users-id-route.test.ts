@@ -19,9 +19,10 @@ import { PATCH, GET } from '@/app/api/admin/users/[id]/route';
 import { NextRequest } from 'next/server';
 import { getTestDb, closeTestDb, seedUser, seedAdmin } from './db-helpers';
 
+beforeAll(() => { getTestDb(); });
+afterAll(() => { closeTestDb(); });
+
 describe('PATCH /api/admin/users/[id]', () => {
-  beforeAll(() => { getTestDb(); });
-  afterAll(() => { closeTestDb(); });
   beforeEach(() => {
     const db = getTestDb();
     db.exec('DELETE FROM User');
@@ -130,8 +131,6 @@ describe('PATCH /api/admin/users/[id]', () => {
 });
 
 describe('GET /api/admin/users/[id]', () => {
-  beforeAll(() => { getTestDb(); });
-  afterAll(() => { closeTestDb(); });
   beforeEach(() => {
     const db = getTestDb();
     db.exec('DELETE FROM User');

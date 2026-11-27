@@ -1,23 +1,55 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { prepareOrderPurchases } from '@/lib/purchase-orders';
+import { purchaseObject } from '@/lib/purchase-activity';
 import { prisma } from '@/lib/prisma';
+import { assertOrderPricingResolved, closeOrderRepricing, jsonObject } from '@/lib/order-catalog-repricing';
 import { requireActiveSession, requireAdmin } from '@/lib/session';
+import { authorizeAdminOrderMutation, consumeAdminOrderStepUp, extractStepUpToken } from '@/lib/admin-order-step-up';
 import type { Prisma } from '@prisma/client';
 import { orderItemView, toOrderItemCreates } from '@/lib/commerce-records';
-import { releaseOrderReceivableOnCancellation, reserveOrderCredit, settleOrderReceivable } from '@/lib/customer-credit';
+import { customerShipmentFields, requirePhysicalStatus } from '@/lib/fulfillment-legacy';
+import { releaseOrderReceivableOnCancellation, reserveOrderCredit } from '@/lib/customer-credit';
 import { orderStatusRequiresFinanceWrite, receivableOccupiesCredit } from '@/lib/order-finance-access';
+import { alipayCancellationPending, recordOrderChangeDuringAlipayReview } from '@/lib/order-payment-review';
+import { alipayReceiptWhere } from '@/lib/payment-concurrency';
 import { assertOrderTransition, calculateOrderAmounts, isAutoCloseableOrderStatus, isInactiveOrderStatus, ORDER_STATUS_LABELS, requiresPaidAlipayRefund } from '@/lib/order-domain';
 import { restoreRedeemedOrderCoupons } from '@/lib/coupon-service';
 import { releaseOrderInventory, reserveOrderInventory } from '@/lib/inventory';
 import { isPostDeliveryPaymentMethod, normalizeOrderPaymentMethod } from '@/data/payment-methods';
 import { getAlipayPaymentSummary } from '@/data/alipay-payment';
 import { refundOrderPointsProportionally, requirePointsRefund, POINTS_REFUND_FAILED } from '@/lib/points-checkout-service';
-import { canAccessOrganizationRecord } from '@/lib/organization-record-access';
+import { customerCanReadOrder } from '@/lib/customer-order-access';
 import { requireOrganizationPermission } from '@/lib/organization-service';
 import { emailKeyedAccess } from '@/lib/verified-email-access';
 import { writeAuditLog } from '@/lib/audit';
 import { commerceLineRefFromRecord, reviewCommerceLinesWithCatalog } from '@/lib/commerce-line-catalog';
 import { decideCommerceLineReview, type CommerceLineFinding } from '@/lib/commerce-line-review';
 import { ownerPrepaySettlementViews } from '@/lib/order-prepay-settlement';
+import { customerOrderStatusMetadata, getLatestAlipayAttempt, merchantOrderApprovalPreview, ORDER_APPROVAL_INCLUDE, orderApprovalConflict, verifyMerchantOrderAcceptance } from '@/lib/order-approval';
+
+const customerEventLabels: Record<string,string> = {
+  order_created: '订单已提交', items_updated: '订单商品已更新', status_changed: '订单状态已更新',
+  shipment_created: '商品已发出', customer_delivery_confirmed: '商品已按实际收货确认交付',
+  shipment_shortfall_confirmed: '包裹已核实短少或退回，正在办理后续交付', organization_order_approved: '组织已审核订单',
+};
+
+function customerEvents(events: { id: string; type: string; createdAt: Date; metadata: string | null }[]) {
+  return events.flatMap(({ id, type, createdAt, metadata }) => {
+    if (!Object.hasOwn(customerEventLabels, type)) return [];
+    const event = { id, type, createdAt, message: customerEventLabels[type] };
+    if (type !== 'organization_order_approved') return [event];
+    const details = jsonObject(metadata);
+    const snapshot = purchaseObject(details.snapshot);
+    const lines = Array.isArray(snapshot.lines) ? snapshot.lines.map(line => {
+      const { name, brand, catalogNumber, spec, unit, quantity, unitPrice, leadTime, conditions } = purchaseObject(line);
+      return { name, brand, catalogNumber, spec, unit, quantity, unitPrice, leadTime, conditions };
+    }) : [];
+    const { total, subtotal, paymentMethod, payee, pointsDiscount, adjustmentTotal } = snapshot;
+    return [{ ...event, metadata: JSON.stringify({ version: details.version, snapshot: {
+      total, subtotal, paymentMethod, payee, pointsDiscount, adjustmentTotal, lines,
+    } }) }];
+  });
+}
 
 export async function GET(
   _req: NextRequest,
@@ -36,31 +68,17 @@ export async function GET(
     const order = await prisma.order.findUnique({
       where: { id },
       include: {
-        orderItems: { orderBy: { position: 'asc' } },
+        ...ORDER_APPROVAL_INCLUDE,
         statusHistory: { orderBy: { createdAt: 'asc' } },
-        addressSnapshot: true,
-        adjustments: { orderBy: { createdAt: 'asc' } },
-        shipments: { orderBy: { createdAt: 'desc' }, include: { items: true } },
+        shipments: { orderBy: { createdAt: 'desc' }, select: customerShipmentFields },
         events: { orderBy: { createdAt: 'asc' } },
-        paymentAttempts: { where: { provider: 'alipay' }, orderBy: { createdAt: 'desc' }, take: 1 },
       },
     });
     if (!order) {
       return NextResponse.json({ error: 'Order not found' }, { status: 404 });
     }
-    if (!isAdmin) {
-      let allowed = order.ownerScope === 'organization'
-        ? Boolean(order.organizationId) && await canAccessOrganizationRecord(user.id, order.organizationId as string)
-        : order.customerId === user.id || await emailKeyedAccess(user.id, order.email);
-      if (!allowed && order.ownerScope === 'organization' && order.organizationId && order.customerId === user.id) {
-        try {
-          await requireOrganizationPermission(user.id, order.organizationId, 'organization.orders.create');
-          allowed = true;
-        } catch {
-          allowed = false;
-        }
-      }
-      if (!allowed) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    if (!isAdmin && !await customerCanReadOrder(user.id, order)) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
 
     let inquiry = null;
@@ -73,15 +91,26 @@ export async function GET(
       });
     }
 
-    const { orderItems, paymentAttempts, ...rest } = order;
+    const { orderItems, statusHistory, events, paymentAttempts, ...rest } = order;
     const settlementViews = await ownerPrepaySettlementViews(prisma, [order]);
+    const creditReviewPending = order.status === 'pending'
+      && isPostDeliveryPaymentMethod(order.paymentMethod)
+      && order.events.some((event) => event.type === 'credit_review_required');
     return NextResponse.json({
       ...rest,
+      receivable: undefined,
       items: orderItems.map(orderItemView),
       inquiry,
-      payment: getAlipayPaymentSummary(order, paymentAttempts[0]),
+      events: isAdmin ? events : customerEvents(events),
+      statusHistory: isAdmin ? statusHistory : statusHistory.map(({ id, fromStatus, toStatus, createdAt, metadata }) => ({
+        id, fromStatus, toStatus, createdAt, metadata: jsonObject(metadata).action === 'accept_order'
+          && jsonObject(metadata).version === 2 ? customerOrderStatusMetadata(metadata) : null,
+      })),
+      ...(isAdmin ? { approvalPreview: await merchantOrderApprovalPreview(prisma, order) } : {}),
+      payment: getAlipayPaymentSummary(order, getLatestAlipayAttempt(paymentAttempts)),
       ownerPrepaySettlement: settlementViews.get(order.id) ?? null,
-    });
+      creditReviewPending,
+    }, { headers: { 'Cache-Control': 'private, no-store' } });
   } catch (err) {
     console.error('[order GET] error:', err);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
@@ -102,8 +131,11 @@ export async function PATCH(
     if (reader instanceof NextResponse) return reader;
   }
 
+  let accepting = false;
   try {
     const body = await req.json();
+    accepting = isPlatformAdmin && body.status === 'confirmed';
+    const stepUpToken = isPlatformAdmin ? extractStepUpToken(body) : undefined;
     const order = await prisma.order.findUnique({
       where: { id },
       include: {
@@ -122,14 +154,17 @@ export async function PATCH(
         && body.status !== order.status
         ? receivableOccupiesCredit((await prisma.accountReceivable.findUnique({ where: { orderId: id }, select: { status: true } }))?.status)
         : false;
-      const admin = await requireAdmin(orderStatusRequiresFinanceWrite({
+      const admin = await authorizeAdminOrderMutation(orderStatusRequiresFinanceWrite({
         currentStatus: order.status,
         nextStatus: body.status,
         paymentMethod: order.paymentMethod,
         hasOpenReceivable,
-      }) ? 'finance.write' : 'orders.write');
+      }) ? 'finance.write' : 'orders.write', stepUpToken);
       if (admin instanceof NextResponse) return admin;
       user = admin;
+      if (body.status === 'confirmed' && order.ownerScope === 'organization' && body.action !== 'accept_order') {
+        return NextResponse.json({ error: '请从管理后台确认 Libereal 接单。' }, { status: 409 });
+      }
     }
 
     if (!isPlatformAdmin) {
@@ -144,6 +179,9 @@ export async function PATCH(
         }
         if (order.customerId === user.id) {
           return NextResponse.json({ error: '订单创建者不能审核本人订单' }, { status: 403 });
+        }
+        if (body.status === 'confirmed') {
+          return NextResponse.json({ error: '请在组织采购页面查看订单明细后提交组织审核。', code: 'ORG_ORDER_REVIEW_PREVIEW_REQUIRED' }, { status: 409 });
         }
       } else {
         const ownsPersonalOrder = order.ownerScope === 'personal'
@@ -163,6 +201,9 @@ export async function PATCH(
         return NextResponse.json({ error: '付款方式无效' }, { status: 400 });
       }
       const currentPaymentMethod = normalizeOrderPaymentMethod(order.paymentMethod);
+      if (currentPaymentMethod !== null && normalizedPaymentMethod === null) {
+        return NextResponse.json({ error: 'PAYMENT_METHOD_REQUIRED' }, { status: 400 });
+      }
       if (normalizedPaymentMethod !== currentPaymentMethod && (order.paidAt || order.paymentAttempts.length > 0)) {
         return NextResponse.json({ error: 'PAYMENT_METHOD_LOCKED' }, { status: 409 });
       }
@@ -171,9 +212,17 @@ export async function PATCH(
     }
 
     let confirmedLineWarnings: CommerceLineFinding[] = [];
+    let prospectiveItems: Prisma.OrderItemCreateWithoutOrderInput[] | undefined;
     const normalizedEffectivePaymentMethod = normalizeOrderPaymentMethod(effectivePaymentMethod);
     if (body.status === 'confirmed' && normalizedEffectivePaymentMethod === 'alipay' && !order.paidAt) {
       return NextResponse.json({ error: 'ALIPAY_PAYMENT_REQUIRED' }, { status: 409 });
+    }
+    if (
+      body.status === 'confirmed'
+      && normalizedEffectivePaymentMethod !== 'alipay'
+      && !isPostDeliveryPaymentMethod(effectivePaymentMethod)
+    ) {
+      return NextResponse.json({ error: 'PAYMENT_METHOD_REQUIRED' }, { status: 409 });
     }
     if (requiresPaidAlipayRefund(body.status, normalizedEffectivePaymentMethod, order.paidAt)) {
       return NextResponse.json({ error: 'PAID_ORDER_REFUND_REQUIRED' }, { status: 409 });
@@ -207,9 +256,10 @@ export async function PATCH(
         const quantity = typeof item.quantity === 'number' ? item.quantity : Number(item.quantity);
         return { ...item, price, quantity };
       });
+      prospectiveItems = toOrderItemCreates(pricedItems);
       updateData.orderItems = {
         deleteMany: {},
-        create: toOrderItemCreates(pricedItems),
+        create: prospectiveItems,
       };
       try {
         const amounts = calculateOrderAmounts(
@@ -225,16 +275,28 @@ export async function PATCH(
       }
     }
 
+    let confirmedInquiryId: string | null = null;
     if (Object.keys(updateData).length > 0) {
-      await prisma.$transaction(async (tx) => {
-        if (body.status === 'cancelled') {
-          // Claim cancellation before any history or resource releases. The payment
-          // callback competes on the same row, so a stale unpaid snapshot cannot win.
-          const cancelled = await tx.order.updateMany({
-            where: { id, status: order.status, paidAt: null },
-            data: { status: 'cancelled', autoCloseAt: null },
+      if (isPlatformAdmin) {
+        const consumedFailure = await consumeAdminOrderStepUp(user, stepUpToken);
+        if (consumedFailure) return consumedFailure;
+      }
+      const result = await prisma.$transaction(async (tx) => {
+        if ((body.status === 'cancelled' || body.status === 'closed')
+          && await recordOrderChangeDuringAlipayReview(tx, id, user, body.status, body.reason)) return { blocked: true } as const;
+        if (accepting || body.items !== undefined) await assertOrderPricingResolved(tx, id, prospectiveItems);
+        if (accepting && (body.items !== undefined || body.paymentMethod !== undefined)) {
+          throw new Error('ORDER_APPROVAL_SAVE_CHANGES_FIRST');
+        }
+        await requirePhysicalStatus(tx, id, order.status, body.status);
+        const acceptance = accepting ? await verifyMerchantOrderAcceptance(tx, id, body.approvalVersion) : null;
+        if ((body.status === 'cancelled' || body.status === 'closed') && body.status !== order.status) {
+          const inactive = await tx.order.updateMany({
+            where: { id, status: order.status, ...(body.status === 'cancelled' || normalizedEffectivePaymentMethod === 'alipay' ? { paidAt: null } : {}),
+              NOT: { paymentAttempts: { some: alipayReceiptWhere } } },
+            data: { status: body.status, autoCloseAt: null },
           });
-          if (cancelled.count !== 1) throw new Error('ORDER_CANCELLATION_CONFLICT');
+          if (inactive.count !== 1) throw new Error('ORDER_CANCELLATION_CONFLICT');
         }
         const eventCreates = [
           ...(body.status && body.status !== order.status ? [{
@@ -252,7 +314,7 @@ export async function PATCH(
               : null,
           }] : []),
         ];
-        await tx.order.update({ where: { id }, data: {
+        await tx.order.update({ where: { id, ...(acceptance ? { status: 'pending', archivedAt: null } : {}) }, data: {
           ...updateData,
           ...(body.status && body.status !== order.status ? {
             statusHistory: {
@@ -262,6 +324,7 @@ export async function PATCH(
                 actorId: user.id,
                 actorEmail: user.email,
                 reason: body.reason || null,
+                ...(acceptance ? { metadata: acceptance.metadata } : {}),
               },
             },
           } : {}),
@@ -279,11 +342,20 @@ export async function PATCH(
             metadata: { confirmWarnings: true, warnings: confirmedLineWarnings },
           }, tx);
         }
-        if (body.status === 'confirmed' && order.status !== 'confirmed') {
-          if (isPostDeliveryPaymentMethod(effectivePaymentMethod)) await reserveOrderCredit(tx, id, user.id);
+        if (acceptance) {
+          if (isPostDeliveryPaymentMethod(acceptance.order.paymentMethod)) await reserveOrderCredit(tx, id, user.id);
           await reserveOrderInventory(tx, id, user.id);
+          await prepareOrderPurchases(tx, id, user);
+          await tx.notification.create({
+            data: {
+              email: acceptance.order.email, role: 'customer', type: 'order_status_changed',
+              title: '订单状态更新', content: `订单 ${id} 状态已更新为：${ORDER_STATUS_LABELS.confirmed}`,
+              linkUrl: '/account/orders', metadata: JSON.stringify({ orderId: id, status: 'confirmed' }),
+            },
+          });
         }
         if (isInactiveOrderStatus(body.status) && !isInactiveOrderStatus(order.status)) {
+          await closeOrderRepricing(tx, id, { id: user.id, email: user.email });
           if (isPostDeliveryPaymentMethod(effectivePaymentMethod)) await releaseOrderReceivableOnCancellation(tx, id, user.id);
           await releaseOrderInventory(tx, id, user.id);
           await restoreRedeemedOrderCoupons(tx, id);
@@ -296,17 +368,17 @@ export async function PATCH(
             reason: body.status === 'closed' ? '订单关闭退回积分' : '订单取消退回积分',
           }));
         }
-        if (body.status === 'completed' && order.status !== 'completed') {
-          if (isPostDeliveryPaymentMethod(effectivePaymentMethod)) await settleOrderReceivable(tx, id, user.id);
-        }
-      });
+        return { blocked: false, confirmedInquiryId: acceptance?.order.inquiryId ?? null } as const;
+      }, { isolationLevel: 'Serializable' });
+      if (result.blocked) return NextResponse.json(alipayCancellationPending, { status: 409 });
+      confirmedInquiryId = result.confirmedInquiryId;
     }
 
     // On confirm: clear user's isNewUser flag
-    if (body.status === 'confirmed' && order.inquiryId) {
+    if (confirmedInquiryId) {
       try {
         const inquiryRow = await prisma.inquiry.findUnique({
-          where: { id: order.inquiryId },
+          where: { id: confirmedInquiryId },
           select: { userId: true },
         });
         if (inquiryRow?.userId) {
@@ -320,7 +392,7 @@ export async function PATCH(
       }
     }
 
-    if (body.status && body.status !== order.status) {
+    if (!accepting && body.status && body.status !== order.status) {
       const statusLabel = (ORDER_STATUS_LABELS as Record<string, string>)[body.status] || body.status;
       await prisma.notification.create({
         data: {
@@ -339,10 +411,18 @@ export async function PATCH(
   } catch (err) {
     console.error('[order PATCH] error:', err);
     const message = err instanceof Error ? err.message : '';
+    const approvalConflict = accepting && orderApprovalConflict(err);
+    if (approvalConflict) return NextResponse.json(approvalConflict, { status: 409 });
+    if ((err as { code?: string })?.code === 'P2025') return NextResponse.json({ error: '订单已变化，请重新查看。' }, { status: 409 });
+    if (message === 'QUOTE_REPRICE_REQUIRED') return NextResponse.json({ error: '商品价格已变化，请先完成原订单价格复核', code: message }, { status: 409 });
+    if (message === 'FULFILLMENT_RECORDS_REQUIRED') return NextResponse.json({ error: '请先按发货明细登记实际运送和签收情况。' }, { status: 409 });
+    if (message === 'CREDIT_RESERVATION_REVIEW_REQUIRED' || message === 'CREDIT_ACCOUNT_NOT_FOUND') {
+      return NextResponse.json({ error: '请联系财务核对原订单的授信预占。', code: message }, { status: 409 });
+    }
     if (message === POINTS_REFUND_FAILED) {
       return NextResponse.json({ error: POINTS_REFUND_FAILED }, { status: 409 });
     }
-    if (['CREDIT_LIMIT_EXCEEDED', 'CREDIT_ACCOUNT_SUSPENDED', 'RECEIVABLE_NOT_FOUND', 'INVALID_ORDER_TRANSITION', 'INSUFFICIENT_AVAILABLE_INVENTORY', 'ALIPAY_PAYMENT_REQUIRED', 'PAID_ORDER_REFUND_REQUIRED', 'ORDER_CANCELLATION_CONFLICT'].includes(message)) {
+    if (['CREDIT_LIMIT_EXCEEDED', 'CREDIT_ACCOUNT_SUSPENDED', 'CREDIT_USER_NOT_FOUND', 'RECEIVABLE_NOT_FOUND', 'INVALID_ORDER_TRANSITION', 'INSUFFICIENT_AVAILABLE_INVENTORY', 'ALIPAY_PAYMENT_REQUIRED', 'PAID_ORDER_REFUND_REQUIRED', 'ORDER_CANCELLATION_CONFLICT'].includes(message)) {
       return NextResponse.json({ error: message }, { status: 409 });
     }
     if (['INVALID_ORDER_STATUS', 'INVALID_ORDER_AMOUNT'].includes(message)) return NextResponse.json({ error: message }, { status: 400 });

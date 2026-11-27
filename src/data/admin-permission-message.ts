@@ -11,6 +11,9 @@ export function adminPermissionErrorMessage(error: unknown, requiredPermission?:
     return PERMISSION_MESSAGES[requiredPermission];
   }
   if (error === 'Forbidden') return '当前账号没有执行该操作的权限。';
+  if (error === 'Admin MFA required') return '请先完成管理员身份确认后再执行该操作。';
+  if (error === 'Admin authenticator policy required') return '请先完成验证器身份策略校验后再执行该操作。';
+  if (error === 'Admin MFA state unavailable') return '暂时无法确认身份验证状态，请稍后重试。';
   if (typeof error === 'string' && error.trim()) return error;
   return '操作失败';
 }

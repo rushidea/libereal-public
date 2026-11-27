@@ -26,10 +26,9 @@ export function adminInquiryTodoWhere(createdBefore?: Date): Prisma.InquiryWhere
   return {
     archivedAt: null,
     status: { in: [...ADMIN_INQUIRY_TODO_STATUSES] },
-    quotes: { none: { status: { in: [...SENT_QUOTE_STATUSES] } } },
     OR: [
       { hasUnresolvedPricing: true },
-      { operationLogs: { in: ['[]', ''] } },
+      { operationLogs: { in: ['[]', ''] }, quotes: { none: { status: { in: [...SENT_QUOTE_STATUSES] } } } },
     ],
     ...(createdBefore ? { createdAt: { lt: createdBefore } } : {}),
   };

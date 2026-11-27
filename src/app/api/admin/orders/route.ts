@@ -1,7 +1,9 @@
+import { receivableCashAmounts, receivableView } from '@/lib/receivable-balance';
 import { NextRequest, NextResponse } from 'next/server';
 import type { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import { AMBIGUOUS_PRODUCT_CATALOG_NUMBER, CustomerUnavailableProductError, verifyAndPriceItems, type PriceLookupItem } from '@/lib/pricing';
+import { assertBrandDiscountPricesCurrent, discountPricingFailure } from '@/lib/pricing';
 import { toOrderItemCreates } from '@/lib/commerce-records';
 import {
   assertVariantCheckoutStock,
@@ -14,7 +16,9 @@ import { requireAdmin } from '@/lib/session';
 import { writeAuditLog } from '@/lib/audit';
 import { adminOrderResolvedLineError, parseAdminOrderCreateCharges } from '@/lib/admin-order-create';
 import { reviewCommerceLinesWithCatalog } from '@/lib/commerce-line-catalog';
-import { normalizeOrderPaymentMethod } from '@/data/payment-methods';
+import { isPostDeliveryPaymentMethod, normalizeOrderPaymentMethod } from '@/data/payment-methods';
+import { summarizeCustomerCredit } from '@/lib/customer-credit';
+import type { OrderCreditReviewBadge } from '@/lib/credit-summary';
 import { orderAutoCloseAt } from '@/lib/order-auto-close';
 import { initialOrderStatus } from '@/lib/order-domain';
 import { isOrderIdUniqueConflict, ORDER_NUMBER_BUSY_ERROR, withAllocatedOrderNumber } from '@/data/order-number';
@@ -30,6 +34,7 @@ import {
 const orderListSelect = {
   id: true,
   email: true,
+  customerId: true,
   subtotal: true,
   adjustmentTotal: true,
   total: true,
@@ -118,7 +123,7 @@ export async function GET(req: NextRequest) {
     const where = buildAdminActiveOrderWhere(query) as Prisma.OrderWhereInput;
     const countWhere = buildAdminActiveOrderCountWhere(query.receivableOpen) as Prisma.OrderWhereInput;
     const select = query.receivableOpen
-      ? { ...orderListSelect, receivable: { select: receivableSelect } }
+      ? { ...orderListSelect, receivable: { select: receivableSelect }, cashPostings: { select: receivableCashAmounts } }
       : orderListSelect;
 
     const [orders, total, statusGroups, pendingAlipayUnpaid, receivableAggregate] = await Promise.all([
@@ -141,19 +146,83 @@ export async function GET(req: NextRequest) {
         },
       }),
       query.receivableOpen
-        ? prisma.accountReceivable.aggregate({
-            where: { status: 'open', order: { is: { archivedAt: null } } },
-            _count: { _all: true },
-            _sum: { amount: true },
-          })
+        ? prisma.$queryRaw<Array<{ count: bigint; cents: bigint }>>`WITH balances AS (
+            SELECT ROUND(r.amount * 100) - COALESCE((SELECT SUM(c.releasedCents) FROM CustomerCashPosting c WHERE c.orderId=r.orderId),0) AS recorded,
+              ROUND(o.total * 100) AS face, COALESCE((SELECT SUM(c.amountCents) FROM CustomerCashPosting c WHERE c.orderId=r.orderId),0) AS received
+            FROM AccountReceivable r JOIN "Order" o ON o.id=r.orderId WHERE r.status IN ('open','overdue') AND o.archivedAt IS NULL
+          )
+          SELECT COUNT(*) AS count, COALESCE(SUM(MAX(0, CASE WHEN face > 0 THEN MIN(recorded, face - received) ELSE recorded END)),0) AS cents FROM balances`
         : Promise.resolve(null),
     ]);
 
+    const pendingPostDelivery = orders.filter(
+      (order) => order.status === 'pending' && isPostDeliveryPaymentMethod(order.paymentMethod),
+    );
+    const pendingIds = pendingPostDelivery.map((order) => order.id);
+    const customerIds = [...new Set(pendingPostDelivery.map((order) => order.customerId).filter((cid): cid is string => Boolean(cid)))];
+    const pendingEmails = [...new Set(pendingPostDelivery.map((order) => order.email).filter(Boolean))];
+    const now = new Date();
+    const [flaggedEvents, creditUsers] = pendingIds.length
+      ? await Promise.all([
+          prisma.orderEvent.findMany({
+            where: { orderId: { in: pendingIds }, type: 'credit_review_required' },
+            select: { orderId: true },
+          }),
+          customerIds.length || pendingEmails.length
+            ? prisma.user.findMany({
+                where: {
+                  OR: [
+                    ...(customerIds.length ? [{ id: { in: customerIds } }] : []),
+                    ...(pendingEmails.length ? [{ email: { in: pendingEmails } }] : []),
+                  ],
+                },
+                select: { id: true, email: true, tier: true, creditAccount: true },
+              })
+            : Promise.resolve([]),
+        ])
+      : [[], []];
+    const flaggedOrderIds = new Set(flaggedEvents.map((event) => event.orderId));
+    const creditUserById = new Map(creditUsers.map((u) => [u.id, u]));
+    const creditUserByEmail = new Map(creditUsers.map((u) => [u.email.toLowerCase(), u]));
+
     const enriched = orders.map((order) => {
-      const { paymentAttempts, addressSnapshot, ...rest } = order;
-      const receivable = 'receivable' in rest ? rest.receivable ?? null : null;
+      const { paymentAttempts, addressSnapshot, customerId, ...rest } = order;
+      const raw = 'receivable' in rest ? rest.receivable as Prisma.AccountReceivableGetPayload<{ select: typeof receivableSelect }> | null : null;
+      const cashPostings = 'cashPostings' in rest
+        ? rest.cashPostings as Prisma.CustomerCashPostingGetPayload<{ select: typeof receivableCashAmounts }>[] : [];
+      const receivable = raw ? receivableView(raw, { total: order.total, cashPostings }) : null;
       const summary = { ...rest };
       if ('receivable' in summary) delete summary.receivable;
+      if ('cashPostings' in summary) delete summary.cashPostings;
+
+      let creditReview: OrderCreditReviewBadge | null = null;
+      if (order.status === 'pending' && isPostDeliveryPaymentMethod(order.paymentMethod)) {
+        const creditUser = (customerId ? creditUserById.get(customerId) : undefined)
+          ?? creditUserByEmail.get(order.email.toLowerCase());
+        const flaggedAtSubmission = flaggedOrderIds.has(order.id);
+        if (creditUser) {
+          const creditSummary = summarizeCustomerCredit(creditUser, creditUser.creditAccount, now);
+          const suspended = !['active', 'credit_limited'].includes(creditSummary.status);
+          const projectedUsed = Math.round((creditSummary.usedAmount + order.total + Number.EPSILON) * 100) / 100;
+          const exceedsLimit = projectedUsed > creditSummary.effectiveLimit;
+          const shortfall = exceedsLimit
+            ? Math.round((projectedUsed - creditSummary.effectiveLimit + Number.EPSILON) * 100) / 100
+            : 0;
+          const needsReview = suspended || exceedsLimit;
+          if (needsReview || flaggedAtSubmission) {
+            creditReview = {
+              needsReview,
+              flaggedAtSubmission,
+              suspended,
+              exceedsLimit,
+              shortfall,
+              availableAmount: creditSummary.availableAmount,
+              effectiveLimit: creditSummary.effectiveLimit,
+            };
+          }
+        }
+      }
+
       return {
         ...summary,
         receivable,
@@ -162,6 +231,7 @@ export async function GET(req: NextRequest) {
         department: null,
         phone: addressSnapshot?.phone || null,
         payment: getAlipayPaymentSummary(order, paymentAttempts[0]),
+        creditReview,
       };
     });
 
@@ -175,7 +245,7 @@ export async function GET(req: NextRequest) {
         pendingAlipayUnpaid,
       ),
       receivableSummary: receivableAggregate
-        ? { count: receivableAggregate._count._all, amount: receivableAggregate._sum.amount ?? 0 }
+        ? { count: Number(receivableAggregate[0].count), amount: Number(receivableAggregate[0].cents) / 100 }
         : null,
     });
   } catch (err) {
@@ -319,6 +389,9 @@ export async function POST(req: NextRequest) {
 
     const orderStatus = initialOrderStatus(normalizedPaymentMethod);
     const order = await withAllocatedOrderNumber(prisma, async (tx, orderId) => {
+      await assertBrandDiscountPricesCurrent(tx, verifiedItems, {
+        customerEmail: customer?.email ?? normalizedCustomerEmail, manualAdjustments, allowManualAdjustment: true, allowHazardousProducts: true,
+      });
       await assertVariantCheckoutStock(tx, orderItems.map((item) => ({
         productId: item.productId,
         quantity: item.quantity,
@@ -394,6 +467,8 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ order, orderId: order.id, warnings });
   } catch (err) {
+    const discountError = discountPricingFailure(err);
+    if (discountError) return NextResponse.json({ error: discountError }, { status: 409 });
     if (err instanceof Error && (err.message === 'INVALID_FALLBACK_PRICE' || err.message === 'INVALID_PRICE_ADJUSTMENT')) {
       return NextResponse.json({ error: '单价必须是有限、非负、最多两位小数的数字' }, { status: 400 });
     }

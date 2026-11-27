@@ -4,6 +4,7 @@ import { getEphemeralStore } from '@/lib/ephemeral-store';
 import { auth } from '@/lib/auth';
 import { requireActiveSession } from '@/lib/session';
 import { prisma } from '@/lib/prisma';
+import { usesProtectedBrandPricing } from '@/lib/pricing';
 import { createUnifiedPricingSnapshot, resolveUnifiedPricingIdentities, type UnifiedPricingRequestLine } from '@/lib/unified-pricing-snapshot';
 import { promotionSkuKey } from '@/data/promotion-foundation';
 import { allocateUnifiedBandsToSources } from '@/lib/unified-price-band-sources';
@@ -49,12 +50,15 @@ async function post(req: NextRequest, dependencies: CartPreviewDependencies) {
       const data = await dependencies.client.$transaction(async (tx) => {
         const identities = (await resolveUnifiedPricingIdentities(tx, { lines })).items;
         const products = await tx.product.findMany({ where: { id: { in: [...new Set(identities.map((item) => item.productId))] } },
-          select: { id: true, price: true, pricingMode: true, variants: { select: { id: true, price: true } } } });
-        const productMap = new Map(products.map((item) => [item.id, item]));
+          select: { id: true, price: true, pricingMode: true, brand: true, brandRecordId: true,
+            variants: { select: { id: true, price: true } } } });
+        const productMap = new Map(await Promise.all(products.map(async (item) => [item.id, {
+          ...item, requiresQuote: item.pricingMode === 'inquiry' || await usesProtectedBrandPricing(tx, item),
+        }] as const)));
         const uncertain = new Set<string>(); const inquiry = new Set<string>();
         for (const item of identities) {
           const product = productMap.get(item.productId); if (!product) throw new Error('INVALID_PROMOTION_PRODUCT');
-          if (product.pricingMode === 'inquiry') { inquiry.add(item.id); continue; }
+          if (product.requiresQuote) { inquiry.add(item.id); continue; }
           const variant = item.variantId ? product.variants.find((entry) => entry.id === item.variantId) : null;
           if (item.variantId && !variant) throw new Error('INVALID_PROMOTION_VARIANT');
           const base = variant ? variant.price : product.price;

@@ -3,14 +3,19 @@ import { PROMOTION_RULES } from '@/lib/cart-promotions/rules';
 import { promotionEngine } from '@/lib/cart-promotions/engine';
 import { legacyRuleVersionHash } from '@/lib/legacy-rule-version';
 import { calculatePrice, type PriceAdjustment, type PromotionCandidate } from '@/lib/price-engine';
-import { lookupBrandDiscountRate } from '@/lib/discount-brand-catalog';
+import { explicitBrandDiscount } from '@/lib/discount-brand-catalog';
 import type { Prisma } from '@prisma/client';
+import { CONFIRMED_TIER_DISCOUNT_RATES } from '@/lib/discount';
+import { pricingContentHash } from '@/lib/pricing-adjustment-approval';
+import { requiresWrittenSupplierQuote, SUPPLIER_WRITTEN_QUOTE_REQUIRED } from '@/lib/supplier-quote-policy';
+import { readApprovedSupplierQuote } from '@/lib/supplier-quote-review';
 
 const pricingVariantSelect = {
   id: true,
   catalogNumber: true,
   spec: true,
   price: true,
+  originalPrice: true,
   promotionalPrice: true,
   minimumSalePrice: true,
   productId: true,
@@ -20,6 +25,7 @@ const pricingVariantSelect = {
 export const AMBIGUOUS_PRODUCT_CATALOG_NUMBER = 'AMBIGUOUS_PRODUCT_CATALOG_NUMBER';
 
 export interface PriceLookupItem {
+  inquiryItemId?: string | null;
   productId?: string | null;
   catalogNumber?: string | null;
   brand?: string | null;
@@ -165,6 +171,10 @@ export function getVerifiedInventoryError(item: VerifiedItem): InventoryValidati
 }
 
 export interface PricingContext {
+  /** Set from the server-loaded inquiry, never accepted as a customer pricing override. */
+  inquiryId?: string;
+  /** Catalogue updates must not silently reuse the legacy lowest-price policy. */
+  requireDiscountPriority?: boolean;
   /** Optional caller-owned transaction for a consistent checkout price snapshot. */
   db?: Prisma.TransactionClient;
   userId?: string | null;
@@ -180,6 +190,84 @@ export interface PricingContext {
   strictQuantity?: boolean;
   /** Inquiry submission may preserve unresolved lines without pricing them. */
   allowQuoteRequired?: boolean;
+}
+
+export function discountPricingFailure(error: unknown): string | null {
+  const messages: Record<string, string> = {
+    BRAND_NOT_ACTIVE: '该品牌尚未启用，请先核对品牌资料',
+    BRAND_DEFAULT_DISCOUNT_REQUIRED: '该品牌尚无已确认的适用折扣，请先预览并确认品牌默认折扣',
+    BRAND_CATALOG_PRICE_REQUIRED: '商品或规格缺少有效目录价，请先核对目录价',
+    SUPPLIER_WRITTEN_QUOTE_REQUIRED: '该销售包装须先人工发函并核验供应商书面回复，再继续报价',
+    INVALID_SUPPLIER_QUOTE_POLICY: '品牌的人工询价门槛无效，请先核对已确认的品牌资料',
+    SUPPLIER_QUOTE_REPLY_EXPIRED: '供应商书面报价已失效，请重新询价并核对回复',
+    SUPPLIER_QUOTE_REVIEW_CHANGED: '询价内容或适用条件已变化，请重新核对供应商回复',
+    SUPPLIER_QUOTE_CUSTOMER_PRICE_CHANGED: '客户售价与当前目录价和已确认的折扣规则不同，请重新核对报价',
+    LEGACY_CUSTOMER_DISCOUNT_REVIEW_REQUIRED: '客户仍有旧版个人折扣，须核清适用品牌和授权后再报价',
+    INVALID_CUSTOMER_BRAND_DISCOUNT: '客户品牌折扣数据无效，请先核对原记录',
+    INVALID_DISCOUNT_RATE: '适用折扣数据无效，请先核对原记录',
+    MANUAL_ADJUSTMENT_REQUIRES_QUOTE_REVIEW: '人工填写价格与当前目录价及折扣不一致，请重新核对报价',
+    PROMOTION_REQUIRES_QUOTE_REVIEW: '该品牌的活动条件尚需核对，暂不能自动叠加活动价格',
+    BRAND_DISCOUNT_PRICE_DRIFT: '目录价、品牌折扣或客户条件已变化，请刷新后重新确认',
+    CATALOG_REPRICING_REQUIRES_REVIEW: '部分报价缺少可核验的商品或价格来源，请先核对原询价资料',
+  };
+  return error instanceof Error ? messages[error.message] ?? null : null;
+}
+
+/** Look up policy from the stored product brand, including legacy products without a brand ID. */
+export async function usesProtectedBrandPricing(
+  tx: Prisma.TransactionClient, product: { brand: string; brandRecordId: string | null },
+): Promise<boolean> {
+  const brand = await tx.brand.findUnique({
+    where: product.brandRecordId ? { id: product.brandRecordId } : { name: product.brand },
+    select: { defaultDiscountRate: true, supplierQuoteRequiredAbove: true },
+  });
+  return brand?.defaultDiscountRate != null || brand?.supplierQuoteRequiredAbove != null;
+}
+
+/** Check active brand policies inside the order/quote transaction, including a newly activated policy. */
+export async function assertBrandDiscountPricesCurrent(
+  tx: Prisma.TransactionClient, items: VerifiedItem[], context: PricingContext,
+) {
+  const canonical = items.map(item => ({ ...item }));
+  const supplierLines = new Set<string>();
+  for (const [index, item] of items.entries()) {
+    if (item.source !== 'db' || !item.productId || item.quoteRequired) continue;
+    const expected = JSON.parse(item.pricingSnapshot) as Record<string, unknown>;
+    if (context.inquiryId && expected.inquiryId && context.inquiryId !== expected.inquiryId) throw new Error('BRAND_DISCOUNT_PRICE_DRIFT');
+    const product = await tx.product.findUnique({ where: { id: item.productId }, select: { brand: true, brandRecordId: true } });
+    const usesBrandPolicy = product !== null && await usesProtectedBrandPricing(tx, product);
+    if (usesBrandPolicy && typeof expected.unifiedPricingEvidenceHash === 'string') {
+      // Unified bands describe a promotion plan. A brand-policy price or a
+      // quantity-bound supplier reply must be verified on the original quote.
+      throw new Error('PROMOTION_REQUIRES_QUOTE_REVIEW');
+    }
+    if (!usesBrandPolicy && expected.discountPolicy !== 'brand_priority' && expected.discountPolicy !== 'supplier_written_reply') continue;
+    try {
+      const current = await verifyAndPriceItems([{
+        productId: item.productId, variantId: item.variantId, catalogNumber: item.catalogNumber,
+        inquiryItemId: typeof expected.inquiryItemId === 'string' ? expected.inquiryItemId : undefined,
+        name: item.name, price: item.unitPrice, quantity: item.quantity,
+      }], { ...context, inquiryId: context.inquiryId ?? (typeof expected.inquiryId === 'string' ? expected.inquiryId : undefined),
+        db: tx, requireDiscountPriority: true, allowClientFallback: false });
+      const actual = current.verifiedItems[0];
+      const snapshot = JSON.parse(actual.pricingSnapshot) as Record<string, unknown>;
+      if (actual.unitPrice !== item.unitPrice || !expected.discountInputsHash
+        || snapshot.discountInputsHash !== expected.discountInputsHash) throw new Error('BRAND_DISCOUNT_PRICE_DRIFT');
+      // The server result decides which authority must be present. A caller's
+      // category label or copied hash cannot turn these checks off.
+      if (snapshot.discountPolicy === 'supplier_written_reply') {
+        const scopeKey = JSON.stringify([snapshot.inquiryId, snapshot.inquiryItemId]);
+        if (supplierLines.has(scopeKey) || (item.leadTime ?? null) !== (actual.leadTime ?? null)
+          || ['discountPolicy', 'inquiryId', 'inquiryItemId', 'supplierQuoteReviewId', 'supplierQuoteReplyHash',
+            'supplierQuoteValidUntil', 'customerSupplyConditions'].some(key => expected[key] !== snapshot[key])) {
+          throw new Error('BRAND_DISCOUNT_PRICE_DRIFT');
+        }
+        supplierLines.add(scopeKey);
+      }
+      canonical[index] = { ...item, pricingSnapshot: actual.pricingSnapshot };
+    } catch { throw new Error('BRAND_DISCOUNT_PRICE_DRIFT'); }
+  }
+  return canonical;
 }
 
 export class CustomerUnavailableProductError extends Error {
@@ -371,6 +459,7 @@ const pricingProductSelect = {
   pricingMode: true,
   name: true,
   brand: true,
+  brandRecordId: true,
   subBrand: true,
   minimumSalePrice: true,
   hazardous: true,
@@ -421,16 +510,7 @@ async function findPricingProduct(db: Prisma.TransactionClient, item: PriceLooku
   return findProductByCatalogNumber(db, catalogNumber, item.brand);
 }
 
-function explicitBrandDiscount(value: string | null | undefined, brand: string, subBrand?: string | null): number | null {
-  if (!value) return null;
-  try {
-    const discounts = JSON.parse(value) as Record<string, number>;
-    const rate = lookupBrandDiscountRate(discounts, brand, subBrand);
-    return typeof rate === 'number' && rate > 0 && rate <= 1 ? rate : null;
-  } catch {
-    return null;
-  }
-}
+
 
 /**
  * Verify and recompute item prices server-side.
@@ -449,15 +529,15 @@ export async function verifyAndPriceItems(
   items: PriceLookupItem[],
   context: PricingContext = {},
 ): Promise<{ verifiedItems: VerifiedItem[]; verifiedSubtotal: number; mismatchedCount: number }> {
+  const db = context.db ?? prisma;
   const verifiedItems: VerifiedItem[] = [];
   let verifiedSubtotal = 0;
   let mismatchedCount = 0;
-  const db = context.db ?? prisma;
   const now = context.now || new Date();
   const user = context.userId || context.customerEmail
     ? await db.user.findFirst({
       where: context.userId ? { id: context.userId } : { email: context.customerEmail! },
-      select: { tier: true, discountRate: true, brandDiscounts: true, isFrozen: true },
+      select: { id: true, email: true, tier: true, discountRate: true, brandDiscounts: true, isFrozen: true },
     })
     : null;
   const allowMemberDiscount = Boolean(user && !user.isFrozen);
@@ -512,6 +592,25 @@ export async function verifyAndPriceItems(
         throw new Error('PRODUCT_CATALOG_MISMATCH');
       }
       if (product && item.brand && item.brand !== product.brand) throw new Error('PRODUCT_BRAND_MISMATCH');
+      const brandPolicy = product ? await db.brand.findUnique({
+        where: product.brandRecordId ? { id: product.brandRecordId } : { name: product.brand },
+        select: { id: true, name: true, isActive: true, defaultDiscountRate: true, supplierQuoteRequiredAbove: true },
+      }) : null;
+      const discountPriority = Boolean(context.requireDiscountPriority || brandPolicy?.defaultDiscountRate != null || brandPolicy?.supplierQuoteRequiredAbove != null);
+      const cataloguePrice = variant ? variant.originalPrice : product?.originalPrice;
+      const supplierQuoteRequired = Boolean(product && requiresWrittenSupplierQuote(cataloguePrice, brandPolicy?.supplierQuoteRequiredAbove));
+      const supplierQuote = supplierQuoteRequired && product && typeof cataloguePrice === 'number' && cataloguePrice > 0 ? await readApprovedSupplierQuote(db, {
+        inquiryId: context.inquiryId, inquiryItemId: item.inquiryItemId, productId: product.id,
+        variantId: variant?.id, quantity: qty, userId: user?.id ?? context.userId, customerEmail: context.customerEmail,
+      }) : null;
+      if (product && discountPriority && brandPolicy && !brandPolicy.isActive) throw new Error('BRAND_NOT_ACTIVE');
+      if (product && discountPriority && item.promoMark) throw new Error('PROMOTION_REQUIRES_QUOTE_REVIEW');
+      if (product && (discountPriority || brandPolicy?.supplierQuoteRequiredAbove != null)
+        && !(typeof cataloguePrice === 'number' && Number.isFinite(cataloguePrice) && cataloguePrice > 0)) {
+        if (!context.allowQuoteRequired) throw new Error('BRAND_CATALOG_PRICE_REQUIRED');
+        quoteRequired = true;
+      }
+      if (supplierQuoteRequired && !supplierQuote && !context.allowQuoteRequired) throw new Error(SUPPLIER_WRITTEN_QUOTE_REQUIRED);
       if (product) {
         available = product.inStock;
         leadTime = product.leadTime;
@@ -532,13 +631,15 @@ export async function verifyAndPriceItems(
           ?? (item.catalogNumber ? context.manualAdjustments?.[item.catalogNumber] : undefined)
           ?? (item.productId ? context.manualAdjustments?.[item.productId] : undefined)
         : undefined;
-      if (product?.pricingMode === 'inquiry' && !(manualAdjustment && context.allowManualAdjustment)) {
+      if (product && !supplierQuote && (supplierQuoteRequired || (product.pricingMode === 'inquiry' && !(manualAdjustment && context.allowManualAdjustment)))) {
         if (!context.allowQuoteRequired) throw new Error('PRODUCT_REQUIRES_INQUIRY');
         quoteRequired = true;
         pricingSnapshot = JSON.stringify({
           calculatedAt: now.toISOString(), productId: product.id, variantId: variant?.id || null,
           catalogNumber: variant?.catalogNumber || product.catalogNumber,
           status: 'quote_required', available, leadTime, stockQuantity,
+          ...(supplierQuoteRequired ? { reason: SUPPLIER_WRITTEN_QUOTE_REQUIRED,
+            cataloguePrice, supplierQuoteRequiredAbove: brandPolicy?.supplierQuoteRequiredAbove } : {}),
         });
       }
       if (product?.hazardous && !context.allowHazardousProducts) {
@@ -548,12 +649,12 @@ export async function verifyAndPriceItems(
           .filter((link) => (!link.variantId || link.variantId === variant?.id)
             && link.promotion.status === 'active'
             && link.promotion.startsAt <= now && link.promotion.endsAt > now) ?? [];
-      if (context.strictQuantity && !item.promoMark && activePromotionLinks.some((link) => {
+      if (!discountPriority && context.strictQuantity && !item.promoMark && activePromotionLinks.some((link) => {
         if (!link.promotion.ruleDefinition || (link.variantId ?? null) !== (variant?.id ?? null)) return false;
         try { return (JSON.parse(link.promotion.ruleDefinition) as { priceBasis?: unknown }).priceBasis === 'catalog'; }
         catch { return true; }
       })) throw new Error('PROMOTION_UNIFIED_RUNTIME_REQUIRED');
-      const referenceConfig = referencePricePromotionConfig();
+      const referenceConfig = discountPriority ? null : referencePricePromotionConfig();
       const configuredReferenceLinks = referenceConfig && referenceConfig !== 'unknown'
         ? activePromotionLinks.filter((link) => link.promotion.id === referenceConfig.promotionId)
         : [];
@@ -561,7 +662,7 @@ export async function verifyAndPriceItems(
       if (product && variant && !item.promoMark && configuredReferenceLinks.length > 0) {
         throw new Error('REFERENCE_PRICE_PROMOTION_INVALID');
       }
-      const inReferenceScope = Boolean(product && !variant && !item.promoMark && !quoteRequired);
+      const inReferenceScope = Boolean(!discountPriority && product && !variant && !item.promoMark && !quoteRequired);
       referencePriceEligible = inReferenceScope;
       const referenceReady = Boolean(product && variant == null && configuredReferenceLinks.length === 1
           && configuredReferenceLink !== undefined && configuredReferenceLink.variantId == null && configuredReferenceLink.promotion.ruleDefinition == null
@@ -576,7 +677,7 @@ export async function verifyAndPriceItems(
       if (promotionEvidence) {
         promotionEvidence = { ...promotionEvidence, referencePriceApplied: referenceApplies, referencePriceEligible: inReferenceScope };
       }
-      if (!quoteRequired && product && (referenceApplies || product.price > 0 || (variant?.price || 0) > 0)) {
+      if (!quoteRequired && product && (discountPriority || referenceApplies || product.price > 0 || (variant?.price || 0) > 0)) {
         const activeDatabasePromotionIds = new Set(activePromotionLinks.map((link) => link.promotion.id));
         const promotions: PromotionCandidate[] = activePromotionLinks.map((link) => ({
             id: link.promotion.id,
@@ -617,12 +718,13 @@ export async function verifyAndPriceItems(
         // 促销标记行（换购/赠品）：按原价计价，不叠加会员/品牌折扣与促销价（优惠由下单 API 统一扣减）
         const isPromoLine = Boolean(item.promoMark);
         const result = calculatePrice({
-          basePrice: referenceApplies ? product.originalPrice! : product.price,
-          variantPrice: referenceApplies ? null : variant?.price,
+          ...(discountPriority ? { discountPolicy: 'brand_priority' as const, brandDefaultDiscountRate: brandPolicy?.defaultDiscountRate } : {}),
+          basePrice: discountPriority ? cataloguePrice! : referenceApplies ? product.originalPrice! : product.price,
+          variantPrice: discountPriority || referenceApplies ? null : variant?.price,
           tier: !isPromoLine && allowMemberDiscount ? user?.tier : undefined,
           personalDiscountRate: !isPromoLine && allowMemberDiscount ? user?.discountRate : null,
           brandDiscountRate: !isPromoLine && allowMemberDiscount
-            ? explicitBrandDiscount(user?.brandDiscounts, product.brand, product.subBrand)
+            ? explicitBrandDiscount(user?.brandDiscounts, product.brand, product.subBrand, discountPriority)
             : null,
           promotions: isPromoLine ? [] : promotions,
           manualAdjustment: isPromoLine ? null : manualAdjustment,
@@ -645,6 +747,8 @@ export async function verifyAndPriceItems(
             ? { state: 'knownnone' }
             : { state: 'unknown' };
         if (promotionEvidence) promotionEvidence = { ...promotionEvidence, identity: promotionIdentity };
+        if (supplierQuote && result.finalPrice !== supplierQuote.reply.customerUnitPrice) throw new Error('SUPPLIER_QUOTE_CUSTOMER_PRICE_CHANGED');
+        if (supplierQuote) leadTime = supplierQuote.reply.leadTime;
         unitPrice = result.finalPrice;
         matchedCatalog = variant?.catalogNumber || product.catalogNumber;
         matchedProductId = product.id;
@@ -652,6 +756,21 @@ export async function verifyAndPriceItems(
         pricingSnapshot = JSON.stringify({
           calculatedAt: now.toISOString(), productId: product.id, variantId: variant?.id || null,
           catalogNumber: matchedCatalog, ...result, referencePriceApplied: referenceApplies,
+          discountPolicy: supplierQuote ? 'supplier_written_reply' : discountPriority ? 'brand_priority' : 'legacy',
+          ...(supplierQuote ? {
+            inquiryId: context.inquiryId, inquiryItemId: item.inquiryItemId,
+            supplierQuoteReviewId: supplierQuote.reviewId, supplierQuoteReplyHash: supplierQuote.replyHash,
+            supplierQuoteValidUntil: supplierQuote.reply.validUntil,
+            customerSupplyConditions: supplierQuote.reply.customerConditions,
+          } : {}),
+          discountInputsHash: pricingContentHash({
+            productId: product.id, brand: product.brand, brandRecordId: product.brandRecordId, subBrand: product.subBrand,
+            cataloguePrice, brandPolicy, tiers: CONFIRMED_TIER_DISCOUNT_RATES, user,
+            ...(supplierQuote ? { supplierRequestHash: supplierQuote.requestHash,
+              supplierReplyHash: supplierQuote.replyHash, quantity: qty } : {}),
+            customerIdentity: user ? { id: user.id, email: user.email } : { email: context.customerEmail ?? null },
+            policy: discountPriority ? 'brand_priority' : 'legacy',
+          }),
           couponPromotionIdentity: promotionIdentity,
           couponPromotionPricingEvidence: promotionEvidence,
         });
@@ -659,7 +778,7 @@ export async function verifyAndPriceItems(
       }
     }
 
-    if (unitPrice == null && manualAdjustment && context.allowManualAdjustment) {
+    if (unitPrice == null && manualAdjustment && context.allowManualAdjustment && !context.requireDiscountPriority && !quoteRequired) {
       unitPrice = manualAdjustment.value;
       source = 'db';
       pricingSnapshot = JSON.stringify({ calculatedAt: now.toISOString(), finalPrice: unitPrice, appliedSource: 'admin_manual_quote' });

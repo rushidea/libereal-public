@@ -1,8 +1,9 @@
-// 测试辅助：建 SQLite DB（in-memory 共享）+ 真实 schema + seed 数据
-// 关键：route handler 内部 `new Database(process.env.DATABASE_PATH)` 也要指向同一文件
-// vitest `env` 在 worker 启动时设 DATABASE_PATH；这个 module 只需读它
+// The setup file assigns DATABASE_PATH before routes or fixtures import Prisma.
+// Keep the fixture connection open until the test file's final afterAll.
 
 import Database from 'better-sqlite3';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 
 let _db: Database.Database | null = null;
 
@@ -492,6 +493,8 @@ export function getTestDb(): Database.Database {
       logoUrl TEXT,
       isActive INTEGER NOT NULL DEFAULT 1,
       sortOrder INTEGER NOT NULL DEFAULT 0,
+      defaultDiscountRate REAL,
+      supplierQuoteRequiredAbove REAL,
       createdAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
       updatedAt DATETIME NOT NULL
     );
@@ -630,6 +633,37 @@ export function getTestDb(): Database.Database {
       action TEXT NOT NULL, details TEXT, ip TEXT, userAgent TEXT,
       createdAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
+    CREATE TABLE IF NOT EXISTS InquiryFeedback (
+      id TEXT PRIMARY KEY,
+      inquiryId TEXT NOT NULL,
+      quoteId TEXT,
+      quoteVersion INTEGER,
+      actorType TEXT NOT NULL,
+      actorUserId TEXT,
+      actorEmail TEXT NOT NULL,
+      actorName TEXT,
+      channel TEXT NOT NULL,
+      channelReference TEXT,
+      feedbackType TEXT NOT NULL,
+      content TEXT NOT NULL,
+      handlingStatus TEXT NOT NULL DEFAULT 'pending',
+      handledByAdminId TEXT,
+      handledByAdminEmail TEXT,
+      handledAt DATETIME,
+      resolutionNote TEXT,
+      resolvedByQuoteId TEXT,
+      clientRequestId TEXT,
+      ip TEXT,
+      userAgent TEXT,
+      createdAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updatedAt DATETIME NOT NULL,
+      FOREIGN KEY (inquiryId) REFERENCES Inquiry(id) ON DELETE CASCADE,
+      FOREIGN KEY (quoteId) REFERENCES Quote(id) ON DELETE SET NULL
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS InquiryFeedback_inquiryId_clientRequestId_key ON InquiryFeedback(inquiryId, clientRequestId);
+    CREATE INDEX IF NOT EXISTS InquiryFeedback_inquiryId_createdAt_idx ON InquiryFeedback(inquiryId, createdAt);
+    CREATE INDEX IF NOT EXISTS InquiryFeedback_inquiryId_handlingStatus_idx ON InquiryFeedback(inquiryId, handlingStatus);
+    CREATE INDEX IF NOT EXISTS InquiryFeedback_quoteId_idx ON InquiryFeedback(quoteId);
     CREATE TABLE IF NOT EXISTS OrderItem (
       id TEXT PRIMARY KEY,
       orderId TEXT NOT NULL,
@@ -842,6 +876,28 @@ export function getTestDb(): Database.Database {
   ensureColumn(_db, 'Order', 'inquiry_order_seq', 'inquiry_order_seq INTEGER');
   _db.exec('CREATE UNIQUE INDEX IF NOT EXISTS Order_inquiryId_inquiryOrderSeq_key ON "Order"(inquiryId, inquiry_order_seq)');
   ensureColumn(_db, 'PointsRedemption', 'pointsReturned', 'pointsReturned INTEGER NOT NULL DEFAULT 0');
+  if (!_db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='PurchaseOrder'").get()) {
+    _db.exec(readFileSync(resolve('prisma/migrations/20261122010000_purchase_orders/migration.sql'), 'utf8'));
+  }
+  if (!_db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='PurchaseReplacementLine'").get()) {
+    _db.exec(readFileSync(resolve('prisma/migrations/20261122020000_purchase_replacement_lines/migration.sql'), 'utf8'));
+  }
+  if (!_db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='FulfillmentParcel'").get()) {
+    _db.exec(readFileSync(resolve('prisma/migrations/20261123010000_fulfillment_parcels/migration.sql'), 'utf8'));
+  }
+  if (!_db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='FulfillmentLineResolution'").get()) {
+    _db.exec(readFileSync(resolve('prisma/migrations/20261123020000_fulfillment_resolutions/migration.sql'), 'utf8'));
+  }
+  if (!_db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='CustomerCashPosting'").get()) {
+    _db.exec(readFileSync(resolve('prisma/migrations/20261123030000_finance_settlement/migration.sql'), 'utf8'));
+  }
+  if (!_db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='AfterSaleCase'").get()) {
+    _db.exec(readFileSync(resolve('prisma/migrations/20261123040000_after_sales/migration.sql'), 'utf8'));
+  }
+  const fulfillmentLineColumns = _db.pragma('table_info(FulfillmentParcelLine)') as { name: string }[];
+  if (!fulfillmentLineColumns.some(column=>column.name==='afterSaleApprovalId')) {
+    _db.exec(readFileSync(resolve('prisma/migrations/20261123050000_after_sale_exchange_source/migration.sql'), 'utf8'));
+  }
   return _db;
 }
 
@@ -856,8 +912,6 @@ export function closeTestDb(): void {
     _db.close();
     _db = null;
   }
-  // 不删 file —— 下次 getTestDb() 会重新打开同一 file + 用 IF NOT EXISTS 幂等创建 schema
-  // file 由 vitest env 指定的 /tmp/... 路径，进程退出后 OS 自动清理
 }
 
 export function seedUserWithPassword(db: Database.Database, user: {
@@ -958,6 +1012,24 @@ export function seedAdmin(db: Database.Database, id = 'admin_test_id', email = '
 export function clearAllTables(db: Database.Database) {
   // 清表顺序：先子表后父表（外键依赖）
   db.exec(`
+    DELETE FROM FinanceEvent;
+    DELETE FROM FinanceInvoiceAllocation;
+    DELETE FROM FinanceInvoice;
+    DELETE FROM FinanceInvoicePlan;
+    DELETE FROM CustomerCashPosting;
+    UPDATE AfterSaleCase SET shortfallId=NULL;
+    DELETE FROM FulfillmentLineResolution;
+    DELETE FROM FulfillmentParcelLine WHERE sourceReceiptId IS NOT NULL;
+    DELETE FROM FulfillmentReceipt;
+    DELETE FROM FulfillmentEvent;
+    DELETE FROM FulfillmentParcelLine;
+    DELETE FROM AfterSaleEvent;
+    DELETE FROM AfterSaleCase;
+    DELETE FROM FulfillmentParcel;
+    DELETE FROM PurchaseReplacementLine;
+    DELETE FROM PurchaseActivity;
+    DELETE FROM PurchaseRequirement;
+    DELETE FROM PurchaseOrder;
     DELETE FROM CouponInstance;
     DELETE FROM Coupon;
     DELETE FROM WechatMiniLoginChallenge;
@@ -992,6 +1064,7 @@ export function clearAllTables(db: Database.Database) {
     DELETE FROM AccountReceivable;
     DELETE FROM UserTierHistory;
     DELETE FROM CreditAccount;
+    DELETE FROM InquiryFeedback;
     DELETE FROM QuoteConfirmation;
     DELETE FROM QuoteItem;
     DELETE FROM Quote;

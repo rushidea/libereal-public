@@ -1,7 +1,7 @@
 // @vitest-environment node
 
 import Database from 'better-sqlite3';
-import { randomBytes, randomUUID } from 'node:crypto';
+import { randomBytes } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
 import {
   createMfaLoginChallenge,
@@ -17,6 +17,7 @@ import {
 import { createMemoryMfaRateLimitStore } from '@/lib/security/mfa-rate-limit';
 import { backfillAuthenticators, hasUnifiedTables } from '@/lib/security/unified-authenticator-store';
 import { totpCodeAt } from '@/lib/security/mfa-totp';
+import { testDatabasePath } from './test-database-path';
 
 function createMfaSchema(db: Database.Database): void {
   db.exec(`
@@ -96,7 +97,7 @@ function createMfaSchema(db: Database.Database): void {
 
 describe('production MFA service flow', () => {
   it('runs setup, encrypted confirmation, TOTP challenge verification and one recovery-code use', async () => {
-    const dbPath = `/tmp/libereal-mfa-service-${process.pid}-${randomUUID()}.db`;
+    const dbPath = testDatabasePath('libereal-mfa-service');
     const db = new Database(dbPath);
     createMfaSchema(db);
     db.prepare('INSERT INTO User (id, email, name) VALUES (?, ?, ?)').run('user-1', 'test@example.com', 'Test User');
@@ -221,7 +222,7 @@ describe('production MFA service flow', () => {
   });
 
   it('backfills legacy MfaSetting and recovery hashes into unified tables idempotently', () => {
-    const dbPath = `/tmp/libereal-mfa-backfill-${process.pid}-${randomUUID()}.db`;
+    const dbPath = testDatabasePath('libereal-mfa-backfill');
     const db = new Database(dbPath);
     db.exec(`
       CREATE TABLE MfaSetting (
@@ -321,7 +322,7 @@ describe('production MFA service flow', () => {
   });
 
   it('fails closed when legacy and unified MFA status rows disagree', () => {
-    const dbPath = `/tmp/libereal-mfa-conflict-${process.pid}-${randomUUID()}.db`;
+    const dbPath = testDatabasePath('libereal-mfa-conflict');
     const db = new Database(dbPath);
     createMfaSchema(db);
     const now = new Date().toISOString();
@@ -359,7 +360,7 @@ describe('production MFA service flow', () => {
   });
 
   it('requires MFA for a passkey-only unified account', () => {
-    const dbPath = `/tmp/libereal-mfa-passkey-only-${process.pid}-${randomUUID()}.db`;
+    const dbPath = testDatabasePath('libereal-mfa-passkey-only');
     const db = new Database(dbPath);
     createMfaSchema(db);
     const now = new Date().toISOString();

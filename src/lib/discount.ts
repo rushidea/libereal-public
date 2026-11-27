@@ -5,6 +5,8 @@ export type TierPolicy = { level: number; min: number; name: string; creditLimit
 export const DEFAULT_TIER: TierPolicy = { level: 0, min: 0, name: 'standard', creditLimit: 0, discountRate: 1 };
 export const TIERS: TierPolicy[] = [DEFAULT_TIER, ...Array.from({ length: 7 }, (_, index) => ({ level: index + 2, min: 0, name: `tier-${index + 2}`, creditLimit: 0, discountRate: 1 }))];
 export const TIER_DISCOUNT_RATES: Record<string, number> = Object.fromEntries(TIERS.map((tier) => [tier.name, 1]));
+/** No merchant-approved tier rates are distributed in the public source. */
+export const CONFIRMED_TIER_DISCOUNT_RATES: Record<string, number> = {};
 
 export function getTierByRollingSpend(amount: number, tiers: readonly TierPolicy[] = TIERS): TierPolicy {
   return [...tiers].sort((a, b) => b.min - a.min).find((tier) => amount >= tier.min) ?? DEFAULT_TIER;

@@ -5,6 +5,8 @@ import { useEffect, useRef, useState } from 'react';
 import { ArrowLeft, Building2, FileText, Info, ReceiptText, X } from 'lucide-react';
 import { uiSurfaces } from '@/lib/ui-surfaces';
 import { InquiryIdDisplay } from '@/components/InquiryIdDisplay';
+import { formatOrderPaymentMethod } from '@/data/payment-methods';
+import type { OrganizationOrderReviewPreview } from '@/lib/organization-order-review';
 
 type Receivable = {
   id: string;
@@ -33,7 +35,9 @@ type OrganizationOrder = {
   createdAt: string;
   archivedAt: string | null;
   receivable: Receivable | null;
+  canCancel: boolean;
   canReview: boolean;
+  organizationReview: 'current' | 'historical' | null;
 };
 
 type OrganizationInquiry = {
@@ -101,6 +105,9 @@ export default function OrganizationHistoryPanel({ organizationId, view }: { org
   const [error, setError] = useState(organizationId ? '' : '缺少组织信息。');
   const [loading, setLoading] = useState(Boolean(organizationId));
   const [reviewingOrderId, setReviewingOrderId] = useState<string | null>(null);
+  const [reviewPreview, setReviewPreview] = useState<OrganizationOrderReviewPreview | null>(null);
+  const [reviewError, setReviewError] = useState('');
+  const [historyRefresh, setHistoryRefresh] = useState(0);
   const [payablePolicyOpen, setPayablePolicyOpen] = useState(false);
   const payablePolicyTriggerRef = useRef<HTMLButtonElement>(null);
   const payablePolicyDialogRef = useRef<HTMLDivElement>(null);
@@ -144,22 +151,41 @@ export default function OrganizationHistoryPanel({ organizationId, view }: { org
     };
   }, [payablePolicyOpen]);
 
-  const reviewOrder = async (orderId: string, status: 'confirmed' | 'cancelled') => {
+  const reviewOrder = async (orderId: string, action: 'preview' | 'approve' | 'cancel') => {
+    if (action === 'approve' && reviewPreview?.orderId !== orderId) return;
     setReviewingOrderId(orderId);
-    setError('');
+    setReviewError('');
     try {
-      const response = await fetch(`/api/orders/${encodeURIComponent(orderId)}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status }),
-      });
-      const body = await response.json().catch(() => ({})) as { error?: string };
-      if (!response.ok) throw new Error(body.error || '订单审核失败');
-      setData((current) => current
-        ? { ...current, orders: current.orders.map((order) => order.id === orderId ? { ...order, status, canReview: false } : order) }
-        : current);
+      const reviewUrl = `/api/organizations/${encodeURIComponent(organizationId)}/orders/${encodeURIComponent(orderId)}/review`;
+      const response = action === 'preview'
+        ? await fetch(reviewUrl, { cache: 'no-store' })
+        : await fetch(action === 'approve' ? reviewUrl : `/api/orders/${encodeURIComponent(orderId)}`, {
+          method: action === 'approve' ? 'POST' : 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(action === 'approve' ? { version: reviewPreview?.version } : { status: 'cancelled' }),
+        });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        if (response.status === 409) setHistoryRefresh((value) => value + 1);
+        throw new Error(body.error || '订单审核失败');
+      }
+      if (action === 'preview') {
+        setReviewPreview(body);
+        setData((current) => current && {
+          ...current,
+          orders: current.orders.map((order) => order.id !== orderId ? order : {
+            ...order,
+            total: body.total,
+            organizationReview: body.reviewed ? 'current' : order.organizationReview && 'historical',
+          }),
+        });
+        return;
+      }
+      setReviewPreview(null);
+      setHistoryRefresh((value) => value + 1);
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : '订单审核失败');
+      setReviewPreview(null);
+      setReviewError(reason instanceof Error ? reason.message : '订单审核失败');
     } finally {
       setReviewingOrderId(null);
     }
@@ -186,7 +212,7 @@ export default function OrganizationHistoryPanel({ organizationId, view }: { org
     return () => {
       active = false;
     };
-  }, [organizationId]);
+  }, [organizationId, historyRefresh]);
 
   if (loading) {
     return <div className={`rounded-2xl border ${uiSurfaces.border} ${uiSurfaces.panelStrong} p-6 text-sm ${uiSurfaces.mutedText}`}>正在读取组织历史记录…</div>;
@@ -228,6 +254,7 @@ export default function OrganizationHistoryPanel({ organizationId, view }: { org
           <ReceiptText className={uiSurfaces.textInteractive} size={20} aria-hidden="true" />
           <h2 className={`text-base font-semibold ${uiSurfaces.titleText}`}>组织采购</h2>
         </div>
+        {reviewError && <p className={`mt-3 text-sm ${uiSurfaces.statusError}`} role="alert">{reviewError}</p>}
         {data.orders.length === 0 ? <p className={`mt-5 text-sm ${uiSurfaces.mutedText}`}>暂无组织采购记录。</p> : (
           <div className="mt-5 space-y-3">
             {data.orders.map((order) => (
@@ -236,17 +263,37 @@ export default function OrganizationHistoryPanel({ organizationId, view }: { org
                   <div>
                     <p className={`break-all font-mono text-sm ${uiSurfaces.titleText}`}>{order.id}</p>
                     <p className={`mt-1 text-xs ${uiSurfaces.mutedText}`}>{formatDate(order.createdAt)} · {statusLabel(order.status)}</p>
+                    {order.organizationReview === 'current' && <p className={`mt-1 text-xs ${uiSurfaces.textSecondary}`}>
+                      本版已通过组织审核{order.status === 'pending' && !order.archivedAt ? '，等待 Libereal 接单' : ''}
+                    </p>}
+                    {order.organizationReview === 'historical' && <p className={`mt-1 text-xs ${uiSurfaces.textSecondary}`}>曾有组织审核记录</p>}
                   </div>
                   <div className="flex flex-wrap items-center justify-end gap-2">
                     <p className={`text-sm font-semibold ${uiSurfaces.textInteractive}`}>{formatPrice(order.total)}</p>
-                    {order.canReview && (
-                      <div className="flex gap-2">
-                        <button type="button" onClick={() => void reviewOrder(order.id, 'cancelled')} disabled={reviewingOrderId !== null} className={`${uiSurfaces.buttonDanger} text-xs`}>取消订单</button>
-                        <button type="button" onClick={() => void reviewOrder(order.id, 'confirmed')} disabled={reviewingOrderId !== null} className={`${uiSurfaces.primaryButton} text-xs`}>{reviewingOrderId === order.id ? '处理中…' : '通过订单'}</button>
-                      </div>
-                    )}
+                    {order.canCancel && <button type="button" onClick={() => void reviewOrder(order.id, 'cancel')} disabled={reviewingOrderId !== null} className={`${uiSurfaces.buttonDanger} text-xs`}>取消订单</button>}
+                    {order.canReview && <button type="button" onClick={() => void reviewOrder(order.id, 'preview')} disabled={reviewingOrderId !== null} className={`${uiSurfaces.primaryButton} text-xs`}>{reviewingOrderId === order.id ? '处理中…' : '查看组织审核明细'}</button>}
                   </div>
                 </div>
+                {reviewPreview?.orderId === order.id && (
+                  <section aria-label="组织审核明细" className={`mt-4 grid gap-2 border-t pt-3 text-sm ${uiSurfaces.border}`}>
+                    <p>下单客户 {reviewPreview.customerEmail}</p>
+                    <p>收款方 {reviewPreview.payee} · {formatOrderPaymentMethod(reviewPreview.paymentMethod ?? '') || '付款方式待确认'}</p>
+                    <ul>{reviewPreview.lines.map(line => <li key={line.id} className="mb-2">
+                      <span>{[line.brand, line.name, line.catalogNumber, line.spec].filter(Boolean).join(' · ')}，{formatPrice(line.unitPrice)} × {line.quantity}{line.unit}</span>
+                      {line.leadTime && <p>货期 {line.leadTime}</p>}
+                      {line.conditions && <p>{line.conditions}</p>}
+                    </li>)}</ul>
+                    {reviewPreview.adjustments.map(row => <p key={row.id}>{row.label} {formatPrice(row.amount)}</p>)}
+                    {reviewPreview.pointsDiscount > 0 && <p>积分抵扣 {formatPrice(reviewPreview.pointsDiscount)}</p>}
+                    {reviewPreview.recipient && <p>收货信息 {[reviewPreview.recipient.name, reviewPreview.recipient.institution, reviewPreview.recipient.phone, reviewPreview.recipient.address].filter(Boolean).join(' · ')}</p>}
+                    <p>合计 {formatPrice(reviewPreview.total)}</p>
+                    <div className="flex items-center gap-2">
+                      {reviewPreview.reviewed ? <span>本版已通过组织审核</span> :
+                        <button type="button" disabled={reviewingOrderId !== null} onClick={() => void reviewOrder(order.id, 'approve')} className={`${uiSurfaces.primaryButton} text-xs`}>通过组织审核，提交 Libereal 接单</button>}
+                      <button type="button" onClick={() => setReviewPreview(null)} className={`${uiSurfaces.buttonGhost} text-xs`}>收起明细</button>
+                    </div>
+                  </section>
+                )}
                 {order.receivable && <p className={`mt-3 text-xs ${uiSurfaces.mutedText}`}>应付款：{formatPrice(order.receivable.amount)} · {statusLabel(order.receivable.status)} · 到期 {formatDate(order.receivable.dueAt)}</p>}
                 {order.pointsDiscount > 0 && (
                   <div className={`mt-3 space-y-1 text-xs ${uiSurfaces.mutedText}`}>

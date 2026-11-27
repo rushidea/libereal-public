@@ -21,7 +21,9 @@ vi.mock('@/lib/cart-promotions/service', async (importOriginal) => {
     },
   };
 });
-vi.mock('@/lib/pricing', () => ({
+vi.mock('@/lib/pricing', async (importOriginal) => ({
+  ...await importOriginal<typeof import('@/lib/pricing')>(),
+  assertBrandDiscountPricesCurrent: vi.fn(),
   AMBIGUOUS_PRODUCT_CATALOG_NUMBER: 'AMBIGUOUS_PRODUCT_CATALOG_NUMBER',
   verifyAndPriceItems: mocks.verifyAndPriceItems,
   getVerifiedInventoryError: (item: { available?: boolean | null; stockQuantity?: number | null; quantity: number }) => {

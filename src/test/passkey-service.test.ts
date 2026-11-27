@@ -47,6 +47,7 @@ import {
 } from '@/lib/security/passkey-service';
 import { consumePasskeyVerifiedToken } from '@/lib/security/passkey-session';
 import { hashChallengeForStorage } from '@/lib/security/mfa-challenge-store';
+import { testDatabasePath } from './test-database-path';
 
 function createSchema(db: Database.Database): void {
   db.exec(`
@@ -119,7 +120,7 @@ describe('Passkey security flow', () => {
   let dbPath: string;
 
   beforeEach(() => {
-    dbPath = `/tmp/libereal-passkey-${process.pid}-${randomUUID()}.db`;
+    dbPath = testDatabasePath('libereal-passkey');
     const db = new Database(dbPath);
     createSchema(db);
     db.close();

@@ -16,6 +16,7 @@ import { InquiryIdDisplay } from '@/components/InquiryIdDisplay';
 import SiteFooter from '@/components/SiteFooter';
 import MobileBottomNav from '@/components/mobile/MobileBottomNav';
 import { effectiveInquiryStatus, quoteIsExpired } from '@/lib/quote-expiry';
+import InquiryFeedbackSection from '@/components/account/InquiryFeedbackSection';
 
 function translatePaymentMethod(method: string): string {
   const map: Record<string, string> = {
@@ -74,7 +75,20 @@ type Inquiry = {
   advisorName?: string;
   advisorPhone?: string;
   createdAt: string;
-  activeQuote?: { id: string; version: number; status: string; subtotal: number; validUntil?: string | null; sentAt?: string; acceptedAt?: string; items: InquiryItem[] } | null;
+  activeQuote?: {
+    id: string;
+    version: number;
+    status: string;
+    subtotal: number;
+    validUntil?: string | null;
+    sentAt?: string;
+    acceptedAt?: string;
+    declineReasonCode?: string | null;
+    declineNote?: string | null;
+    declinedAt?: string | null;
+    declinedByEmail?: string | null;
+    items: InquiryItem[];
+  } | null;
   currentQuote?: { id: string; version: number; status: string; subtotal: number; validUntil?: string | null; sentAt?: string; acceptedAt?: string; items: InquiryItem[] } | null;
   quoteIsHistorical?: boolean;
   operationLogs?: string;
@@ -285,7 +299,7 @@ export default function InquiryDetailPage({ params }: { params: Promise<{ id: st
                   <div className="flex justify-between items-start border-b border-gray-50 dark:border-slate-400 pb-2">
                     <span className="text-gray-500 dark:text-gray-400">报价发送</span>
                     <span className="text-brand-600 dark:text-brand-500 text-right font-medium">
-                      {inquiry.activeQuote.sentAt ? new Date(inquiry.activeQuote.sentAt).toLocaleString('zh-CN') : '是'}
+                      {inquiry.activeQuote.sentAt ? new Date(inquiry.activeQuote.sentAt).toLocaleString('zh-CN') : '未记录发送时间'}
                     </span>
                   </div>
                 )}
@@ -421,6 +435,15 @@ export default function InquiryDetailPage({ params }: { params: Promise<{ id: st
                   </div>
                 </div>
               </div>
+            </div>
+
+            <div className="mt-5">
+              <InquiryFeedbackSection
+                inquiryId={inquiry.id}
+                inquiryStatus={inquiry.status}
+                activeQuote={inquiry.activeQuote}
+                quoteIsHistorical={Boolean(inquiry.quoteIsHistorical)}
+              />
             </div>
           </div>
         </div>

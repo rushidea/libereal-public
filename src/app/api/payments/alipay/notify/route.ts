@@ -2,16 +2,20 @@ import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { alipayAmountToCents, getAlipaySdk, parseAlipayAmountCents } from '@/lib/alipay';
 import { writeAuditLog } from '@/lib/audit';
+import {
+  AlipayStockReceiptDeferred, applyStockHeldAlipayPayment, previewStockHeldAlipayPayment, recordAlipayOrderReceipt,
+  recordAlipayPointsPending, STOCK_SHORTFALL_STATUS,
+} from '@/lib/alipay-order-settlement';
+import type { Prisma } from '@prisma/client';
 import { releaseOrderInventory, reserveOrderInventory } from '@/lib/inventory';
 import { settlePaymentPoints } from '@/lib/payment-concurrency';
 import { POINTS_SETTLEMENT_BUSY_ERROR } from '@/lib/points-checkout-service';
 import { AUTO_CLOSEABLE_ORDER_STATUSES, isInactiveOrderStatus } from '@/lib/order-domain';
 
 const SUCCESS_STATUSES = new Set(['TRADE_SUCCESS', 'TRADE_FINISHED']);
-const ALIPAY_STOCK_SHORTFALL_STATUS = 'paid_stock_shortfall_reconciliation_required';
 const TERMINAL_ATTEMPT_STATUSES = [
   'paid',
-  ALIPAY_STOCK_SHORTFALL_STATUS,
+  STOCK_SHORTFALL_STATUS,
   'rejected_order_cancelled',
   'rejected_amount_mismatch',
   'paid_superseded_reconciliation_required',
@@ -95,56 +99,58 @@ async function handlePointsTopupNotify(data: Record<string, string>) {
 }
 
 async function recordAlipayStockShortfall(
+  tx: Prisma.TransactionClient,
   attempt: { id: string; outTradeNo: string; amount: number; order: { id: string; total: number } },
-  data: Record<string, string>,
+  data: Record<string, string>, receivedAt: Date, paidAt?: Date,
 ) {
-  await prisma.$transaction(async (tx) => {
-    const latestOrder = await tx.order.findUnique({
-      where: { id: attempt.order.id },
-      select: { paidAt: true },
-    });
-    // 同一笔通知的重试，或另一笔已提交的收款，都不能把已付款订单改成缺货待核对。
-    if (latestOrder?.paidAt) return;
-    const claimed = await tx.paymentAttempt.updateMany({
-      where: { id: attempt.id, status: { notIn: TERMINAL_ATTEMPT_STATUSES } },
-      data: {
-        status: ALIPAY_STOCK_SHORTFALL_STATUS,
-        tradeNo: data.trade_no || null,
-        notifiedAt: new Date(),
-      },
-    });
-    if (claimed.count !== 1) return;
-    await tx.order.update({
-      where: { id: attempt.order.id },
-      data: {
-        events: {
-          create: {
-            type: 'payment_stock_shortfall',
-            actorEmail: 'system',
-            message: '支付宝已收款，可售库存不足，订单未记为已付款',
-            metadata: JSON.stringify({
-              outTradeNo: attempt.outTradeNo,
-              tradeNo: data.trade_no || null,
-              amount: attempt.amount,
-            }),
-          },
+  const latestOrder = await tx.order.findUnique({
+    where: { id: attempt.order.id },
+    select: { paidAt: true },
+  });
+  // 同一笔通知的重试，或另一笔已提交的收款，都不能把已付款订单改成缺货待核对。
+  if (latestOrder?.paidAt) return;
+  const claimed = await tx.paymentAttempt.updateMany({
+    where: { id: attempt.id, status: { notIn: TERMINAL_ATTEMPT_STATUSES } },
+    data: {
+      status: STOCK_SHORTFALL_STATUS,
+      tradeNo: data.trade_no || null,
+      notifiedAt: receivedAt,
+      paidAt,
+    },
+  });
+  if (claimed.count !== 1) return;
+  await tx.order.update({
+    where: { id: attempt.order.id },
+    data: {
+      events: {
+        create: {
+          type: 'payment_stock_shortfall',
+          actorEmail: 'system',
+          message: '支付宝已收款，可售库存不足，订单未记为已付款',
+          metadata: JSON.stringify({
+            outTradeNo: attempt.outTradeNo,
+            tradeNo: data.trade_no || null,
+            amount: attempt.amount,
+          }),
         },
       },
-    });
-    await writeAuditLog({
-      action: 'payment.alipay_stock_shortfall_reconciliation_required',
-      resource: 'payments',
-      targetType: 'Order',
-      targetId: attempt.order.id,
-      after: {
-        outTradeNo: attempt.outTradeNo,
-        tradeNo: data.trade_no || null,
-        amount: attempt.amount,
-        orderTotal: attempt.order.total,
-        reason: 'insufficient_available_inventory',
-      },
-    }, tx);
+    },
   });
+  await writeAuditLog({
+    action: 'payment.alipay_stock_shortfall_reconciliation_required',
+    resource: 'payments',
+    targetType: 'Order',
+    targetId: attempt.order.id,
+    after: {
+      outTradeNo: attempt.outTradeNo,
+      tradeNo: data.trade_no || null,
+      amount: attempt.amount,
+      orderTotal: attempt.order.total,
+      reason: 'insufficient_available_inventory',
+      providerPaidAt: paidAt?.toISOString() ?? null,
+      firstNotifiedAt: receivedAt.toISOString(),
+    },
+  }, tx);
 }
 
 export async function POST(req: Request) {
@@ -190,6 +196,10 @@ export async function POST(req: Request) {
   }
 
   const isPaid = SUCCESS_STATUSES.has(data.trade_status);
+  const receivedAt = new Date();
+  const paymentTime = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(data.gmt_payment ?? '')
+    ? new Date(data.gmt_payment.replace(' ', 'T') + '+08:00') : null;
+  const providerPaidAt = paymentTime && paymentTime <= receivedAt ? paymentTime : undefined;
   try {
     await prisma.$transaction(async (tx) => {
       const latestAttempt = await tx.paymentAttempt.findUnique({
@@ -310,6 +320,13 @@ export async function POST(req: Request) {
       // Attempt state is monotonic. Delayed non-paid notifications and
       // duplicate paid notifications must not rewrite terminal outcomes.
       if (isTerminalAttemptStatus(latestAttempt.status)) return;
+      if (latestAttempt.status === STOCK_SHORTFALL_STATUS) {
+        if (isPaid && latestAttempt.tradeNo === data.trade_no) {
+          const held = await previewStockHeldAlipayPayment(tx, latestAttempt.order.id, latestAttempt.id);
+          await applyStockHeldAlipayPayment(tx, held);
+        }
+        return;
+      }
 
       const amountMatchesOrder = amountsEqualInCents(latestAttempt.amount, latestAttempt.order.total);
       if (isPaid && (!amountMatchesOrder || isInactiveOrderStatus(latestAttempt.order.status))) {
@@ -420,7 +437,17 @@ export async function POST(req: Request) {
         // 已有预占会跳过，确认订单时再次预占不会重复占用。
         const shouldReserve = !latestAttempt.order.paidAt && !isInactiveOrderStatus(latestAttempt.order.status);
         if (shouldReserve) {
-          await reserveOrderInventory(tx, latestAttempt.order.id, null, '支付宝收款预占库存');
+          await tx.$executeRawUnsafe('SAVEPOINT alipay_inventory_reservation');
+          try {
+            await reserveOrderInventory(tx, latestAttempt.order.id, null, '支付宝收款预占库存');
+          } catch (error) {
+            await tx.$executeRawUnsafe('ROLLBACK TO SAVEPOINT alipay_inventory_reservation');
+            await tx.$executeRawUnsafe('RELEASE SAVEPOINT alipay_inventory_reservation');
+            if (!isInsufficientInventoryError(error)) throw error;
+            await recordAlipayStockShortfall(tx, latestAttempt, data, receivedAt, providerPaidAt);
+            return;
+          }
+          await tx.$executeRawUnsafe('RELEASE SAVEPOINT alipay_inventory_reservation');
         }
         const claimed = await tx.order.updateMany({
           where: {
@@ -429,7 +456,7 @@ export async function POST(req: Request) {
             paidAt: null,
             status: { in: [...AUTO_CLOSEABLE_ORDER_STATUSES] },
           },
-          data: { paidAt: new Date(), status: 'pending', autoCloseAt: null },
+          data: { paidAt: providerPaidAt ?? receivedAt, status: 'pending', autoCloseAt: null },
         });
         firstPayment = claimed.count === 1;
         if (!firstPayment) {
@@ -474,7 +501,7 @@ export async function POST(req: Request) {
           status: isPaid ? 'paid' : data.trade_status || 'notified',
           tradeNo: data.trade_no || null,
           notifiedAt: new Date(),
-          ...(isPaid && !latestAttempt.paidAt ? { paidAt: new Date() } : {}),
+          ...(isPaid && !latestAttempt.paidAt ? { paidAt: providerPaidAt ?? receivedAt } : {}),
         },
       });
       if (isPaid && (firstPayment || !latestAttempt.order.pointsApplied)) {
@@ -491,84 +518,16 @@ export async function POST(req: Request) {
         }
       }
       if (isPaid && firstPayment) {
-        await tx.order.update({
-          where: { id: latestAttempt.order.id },
-          data: {
-            ...(latestAttempt.order.status === 'unpaid' ? {
-              statusHistory: {
-                create: {
-                  fromStatus: 'unpaid',
-                  toStatus: 'pending',
-                  actorEmail: 'system',
-                  reason: 'alipay_paid',
-                },
-              },
-            } : {}),
-            events: {
-              create: {
-                type: 'payment_received',
-                message: pointsSettlement === 'pending' ? '支付宝支付成功，积分待处理' : '支付宝支付成功',
-                metadata: JSON.stringify({
-                  outTradeNo: latestAttempt.outTradeNo,
-                  tradeNo: data.trade_no || null,
-                  pointsSettlement,
-                  ...(pointsSettlementError ? { pointsSettlementError } : {}),
-                }),
-              },
-            },
-          },
-        });
-        await writeAuditLog({
-          action: 'payment.alipay_paid',
-          resource: 'payments',
-          targetType: 'Order',
-          targetId: latestAttempt.order.id,
-          after: { outTradeNo: latestAttempt.outTradeNo, tradeNo: data.trade_no || null, amount: latestAttempt.amount },
-        }, tx);
+        await recordAlipayOrderReceipt(tx, { orderId: latestAttempt.order.id, priorStatus: latestAttempt.order.status,
+          amount: latestAttempt.amount, outTradeNo: latestAttempt.outTradeNo, tradeNo: data.trade_no || null },
+        pointsSettlement, pointsSettlementError);
       }
       if (isPaid && pointsSettlement === 'pending') {
-        const settlement = await tx.order.findUnique({
-          where: { id: latestAttempt.order.id },
-          select: { pointsApplied: true },
-        });
-        await tx.order.update({
-          where: { id: latestAttempt.order.id },
-          data: {
-            events: {
-              create: {
-                type: 'points_settlement_pending',
-                message: '支付宝订单积分待处理',
-                metadata: JSON.stringify({
-                  outTradeNo: latestAttempt.outTradeNo,
-                  pointsSettlementError,
-                }),
-              },
-            },
-          },
-        });
-        await writeAuditLog({
-          action: 'payment.alipay_points_pending',
-          resource: 'payments',
-          targetType: 'Order',
-          targetId: latestAttempt.order.id,
-          after: {
-            outTradeNo: latestAttempt.outTradeNo,
-            pointsApplied: settlement?.pointsApplied === true,
-            reason: pointsSettlementError,
-          },
-        }, tx);
+        await recordAlipayPointsPending(tx, latestAttempt.order.id, latestAttempt.outTradeNo, pointsSettlementError);
       }
     });
   } catch (error) {
-    if (isInsufficientInventoryError(error)) {
-      try {
-        await recordAlipayStockShortfall(attempt, data);
-      } catch (recordError) {
-        console.error('[alipay notify] stock shortfall recording failed', recordError);
-        return new NextResponse('fail', { status: 500 });
-      }
-      return new NextResponse('success');
-    }
+    if (error instanceof AlipayStockReceiptDeferred) return new NextResponse('success');
     console.error('[alipay notify] notification processing failed', error);
     return new NextResponse('fail', { status: 500 });
   }

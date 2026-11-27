@@ -4,6 +4,8 @@ const mocks = vi.hoisted(() => ({
   requireActiveSession: vi.fn(),
   orderFindUnique: vi.fn(),
   userFindUnique: vi.fn(),
+  orderEventsFindMany: vi.fn(),
+  repricingResultFindUnique: vi.fn(),
   paymentAttemptCreate: vi.fn(),
   paymentAttemptFindFirst: vi.fn(),
   paymentAttemptFindUnique: vi.fn(),
@@ -14,6 +16,14 @@ const mocks = vi.hoisted(() => ({
 vi.mock('@/lib/session', () => ({ requireActiveSession: mocks.requireActiveSession }));
 vi.mock('@/lib/prisma', () => ({
   prisma: {
+    orderEvent: { findMany: mocks.orderEventsFindMany },
+    backgroundTask: { findUnique: mocks.repricingResultFindUnique },
+    $transaction: async (callback: (tx: unknown) => Promise<unknown>) => callback({
+      order: { findUnique: mocks.orderFindUnique },
+      orderEvent: { findMany: mocks.orderEventsFindMany },
+      backgroundTask: { findUnique: mocks.repricingResultFindUnique },
+      paymentAttempt: { create: mocks.paymentAttemptCreate },
+    }),
     order: { findUnique: mocks.orderFindUnique },
     user: { findUnique: mocks.userFindUnique },
     paymentAttempt: {
@@ -45,12 +55,14 @@ const order = {
   paymentMethod: 'alipay',
   paidAt: null,
   status: 'pending',
+  orderItems: [],
+  _count: { paymentAttempts: 0 },
   createdAt: new Date('2099-07-16T00:00:00.000Z'),
 };
 
 describe('Alipay order payment routes', () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    vi.resetAllMocks();
     mocks.requireActiveSession.mockResolvedValue(user);
     mocks.userFindUnique.mockImplementation(async ({ where }: { where: { id: string } }) => {
       if (where.id === user.id) return { email: user.email, emailVerified: new Date('2026-01-01T00:00:00.000Z') };
@@ -58,9 +70,40 @@ describe('Alipay order payment routes', () => {
       return null;
     });
     mocks.orderFindUnique.mockResolvedValue(order);
+    mocks.orderEventsFindMany.mockResolvedValue([]);
+    mocks.repricingResultFindUnique.mockResolvedValue(null);
     mocks.paymentAttemptFindFirst.mockResolvedValue(null);
     mocks.paymentAttemptCreate.mockImplementation(async ({ data }) => ({ ...data }));
     mocks.writeAuditLog.mockResolvedValue(undefined);
+  });
+
+  it('keeps a late provider receipt out of a second checkout or redirect', async () => {
+    const unsettled = { ...order, _count: { paymentAttempts: 1 } };
+    mocks.orderFindUnique.mockResolvedValue(unsettled);
+    mocks.paymentAttemptFindUnique.mockResolvedValue({ orderId: order.id, order: unsettled, provider: 'alipay', status: 'created', amount: order.total });
+    const params = Promise.resolve({ id: order.id });
+    const created = await createPayment(new Request('https://example.test/api/orders/order-1/alipay', { method: 'POST' }), { params });
+    expect(created.status).toBe(409);
+    expect((await created.json()).code).toBe('PAYMENT_RECONCILIATION_REQUIRED');
+    const redirect = await redirectToAlipay(new Request('https://example.test/api/orders/order-1/alipay/redirect?attemptId=unsettled'), { params });
+    expect(redirect.status).toBe(409);
+    expect(mocks.pageExecute).not.toHaveBeenCalled();
+    expect(mocks.paymentAttemptCreate).not.toHaveBeenCalled();
+  });
+
+  it('does not open another payment while the original order needs price confirmation', async () => {
+    mocks.orderEventsFindMany.mockResolvedValue([{ metadata: JSON.stringify({ quoteVersion: 2, quoteId: 'q2' }) }]);
+    const response = await createPayment(new Request('https://libereal.cn/api/orders/order-1/alipay', { method: 'POST' }), { params: Promise.resolve({ id: order.id }) });
+    expect(response.status).toBe(409);
+    expect((await response.json()).code).toBe('QUOTE_REPRICE_REQUIRED');
+    expect(mocks.paymentAttemptCreate).not.toHaveBeenCalled();
+  });
+
+  it('rechecks repricing inside the payment-creation transaction', async () => {
+    mocks.orderEventsFindMany.mockResolvedValueOnce([]).mockResolvedValueOnce([{ metadata: JSON.stringify({ quoteVersion: 2, quoteId: 'q2' }) }]);
+    const response = await createPayment(new Request('https://libereal.cn/api/orders/order-1/alipay', { method: 'POST' }), { params: Promise.resolve({ id: order.id }) });
+    expect(response.status).toBe(409);
+    expect(mocks.paymentAttemptCreate).not.toHaveBeenCalled();
   });
 
   it('creates a payment attempt and returns a same-origin redirect URL', async () => {

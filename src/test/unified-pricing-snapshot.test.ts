@@ -50,8 +50,9 @@ function createSyntheticPrisma() {
       id TEXT PRIMARY KEY, catalogNumber TEXT NOT NULL, name TEXT NOT NULL, brand TEXT NOT NULL, price REAL NOT NULL,
       pricingMode TEXT NOT NULL DEFAULT 'fixed', originalPrice REAL, category TEXT, subcategory TEXT, spec TEXT, salesUnit TEXT, imageUrl TEXT, inStock BOOLEAN NOT NULL DEFAULT 1,
       promotionalPrice REAL, promotion BOOLEAN NOT NULL DEFAULT 0, costPrice REAL, minimumSalePrice REAL, subBrand TEXT, leadTime TEXT,
-      hazardous BOOLEAN NOT NULL DEFAULT 0, stockQuantity INTEGER NOT NULL DEFAULT -1, deletedAt DATETIME
+      hazardous BOOLEAN NOT NULL DEFAULT 0, stockQuantity INTEGER NOT NULL DEFAULT -1, deletedAt DATETIME, brandRecordId TEXT
     );
+    CREATE TABLE Brand (id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE, defaultDiscountRate REAL, supplierQuoteRequiredAbove REAL);
     CREATE TABLE ProductVariant (
       id TEXT PRIMARY KEY, productId TEXT NOT NULL, catalogNumber TEXT NOT NULL, spec TEXT NOT NULL, price REAL NOT NULL,
       originalPrice REAL, promotionalPrice REAL, costPrice REAL, minimumSalePrice REAL,
@@ -491,6 +492,27 @@ describe('real Prisma static and database promotion integration', () => {
       expect(data.lineBands[1]).toEqual([{ quantity: 1, unitPriceCents: 5000 }]);
       expect(data.statuses[0].id).toBe('activity-0');
       expect(data).not.toHaveProperty('evidence');
+    } finally { await synthetic.cleanup(); }
+  });
+
+  it('does not show a unified cart price for protected brands while keeping ordinary lines priced', async () => {
+    const synthetic = createSyntheticPrisma();
+    try {
+      seedSyntheticProduct(synthetic.databasePath, { id: 'ordinary', catalogNumber: 'O', price: 10, originalPrice: 10 });
+      seedSyntheticProduct(synthetic.databasePath, { id: 'protected', catalogNumber: 'P', price: 20, originalPrice: 20 });
+      const fixture = new Database(synthetic.databasePath);
+      try {
+        fixture.prepare('INSERT INTO Brand (id, name, defaultDiscountRate) VALUES (?, ?, ?)').run('locked', 'Synthetic Protected Brand', 0.8);
+        fixture.prepare('UPDATE Product SET brandRecordId = ? WHERE id = ?').run('locked', 'protected');
+      } finally { fixture.close(); }
+
+      const response = await cartPreviewPost.forTest(new Request('https://example.test/api/promotions/cart', { method: 'POST',
+        body: JSON.stringify([{ productId: 'ordinary', quantity: 1 }, { productId: 'protected', quantity: 1 }]) }) as never,
+        { client: synthetic.prisma, userId: async () => null });
+      expect(response.status).toBe(200);
+      expect(await response.json()).toMatchObject({
+        lineTotals: [1000, null], lineBands: [[{ quantity: 1, unitPriceCents: 1000 }], null], total: 1000,
+      });
     } finally { await synthetic.cleanup(); }
   });
 

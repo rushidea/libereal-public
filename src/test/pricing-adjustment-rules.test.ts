@@ -8,6 +8,15 @@ import {
 } from '@/lib/pricing-adjustment-rules';
 
 describe('price adjustment rules', () => {
+  it('requires an explicit valid brand default and rejects an unknown target', () => {
+    const body = { target: 'brand_default_discount', brand: 'Fixture', reason: '核实资料', brandDefaultDiscountRate: 0.8 };
+    expect(parsePriceAdjustmentRequest(body)).toMatchObject({ ok: true, value: { target: 'brand_default_discount', brandDefaultDiscountRate: 0.8, brand: 'Fixture' } });
+    for (const brandDefaultDiscountRate of [null, undefined, '', '0.8', 0, -1, 1.1, NaN]) {
+      expect(parsePriceAdjustmentRequest({ ...body, brandDefaultDiscountRate }).ok).toBe(false);
+    }
+    expect(parsePriceAdjustmentRequest({ ...body, brand: '' }).ok).toBe(false);
+    expect(parsePriceAdjustmentRequest({ ...body, target: 'customer_default' }).ok).toBe(false);
+  });
   it('raises, lowers and sets public prices without going below zero', () => {
     expect(computeAdjustedPrice(100, { mode: 'percent', direction: 'increase', amount: 10 })).toBe(110);
     expect(computeAdjustedPrice(100, { mode: 'percent', direction: 'decrease', amount: 10 })).toBe(90);

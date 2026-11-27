@@ -12,9 +12,10 @@ import { POST as approvalPOST } from '@/app/api/admin/users/approval/route';
 import { NextRequest } from 'next/server';
 import { getTestDb, closeTestDb, seedUser, seedAdmin, clearAllTables } from './db-helpers';
 
+beforeAll(() => { getTestDb(); });
+afterAll(() => { closeTestDb(); });
+
 describe('GET /api/admin/users/search', () => {
-  beforeAll(() => { getTestDb(); });
-  afterAll(() => { closeTestDb(); });
   beforeEach(() => {
     const db = getTestDb();
     clearAllTables(db);
@@ -65,8 +66,6 @@ describe('GET /api/admin/users/search', () => {
 });
 
 describe('GET /api/admin/users/filter', () => {
-  beforeAll(() => { getTestDb(); });
-  afterAll(() => { closeTestDb(); });
   beforeEach(() => {
     const db = getTestDb();
     clearAllTables(db);
@@ -136,8 +135,6 @@ describe('GET /api/admin/users/filter', () => {
 });
 
 describe('POST /api/admin/users/approval', () => {
-  beforeAll(() => { getTestDb(); });
-  afterAll(() => { closeTestDb(); });
   beforeEach(() => {
     const db = getTestDb();
     clearAllTables(db);

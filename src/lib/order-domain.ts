@@ -13,6 +13,8 @@ export const ORDER_STATUSES = [
 
 export type OrderStatus = (typeof ORDER_STATUSES)[number];
 
+// Written by the server only when an authorized Libereal administrator accepts an order.
+
 export const ORDER_STATUS_LABELS: Record<OrderStatus, string> = {
   unpaid: '未付款',
   pending: '待确认',

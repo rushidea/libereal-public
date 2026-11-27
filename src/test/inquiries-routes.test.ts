@@ -58,9 +58,11 @@ function seedInquiry(db: ReturnType<typeof getTestDb>, inquiry: {
   ));
 }
 
+// The handlers and fixtures share one SQLite file and keep separate connections for this suite.
+beforeAll(() => { getTestDb(); });
+afterAll(() => { closeTestDb(); });
+
 describe('GET /api/inquiries (admin list)', () => {
-  beforeAll(() => { getTestDb(); });
-  afterAll(() => { closeTestDb(); });
   beforeEach(() => {
     const db = getTestDb();
     clearAllTables(db);
@@ -144,8 +146,6 @@ describe('GET /api/inquiries (admin list)', () => {
 });
 
 describe('POST /api/inquiries/[id]/quote (admin send quote)', () => {
-  beforeAll(() => { getTestDb(); });
-  afterAll(() => { closeTestDb(); });
   beforeEach(() => {
     const db = getTestDb();
     clearAllTables(db);
@@ -856,8 +856,6 @@ describe('POST /api/inquiries/[id]/quote (admin send quote)', () => {
 });
 
 describe('PATCH /api/admin/inquiries/archive', () => {
-  beforeAll(() => { getTestDb(); });
-  afterAll(() => { closeTestDb(); });
   beforeEach(() => {
     const db = getTestDb();
     clearAllTables(db);
@@ -945,8 +943,6 @@ describe('PATCH /api/admin/inquiries/archive', () => {
 });
 
 describe('GET /api/admin/inquiries/archived', () => {
-  beforeAll(() => { getTestDb(); });
-  afterAll(() => { closeTestDb(); });
   beforeEach(() => {
     const db = getTestDb();
     clearAllTables(db);
