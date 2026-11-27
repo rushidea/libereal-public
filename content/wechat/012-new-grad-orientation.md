@@ -5,7 +5,8 @@ cover: "012-new-grad-orientation-cover.png"
 summary: "带新生第一件事不是带去食堂。先把那些没人写进 SOP 的野规矩交代完，省得后面出岔子。"
 issue: "第12期"
 wechatFirst: "true"
-publishedDate: 2026-08-28
+publishedDate: 2026-08-24
+wechatUrl: "https://mp.weixin.qq.com/s?__biz=MzY4NTM2MzExNQ==&mid=2247483935&idx=1&sn=90eaf5f115a5958c2cd2d48e19375c07&chksm=f39498dbc4e311cd69b367ca2d77f23111864c0b91dcee2a9d0820b0d93964ef72991980e2dc"
 ---
 
 # 新同学来了，那些"野路子"规矩得交代一遍
