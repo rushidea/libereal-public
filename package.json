@@ -82,6 +82,9 @@
       "@simplewebauthn/browser": "13.3.0",
       "@simplewebauthn/server": "13.3.2"
     },
+    "@prisma/config@7.10.0": {
+      "effect": "3.22.1"
+    },
     "deepmerge-ts": "8.0.0",
     "mysql2": "3.23.1",
     "uuid": "11.1.1",
