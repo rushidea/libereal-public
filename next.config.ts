@@ -1,6 +1,18 @@
 import type { NextConfig } from "next";
 import path from "path";
 
+function parseConfiguredImageHosts(): { protocol: 'https'; hostname: string }[] {
+  const raw = [
+    process.env.PRODUCT_IMAGE_HOSTS ?? '',
+    process.env.NEXT_PUBLIC_PRODUCT_IMAGE_HOSTS ?? '',
+  ]
+    .join(',')
+    .split(',')
+    .map((host) => host.trim().toLowerCase())
+    .filter(Boolean);
+  return [...new Set(raw)].map((hostname) => ({ protocol: 'https', hostname }));
+}
+
 const nextConfig: NextConfig = {
   // Parent ~/package-lock.json is unrelated; pin tracing root to this app.
   outputFileTracingRoot: path.join(__dirname),
@@ -101,10 +113,12 @@ const nextConfig: NextConfig = {
       },
     ];
   },
-  // Allow <Image> to load from these external hosts (news thumbnails, etc.)
+  // Allow <Image> to load from these external hosts (news thumbnails, vendor CDNs, etc.)
   // See: https://nextjs.org/docs/app/api-reference/next-config-js/images
   images: {
+    minimumCacheTTL: 2592000,
     remotePatterns: [
+      ...parseConfiguredImageHosts(),
       // jbr-pub.org.cn (some RSS feeds serve http URLs - allow both)
       { protocol: 'http', hostname: 'www.jbr-pub.org.cn' },
       { protocol: 'https', hostname: 'www.jbr-pub.org.cn' },

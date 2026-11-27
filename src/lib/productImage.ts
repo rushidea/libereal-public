@@ -392,7 +392,34 @@ const IMAGE_PATH_EXTENSION = /\.(?:jpe?g|png|webp|gif|svg)$/i;
 
 const INVALID_IMAGE_HOSTS = ['abcepta.com.cn', 'www.abcepta.com.cn'];
 
-/** True when imageUrl points at an actual image file, not a vendor product page. */
+function getConfiguredExternalImageHosts(): Set<string> {
+  const raw = [
+    process.env.NEXT_PUBLIC_PRODUCT_IMAGE_HOSTS ?? '',
+    process.env.PRODUCT_IMAGE_HOSTS ?? '',
+  ]
+    .join(',')
+    .split(',')
+    .map((host) => host.trim().toLowerCase())
+    .filter(Boolean);
+  return new Set(raw);
+}
+
+function isAllowedExtensionlessExternalImage(parsed: URL): boolean {
+  const host = parsed.hostname.toLowerCase();
+  const path = parsed.pathname;
+  if (!path || path === '/' || /^\/products\//i.test(path)) return false;
+  if (getConfiguredExternalImageHosts().has(host)) return true;
+  // Common extensionless object/CDN image URL patterns (e.g. OSS date-hash keys or Cloudflare Images)
+  if (host.endsWith('.aliyuncs.com') && /^\/\d{4}\/\d{2}\/\d{2}\/[a-f0-9]{16,}$/i.test(path)) {
+    return true;
+  }
+  if (/^\/cdn-cgi\/imagedelivery\//i.test(path)) {
+    return true;
+  }
+  return false;
+}
+
+/** True when imageUrl points at an actual image file or allowed external image object, not a vendor product page. */
 export function isValidProductImageUrl(url?: string | null): url is string {
   if (!url?.trim()) return false;
   try {
@@ -402,6 +429,8 @@ export function isValidProductImageUrl(url?: string | null): url is string {
       const parsed = new URL(normalized);
       if (INVALID_IMAGE_HOSTS.includes(parsed.hostname.toLowerCase())) return false;
       path = parsed.pathname.toLowerCase();
+      if (IMAGE_PATH_EXTENSION.test(path)) return true;
+      return isAllowedExtensionlessExternalImage(parsed);
     } else {
       path = (normalized.split('?')[0] ?? '').toLowerCase();
     }
@@ -418,8 +447,9 @@ export function getCategoryGradient(category?: string | null): string {
   return CATEGORY_GRADIENTS[category] ?? DEFAULT_GRADIENT;
 }
 
-export function getProductImageUrl(product: Pick<Product, 'imageUrl' | 'category' | 'subcategory'>): string | undefined {
-  if (product.imageUrl && isValidProductImageUrl(product.imageUrl)) return product.imageUrl;
+export function getFallbackProductImageUrl(
+  product: Pick<Product, 'category' | 'subcategory'>,
+): string | undefined {
   if (
     product.category &&
     CATEGORY_PREFERRED_OVER_SUBCATEGORY.has(product.category) &&
@@ -441,6 +471,11 @@ export function getProductImageUrl(product: Pick<Product, 'imageUrl' | 'category
     return CATEGORY_IMAGES[product.category];
   }
   return undefined;
+}
+
+export function getProductImageUrl(product: Pick<Product, 'imageUrl' | 'category' | 'subcategory'>): string | undefined {
+  if (product.imageUrl && isValidProductImageUrl(product.imageUrl)) return product.imageUrl;
+  return getFallbackProductImageUrl(product);
 }
 
 export function getProductImageAlt(

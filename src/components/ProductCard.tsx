@@ -2,18 +2,17 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
-import Image from 'next/image';
 import { Package, ShoppingCart, Check, Info, GitCompare, Heart, AlertTriangle, Flame } from 'lucide-react';
 import { Product, ProductVariant } from '@/types/Product';
 import { useCompare } from '@/context/CompareContext';
 import { useWishlist } from '@/context/WishlistContext';
 import { useCart } from '@/context/CartContext';
 import { useRouter } from 'next/navigation';
+import ProductImage from '@/components/ProductImage';
 import {
   getCategoryGradient,
   getDisplayBrand,
   getProductImageAlt,
-  getProductImageUrl,
 } from '@/lib/productImage';
 import { uiSurfaces } from '@/lib/ui-surfaces';
 import { getProductFulfillmentPresentation } from '@/lib/product-fulfillment';
@@ -131,7 +130,6 @@ export default function ProductCard({
   const imageProduct = imageSubcategoryOverride
     ? { ...product, subcategory: imageSubcategoryOverride }
     : product;
-  const imageUrl = getProductImageUrl(imageProduct);
   const imageAlt = getProductImageAlt(imageProduct);
   const categoryGradient = getCategoryGradient(product.category);
   const displayBrand = getDisplayBrand(product);
@@ -142,19 +140,17 @@ export default function ProductCard({
         href={`/products/${encodeURIComponent(product.catalogNumber)}?brand=${encodeURIComponent(product.brand)}`}
         className={`relative block aspect-[4/3] overflow-hidden bg-gradient-to-br ${categoryGradient} dark:opacity-80`}
       >
-        {imageUrl ? (
-          <Image
-            src={imageUrl}
-            alt={imageAlt}
-            fill
-            sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 25vw"
-            className="object-cover object-center transition-transform duration-500 ease-out group-hover:scale-105"
-          />
-        ) : (
-          <div className="absolute inset-0 flex items-center justify-center">
-            <Package className="h-10 w-10 text-white/40" />
-          </div>
-        )}
+        <ProductImage
+          product={imageProduct}
+          alt={imageAlt}
+          sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 25vw"
+          className="object-cover object-center transition-transform duration-500 ease-out group-hover:scale-105"
+          fallback={(
+            <div className="absolute inset-0 flex items-center justify-center">
+              <Package className="h-10 w-10 text-white/40" />
+            </div>
+          )}
+        />
         <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-slate-950/34 via-slate-950/6 to-transparent" />
 
         {product.hazardous ? (

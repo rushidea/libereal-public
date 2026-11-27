@@ -3,7 +3,6 @@
 import { useState, useCallback, useEffect, useMemo } from 'react';
 import { getProductCartKey, useCart } from '@/context/CartContext';
 import Link from 'next/link';
-import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 import {
   Package, ShoppingCart, Check,
@@ -16,7 +15,8 @@ import MobileBottomNav from '@/components/mobile/MobileBottomNav';
 import { Product } from '@/types/Product';
 import AdaptiveHeader from '@/components/AdaptiveHeader';
 import { productCategories } from '@/data/categories';
-import { getProductImageAlt, getProductImageUrl } from '@/lib/productImage';
+import ProductImage from '@/components/ProductImage';
+import { getProductImageAlt } from '@/lib/productImage';
 import { uiSurfaces } from '@/lib/ui-surfaces';
 import { getEffectiveProductPrice } from '@/lib/product-pricing';
 import { getVariantOptionCopy, mergeProductPackageOptions } from '@/lib/product-variants';
@@ -242,16 +242,12 @@ export default function ProductDetailClient({ product, variants, related }: Prod
             <div className={`overflow-hidden rounded-3xl ${uiSurfaces.panelStrong}`}>
               {/* Image */}
               <div className="relative flex h-56 w-full items-center justify-center overflow-hidden bg-gradient-to-br from-white/70 to-white/30 backdrop-blur-sm dark:from-slate-100/80 dark:to-slate-200/40">
-                {getProductImageUrl(product) ? (
-                  <Image
-                    src={getProductImageUrl(product)!}
-                    alt={getProductImageAlt(product)}
-                    fill
-                    className="object-cover"
-                  />
-                ) : (
-                  <Package size={64} className="text-gray-300" />
-                )}
+                <ProductImage
+                  product={product}
+                  alt={getProductImageAlt(product)}
+                  className="object-cover"
+                  fallback={<Package size={64} className="text-gray-300" />}
+                />
                 <div className="absolute inset-0 pointer-events-none z-10 overflow-hidden select-none" aria-hidden="true">
                   <div
                     className="absolute left-1/2 top-1/2 w-[170%] h-[170%] -translate-x-1/2 -translate-y-1/2 rotate-[-28deg] grid gap-x-3 gap-y-1 justify-items-center content-center"
@@ -693,16 +689,12 @@ export default function ProductDetailClient({ product, variants, related }: Prod
                 <Link key={p.id} href={`/products/${encodeURIComponent(p.catalogNumber)}?brand=${encodeURIComponent(p.brand)}`} className="group">
                   <div className={`rounded-2xl p-4 transition-all hover:-translate-y-0.5 hover:shadow-lg ${uiSurfaces.panel}`}>
                     <div className="relative mb-3 flex h-20 w-full items-center justify-center overflow-hidden rounded-xl border border-white/50 bg-white/60 backdrop-blur-sm dark:border-slate-300/70 dark:bg-slate-100/58">
-                      {getProductImageUrl(p) ? (
-                        <Image
-                          src={getProductImageUrl(p)!}
-                          alt={getProductImageAlt(p)}
-                          fill
-                          className="object-cover"
-                        />
-                      ) : (
-                        <Package className="w-8 h-8 text-gray-300" />
-                      )}
+                      <ProductImage
+                        product={p}
+                        alt={getProductImageAlt(p)}
+                        className="object-cover"
+                        fallback={<Package className="w-8 h-8 text-gray-300" />}
+                      />
                     </div>
                     <p className="text-xs text-gray-500 mb-1">{p.brand}</p>
                     <p className="text-sm font-medium text-gray-800 line-clamp-2 mb-2 group-hover:text-brand-600 transition-colors">

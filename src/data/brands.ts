@@ -15,6 +15,12 @@ interface BrandDescription {
 
 const brandDbNames: Record<string, string> = {
   'Cell Signaling Technology': 'CST',
+  '同仁化学': 'DOJINDO',
+  'Dojindo': 'DOJINDO',
+  '联科生物': 'MultiSciences',
+  '兰杰柯': 'LABGIC',
+  'Labgic': 'LABGIC',
+  '思拓凡': 'Cytiva',
 };
 
 export function resolveDbBrandName(name: string): string {
@@ -137,6 +143,53 @@ export const brandDescriptions: Record<string, BrandDescription> = {
     name: 'Biosharp（白鲨）',
     description: '中国本土实验室耗材与基础试剂品牌,提供离心管、吸头、手套等一次性耗材以及常用基础试剂。',
     detail: `Biosharp 是中国实验室耗材品牌,主营一次性实验耗材(离心管、吸头、手套、PCR 管等)和部分常用基础试剂科研场景。`,
+    subBrands: [],
+  },
+  'DOJINDO': {
+    name: 'DOJINDO（同仁化学）',
+    description: '日本专业生化与细胞检测试剂品牌,以 CCK-8 细胞增殖检测、荧光探针及氧化应激/铁死亡检测试剂盒著称。',
+    detail: `DOJINDO（同仁化学研究所）创立于 1946 年,总部位于日本熊本,长期专注生命科学功能性化学试剂与细胞检测试剂盒研发。
+
+其核心优势产品覆盖:
+• 细胞活力与增殖检测:经典 CCK-8 试剂盒、细胞毒性与凋亡检测
+• 荧光探针与细胞成像:活性氧(ROS)、铁离子、线粒体与自噬探针
+• 生化分析与偶联试剂:水溶性四唑盐、生物素/荧光标记试剂盒
+
+在中国大陆设有同仁化学(上海)技术支持团队,面向高校、医院与生物医药实验室稳定供货。`,
+    subBrands: [],
+  },
+  'MultiSciences': {
+    name: 'MultiSciences（联科生物）',
+    description: '中国本土免疫检测与细胞分析试剂品牌,主营高灵敏度 ELISA 试剂盒、流式抗体及细胞因子检测产品。',
+    detail: `联科生物(MultiSciences)成立于中国杭州,聚焦免疫学与细胞生物学科研试剂研发生产。产品覆盖人/小鼠/大鼠多物种 ELISA 试剂盒、流式细胞术荧光直标抗体、细胞凋亡/周期检测试剂盒与通用辅助试剂,适合高校课题组及转化医学实验室常规采购。`,
+    subBrands: [],
+  },
+  'Cytiva': {
+    name: 'Cytiva（思拓凡）',
+    description: '全球生命科学与生物制药技术供应商(原 GE Healthcare Life Sciences),以层析填料、蛋白纯化、膜过滤与细胞培养耗材著称。',
+    detail: `Cytiva（思拓凡）前身为 GE Healthcare 生命科学业务,旗下汇聚 Whatman、Amersham、HyClone、ÄKTA 等经典产品线。产品覆盖滤纸与微孔滤膜、蛋白质印迹转印膜、亲和/凝胶过滤层析介质、超滤与细胞培养基,广泛应用于基础科研与生物工艺开发。`,
+    subBrands: [
+      { name: 'Whatman', description: '实验室滤纸、微孔滤膜、针头滤器与样品前处理耗材' },
+      { name: 'Amersham', description: 'PVDF/NC 转印膜、ECL 化学发光底物与蛋白检测耗材' },
+      { name: 'HyClone', description: '细胞培养基、血清与缓冲液' },
+    ],
+  },
+  'LABGIC': {
+    name: 'LABGIC（兰杰柯）',
+    description: '中国生命科学综合服务商与实验室设备耗材品牌,覆盖移液器、小型实验仪器与配套耗材。',
+    detail: `LABGIC（兰杰柯）立足生命科学科研服务领域,围绕常规分子、细胞与理化实验室需求提供移液器、基础实验仪器与配套耗材,同时运营 Biosharp、Labselect 等自有品牌体系,支持快速现货交付。`,
+    subBrands: [],
+  },
+  '贤至生物': {
+    name: '贤至生物',
+    description: '中国本土抗体与免疫检测科研试剂品牌,提供特色单克隆/多克隆抗体及配套实验技术资料。',
+    detail: `贤至生物专注科研用抗体与免疫检测试剂开发,提供针对常见信号通路与蛋白标志物的验证抗体及详细说明书资料,支持高校及科研院所课题组常规 Western Blot、免疫荧光等实验应用。`,
+    subBrands: [],
+  },
+  'LIBEREAL': {
+    name: 'LIBEREAL',
+    description: 'LIBEREAL 平台严选与自营科研配套产品,服务高校与生物医药实验室日常采购需求。',
+    detail: `LIBEREAL 面向高校、医院与生物医药研发实验室提供一站式科研试剂与耗材选型采购服务,覆盖平台严选组合与配套科研用品。`,
     subBrands: [],
   },
 };
